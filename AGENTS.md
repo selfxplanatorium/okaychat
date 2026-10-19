@@ -36,6 +36,7 @@ src/server/
   routes.ts           REST API (threads, providers, MCP, usage, settings)
   chat.ts             /api/chat and turnStream() (one turn, shared with schedules), auto-compaction, titles
   projects.ts         Projects: instructions, pinned files, system prompt section
+  admin.ts            Admin API: users, sign-up switch, server-wide provider keys
   shares.ts           Public read-only links (/api/public/shares, no auth)
   search.ts           Full-text search over messages (FTS5, synced by triggers in db.ts)
   schedules.ts        Scheduled prompts: next-run math, 30 s ticker, server-side runs

@@ -46,6 +46,17 @@ export const requireUser: MiddlewareHandler<AppEnv> = async (c, next) => {
   await next();
 };
 
+/** Admin setting in the database, falling back to OKAYCHAT_ALLOW_SIGNUP. */
+export function signupAllowed(): boolean {
+  const row = db.prepare("SELECT value FROM server_settings WHERE key = 'allowSignup'").get() as { value: string } | undefined;
+  return row ? row.value === "true" : env.allowSignup;
+}
+
+export const requireAdmin: MiddlewareHandler<AppEnv> = async (c, next) => {
+  if (c.get("user").role !== "admin") return c.json({ error: "Admins only" }, 403);
+  await next();
+};
+
 const userCount = () => (db.prepare("SELECT COUNT(*) AS n FROM users").get() as { n: number }).n;
 
 const credentials = z.object({
@@ -58,13 +69,13 @@ export const authRoutes = new Hono<AppEnv>()
   .get("/status", (c) => {
     const user = userFromToken(getCookie(c, COOKIE));
     const count = userCount();
-    return c.json({ user, needsSetup: count === 0, signupOpen: count === 0 || env.allowSignup });
+    return c.json({ user, needsSetup: count === 0, signupOpen: count === 0 || signupAllowed() });
   })
   .post("/signup", async (c) => {
     const body = credentials.safeParse(await c.req.json());
     if (!body.success) return c.json({ error: "Enter a valid email and a password of 8+ characters." }, 400);
     const first = userCount() === 0;
-    if (!first && !env.allowSignup) return c.json({ error: "Sign-up is closed. Ask an admin." }, 403);
+    if (!first && !signupAllowed()) return c.json({ error: "Sign-up is closed. Ask an admin." }, 403);
     const exists = db.prepare("SELECT 1 FROM users WHERE email = ?").get(body.data.email);
     if (exists) return c.json({ error: "That email is already registered." }, 409);
     const id = newId("usr");

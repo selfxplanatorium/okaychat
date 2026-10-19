@@ -5,6 +5,7 @@ import type { McpServerConfig, UserSettings } from "../shared/types.js";
 import { requireUser, type AppEnv } from "./auth.js";
 import { newId } from "./crypto.js";
 import { deleteConnection, listModels, listProviders, saveConnection } from "./catalog/providers.js";
+import { adminRoutes } from "./admin.js";
 import { artifactRoutes } from "./artifacts.js";
 import { chatRoutes } from "./chat.js";
 import { fileRoutes } from "./files.js";
@@ -159,7 +160,8 @@ const api = new Hono<AppEnv>()
   .route("/", scheduleRoutes)
   .route("/", projectRoutes)
   .route("/", searchRoutes)
-  .route("/", shareRoutes);
+  .route("/", shareRoutes)
+  .route("/", adminRoutes);
 
 /** OAuth redirect target. Not behind requireUser: the state parameter identifies the user and server. */
 export const mcpOAuthCallback = new Hono().get("/", async (c) => {

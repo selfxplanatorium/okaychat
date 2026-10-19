@@ -6,7 +6,8 @@ Status as of 2026-10-19. Update this file when a feature ships or a plan changes
 
 | Area | What exists | Notes |
 | --- | --- | --- |
-| Accounts | Email + password, first user is admin, optional open sign-up | scrypt hashes, 30-day httpOnly session cookie |
+| Accounts | Email + password, first user is admin. Settings → Admin: add users, change roles, reset passwords (signs the user out), delete users, open or close sign-up | scrypt hashes, 30-day httpOnly session cookie. The sign-up switch overrides `OKAYCHAT_ALLOW_SIGNUP` once set |
+| Server-wide keys | Admins connect providers for every user (Settings → Admin). A user's own key for the same provider wins. Users see a "Server key" badge | `shared_connections`, merged under each user's connections in `catalog/providers.ts` |
 | Providers | OpenCode Go first (onboarding), OpenCode Zen, and every models.dev provider that speaks OpenAI, OpenAI-compatible, Anthropic, or Google APIs. Custom OpenAI-compatible endpoints (Ollama, LM Studio, vLLM) | Keys AES-256-GCM encrypted. Go model list is live from `/v1/models`, enriched by models.dev |
 | Chat | assistant-ui Thread: streaming, Markdown, reasoning, tool calls, branches, edit, regenerate, copy, export | Threads and branching history persisted in SQLite |
 | Model picker | Search, favorites, capability icons, context size, price, per-model reasoning effort | |
@@ -33,10 +34,9 @@ Status as of 2026-10-19. Update this file when a feature ships or a plan changes
 
 ## Pass 2: next
 
-1. Admin page: users, sign-up toggle, server-wide provider keys.
-2. Resumable streams (survive reloads) using assistant-ui's resumable transport.
-3. Sync appearance settings to the server per user (now per device).
-4. Code-split the chat bundle (1.6 MB unminified main chunk: assistant-ui, Markdown, AI SDK client).
+1. Resumable streams (survive reloads) using assistant-ui's resumable transport.
+2. Sync appearance settings to the server per user (now per device).
+3. Code-split the chat bundle (1.6 MB unminified main chunk: assistant-ui, Markdown, AI SDK client).
 
 ## Known gaps
 

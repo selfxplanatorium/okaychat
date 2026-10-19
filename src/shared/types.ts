@@ -44,6 +44,8 @@ export interface ProviderInfo {
   needsBaseURL: boolean;
   connected: boolean;
   enabled: boolean;
+  /** Connected with a server-wide key from an admin. */
+  shared: boolean;
   baseURL?: string;
   modelCount: number;
 }
@@ -263,4 +265,15 @@ export interface SharedThread {
   title: string | null;
   createdAt: number;
   messages: Array<{ id: string; role: "user" | "assistant"; parts: SharedPart[] }>;
+}
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  name: string;
+  role: "admin" | "user";
+  createdAt: number;
+  threads: number;
+  /** Spend in the last 30 days, from recorded usage. */
+  cost30d: number;
 }

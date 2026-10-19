@@ -1,7 +1,9 @@
-import { ArrowLeftIcon, BarChart3Icon, BlocksIcon, CalendarClockIcon, FolderIcon, KeyRoundIcon, PaletteIcon, SlidersHorizontalIcon } from "lucide-react";
+import { ArrowLeftIcon, BarChart3Icon, BlocksIcon, CalendarClockIcon, FolderIcon, KeyRoundIcon, ShieldIcon, PaletteIcon, SlidersHorizontalIcon } from "lucide-react";
 import type { ComponentType } from "react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
+import { useData } from "@/state/data";
+import { AdminSettings } from "./AdminSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { GeneralSettings } from "./GeneralSettings";
 import { McpSettings } from "./McpSettings";
@@ -10,7 +12,7 @@ import { ProvidersSettings } from "./ProvidersSettings";
 import { ScheduleSettings } from "./ScheduleSettings";
 import { UsageSettings } from "./UsageSettings";
 
-const SECTIONS: Array<{ id: string; label: string; icon: ComponentType<{ className?: string }>; component: ComponentType }> = [
+const SECTIONS: Array<{ id: string; label: string; icon: ComponentType<{ className?: string }>; component: ComponentType; admin?: boolean }> = [
   { id: "general", label: "General", icon: SlidersHorizontalIcon, component: GeneralSettings },
   { id: "providers", label: "Providers", icon: KeyRoundIcon, component: ProvidersSettings },
   { id: "mcp", label: "MCP servers", icon: BlocksIcon, component: McpSettings },
@@ -18,10 +20,13 @@ const SECTIONS: Array<{ id: string; label: string; icon: ComponentType<{ classNa
   { id: "schedules", label: "Scheduled", icon: CalendarClockIcon, component: ScheduleSettings },
   { id: "usage", label: "Usage", icon: BarChart3Icon, component: UsageSettings },
   { id: "appearance", label: "Appearance", icon: PaletteIcon, component: AppearanceSettings },
+  { id: "admin", label: "Admin", icon: ShieldIcon, component: AdminSettings, admin: true },
 ];
 
 export function SettingsLayout({ section }: { section: string }) {
-  const current = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0]!;
+  const isAdmin = useData((s) => s.me?.role === "admin");
+  const sections = SECTIONS.filter((s) => !s.admin || isAdmin);
+  const current = sections.find((s) => s.id === section) ?? sections[0]!;
   const Page = current.component;
   return (
     <div className="flex h-full min-h-0 flex-1 max-md:flex-col">
@@ -29,7 +34,7 @@ export function SettingsLayout({ section }: { section: string }) {
         <Link href="/" className="text-sidebar-muted-foreground hover:bg-sidebar-row-hover mb-2 flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm max-md:mb-0">
           <ArrowLeftIcon className="size-4" /> Back to chat
         </Link>
-        {SECTIONS.map((s) => (
+        {sections.map((s) => (
           <Link
             key={s.id}
             href={`/settings/${s.id}`}

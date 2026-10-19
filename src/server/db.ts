@@ -177,6 +177,20 @@ const migrations: string[] = [
     created_at INTEGER NOT NULL
   );
   `,
+  `
+  CREATE TABLE shared_connections (
+    provider_id TEXT PRIMARY KEY,
+    api_key_enc TEXT,
+    base_url TEXT,
+    config_json TEXT NOT NULL DEFAULT '{}',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE server_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

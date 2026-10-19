@@ -1,5 +1,5 @@
 import { CheckCircle2Icon, ExternalLinkIcon, PlusIcon, SearchIcon, TrashIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import type { ProviderInfo } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,9 +11,29 @@ import { SettingsPage, SettingsSection } from "./SettingsUI";
 
 export const OPENCODE_GO_CONSOLE = "https://opencode.ai/console";
 
+/** Which connections the page edits: the user's own, or the server-wide ones an admin shares. */
+interface ProviderScope {
+  base: "/providers" | "/admin/providers";
+  providers: ProviderInfo[];
+  refresh: () => Promise<void>;
+}
+
+const ScopeContext = createContext<ProviderScope | null>(null);
+
+export function ProviderScopeProvider({ children, ...scope }: ProviderScope & { children: ReactNode }) {
+  return <ScopeContext.Provider value={scope}>{children}</ScopeContext.Provider>;
+}
+
+function useScope(): ProviderScope {
+  const scoped = useContext(ScopeContext);
+  const providers = useData((s) => s.providers);
+  const refresh = useData((s) => s.refreshProviders);
+  return scoped ?? { base: "/providers", providers, refresh };
+}
+
 /** Key + optional base URL form. Saving never echoes the stored key back. */
 export function ProviderForm({ provider, onSaved, autoFocus }: { provider: ProviderInfo; onSaved?: () => void; autoFocus?: boolean }) {
-  const refresh = useData((s) => s.refreshProviders);
+  const { base, refresh } = useScope();
   const [apiKey, setApiKey] = useState("");
   const [baseURL, setBaseURL] = useState(provider.needsBaseURL || provider.custom ? (provider.baseURL ?? "") : "");
   const [busy, setBusy] = useState(false);
@@ -23,7 +43,7 @@ export function ProviderForm({ provider, onSaved, autoFocus }: { provider: Provi
     setBusy(true);
     setError(null);
     try {
-      await api(`/providers/${provider.id}`, {
+      await api(`${base}/${provider.id}`, {
         method: "PUT",
         json: { ...(apiKey ? { apiKey } : {}), ...(baseURL !== "" ? { baseURL } : {}), enabled: true },
       });
@@ -49,13 +69,13 @@ export function ProviderForm({ provider, onSaved, autoFocus }: { provider: Provi
         <Input
           type="password"
           autoFocus={autoFocus}
-          placeholder={provider.connected ? "Key saved. Paste a new one to replace it." : "API key"}
+          placeholder={provider.shared ? "Your own key, used instead of the server's" : provider.connected ? "Key saved. Paste a new one to replace it." : "API key"}
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
           autoComplete="off"
         />
         <Button type="submit" disabled={busy || (!apiKey && baseURL === (provider.baseURL ?? ""))}>
-          {provider.connected ? "Update" : "Connect"}
+          {provider.connected && !provider.shared ? "Update" : "Connect"}
         </Button>
       </div>
       {(provider.needsBaseURL || provider.custom) && (
@@ -67,7 +87,7 @@ export function ProviderForm({ provider, onSaved, autoFocus }: { provider: Provi
 }
 
 function ProviderRow({ provider, expanded, onToggle }: { provider: ProviderInfo; expanded: boolean; onToggle: () => void }) {
-  const refresh = useData((s) => s.refreshProviders);
+  const { base, refresh } = useScope();
   return (
     <div className="px-4 py-3">
       <div className="flex items-center gap-3">
@@ -75,15 +95,16 @@ function ProviderRow({ provider, expanded, onToggle }: { provider: ProviderInfo;
           <span className="truncate text-sm font-medium">{provider.name}</span>
           {provider.id === "opencode-go" && <span className="bg-primary/10 text-primary rounded px-1.5 py-0.5 text-[10px] font-medium">Recommended</span>}
           {provider.connected && <CheckCircle2Icon className="text-success size-3.5 shrink-0" aria-label="Connected" />}
+          {provider.shared && <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[10px] font-medium">Server key</span>}
           <span className="text-muted-foreground ml-auto text-xs tabular-nums">{provider.modelCount ? `${provider.modelCount} models` : ""}</span>
         </button>
-        {provider.connected && (
+        {provider.connected && !provider.shared && (
           <>
             <Switch
               checked={provider.enabled}
               aria-label={`Enable ${provider.name}`}
               onCheckedChange={async (enabled) => {
-                await api(`/providers/${provider.id}`, { method: "PUT", json: { enabled } });
+                await api(`${base}/${provider.id}`, { method: "PUT", json: { enabled } });
                 await refresh();
               }}
             />
@@ -92,7 +113,7 @@ function ProviderRow({ provider, expanded, onToggle }: { provider: ProviderInfo;
               variant="ghost"
               aria-label={`Disconnect ${provider.name}`}
               onClick={async () => {
-                await api(`/providers/${provider.id}`, { method: "DELETE" });
+                await api(`${base}/${provider.id}`, { method: "DELETE" });
                 await refresh();
               }}
             >
@@ -116,7 +137,7 @@ function ProviderRow({ provider, expanded, onToggle }: { provider: ProviderInfo;
 }
 
 function CustomProviderForm({ onDone }: { onDone: () => void }) {
-  const refresh = useData((s) => s.refreshProviders);
+  const { base, refresh } = useScope();
   const [name, setName] = useState("");
   const [baseURL, setBaseURL] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -129,7 +150,7 @@ function CustomProviderForm({ onDone }: { onDone: () => void }) {
         const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
         if (!slug) return setError("Give it a name.");
         try {
-          await api(`/providers/custom-${slug}`, { method: "PUT", json: { name, baseURL, apiKey: apiKey || undefined, enabled: true } });
+          await api(`${base}/custom-${slug}`, { method: "PUT", json: { name, baseURL, apiKey: apiKey || undefined, enabled: true } });
           await refresh();
           onDone();
         } catch (err) {
@@ -152,7 +173,16 @@ function CustomProviderForm({ onDone }: { onDone: () => void }) {
 }
 
 export function ProvidersSettings() {
-  const providers = useData((s) => s.providers);
+  return (
+    <SettingsPage title="Providers" description="OpenCode Go is the primary connection. Add any other provider for more models. Keys are encrypted at rest.">
+      <ProviderLists />
+    </SettingsPage>
+  );
+}
+
+/** Connected and available providers for the current scope. */
+export function ProviderLists() {
+  const { providers } = useScope();
   const [expanded, setExpanded] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [addingCustom, setAddingCustom] = useState(false);
@@ -171,7 +201,7 @@ export function ProvidersSettings() {
     list.map((p) => <ProviderRow key={p.id} provider={p} expanded={expanded === p.id} onToggle={() => setExpanded(expanded === p.id ? null : p.id)} />);
 
   return (
-    <SettingsPage title="Providers" description="OpenCode Go is the primary connection. Add any other provider for more models. Keys are encrypted at rest.">
+    <>
       {connected.length > 0 && <SettingsSection title="Connected">{rows(connected)}</SettingsSection>}
       <SettingsSection
         title="Add a provider"
@@ -192,6 +222,6 @@ export function ProvidersSettings() {
         )}
       </SettingsSection>
       {rest.length > 0 && <SettingsSection title={`All providers (${rest.length})`}>{rows(rest)}</SettingsSection>}
-    </SettingsPage>
+    </>
   );
 }

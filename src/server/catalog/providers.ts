@@ -24,12 +24,19 @@ export interface Connection {
   baseURL?: string;
   name?: string;
   enabled: boolean;
+  /** Configured by an admin for every user. The user cannot see or change it. */
+  shared?: boolean;
 }
 
-function readConnections(userId: string): Map<string, Connection> {
-  const rows = db
-    .prepare("SELECT provider_id, api_key_enc, base_url, config_json, enabled FROM provider_connections WHERE user_id = ?")
-    .all(userId) as unknown as ConnectionRow[];
+/** A user id, or null for the server-wide connections an admin shares with every user. */
+export type ConnectionScope = string | null;
+
+function readScope(scope: ConnectionScope): Map<string, Connection> {
+  const rows = (
+    scope === null
+      ? db.prepare("SELECT provider_id, api_key_enc, base_url, config_json, enabled FROM shared_connections").all()
+      : db.prepare("SELECT provider_id, api_key_enc, base_url, config_json, enabled FROM provider_connections WHERE user_id = ?").all(scope)
+  ) as unknown as ConnectionRow[];
   return new Map(
     rows.map((r) => {
       const config = JSON.parse(r.config_json) as { name?: string };
@@ -41,50 +48,65 @@ function readConnections(userId: string): Map<string, Connection> {
           baseURL: r.base_url ?? undefined,
           name: config.name,
           enabled: r.enabled === 1,
+          ...(scope === null ? { shared: true } : {}),
         },
       ];
     }),
   );
 }
 
+/** What a user can use: server-wide connections, overridden by the user's own for the same provider. */
+function readConnections(userId: string): Map<string, Connection> {
+  const shared = [...readScope(null)].filter(([, c]) => c.enabled);
+  return new Map([...shared, ...readScope(userId)]);
+}
+
 export function getConnection(userId: string, providerId: string): Connection | undefined {
   return readConnections(userId).get(providerId);
 }
 
-export function saveConnection(userId: string, providerId: string, input: ProviderConnectionInput) {
-  const existing = getConnection(userId, providerId);
+export function saveConnection(scope: ConnectionScope, providerId: string, input: ProviderConnectionInput) {
+  const existing = readScope(scope).get(providerId);
   // An omitted key keeps the stored one, so the UI never needs to read secrets back.
   const apiKey = input.apiKey === undefined ? existing?.apiKey : input.apiKey || undefined;
   const baseURL = input.baseURL === undefined ? existing?.baseURL : input.baseURL.trim() || undefined;
   const name = input.name ?? existing?.name;
-  db.prepare(
-    `INSERT INTO provider_connections (user_id, provider_id, api_key_enc, base_url, config_json, enabled, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT (user_id, provider_id) DO UPDATE SET
-       api_key_enc = excluded.api_key_enc, base_url = excluded.base_url,
-       config_json = excluded.config_json, enabled = excluded.enabled`,
-  ).run(
-    userId,
+  const values = [
     providerId,
     apiKey ? encrypt(apiKey) : null,
     baseURL ?? null,
     JSON.stringify({ name }),
     (input.enabled ?? existing?.enabled ?? true) ? 1 : 0,
     Date.now(),
-  );
+  ];
+  if (scope === null) {
+    db.prepare(
+      `INSERT INTO shared_connections (provider_id, api_key_enc, base_url, config_json, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (provider_id) DO UPDATE SET api_key_enc = excluded.api_key_enc, base_url = excluded.base_url,
+         config_json = excluded.config_json, enabled = excluded.enabled`,
+    ).run(...values);
+  } else {
+    db.prepare(
+      `INSERT INTO provider_connections (user_id, provider_id, api_key_enc, base_url, config_json, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (user_id, provider_id) DO UPDATE SET api_key_enc = excluded.api_key_enc, base_url = excluded.base_url,
+         config_json = excluded.config_json, enabled = excluded.enabled`,
+    ).run(scope, ...values);
+  }
   liveCache.clear();
 }
 
-export function deleteConnection(userId: string, providerId: string) {
-  db.prepare("DELETE FROM provider_connections WHERE user_id = ? AND provider_id = ?").run(userId, providerId);
+export function deleteConnection(scope: ConnectionScope, providerId: string) {
+  if (scope === null) db.prepare("DELETE FROM shared_connections WHERE provider_id = ?").run(providerId);
+  else db.prepare("DELETE FROM provider_connections WHERE user_id = ? AND provider_id = ?").run(scope, providerId);
 }
 
 const isCustom = (id: string) => id.startsWith("custom-");
 const isLocal = (url?: string) => !!url && /\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|host\.docker\.internal)/.test(url);
 
-export async function listProviders(userId: string): Promise<ProviderInfo[]> {
+/** Providers as a user sees them (own plus shared), or with `null` as the admin sees the shared set. */
+export async function listProviders(scope: ConnectionScope): Promise<ProviderInfo[]> {
   const catalog = await getCatalog();
-  const connections = readConnections(userId);
+  const connections = scope === null ? readScope(null) : readConnections(scope);
   const out: ProviderInfo[] = [];
   for (const provider of Object.values(catalog)) {
     if (!isSupportedProvider(provider)) continue;
@@ -98,6 +120,7 @@ export async function listProviders(userId: string): Promise<ProviderInfo[]> {
       needsBaseURL: isLocal(provider.api),
       connected: !!conn && (!!conn.apiKey || !!conn.baseURL),
       enabled: conn?.enabled ?? false,
+      shared: scope !== null && !!conn?.shared,
       baseURL: conn?.baseURL ?? provider.api,
       modelCount: Object.keys(provider.models).length,
     });
@@ -112,6 +135,7 @@ export async function listProviders(userId: string): Promise<ProviderInfo[]> {
       needsBaseURL: true,
       connected: true,
       enabled: conn.enabled,
+      shared: scope !== null && !!conn.shared,
       baseURL: conn.baseURL,
       modelCount: 0,
     });
