@@ -11,6 +11,9 @@ interface DataState {
   loaded: boolean;
   /** Model chosen in the composer. Falls back to settings.defaultModel. */
   selectedModel: string | null;
+  /** Plan mode: the model investigates read-only and proposes a plan instead of acting. */
+  planMode: boolean;
+  setPlanMode: (on: boolean) => void;
   load: () => Promise<void>;
   refreshProviders: () => Promise<void>;
   refreshMcp: () => Promise<void>;
@@ -19,6 +22,7 @@ interface DataState {
 }
 
 const SELECTED_KEY = "okaychat:selected-model";
+const PLAN_KEY = "okaychat:plan-mode";
 
 export const useData = create<DataState>((set, get) => ({
   me: null,
@@ -28,6 +32,11 @@ export const useData = create<DataState>((set, get) => ({
   mcp: [],
   loaded: false,
   selectedModel: localStorage.getItem(SELECTED_KEY),
+  planMode: localStorage.getItem(PLAN_KEY) === "true",
+  setPlanMode: (on) => {
+    localStorage.setItem(PLAN_KEY, String(on));
+    set({ planMode: on });
+  },
   load: async () => {
     const [me, settings, providers, models, mcp] = await Promise.all([
       api<Me>("/me"),

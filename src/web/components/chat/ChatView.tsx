@@ -2,6 +2,7 @@ import { ThreadPrimitive } from "@assistant-ui/react";
 import { Thread } from "@/components/assistant-ui/elements/thread.aui";
 import { CompactionMarker, ContextMeter, MessageMeta } from "./ContextMeter";
 import { EffortPicker, ModelPicker } from "./ModelPicker";
+import { ExecutePlan, PlanToggle } from "./PlanMode";
 import { useData } from "@/state/data";
 
 const SUGGESTIONS = [
@@ -39,11 +40,21 @@ function ComposerToolbar() {
     <>
       <ModelPicker />
       <EffortPicker />
+      <PlanToggle />
       <ContextMeter />
     </>
   );
 }
 
+function AfterMessage() {
+  return (
+    <>
+      <ExecutePlan />
+      <CompactionMarker />
+    </>
+  );
+}
+
 export function ChatView() {
-  return <Thread components={{ Welcome, ComposerToolbar, MessageMeta, AfterMessage: CompactionMarker }} />;
+  return <Thread components={{ Welcome, ComposerToolbar, MessageMeta, AfterMessage }} />;
 }

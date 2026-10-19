@@ -171,7 +171,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     runtimeHook: () =>
       // eslint-disable-next-line react-hooks/rules-of-hooks
       useChatRuntime({
-        transport: new AssistantChatTransport({ api: "/api/chat", credentials: "same-origin" }),
+        transport: new AssistantChatTransport({
+          api: "/api/chat",
+          credentials: "same-origin",
+          body: () => ({ planMode: useData.getState().planMode }),
+        }),
         adapters: { attachments },
         // Browser-executed tools (generative UI) and tool approvals resolve locally; this sends them back to finish the turn.
         sendAutomaticallyWhen: (options) => lastAssistantMessageIsCompleteWithToolCalls(options) || lastAssistantMessageIsCompleteWithApprovalResponses(options),

@@ -38,16 +38,21 @@ const chatBody = z.object({
   // Browser-executed tools (generative UI) and the instructions that go with them.
   system: z.string().optional(),
   tools: z.record(z.string(), z.any()).optional(),
+  planMode: z.boolean().optional(),
 });
 
-function systemPrompt(userPrompt: string, mcpInstructions: string[], artifacts: boolean, clientSystem?: string): string {
+const PLAN_INSTRUCTIONS = `# Plan mode
+The user wants a plan before anything changes. Investigate with the read-only tools you have, ask about anything that blocks a good plan, then reply with a numbered plan: the steps, what each changes, and open questions. Do not carry out the plan. The user switches to act mode to run it.`;
+
+function systemPrompt(userPrompt: string, mcpInstructions: string[], artifacts: boolean, clientSystem?: string, planMode?: boolean): string {
   // Order matters for caching: static text first, nothing that changes per request.
   const parts = [BASE_SYSTEM, `Today's date: ${new Date().toISOString().slice(0, 10)}.`];
   if (artifacts) parts.push(ARTIFACT_INSTRUCTIONS);
   if (userPrompt.trim()) parts.push(`# User instructions\n${userPrompt.trim()}`);
   if (mcpInstructions.length) parts.push(`# Tool server instructions\n${mcpInstructions.join("\n\n")}`);
-  // Last: it can change when the user interacts with a rendered UI, which should not invalidate the rest.
+  // Last: these change per turn (UI interactions, mode toggle) and should not invalidate the rest.
   if (clientSystem?.trim()) parts.push(clientSystem.trim());
+  if (planMode) parts.push(PLAN_INSTRUCTIONS);
   return parts.join("\n\n");
 }
 
@@ -89,30 +94,39 @@ export const chatRoutes = new Hono<AppEnv>()
           writer.write({ type: "data-compaction", data: { status: "done", boundaryMessageId: compaction.boundaryMessageId, tokensBefore: compaction.tokensBefore }, transient: true });
         }
 
-        const mcp = model.toolCall ? await toolsForUser(user.id) : { tools: {}, instructions: [], servers: [] };
+        const mcp = model.toolCall ? await toolsForUser(user.id) : { tools: {}, readOnly: new Set<string>(), instructions: [], servers: [] };
         // Built-in tools first, then MCP tools in sorted order, so the tool block is identical across turns.
-        const useArtifacts = model.toolCall && settings.artifacts;
-        const useGenerativeUI = model.toolCall && settings.generativeUI && !!parsed.data.tools;
+        const planMode = parsed.data.planMode === true;
         const readOnlyTools = {
           ...(model.toolCall && settings.webTools ? webTools() : {}),
           // Sub-agents run unattended, so they get no tool that waits for approval.
           ...Object.fromEntries(Object.entries(mcp.tools).filter(([, t]) => !t.needsApproval)),
         };
         const subagentModels = model.toolCall && settings.subagents ? await allowedSubagentModels(user.id, settings, model.ref) : [];
-        const tools = {
-          ...(model.toolCall && settings.webTools ? webTools() : {}),
-          ...(subagentModels.length
-            ? subagentTools({ userId: user.id, threadId, allowed: subagentModels, subTools: readOnlyTools, signal: c.req.raw.signal })
-            : {}),
-          ...(useArtifacts ? artifactTools(threadId) : {}),
-          ...(model.toolCall && codexConnected(user.id) ? imageTools(user.id, threadId, c.req.raw.signal) : {}),
-          ...(useGenerativeUI ? frontendTools(parsed.data.tools as FrontendTools) : {}),
-          ...mcp.tools,
-        };
+        const useArtifacts = model.toolCall && settings.artifacts && !planMode;
+        const useGenerativeUI = model.toolCall && settings.generativeUI && !!parsed.data.tools && !planMode;
+        const subagents = subagentModels.length
+          ? subagentTools({ userId: user.id, threadId, allowed: subagentModels, subTools: readOnlyTools, signal: c.req.raw.signal })
+          : {};
+        // Plan mode keeps only tools that cannot change anything: web, sub-agents, and MCP tools marked read-only.
+        const tools = planMode
+          ? {
+              ...(model.toolCall && settings.webTools ? webTools() : {}),
+              ...subagents,
+              ...Object.fromEntries(Object.entries(mcp.tools).filter(([name]) => mcp.readOnly.has(name))),
+            }
+          : {
+              ...(model.toolCall && settings.webTools ? webTools() : {}),
+              ...subagents,
+              ...(useArtifacts ? artifactTools(threadId) : {}),
+              ...(model.toolCall && codexConnected(user.id) ? imageTools(user.id, threadId, c.req.raw.signal) : {}),
+              ...(useGenerativeUI ? frontendTools(parsed.data.tools as FrontendTools) : {}),
+              ...mcp.tools,
+            };
         const { messages: live, summary } = applyCompaction(uiMessages, compaction);
         const handle = createModel(model, conn, { affinity: threadId, effort });
         const converted = await convertToModelMessages(live, { tools, ignoreIncompleteToolCalls: true });
-        const { system, messages } = handle.markCache(systemPrompt(settings.systemPrompt, mcp.instructions, useArtifacts, useGenerativeUI ? parsed.data.system : undefined), [
+        const { system, messages } = handle.markCache(systemPrompt(settings.systemPrompt, mcp.instructions, useArtifacts, useGenerativeUI ? parsed.data.system : undefined, planMode), [
           ...(summary ? summaryMessages(summary) : []),
           ...converted,
         ]);
@@ -149,7 +163,7 @@ export const chatRoutes = new Hono<AppEnv>()
             sendSources: true,
             onError: describeProviderError,
             messageMetadata: ({ part }): AssistantMetadata | undefined => {
-              if (part.type === "start") return { modelRef, contextWindow: model.context };
+              if (part.type === "start") return { modelRef, contextWindow: model.context, ...(planMode ? { mode: "plan" as const } : {}) };
               if (part.type === "finish") {
                 return {
                   modelRef,
@@ -159,6 +173,7 @@ export const chatRoutes = new Hono<AppEnv>()
                   contextWindow: model.context,
                   durationMs: Date.now() - startedAt,
                   compacted: compaction !== thread.compaction,
+                  ...(planMode ? { mode: "plan" as const } : {}),
                 };
               }
               return undefined;

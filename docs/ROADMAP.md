@@ -14,6 +14,7 @@ Status as of 2026-10-19. Update this file when a feature ships or a plan changes
 | MCP | Streamable HTTP, SSE, stdio (admin only), OAuth with PKCE + dynamic registration, per-tool toggles, status, reconnect, timeouts, idle close | See `docs/research/mcp.md` |
 | Tool approvals | MCP tools marked destructive (or every tool, per server) wait for Allow / Deny in the thread | See `docs/research/mcp.md` |
 | Sub-agents | `delegate_task` runs a self-contained task on an allowed model (default sub-agent model, utility model, chat model) with web and approval-free MCP tools. Progress streams into a card; only the report reaches the main context. Usage recorded as `subagent` | Toggle and default model in Settings → General |
+| Plan mode | Composer toggle. The server offers only web, sub-agent, and read-only MCP tools and asks for a numbered plan. "Execute plan" under the answer switches to act mode and runs it | Mode is per device. The mode instructions sit at the end of the system prompt |
 | Caching | Stable prompt prefix, Anthropic breakpoints, OpenAI `prompt_cache_key`, OpenCode session affinity headers | See `docs/research/prompt-caching.md` |
 | Usage | Per message (tokens, cache %, cost, time), per thread, dashboard by day/model/purpose, OpenCode Go 5 h/week/month spend | Cost uses models.dev prices incl. context tiers |
 | Context | Composer ring with fill %, auto-compact threshold marker, thread cost | |
@@ -27,7 +28,7 @@ Status as of 2026-10-19. Update this file when a feature ships or a plan changes
 
 ## Pass 2: next
 
-1. Agentic features: plan/act mode, scheduled prompts.
+1. Scheduled prompts: run a saved prompt in a thread on a schedule, server-side.
 2. Projects: per-project instructions, pinned files, and default model.
 3. Search across threads (SQLite FTS5).
 4. Sharing: read-only public link for a thread.
