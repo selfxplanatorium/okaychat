@@ -22,6 +22,7 @@ import { toolsForUser } from "./mcp/manager.js";
 import { imageTools } from "./tools/image.js";
 import { subagentTools } from "./tools/subagent.js";
 import { webTools } from "./tools/web.js";
+import { adaptPdfParts } from "./pdf-parts.js";
 import { projectContext } from "./projects.js";
 import { getSettings } from "./settings.js";
 import { ensureThread, getThread, setCompaction, updateThread } from "./threads.js";
@@ -129,7 +130,7 @@ export async function turnStream(opts: TurnOptions) {
           };
       const { messages: live, summary } = applyCompaction(uiMessages, compaction);
       const handle = createModel(model, conn, { affinity: threadId, effort });
-      const converted = await convertToModelMessages(live, { tools, ignoreIncompleteToolCalls: true });
+      const converted = await convertToModelMessages(await adaptPdfParts(live, model), { tools, ignoreIncompleteToolCalls: true });
       const { system, messages } = handle.markCache(systemPrompt(settings.systemPrompt, projectContext(userId, thread.projectId), mcp.instructions, useArtifacts, useGenerativeUI ? opts.clientSystem : undefined, planMode), [
         ...(summary ? summaryMessages(summary) : []),
         ...converted,

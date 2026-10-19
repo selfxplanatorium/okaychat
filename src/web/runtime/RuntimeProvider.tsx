@@ -14,7 +14,7 @@ import {
   type RemoteThreadListAdapter,
   type ThreadHistoryAdapter,
 } from "@assistant-ui/react";
-import { lastAssistantMessageIsCompleteWithApprovalResponses, lastAssistantMessageIsCompleteWithToolCalls } from "ai";
+import { generateId, lastAssistantMessageIsCompleteWithApprovalResponses, lastAssistantMessageIsCompleteWithToolCalls } from "ai";
 import { createAssistantStream } from "assistant-stream";
 import { useEffect, useMemo, type ReactNode } from "react";
 import type { ThreadSummary } from "@shared/types";
@@ -26,13 +26,28 @@ import { useActiveModel, useData } from "@/state/data";
 const CODE_EXTENSIONS =
   ".txt,.md,.mdx,.csv,.tsv,.json,.jsonl,.yaml,.yml,.toml,.xml,.html,.css,.scss,.js,.jsx,.ts,.tsx,.mjs,.cjs,.py,.rb,.go,.rs,.java,.kt,.swift,.c,.h,.cpp,.hpp,.cs,.php,.sh,.bash,.zsh,.sql,.graphql,.proto,.ini,.env,.log,.r,.lua,.dart,.vue,.svelte,.tex";
 
-/** PDFs and Word files are converted to text on the server, so every model can read them. */
+/** Native PDFs up to this size. Larger ones are sent as extracted text, so requests and history stay small. */
+const NATIVE_PDF_BYTES = 10 * 1024 * 1024;
+
+const readDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+
+/**
+ * PDFs go as files: models that read PDFs see the pages, and the server extracts text for the rest.
+ * Word files are always converted to text on the server.
+ */
 class DocumentAttachmentAdapter implements AttachmentAdapter {
   accept = "application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
   async add({ file }: { file: File }) {
     return {
-      id: crypto.randomUUID(),
+      // Not crypto.randomUUID: it only exists in secure contexts, and plain-HTTP origins would fail silently.
+      id: generateId(),
       type: "document" as const,
       name: file.name,
       contentType: file.type,
@@ -42,6 +57,14 @@ class DocumentAttachmentAdapter implements AttachmentAdapter {
   }
 
   async send(attachment: Parameters<AttachmentAdapter["send"]>[0], options?: { signal?: AbortSignal }) {
+    const isPdf = attachment.file.type === "application/pdf" || attachment.name.toLowerCase().endsWith(".pdf");
+    if (isPdf && attachment.file.size <= NATIVE_PDF_BYTES) {
+      return {
+        ...attachment,
+        status: { type: "complete" as const },
+        content: [{ type: "file" as const, data: await readDataUrl(attachment.file), mimeType: "application/pdf", filename: attachment.name }],
+      };
+    }
     const form = new FormData();
     form.append("file", attachment.file);
     const { text, pages } = await api<{ text: string; pages?: number }>("/files/extract", {

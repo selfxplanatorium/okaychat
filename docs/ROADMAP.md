@@ -10,7 +10,7 @@ Status as of 2026-10-19. Update this file when a feature ships or a plan changes
 | Providers | OpenCode Go first (onboarding), OpenCode Zen, and every models.dev provider that speaks OpenAI, OpenAI-compatible, Anthropic, or Google APIs. Custom OpenAI-compatible endpoints (Ollama, LM Studio, vLLM) | Keys AES-256-GCM encrypted. Go model list is live from `/v1/models`, enriched by models.dev |
 | Chat | assistant-ui Thread: streaming, Markdown, reasoning, tool calls, branches, edit, regenerate, copy, export | Threads and branching history persisted in SQLite |
 | Model picker | Search, favorites, capability icons, context size, price, per-model reasoning effort | |
-| Files | Images (vision), PDF and DOCX (server text extraction), 60+ text/code formats | PDFs without a text layer get a clear note |
+| Files | Images (vision, also pasted from the clipboard), PDFs as native file input up to 10 MB, DOCX (server text extraction), 60+ text/code formats | Models without PDF input get the extracted text, swapped in per request on the server (`pdf-parts.ts`), so switching models keeps working. PDFs without a text layer get a clear note |
 | MCP | Streamable HTTP, SSE, stdio (admin only), OAuth with PKCE + dynamic registration, per-tool toggles, status, reconnect, timeouts, idle close | See `docs/research/mcp.md` |
 | Tool approvals | MCP tools marked destructive (or every tool, per server) wait for Allow / Deny in the thread | See `docs/research/mcp.md` |
 | Sub-agents | `delegate_task` runs a self-contained task on an allowed model (default sub-agent model, utility model, chat model) with web and approval-free MCP tools. Progress streams into a card; only the report reaches the main context. Usage recorded as `subagent` | Toggle and default model in Settings → General |
@@ -33,11 +33,10 @@ Status as of 2026-10-19. Update this file when a feature ships or a plan changes
 
 ## Pass 2: next
 
-1. Native PDF input for models that support it (skip text extraction), image paste from clipboard.
-2. Admin page: users, sign-up toggle, server-wide provider keys.
-3. Resumable streams (survive reloads) using assistant-ui's resumable transport.
-4. Sync appearance settings to the server per user (now per device).
-5. Code-split the chat bundle (1.6 MB unminified main chunk: assistant-ui, Markdown, AI SDK client).
+1. Admin page: users, sign-up toggle, server-wide provider keys.
+2. Resumable streams (survive reloads) using assistant-ui's resumable transport.
+3. Sync appearance settings to the server per user (now per device).
+4. Code-split the chat bundle (1.6 MB unminified main chunk: assistant-ui, Markdown, AI SDK client).
 
 ## Known gaps
 
