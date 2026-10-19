@@ -8,6 +8,8 @@ import {
   SimpleTextAttachmentAdapter,
   useAui,
   useRemoteThreadListRuntime,
+  WebSpeechDictationAdapter,
+  WebSpeechSynthesisAdapter,
   type AttachmentAdapter,
   type RemoteThreadListAdapter,
   type ThreadHistoryAdapter,
@@ -67,6 +69,27 @@ const attachments = new CompositeAttachmentAdapter([
   new DocumentAttachmentAdapter(),
   new CodeAttachmentAdapter(),
 ]);
+
+/** Reads the answer, not its Markdown: code blocks, link targets, and formatting marks are dropped. */
+class SpokenTextAdapter extends WebSpeechSynthesisAdapter {
+  override speak(text: string) {
+    const plain = text
+      .replace(/```[\s\S]*?```/g, " (code omitted) ")
+      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/https?:\/\/\S+/g, "")
+      .replace(/^#+\s*/gm, "")
+      .replace(/[*_`~>|]/g, "")
+      .replace(/\$\$?[^$]*\$\$?/g, " (formula) ");
+    return super.speak(plain);
+  }
+}
+
+// Browser speech: no server or keys. Recognition needs a secure context (HTTPS or localhost) and, in Chrome,
+// sends audio to Google. Both are left out where the browser lacks them, which hides their buttons.
+const voiceAdapters = {
+  ...(WebSpeechDictationAdapter.isSupported() && window.isSecureContext ? { dictation: new WebSpeechDictationAdapter({ language: navigator.language }) } : {}),
+  ...("speechSynthesis" in window ? { speech: new SpokenTextAdapter() } : {}),
+};
 
 const threadListAdapter: RemoteThreadListAdapter = {
   async list() {
@@ -177,7 +200,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           credentials: "same-origin",
           body: () => ({ planMode: useData.getState().planMode }),
         }),
-        adapters: { attachments },
+        adapters: { attachments, ...voiceAdapters },
         // Browser-executed tools (generative UI) and tool approvals resolve locally; this sends them back to finish the turn.
         sendAutomaticallyWhen: (options) => lastAssistantMessageIsCompleteWithToolCalls(options) || lastAssistantMessageIsCompleteWithApprovalResponses(options),
       }),

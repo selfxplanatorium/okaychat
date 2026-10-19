@@ -61,6 +61,8 @@ import {
   SquareIcon,
   ThumbsDownIcon,
   ThumbsUpIcon,
+  Volume2Icon,
+  VolumeXIcon,
 } from "lucide-react";
 import {
   createContext,
@@ -798,6 +800,22 @@ const AssistantActionBar: FC = () => {
             <ThumbsDownIcon />
           </TooltipIconButton>
         </ActionBarPrimitive.FeedbackNegative>
+      </AuiIf>
+      <AuiIf condition={(s) => s.thread.capabilities.speech}>
+        <AuiIf condition={(s) => s.message.speech == null}>
+          <ActionBarPrimitive.Speak asChild>
+            <TooltipIconButton tooltip="Read aloud">
+              <Volume2Icon />
+            </TooltipIconButton>
+          </ActionBarPrimitive.Speak>
+        </AuiIf>
+        <AuiIf condition={(s) => s.message.speech != null}>
+          <ActionBarPrimitive.StopSpeaking asChild>
+            <TooltipIconButton tooltip="Stop reading">
+              <VolumeXIcon />
+            </TooltipIconButton>
+          </ActionBarPrimitive.StopSpeaking>
+        </AuiIf>
       </AuiIf>
       <ActionBarPrimitive.Reload asChild>
         <TooltipIconButton tooltip="Refresh">
