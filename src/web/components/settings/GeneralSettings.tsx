@@ -75,6 +75,11 @@ export function GeneralSettings() {
           description="Lets models create pages, apps, diagrams, and documents that open in a side panel, with versions and download."
           control={<Switch checked={settings.artifacts} onCheckedChange={(artifacts) => update({ artifacts })} aria-label="Artifacts" />}
         />
+        <SettingsRow
+          label="Generative UI"
+          description="Lets models answer with tables, cards, and forms in the app's style, or interactive charts and calculators in a sandboxed frame."
+          control={<Switch checked={settings.generativeUI} onCheckedChange={(generativeUI) => update({ generativeUI })} aria-label="Generative UI" />}
+        />
       </SettingsSection>
 
       <SettingsSection title="Custom instructions" description="Added to the system prompt of every chat. Changing it resets the prompt cache once.">

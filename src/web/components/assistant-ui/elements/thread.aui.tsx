@@ -114,6 +114,9 @@ const messageGroupBy = groupPartByType({
   // Artifact cards stay visible so they can be clicked and auto-open the panel.
   "tool-call:create_artifact": [],
   "tool-call:update_artifact": [],
+  "tool-call:show_widget": [],
+  "tool-call:edit_widget": [],
+  "tool-call:render_spec": [],
 });
 
 type ThreadGroupKey =

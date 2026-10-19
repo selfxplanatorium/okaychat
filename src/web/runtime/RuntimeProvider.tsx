@@ -12,11 +12,13 @@ import {
   type RemoteThreadListAdapter,
   type ThreadHistoryAdapter,
 } from "@assistant-ui/react";
+import { lastAssistantMessageIsCompleteWithToolCalls } from "ai";
 import { createAssistantStream } from "assistant-stream";
 import { useEffect, useMemo, type ReactNode } from "react";
 import type { ThreadSummary } from "@shared/types";
 import { api } from "@/lib/api";
 import { toolkit } from "@/components/chat/tool-ui";
+import { WidgetInstructions, widgets } from "@/components/genui/toolkit";
 import { useActiveModel, useData } from "@/state/data";
 
 const CODE_EXTENSIONS =
@@ -171,13 +173,16 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       useChatRuntime({
         transport: new AssistantChatTransport({ api: "/api/chat", credentials: "same-origin" }),
         adapters: { attachments },
+        // Browser-executed tools (generative UI) add their output locally; this sends it back to finish the turn.
+        sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
       }),
     adapter: threadListAdapter,
   });
-  const config = AuiConfig({ tools: Tools({ toolkit }) });
+  const config = useMemo(() => AuiConfig({ tools: Tools({ toolkit: { ...toolkit, ...widgets.toolkit } }) }), []);
   return (
     <AssistantRuntimeProvider runtime={runtime} config={config}>
       <ModelContextBridge />
+      <WidgetInstructions />
       {children}
     </AssistantRuntimeProvider>
   );

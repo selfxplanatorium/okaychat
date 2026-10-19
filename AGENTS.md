@@ -23,6 +23,7 @@ okaychat is a self-hosted AI chat app meant to replace LibreChat and Open WebUI.
 | Web | Vite + React 19 + Tailwind v4 | No SSR needed |
 | Chat UI | assistant-ui (`@assistant-ui/react`, `@assistant-ui/ai-sdk`), components copied into `src/web/components/assistant-ui/elements/` | Required by the product brief. Copied (shadcn-style) so we can add slots |
 | UI primitives | Base UI (`@base-ui/react`), lucide icons, zustand stores | Same primitives the assistant-ui registry uses |
+| Generative UI | `generative-frame` (spec mode + sandboxed widgets) | Both renderers, streaming, render reports for repair. See `docs/research/generative-ui.md` |
 | Files | `unpdf` (PDF), `mammoth` (DOCX) | Pure JS, no native deps |
 | Web | `linkedom` + `@mozilla/readability` + `turndown`; SearXNG sidecar for search | Free, no keys. See `docs/research/web-search.md` |
 | Theming | Port of T3Code appearance settings (MIT) | Required by the product brief |
@@ -45,6 +46,7 @@ src/web/
   runtime/            assistant-ui runtime: thread list, history, attachments, model context
   components/chat/    Composer controls, context meter, tool renderers
   components/artifacts Artifact card, side panel, sandboxed frame documents
+  components/genui    Generative UI catalog (render_spec components) and widget toolkit
   components/settings Settings pages
   theme/              T3Code theme engine port (see its README)
   state/              zustand stores (data, appearance, thread meta)
@@ -63,6 +65,7 @@ docs/                 Reusable documentation (see below)
 - `docs/research/assistant-ui.md`: runtime, thread list, history, components.
 - `docs/research/t3code-appearance.md`: what we ported from T3Code and how.
 - `docs/research/web-search.md`, `docs/research/scrapling.md`: keyless search and page fetching.
+- `docs/research/generative-ui.md`: `generative-frame` widgets and spec mode, browser-executed tools.
 
 Add a new file under `docs/research/` whenever you research an external API or library.
 
@@ -88,6 +91,7 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 - Context fill uses the last step's input + output tokens, not the turn total.
 - Tool calls collapse into a "N tool calls" group by default. Tools whose card must stay visible get a `"tool-call:<name>": []` entry in `messageGroupBy` (`thread.aui.tsx`).
 - Artifact frames have an opaque origin (no `allow-same-origin`), so `localStorage` throws. `frame.ts` injects in-memory storage before any artifact code runs.
+- Browser-executed tools need `sendAutomaticallyWhen` on `useChatRuntime`, or the turn stops after the first one. The server merges their schemas from the request body with `frontendTools`.
 - Messages are persisted by the client's history adapter, not by `/api/chat`. A chat sent with curl leaves the thread empty. Drive the UI to test persistence.
 
 ## Commands

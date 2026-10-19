@@ -72,6 +72,8 @@ export interface UserSettings {
   webTools: boolean;
   /** Built-in artifact tools: documents and apps shown in a side panel. */
   artifacts: boolean;
+  /** Generative UI: declarative components and sandboxed HTML/SVG widgets, rendered in the browser. */
+  generativeUI: boolean;
 }
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
@@ -82,6 +84,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   maxSteps: 20,
   webTools: true,
   artifacts: true,
+  generativeUI: true,
 };
 
 export interface TokenUsage {

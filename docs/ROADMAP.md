@@ -19,22 +19,22 @@ Status as of 2026-10-19. Update this file when a feature ships or a plan changes
 | Appearance | Port of T3Code: theme library, light/dark/system, per-mode halves, custom + VS Code theme import, contrast, glass opacity, chat width, panel motion, fonts and sizes, word wrap | MIT, credited in `src/web/theme/` |
 | Web | `web_search` (SearXNG sidecar, then Brave HTML, then DuckDuckGo lite) and `web_fetch` (Readability → Markdown, PDFs, paging, Scrapling fallback with optional headless Chromium). Source cards in the UI | No keys. Toggle in Settings → General |
 | Artifacts | `create_artifact` / `update_artifact` (exact find/replace edits or full rewrite) / `read_artifact`. HTML, React (TSX via Babel + esm.sh + Tailwind browser build), SVG, Markdown, code. Side panel with preview/code, versions, copy, download, resize | Sandboxed iframe without `allow-same-origin`. Preview needs internet for the CDNs. Toggle in Settings → General |
+| Generative UI | `render_spec` (declarative components from our themed catalog: cards, tables, metrics, bars, forms) and `show_widget` / `edit_widget` (HTML/SVG in a null-origin sandbox with render reports for repair), via `generative-frame` | Tools run in the browser. See `docs/research/generative-ui.md`. Toggle in Settings → General |
 | Deploy | Dockerfile (Node 22 + Python venv with Scrapling, optional Chromium), Compose with SearXNG | `SCRAPLING_BROWSER=false` build arg for a smaller image |
 
 ## Pass 2: next
 
-1. Generative UI: port the OpenIntelligentUI pattern to TypeScript. Two renderers chosen per turn: declarative components via `@assistant-ui/generative-ui` (tables, cards, forms) and sandboxed HTML/JS widgets via `generative-frame` (`show_widget`, `edit_widget`) for charts, calculators, maps.
-2. Image generation through the user's own Codex CLI: per-user sandboxed `CODEX_HOME` inside the container, `codex login` device flow from the settings page, an `generate_image` tool that runs `codex exec` with image output, results stored as files and shown inline.
-3. Agentic features: plan/act mode, sub-agents (delegate a task to another model), tool approval prompts for destructive MCP tools, scheduled prompts.
-4. Projects: per-project instructions, pinned files, and default model.
-5. Search across threads (SQLite FTS5).
-6. Sharing: read-only public link for a thread.
-7. Voice input (assistant-ui dictation adapter) and TTS.
-8. Native PDF input for models that support it (skip text extraction), image paste from clipboard.
-9. Admin page: users, sign-up toggle, server-wide provider keys.
-10. Resumable streams (survive reloads) using assistant-ui's resumable transport.
-11. Sync appearance settings to the server per user (now per device).
-12. Code-split the chat bundle (1.6 MB unminified main chunk: assistant-ui, Markdown, AI SDK client).
+1. Image generation through the user's own Codex CLI: per-user sandboxed `CODEX_HOME` inside the container, `codex login` device flow from the settings page, an `generate_image` tool that runs `codex exec` with image output, results stored as files and shown inline.
+2. Agentic features: plan/act mode, sub-agents (delegate a task to another model), tool approval prompts for destructive MCP tools, scheduled prompts.
+3. Projects: per-project instructions, pinned files, and default model.
+4. Search across threads (SQLite FTS5).
+5. Sharing: read-only public link for a thread.
+6. Voice input (assistant-ui dictation adapter) and TTS.
+7. Native PDF input for models that support it (skip text extraction), image paste from clipboard.
+8. Admin page: users, sign-up toggle, server-wide provider keys.
+9. Resumable streams (survive reloads) using assistant-ui's resumable transport.
+10. Sync appearance settings to the server per user (now per device).
+11. Code-split the chat bundle (1.6 MB unminified main chunk: assistant-ui, Markdown, AI SDK client).
 
 ## Known gaps
 

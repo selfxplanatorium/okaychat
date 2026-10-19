@@ -8,6 +8,7 @@ import {
   type LanguageModelUsage,
   type UIMessage,
 } from "ai";
+import { frontendTools, type FrontendTools } from "assistant-stream/ai-sdk";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AssistantMetadata, ReasoningEffort, TokenUsage } from "../shared/types.js";
@@ -26,19 +27,24 @@ const BASE_SYSTEM = `You are okaychat, a helpful assistant. Use Markdown. Use fe
 Use LaTeX with $...$ inline and $$...$$ for display math. When tools are available, use them when they help, and say what you found.
 When you use web results, cite sources inline as Markdown links.`;
 
-// AssistantChatTransport sends the thread's remote id as `id` and model context as `config`.
+// AssistantChatTransport sends the thread's remote id as `id` and model context as `config`, `system`, and `tools`.
 const chatBody = z.object({
   messages: z.array(z.any()),
   id: z.string().min(1),
   config: z.object({ modelName: z.string().min(3), reasoningEffort: z.string().optional() }).loose(),
+  // Browser-executed tools (generative UI) and the instructions that go with them.
+  system: z.string().optional(),
+  tools: z.record(z.string(), z.any()).optional(),
 });
 
-function systemPrompt(userPrompt: string, mcpInstructions: string[], artifacts: boolean): string {
+function systemPrompt(userPrompt: string, mcpInstructions: string[], artifacts: boolean, clientSystem?: string): string {
   // Order matters for caching: static text first, nothing that changes per request.
   const parts = [BASE_SYSTEM, `Today's date: ${new Date().toISOString().slice(0, 10)}.`];
   if (artifacts) parts.push(ARTIFACT_INSTRUCTIONS);
   if (userPrompt.trim()) parts.push(`# User instructions\n${userPrompt.trim()}`);
   if (mcpInstructions.length) parts.push(`# Tool server instructions\n${mcpInstructions.join("\n\n")}`);
+  // Last: it can change when the user interacts with a rendered UI, which should not invalidate the rest.
+  if (clientSystem?.trim()) parts.push(clientSystem.trim());
   return parts.join("\n\n");
 }
 
@@ -83,15 +89,17 @@ export const chatRoutes = new Hono<AppEnv>()
         const mcp = model.toolCall ? await toolsForUser(user.id) : { tools: {}, instructions: [], servers: [] };
         // Built-in tools first, then MCP tools in sorted order, so the tool block is identical across turns.
         const useArtifacts = model.toolCall && settings.artifacts;
+        const useGenerativeUI = model.toolCall && settings.generativeUI && !!parsed.data.tools;
         const tools = {
           ...(model.toolCall && settings.webTools ? webTools() : {}),
           ...(useArtifacts ? artifactTools(threadId) : {}),
+          ...(useGenerativeUI ? frontendTools(parsed.data.tools as FrontendTools) : {}),
           ...mcp.tools,
         };
         const { messages: live, summary } = applyCompaction(uiMessages, compaction);
         const handle = createModel(model, conn, { affinity: threadId, effort });
         const converted = await convertToModelMessages(live, { tools, ignoreIncompleteToolCalls: true });
-        const { system, messages } = handle.markCache(systemPrompt(settings.systemPrompt, mcp.instructions, useArtifacts), [
+        const { system, messages } = handle.markCache(systemPrompt(settings.systemPrompt, mcp.instructions, useArtifacts, useGenerativeUI ? parsed.data.system : undefined), [
           ...(summary ? summaryMessages(summary) : []),
           ...converted,
         ]);
