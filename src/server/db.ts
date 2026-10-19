@@ -97,6 +97,22 @@ const migrations: string[] = [
     PRIMARY KEY (thread_id, id, version)
   );
   `,
+  `
+  CREATE TABLE codex_auth (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    auth_enc TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE images (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    thread_id TEXT,
+    prompt TEXT NOT NULL,
+    width INTEGER,
+    height INTEGER,
+    created_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

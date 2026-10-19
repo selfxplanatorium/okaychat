@@ -4,6 +4,7 @@ import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useData } from "@/state/data";
+import { CodexConnect } from "./CodexConnect";
 import { SettingsPage, SettingsRow, SettingsSection, SettingsSlider } from "./SettingsUI";
 
 export function GeneralSettings() {
@@ -79,6 +80,11 @@ export function GeneralSettings() {
           label="Generative UI"
           description="Lets models answer with tables, cards, and forms in the app's style, or interactive charts and calculators in a sandboxed frame."
           control={<Switch checked={settings.generativeUI} onCheckedChange={(generativeUI) => update({ generativeUI })} aria-label="Generative UI" />}
+        />
+        <SettingsRow
+          label="Image generation"
+          description="Create and edit images with your own ChatGPT plan through the Codex CLI. Sign in once with a one-time code."
+          control={<CodexConnect />}
         />
       </SettingsSection>
 

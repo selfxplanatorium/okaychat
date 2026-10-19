@@ -8,6 +8,7 @@ import { deleteConnection, listModels, listProviders, saveConnection } from "./c
 import { artifactRoutes } from "./artifacts.js";
 import { chatRoutes } from "./chat.js";
 import { fileRoutes } from "./files.js";
+import { deleteThreadImages, imageRoutes } from "./tools/image.js";
 import { callbackUrl, disconnectServer, serverInfo, testServer } from "./mcp/manager.js";
 import { pendingByState, StoredOAuthProvider } from "./mcp/oauth.js";
 import * as mcpStore from "./mcp/store.js";
@@ -76,8 +77,9 @@ const api = new Hono<AppEnv>()
     updateThread(c.get("user").id, c.req.param("id"), (await c.req.json()) as { title?: string; status?: "regular" | "archived" });
     return c.json({ ok: true });
   })
-  .delete("/threads/:id", (c) => {
+  .delete("/threads/:id", async (c) => {
     deleteThread(c.get("user").id, c.req.param("id"));
+    await deleteThreadImages(c.get("user").id, c.req.param("id"));
     return c.json({ ok: true });
   })
   .get("/threads/:id/messages", (c) => c.json(listMessages(c.get("user").id, c.req.param("id"))))
@@ -141,7 +143,8 @@ const api = new Hono<AppEnv>()
   })
   .route("/", chatRoutes)
   .route("/", fileRoutes)
-  .route("/", artifactRoutes);
+  .route("/", artifactRoutes)
+  .route("/", imageRoutes);
 
 /** OAuth redirect target. Not behind requireUser: the state parameter identifies the user and server. */
 export const mcpOAuthCallback = new Hono().get("/", async (c) => {

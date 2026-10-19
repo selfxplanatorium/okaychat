@@ -1,5 +1,5 @@
 import { defineToolkit } from "@assistant-ui/react";
-import { BookOpenIcon, ChevronDownIcon, FileTextIcon, GlobeIcon, Loader2Icon, SearchIcon, TriangleAlertIcon } from "lucide-react";
+import { BookOpenIcon, ChevronDownIcon, DownloadIcon, FileTextIcon, GlobeIcon, ImageIcon, Loader2Icon, SearchIcon, TriangleAlertIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { ArtifactCard } from "@/components/artifacts/ArtifactCard";
 import { cn } from "@/lib/utils";
@@ -104,4 +104,46 @@ export const toolkit = defineToolkit({
       <ToolShell icon={<BookOpenIcon className="size-4" />} running={status?.type === "running"} label={`Read artifact ${(args as { id?: string })?.id ?? ""}`} />
     ),
   },
+  generate_image: {
+    type: "backend",
+    render: ({ args, result, status }) => <GeneratedImage args={args} result={result} running={status?.type === "running"} />,
+  },
 });
+
+function GeneratedImage({ args, result, running }: { args: unknown; result: unknown; running: boolean }) {
+  const prompt = (args as { prompt?: string })?.prompt ?? "";
+  const image = result as { id?: string; url?: string; width?: number; height?: number } | string | undefined;
+  if (running || !image) {
+    return (
+      <div className="bg-muted/40 my-2 flex aspect-square w-full max-w-sm flex-col items-center justify-center gap-2 rounded-xl border p-4 text-center">
+        <Loader2Icon className="text-muted-foreground size-5 animate-spin" />
+        <span className="shimmer text-sm">Generating image…</span>
+        <span className="text-muted-foreground line-clamp-3 text-xs">{prompt}</span>
+      </div>
+    );
+  }
+  if (typeof image === "string" || !image.url) {
+    return <ToolShell icon={<ImageIcon className="size-4" />} running={false} error={typeof image === "string" ? image : "No image"} label="Image generation failed" />;
+  }
+  return (
+    <figure className="group/img relative my-2 w-fit max-w-full">
+      <a href={image.url} target="_blank" rel="noreferrer">
+        <img
+          src={image.url}
+          alt={prompt}
+          width={image.width}
+          height={image.height}
+          className="h-auto max-h-[32rem] w-auto max-w-full rounded-xl border"
+        />
+      </a>
+      <a
+        href={image.url}
+        download={`${image.id}.png`}
+        aria-label="Download image"
+        className="surface-glass text-muted-foreground hover:text-foreground absolute top-2 right-2 rounded-lg border p-1.5 opacity-0 transition-opacity group-hover/img:opacity-100"
+      >
+        <DownloadIcon className="size-4" />
+      </a>
+    </figure>
+  );
+}

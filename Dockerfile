@@ -30,6 +30,10 @@ RUN if [ "$SCRAPLING_BROWSER" = "true" ]; then \
       scrapling install && rm -rf /var/lib/apt/lists/* /root/.cache; \
     fi
 
+# Codex CLI for image generation with each user's own ChatGPT plan. Build with --build-arg CODEX_CLI=false to skip.
+ARG CODEX_CLI=true
+RUN if [ "$CODEX_CLI" = "true" ]; then npm install -g @openai/codex@0.163.0 && npm cache clean --force; fi
+
 WORKDIR /app
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules

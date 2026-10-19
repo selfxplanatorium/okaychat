@@ -36,10 +36,11 @@ src/server/
   routes.ts           REST API (threads, providers, MCP, usage, settings)
   chat.ts             /api/chat streaming, auto-compaction, titles
   artifacts.ts        Artifact tools, versions table, panel API
+  codex.ts            Codex CLI login (device code) and per-run CODEX_HOME with encrypted credentials
   llm.ts              Model factory per wire format, cache breakpoints, OpenCode headers
   catalog/            models.dev catalog + provider connections (encrypted keys)
   mcp/                MCP connection manager, OAuth provider, storage
-  tools/              Built-in tools: web_search, web_fetch (+ Scrapling fallback)
+  tools/              Built-in tools: web_search, web_fetch (+ Scrapling fallback), generate_image (Codex)
   compaction.ts usage.ts files.ts threads.ts settings.ts auth.ts db.ts
 src/web/
   App.tsx             Auth gate, onboarding, shell, routes (wouter)
@@ -65,6 +66,7 @@ docs/                 Reusable documentation (see below)
 - `docs/research/assistant-ui.md`: runtime, thread list, history, components.
 - `docs/research/t3code-appearance.md`: what we ported from T3Code and how.
 - `docs/research/web-search.md`, `docs/research/scrapling.md`: keyless search and page fetching.
+- `docs/research/codex-images.md`: image generation through the Codex CLI, login, credential handling.
 - `docs/research/generative-ui.md`: `generative-frame` widgets and spec mode, browser-executed tools.
 
 Add a new file under `docs/research/` whenever you research an external API or library.

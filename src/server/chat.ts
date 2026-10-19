@@ -15,9 +15,11 @@ import type { AssistantMetadata, ReasoningEffort, TokenUsage } from "../shared/t
 import type { AppEnv } from "./auth.js";
 import { ARTIFACT_INSTRUCTIONS, artifactTools } from "./artifacts.js";
 import { resolveModel } from "./catalog/providers.js";
+import { isConnected as codexConnected } from "./codex.js";
 import { applyCompaction, compact, currentContextTokens, summaryMessages } from "./compaction.js";
 import { createModel } from "./llm.js";
 import { toolsForUser } from "./mcp/manager.js";
+import { imageTools } from "./tools/image.js";
 import { webTools } from "./tools/web.js";
 import { getSettings } from "./settings.js";
 import { ensureThread, getThread, setCompaction, updateThread } from "./threads.js";
@@ -93,6 +95,7 @@ export const chatRoutes = new Hono<AppEnv>()
         const tools = {
           ...(model.toolCall && settings.webTools ? webTools() : {}),
           ...(useArtifacts ? artifactTools(threadId) : {}),
+          ...(model.toolCall && codexConnected(user.id) ? imageTools(user.id, threadId, c.req.raw.signal) : {}),
           ...(useGenerativeUI ? frontendTools(parsed.data.tools as FrontendTools) : {}),
           ...mcp.tools,
         };
