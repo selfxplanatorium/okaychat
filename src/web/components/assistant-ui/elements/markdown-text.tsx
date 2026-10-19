@@ -12,8 +12,8 @@ import {
 import remarkGfm from "remark-gfm";
 import { type FC, memo, useMemo, useRef } from "react";
 import type { TextMessagePartProps } from "@assistant-ui/react";
-import { CheckIcon, CopyIcon } from "lucide-react";
 
+import { CopyFeedbackIcon } from "@/components/assistant-ui/elements/surfaces";
 import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { cn } from "@/lib/utils";
@@ -79,12 +79,7 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
         {language}
       </span>
       <TooltipIconButton tooltip="Copy" onClick={onCopy}>
-        {!isCopied && (
-          <CopyIcon className="animate-in zoom-in-75 fade-in duration-150" />
-        )}
-        {isCopied && (
-          <CheckIcon className="animate-in zoom-in-50 fade-in duration-200 ease-out" />
-        )}
+        <CopyFeedbackIcon copied={isCopied} />
       </TooltipIconButton>
     </div>
   );

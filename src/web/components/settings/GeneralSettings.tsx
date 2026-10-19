@@ -87,19 +87,21 @@ export function GeneralSettings() {
           control={<Switch checked={settings.subagents} onCheckedChange={(subagents) => update({ subagents })} aria-label="Sub-agents" />}
         />
         {settings.subagents && (
-          <SettingsRow
-            label="Sub-agent model"
-            description="Default for delegated tasks. The utility model and the chat model are offered too."
-            control={
-              <Select
-                className="w-64"
-                value={settings.subagentModel ?? null}
-                onValueChange={(v) => update({ subagentModel: v })}
-                options={models.filter((m) => m.toolCall).map((m) => ({ value: m.ref, label: `${m.name} · ${m.providerId}` }))}
-                placeholder="Utility model"
-              />
-            }
-          />
+          <div className="settings-collapse">
+            <SettingsRow
+              label="Sub-agent model"
+              description="Default for delegated tasks. The utility model and the chat model are offered too."
+              control={
+                <Select
+                  className="w-64"
+                  value={settings.subagentModel ?? null}
+                  onValueChange={(v) => update({ subagentModel: v })}
+                  options={models.filter((m) => m.toolCall).map((m) => ({ value: m.ref, label: `${m.name} · ${m.providerId}` }))}
+                  placeholder="Utility model"
+                />
+              }
+            />
+          </div>
         )}
         <SettingsRow
           label="Image generation"

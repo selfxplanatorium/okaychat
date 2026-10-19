@@ -1,7 +1,8 @@
 "use client";
 
 import type { ComponentProps } from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { CheckIcon, CopyIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsomorphicLayoutEffect } from "../utils/useIsomorphicLayoutEffect";
 
@@ -16,31 +17,36 @@ export const fieldInteractive =
   "bg-foreground/[0.04] transition-colors hover:bg-foreground/[0.07] forced-colors:border dark:bg-foreground/[0.06] dark:hover:bg-foreground/[0.09]";
 
 export const pressable =
-  "transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] active:scale-[0.96] motion-reduce:transition-none";
+  "transition-transform duration-(--motion-fast) ease-out-quart active:scale-[0.96] motion-reduce:transition-none";
 
 export const ghostButton =
-  "flex items-center justify-center rounded-full text-muted-foreground outline-hidden transition-[background-color,color,scale] duration-150 hover:bg-foreground/[0.06] hover:text-foreground/90 active:scale-[0.96] focus-visible:ring-1 focus-visible:ring-foreground/20 motion-reduce:transition-none dark:hover:bg-foreground/[0.09]";
+  "flex items-center justify-center rounded-full text-muted-foreground outline-hidden transition-[background-color,color,scale] duration-(--motion-fast) ease-out-quart hover:bg-foreground/[0.06] hover:text-foreground/90 active:scale-[0.96] focus-visible:ring-1 focus-visible:ring-foreground/20 motion-reduce:transition-none dark:hover:bg-foreground/[0.09]";
 
 export const inkButton =
-  "bg-foreground text-background transition-[opacity,scale] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:opacity-90 active:scale-[0.96] motion-reduce:transition-none forced-colors:border";
+  "bg-foreground text-background transition-[opacity,scale] duration-(--motion-fast) ease-out-quart hover:opacity-90 active:scale-[0.96] motion-reduce:transition-none forced-colors:border";
 
 export const iconSwap =
-  "[grid-area:1/1] transition-[opacity,scale,filter] duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none";
+  "[grid-area:1/1] transition-[opacity,scale,filter] duration-(--motion-base) ease-out-quart motion-reduce:transition-none";
 
 export const iconSwapIn = "scale-100 opacity-100 blur-none";
 
 export const iconSwapOut = "scale-[0.25] opacity-0 blur-[4px]";
 
 export const labelSwap =
-  "col-start-1 row-start-1 flex w-max items-center gap-1.5 leading-none transition-[opacity,filter] duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none";
+  "col-start-1 row-start-1 flex w-max items-center gap-1.5 leading-none transition-[opacity,filter] duration-(--motion-base) ease-out-quart motion-reduce:transition-none";
 
 export const labelSwapIn = "opacity-100 blur-none";
 
 export const labelSwapOut =
   "pointer-events-none select-none opacity-0 blur-[2px]";
 
+/**
+ * Base UI measures the panel and publishes its height, so the disclosure opens
+ * and closes with a transition instead of keyframes: interruptible, and the
+ * exit is shorter than the entrance.
+ */
 export const collapsePanel =
-  "h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] data-[ending-style]:h-0 data-[starting-style]:h-0 motion-reduce:transition-none";
+  "h-(--collapsible-panel-height) overflow-hidden opacity-100 transition-[height,opacity] duration-(--animation-duration) ease-out-expo data-[starting-style]:h-0 data-[starting-style]:opacity-0 data-[ending-style]:h-0 data-[ending-style]:opacity-0 data-[ending-style]:duration-150 data-[ending-style]:ease-in-quart motion-reduce:transition-none";
 
 export const live = "text-blue-500 dark:text-blue-400";
 
@@ -100,7 +106,7 @@ export function SwapLabel({
     <span
       style={width === null ? undefined : { width }}
       className={cn(
-        "grid overflow-x-clip transition-[width] duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none",
+        "grid overflow-x-clip transition-[width] duration-(--motion-base) ease-out-quart motion-reduce:transition-none",
         className,
       )}
     >
@@ -117,6 +123,88 @@ export function SwapLabel({
           {layer}
         </span>
       ))}
+    </span>
+  );
+}
+
+/**
+ * Copy turns into a check without the two icons snapping past each other: both
+ * are always mounted, and the check pops on the spring when it takes over.
+ */
+export function CopyFeedbackIcon({
+  copied,
+  className,
+}: {
+  copied: boolean;
+  className?: string;
+}) {
+  return (
+    <span data-slot="copy-feedback-icon" className={cn("grid", className)}>
+      <CheckIcon
+        aria-hidden
+        className={cn(
+          iconSwap,
+          "ease-spring",
+          copied ? iconSwapIn : iconSwapOut,
+        )}
+      />
+      <CopyIcon
+        aria-hidden
+        className={cn(iconSwap, copied ? iconSwapOut : iconSwapIn)}
+      />
+    </span>
+  );
+}
+
+const TEXT_SWAP_OUT_MS = 160;
+
+/**
+ * A label that changes in place (model, effort) crossfades: the outgoing value
+ * stays mounted for one short beat so the two never pop.
+ */
+export function TextSwap({
+  value,
+  className,
+}: {
+  value: string;
+  className?: string;
+}) {
+  const [shown, setShown] = useState<{ current: string; outgoing?: string }>({
+    current: value,
+  });
+
+  if (shown.current !== value) {
+    setShown({ current: value, outgoing: shown.current });
+  }
+
+  useEffect(() => {
+    if (shown.outgoing === undefined) return undefined;
+    const timeout = setTimeout(() => {
+      setShown((state) =>
+        state.outgoing === shown.outgoing
+          ? { current: state.current }
+          : state,
+      );
+    }, TEXT_SWAP_OUT_MS);
+    return () => clearTimeout(timeout);
+  }, [shown.outgoing]);
+
+  return (
+    <span className={cn("grid min-w-0 overflow-hidden", className)}>
+      <span
+        key={shown.current}
+        className="chat-text-swap-in col-start-1 row-start-1 truncate"
+      >
+        {shown.current}
+      </span>
+      {shown.outgoing !== undefined && (
+        <span
+          aria-hidden
+          className="chat-text-swap-out col-start-1 row-start-1 truncate"
+        >
+          {shown.outgoing}
+        </span>
+      )}
     </span>
   );
 }

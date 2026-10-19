@@ -49,7 +49,7 @@ const AttachmentPreview: FC<AttachmentPreviewProps> = ({ src, name }) => {
       src={src}
       alt={`Preview of ${name}`}
       className={cn(
-        "block h-auto max-h-[80vh] w-auto max-w-full rounded-sm object-contain transition-opacity duration-300 motion-reduce:transition-none",
+        "block h-auto max-h-[80vh] w-auto max-w-full rounded-sm object-contain transition-[opacity] duration-(--motion-slow) ease-out-quart motion-reduce:transition-none",
         isLoaded
           ? "aui-attachment-preview-image-loaded opacity-100"
           : "aui-attachment-preview-image-loading opacity-0",
@@ -160,8 +160,8 @@ const AttachmentUI: FC = () => {
         <AttachmentPrimitive.Root
           className={cn(
             "aui-attachment-root relative",
-            isComposer &&
-              "animate-in fade-in-0 zoom-in-95 duration-200 motion-reduce:animate-none",
+            // Added files land in the composer with a small spring.
+            isComposer && "animate-pop-in motion-reduce:animate-none",
             isImage &&
               !isComposer &&
               "aui-attachment-root-message only:*:first:size-24",

@@ -327,7 +327,7 @@ function ThemeLibrary({
         aria-label={choice.aria}
         onClick={() => useAppearance.getState().setMode(choice.value)}
         className={cn(
-          "focus-visible:ring-ring flex cursor-pointer flex-col gap-1.5 rounded-xl border p-2 outline-none transition-colors focus-visible:ring-2",
+          "focus-visible:ring-ring flex cursor-pointer flex-col gap-1.5 rounded-xl border p-2 outline-none transition-[transform,box-shadow,background-color,border-color] duration-(--motion-base) ease-spring hover:-translate-y-0.5 focus-visible:ring-2",
           active ? "border-transparent bg-accent/30" : "border-border/70 bg-card/60 hover:bg-accent/10",
         )}
         style={active ? { boxShadow: "inset 0 0 0 1px var(--ring)" } : undefined}
@@ -368,7 +368,7 @@ function ThemeLibrary({
             <div
               key={`${card.custom ? "custom" : "std"}-${card.id}`}
               className={cn(
-                "border-border/70 bg-card/60 hover:bg-accent/10 flex flex-col overflow-hidden rounded-xl border transition-colors",
+                "border-border/70 bg-card/60 hover:bg-accent/10 flex flex-col overflow-hidden rounded-xl border transition-[transform,box-shadow,background-color,border-color] duration-(--motion-base) ease-spring hover:-translate-y-0.5",
                 active && "bg-accent/30",
               )}
               style={active ? { boxShadow: "inset 0 0 0 1px var(--ring)" } : undefined}
@@ -394,14 +394,14 @@ function ThemeLibrary({
                       aria-pressed={owned(m)}
                       onClick={() => assignThemeHalf(m, card.id === "" ? null : card.id)}
                       className={cn(
-                        "border-border/70 focus-visible:ring-ring size-4 rounded-full border outline-none focus-visible:ring-2",
+                        "border-border/70 focus-visible:ring-ring size-4 rounded-full border outline-none transition-[box-shadow,transform] duration-(--motion-base) ease-spring hover:scale-110 focus-visible:ring-2",
                         owned(m) && "ring-ring ring-2 ring-inset",
                       )}
                       style={{ backgroundColor: colorsFor(card.id, m).canvas, boxShadow: `inset 0 0 0 3px ${colorsFor(card.id, m).accent}` }}
                     />
                   ))}
                 </div>
-                {active && <CheckIcon aria-hidden className="text-foreground size-3.5 shrink-0" />}
+                {active && <CheckIcon aria-hidden className="text-foreground animate-pop-in size-3.5 shrink-0" />}
                 <Menu>
                   <MenuTrigger
                     render={<Button variant="ghost" size="icon-xs" aria-label={`Actions for ${card.label}`} />}
@@ -578,7 +578,7 @@ function ThemeEditorDialog({
                 aria-selected={mode === m}
                 onClick={() => switchMode(m)}
                 className={cn(
-                  "rounded-md px-3 py-1 text-xs font-medium capitalize outline-none focus-visible:ring-2",
+                  "rounded-md px-3 py-1 text-xs font-medium capitalize outline-none transition-colors duration-(--motion-fast) focus-visible:ring-2",
                   mode === m ? "bg-background text-foreground" : "text-muted-foreground hover:text-foreground",
                 )}
               >
@@ -593,7 +593,7 @@ function ThemeEditorDialog({
           ))}
         </div>
         {error && (
-          <p role="alert" aria-live="polite" className="text-destructive text-xs">
+          <p role="alert" aria-live="polite" className="text-destructive settings-error text-xs">
             {error}
           </p>
         )}
@@ -697,7 +697,7 @@ function ThemeImportDialog({ onClose }: { onClose: () => void }) {
             <DialogDescription>{conflicts.map((t) => t.label).join(", ")} is already installed. Update it, or keep both copies.</DialogDescription>
           </DialogHeader>
           {error && (
-            <p role="alert" aria-live="polite" className="text-destructive text-xs">
+            <p role="alert" aria-live="polite" className="text-destructive settings-error text-xs">
               {error}
             </p>
           )}
@@ -734,7 +734,7 @@ function ThemeImportDialog({ onClose }: { onClose: () => void }) {
             void readFiles(event.dataTransfer.files);
           }}
           className={cn(
-            "flex flex-col items-center gap-2 rounded-xl border border-dashed p-4 text-center",
+            "flex flex-col items-center gap-2 rounded-xl border border-dashed p-4 text-center transition-colors duration-(--motion-fast)",
             dragging ? "border-ring bg-accent/20" : "border-border",
           )}
         >
@@ -775,7 +775,7 @@ function ThemeImportDialog({ onClose }: { onClose: () => void }) {
           />
         </div>
         {error && (
-          <p role="alert" aria-live="polite" className="text-destructive text-xs">
+          <p role="alert" aria-live="polite" className="text-destructive settings-error text-xs">
             {error}
           </p>
         )}
@@ -975,19 +975,21 @@ function TypographySection() {
         onReset={() => update({ fontFamilySans: DEFAULT_APPEARANCE.fontFamilySans, fontSizeInterface: DEFAULT_APPEARANCE.fontSizeInterface })}
       />
       {s.typographyAdvanced && (
-        <FontRow
-          label="Prompt font"
-          description="Only the box you write prompts in. Mono works well here."
-          family={s.fontFamilyComposer}
-          placeholder={interfaceLabel}
-          size={s.fontSizePrompt}
-          sizeMin={MIN_PROMPT_FONT_SIZE}
-          sizeMax={MAX_PROMPT_FONT_SIZE}
-          sizeDefault={DEFAULT_APPEARANCE.fontSizePrompt}
-          onFamilyChange={(fontFamilyComposer) => update({ fontFamilyComposer })}
-          onSizeChange={(fontSizePrompt) => update({ fontSizePrompt })}
-          onReset={() => update({ fontFamilyComposer: DEFAULT_APPEARANCE.fontFamilyComposer, fontSizePrompt: DEFAULT_APPEARANCE.fontSizePrompt })}
-        />
+        <div className="settings-collapse">
+          <FontRow
+            label="Prompt font"
+            description="Only the box you write prompts in. Mono works well here."
+            family={s.fontFamilyComposer}
+            placeholder={interfaceLabel}
+            size={s.fontSizePrompt}
+            sizeMin={MIN_PROMPT_FONT_SIZE}
+            sizeMax={MAX_PROMPT_FONT_SIZE}
+            sizeDefault={DEFAULT_APPEARANCE.fontSizePrompt}
+            onFamilyChange={(fontFamilyComposer) => update({ fontFamilyComposer })}
+            onSizeChange={(fontSizePrompt) => update({ fontSizePrompt })}
+            onReset={() => update({ fontFamilyComposer: DEFAULT_APPEARANCE.fontFamilyComposer, fontSizePrompt: DEFAULT_APPEARANCE.fontSizePrompt })}
+          />
+        </div>
       )}
       <FontRow
         label={s.typographyAdvanced ? "Code font" : "Monospace font"}
@@ -1004,18 +1006,20 @@ function TypographySection() {
         onReset={() => update({ fontFamilyCode: DEFAULT_APPEARANCE.fontFamilyCode, fontSizeCode: DEFAULT_APPEARANCE.fontSizeCode })}
       />
       {s.typographyAdvanced && isMac && (
-        <SettingsRow
-          label="Font smoothing"
-          description="Use thinner grayscale text smoothing instead of the macOS default."
-          reset={s.fontSmoothing !== DEFAULT_APPEARANCE.fontSmoothing ? () => reset("fontSmoothing") : null}
-          control={
-            <Switch
-              aria-label="Font smoothing"
-              checked={s.fontSmoothing}
-              onCheckedChange={(checked) => update({ fontSmoothing: Boolean(checked) })}
-            />
-          }
-        />
+        <div className="settings-collapse">
+          <SettingsRow
+            label="Font smoothing"
+            description="Use thinner grayscale text smoothing instead of the macOS default."
+            reset={s.fontSmoothing !== DEFAULT_APPEARANCE.fontSmoothing ? () => reset("fontSmoothing") : null}
+            control={
+              <Switch
+                aria-label="Font smoothing"
+                checked={s.fontSmoothing}
+                onCheckedChange={(checked) => update({ fontSmoothing: Boolean(checked) })}
+              />
+            }
+          />
+        </div>
       )}
       <SettingsRow
         label="Word wrap"
@@ -1048,7 +1052,7 @@ export function AppearanceSettings() {
 
   return (
     <SettingsPage title="Appearance" description="Colors, themes, and typography synced across your devices.">
-      {syncError && <p role="status" className="text-muted-foreground mb-4 text-sm">{syncError}</p>}
+      {syncError && <p role="status" className="text-muted-foreground animate-fade-in mb-4 text-sm">{syncError}</p>}
       <ThemeLibrary
         theme={s.theme}
         halves={s.halves}

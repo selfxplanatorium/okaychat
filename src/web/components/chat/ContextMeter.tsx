@@ -12,6 +12,7 @@ import { metadataOf, useContextUsage, useCurrentThreadId, useThreadMeta, useThre
 function Ring({ fraction }: { fraction: number }) {
   const r = 7;
   const c = 2 * Math.PI * r;
+  const fill = Math.max(0.02, Math.min(1, fraction));
   const tone = fraction > 0.85 ? "text-error" : fraction > 0.6 ? "text-warning" : "text-primary";
   return (
     <svg viewBox="0 0 18 18" className="size-4 -rotate-90" aria-hidden>
@@ -24,8 +25,10 @@ function Ring({ fraction }: { fraction: number }) {
         strokeWidth="2.5"
         strokeLinecap="round"
         stroke="currentColor"
-        className={tone}
-        strokeDasharray={`${Math.max(0.02, Math.min(1, fraction)) * c} ${c}`}
+        // Dash offset instead of dash length: the ring fills without relayout.
+        className={cn(tone, "transition-[color,stroke-dashoffset] duration-(--motion-slow) ease-out-quart")}
+        strokeDasharray={c}
+        strokeDashoffset={c * (1 - fill)}
       />
     </svg>
   );
@@ -73,7 +76,7 @@ export function ContextMeter() {
   return (
     <Popover>
       <PopoverTrigger
-        className="hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs tabular-nums"
+        className="hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs tabular-nums transition-colors duration-(--motion-fast) ease-out-quart"
         aria-label="Context usage"
       >
         <Ring fraction={fraction} />
@@ -87,7 +90,10 @@ export function ContextMeter() {
           </span>
         </div>
         <div className="bg-muted relative mb-3 h-1.5 overflow-hidden rounded-full">
-          <div className={cn("h-full rounded-full", fraction > 0.85 ? "bg-error" : fraction > 0.6 ? "bg-warning" : "bg-primary")} style={{ width: `${Math.min(100, fraction * 100)}%` }} />
+          <div
+            className={cn("h-full origin-left rounded-full transition-[transform,background-color] duration-(--motion-slow) ease-out-quart", fraction > 0.85 ? "bg-error" : fraction > 0.6 ? "bg-warning" : "bg-primary")}
+            style={{ width: "100%", transform: `scaleX(${Math.min(1, fraction)})` }}
+          />
           {autoCompactAt > 0 && <div className="bg-foreground/40 absolute top-0 h-full w-px" style={{ left: `${autoCompactAt * 100}%` }} title="Auto-compact threshold" />}
         </div>
         <dl className="text-muted-foreground grid grid-cols-2 gap-y-1 text-xs">
@@ -128,7 +134,7 @@ export function MessageMeta() {
   const u = meta.usage;
   const cache = u?.input ? Math.round((u.cacheRead / u.input) * 100) : 0;
   return (
-    <div className="text-muted-foreground/80 ms-auto flex items-center gap-2 pe-2 text-[11px] tabular-nums opacity-0 transition-opacity [[data-role=assistant]:hover_&]:opacity-100">
+    <div className="text-muted-foreground/80 ms-auto flex items-center gap-2 pe-2 text-[11px] tabular-nums opacity-0 transition-opacity duration-(--motion-fast) delay-75 ease-out-quart [[data-role=assistant]:hover_&]:opacity-100">
       <span>{name}</span>
       {u && (
         <span title={`Input ${u.input} (cached ${u.cacheRead}, written ${u.cacheWrite}) · Output ${u.output} (reasoning ${u.reasoning})`}>
@@ -148,15 +154,15 @@ export function CompactionMarker() {
   const [open, setOpen] = useState(false);
   if (!meta?.compaction || meta.compaction.boundaryMessageId !== messageId) return null;
   return (
-    <div className="text-muted-foreground my-2 px-2 text-xs">
-      <button type="button" onClick={() => setOpen(!open)} className="hover:text-foreground flex w-full items-center gap-3">
+    <div className="text-muted-foreground animate-fade-in my-2 px-2 text-xs">
+      <button type="button" onClick={() => setOpen(!open)} className="hover:text-foreground flex w-full items-center gap-3 transition-colors duration-(--motion-fast) ease-out-quart">
         <span className="bg-border h-px flex-1" />
         <ShrinkIcon className="size-3.5" />
         Earlier messages summarized ({formatTokens(meta.compaction.tokensBefore)} tokens)
-        <ChevronDownIcon className={cn("size-3.5 transition-transform", open && "rotate-180")} />
+        <ChevronDownIcon className={cn("size-3.5 transition-transform duration-(--motion-base) ease-out-expo", open && "rotate-180")} />
         <span className="bg-border h-px flex-1" />
       </button>
-      {open && <pre className="bg-muted/50 mt-2 max-h-80 overflow-auto rounded-lg p-3 font-sans whitespace-pre-wrap">{meta.compaction.summary}</pre>}
+      {open && <pre className="bg-muted/50 animate-rise-in mt-2 max-h-80 overflow-auto rounded-lg p-3 font-sans whitespace-pre-wrap">{meta.compaction.summary}</pre>}
     </div>
   );
 }

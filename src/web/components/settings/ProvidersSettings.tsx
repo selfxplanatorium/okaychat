@@ -1,5 +1,5 @@
 import { CheckCircle2Icon, ExternalLinkIcon, PlusIcon, SearchIcon, TrashIcon } from "lucide-react";
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import type { ProviderInfo } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -81,20 +81,20 @@ export function ProviderForm({ provider, onSaved, autoFocus }: { provider: Provi
       {(provider.needsBaseURL || provider.custom) && (
         <Input placeholder="Base URL, e.g. http://host.docker.internal:11434/v1" value={baseURL} onChange={(e) => setBaseURL(e.target.value)} />
       )}
-      {error && <p className="text-error text-xs">{error}</p>}
+      {error && <p className="text-error settings-error text-xs">{error}</p>}
     </form>
   );
 }
 
-function ProviderRow({ provider, expanded, onToggle }: { provider: ProviderInfo; expanded: boolean; onToggle: () => void }) {
+function ProviderRow({ provider, index, expanded, onToggle }: { provider: ProviderInfo; index: number; expanded: boolean; onToggle: () => void }) {
   const { base, refresh } = useScope();
   return (
-    <div className="px-4 py-3">
+    <div className="stagger animate-rise-in px-4 py-3" style={{ "--i": index } as CSSProperties}>
       <div className="flex items-center gap-3">
         <button type="button" onClick={onToggle} className="flex min-w-0 flex-1 items-center gap-2 text-left">
           <span className="truncate text-sm font-medium">{provider.name}</span>
           {provider.id === "opencode-go" && <span className="bg-primary/10 text-primary rounded px-1.5 py-0.5 text-[10px] font-medium">Recommended</span>}
-          {provider.connected && <CheckCircle2Icon className="text-success size-3.5 shrink-0" aria-label="Connected" />}
+          {provider.connected && <CheckCircle2Icon className="text-success animate-pop-in size-3.5 shrink-0" aria-label="Connected" />}
           {provider.shared && <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[10px] font-medium">Server key</span>}
           <span className="text-muted-foreground ml-auto text-xs tabular-nums">{provider.modelCount ? `${provider.modelCount} models` : ""}</span>
         </button>
@@ -123,13 +123,20 @@ function ProviderRow({ provider, expanded, onToggle }: { provider: ProviderInfo;
         )}
       </div>
       {expanded && (
-        <div className="mt-3 flex flex-col gap-2">
-          <ProviderForm provider={provider} onSaved={onToggle} autoFocus />
-          {provider.doc && (
-            <a href={provider.id === "opencode-go" ? OPENCODE_GO_CONSOLE : provider.doc} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs">
-              {provider.id === "opencode-go" ? "Get a key in the OpenCode console" : "Provider docs"} <ExternalLinkIcon className="size-3" />
-            </a>
-          )}
+        <div className="settings-collapse mt-3">
+          <div className="flex flex-col gap-2">
+            <ProviderForm provider={provider} onSaved={onToggle} autoFocus />
+            {provider.doc && (
+              <a
+                href={provider.id === "opencode-go" ? OPENCODE_GO_CONSOLE : provider.doc}
+                target="_blank"
+                rel="noreferrer"
+                className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs transition-colors duration-(--motion-fast)"
+              >
+                {provider.id === "opencode-go" ? "Get a key in the OpenCode console" : "Provider docs"} <ExternalLinkIcon className="size-3" />
+              </a>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -144,7 +151,7 @@ function CustomProviderForm({ onDone }: { onDone: () => void }) {
   const [error, setError] = useState<string | null>(null);
   return (
     <form
-      className="grid gap-2 px-4 py-3 sm:grid-cols-[1fr_2fr]"
+      className="animate-rise-in grid gap-2 px-4 py-3 sm:grid-cols-[1fr_2fr]"
       onSubmit={async (e) => {
         e.preventDefault();
         const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -161,7 +168,7 @@ function CustomProviderForm({ onDone }: { onDone: () => void }) {
       <Input placeholder="Name (e.g. Ollama)" value={name} onChange={(e) => setName(e.target.value)} required />
       <Input placeholder="OpenAI-compatible base URL (…/v1)" value={baseURL} onChange={(e) => setBaseURL(e.target.value)} required />
       <Input type="password" placeholder="API key (optional)" value={apiKey} onChange={(e) => setApiKey(e.target.value)} className="sm:col-span-2" />
-      {error && <p className="text-error text-xs sm:col-span-2">{error}</p>}
+      {error && <p className="text-error settings-error text-xs sm:col-span-2">{error}</p>}
       <div className="flex justify-end gap-2 sm:col-span-2">
         <Button type="button" variant="ghost" onClick={onDone}>
           Cancel
@@ -198,7 +205,9 @@ export function ProviderLists() {
   }, [providers, query]);
 
   const rows = (list: ProviderInfo[]) =>
-    list.map((p) => <ProviderRow key={p.id} provider={p} expanded={expanded === p.id} onToggle={() => setExpanded(expanded === p.id ? null : p.id)} />);
+    list.map((p, index) => (
+      <ProviderRow key={p.id} index={index} provider={p} expanded={expanded === p.id} onToggle={() => setExpanded(expanded === p.id ? null : p.id)} />
+    ));
 
   return (
     <>
@@ -216,7 +225,11 @@ export function ProviderLists() {
         {addingCustom ? (
           <CustomProviderForm onDone={() => setAddingCustom(false)} />
         ) : (
-          <button type="button" onClick={() => setAddingCustom(true)} className={cn("text-muted-foreground hover:text-foreground flex items-center gap-2 px-4 py-3 text-sm")}>
+          <button
+            type="button"
+            onClick={() => setAddingCustom(true)}
+            className={cn("text-muted-foreground hover:text-foreground flex items-center gap-2 px-4 py-3 text-sm transition-colors duration-(--motion-fast)")}
+          >
             <PlusIcon className="size-4" /> Custom OpenAI-compatible endpoint (Ollama, LM Studio, vLLM…)
           </button>
         )}

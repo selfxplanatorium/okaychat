@@ -1,6 +1,6 @@
 import { useAui } from "@assistant-ui/react";
 import { MessageSquareTextIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { api } from "@/lib/api";
 import { useData } from "@/state/data";
 
@@ -30,15 +30,16 @@ export function MessageSearchResults({ query }: { query: string }) {
 
   if (!hits) return null;
   return (
-    <div className="mt-2">
+    <div className="animate-fade-in mt-2">
       <div className="text-muted-foreground px-2.5 pt-2 pb-1 text-xs font-medium">In messages</div>
-      {hits.length === 0 && <p className="text-muted-foreground px-2.5 py-1 text-sm">No messages match</p>}
-      {hits.map((h) => (
+      {hits.length === 0 && <p className="text-muted-foreground animate-fade-in px-2.5 py-1 text-sm">No messages match</p>}
+      {hits.map((h, i) => (
         <button
           key={h.threadId}
           type="button"
           onClick={() => aui.threads.switchToThread(h.threadId)}
-          className="hover:bg-sidebar-row-hover flex w-full flex-col gap-0.5 rounded-lg px-2.5 py-1.5 text-left"
+          style={{ "--i": Math.min(i, 7) } as CSSProperties}
+          className="stagger animate-rise-in hover:bg-sidebar-row-hover flex w-full flex-col gap-0.5 rounded-lg px-2.5 py-1.5 text-left transition-colors duration-(--motion-fast) ease-out-quart"
         >
           <span className="flex items-center gap-1.5 truncate text-sm">
             <MessageSquareTextIcon className="text-muted-foreground size-3.5 shrink-0" />

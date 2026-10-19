@@ -11,7 +11,7 @@ const Shell = lazy(() => import("./ChatShell").then((m) => ({ default: m.Shell }
 const SharePage = lazy(() => import("@/components/share/SharePage").then((m) => ({ default: m.SharePage })));
 
 export function AppLoading() {
-  return <div role="status" className="text-muted-foreground grid h-full place-items-center text-sm">Loading okaychat…</div>;
+  return <div role="status" className="text-muted-foreground animate-fade-in grid h-full place-items-center text-sm">Loading okaychat…</div>;
 }
 
 type AuthStatus = { user: Me | null; needsSetup: boolean; signupOpen: boolean };

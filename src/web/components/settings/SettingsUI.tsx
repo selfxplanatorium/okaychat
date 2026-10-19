@@ -1,16 +1,25 @@
 import { RotateCcwIcon } from "lucide-react";
-import type { CSSProperties, ReactNode } from "react";
+import { Children, isValidElement, type CSSProperties, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /** Layout primitives shared by every settings page. Mirrors T3Code's SettingsSection / SettingsRow. */
 export function SettingsPage({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
+  // Groups rise in one after another when the section mounts, so a dense page
+  // reads top to bottom instead of appearing all at once.
+  let group = 0;
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 py-8">
-      <header>
+      <header className="stagger animate-rise-in" style={{ "--i": 0 } as CSSProperties}>
         <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
         {description && <p className="text-muted-foreground mt-1 text-sm">{description}</p>}
       </header>
-      {children}
+      {Children.map(children, (child) =>
+        isValidElement(child) ? (
+          <div className="stagger animate-rise-in" style={{ "--i": ++group } as CSSProperties}>
+            {child}
+          </div>
+        ) : null,
+      )}
     </div>
   );
 }
@@ -52,7 +61,7 @@ export function SettingsRow({
         <div className="flex items-center gap-1.5 text-sm font-medium">
           {label}
           {reset && (
-            <button type="button" onClick={reset} aria-label="Reset to default" className="text-muted-foreground hover:text-foreground rounded p-0.5">
+            <button type="button" onClick={reset} aria-label="Reset to default" className="text-muted-foreground hover:text-foreground rounded p-0.5 transition-colors duration-(--motion-fast)">
               <RotateCcwIcon className="size-3" />
             </button>
           )}

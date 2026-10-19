@@ -27,13 +27,19 @@ function ToolShell({ icon, label, running, error, children }: { icon: ReactNode;
   const [open, setOpen] = useState(false);
   return (
     <div className="my-2 text-sm">
-      <button type="button" onClick={() => setOpen(!open)} className="text-muted-foreground hover:text-foreground flex max-w-full items-center gap-2" disabled={!children}>
-        {running ? <Loader2Icon className="size-4 animate-spin" /> : error ? <TriangleAlertIcon className="text-warning size-4" /> : icon}
+      <button type="button" onClick={() => setOpen(!open)} className="text-muted-foreground hover:text-foreground flex max-w-full items-center gap-2 transition-colors duration-(--motion-fast) ease-out-quart" disabled={!children}>
+        {/* The spinner and the result icon share a slot so completion crossfades. */}
+        <span className="relative size-4 shrink-0">
+          <Loader2Icon className={cn("absolute inset-0 size-4 transition-[opacity,scale] duration-(--motion-fast) ease-out-quart motion-reduce:animate-none", running ? "scale-100 animate-spin opacity-100" : "scale-50 opacity-0")} />
+          <span className={cn("absolute inset-0 flex items-center justify-center transition-[opacity,scale] duration-(--motion-base) ease-spring", running ? "scale-50 opacity-0" : "scale-100 opacity-100")}>
+            {error ? <TriangleAlertIcon className="text-warning size-4" /> : icon}
+          </span>
+        </span>
         <span className={cn("truncate", running && "shimmer")}>{label}</span>
-        {children && <ChevronDownIcon className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-180")} />}
+        {children && <ChevronDownIcon className={cn("size-3.5 shrink-0 transition-transform duration-(--motion-base) ease-out-expo", open && "rotate-180")} />}
       </button>
-      {error && <p className="text-muted-foreground mt-1 ml-6 text-xs">{error}</p>}
-      {open && children && <div className="mt-2 ml-6">{children}</div>}
+      {error && <p className="text-muted-foreground animate-rise-in mt-1 ml-6 text-xs">{error}</p>}
+      {open && children && <div className="animate-rise-in mt-2 ml-6">{children}</div>}
     </div>
   );
 }
@@ -133,7 +139,7 @@ function GeneratedImage({ args, result, running }: { args: unknown; result: unkn
     return <ToolShell icon={<ImageIcon className="size-4" />} running={false} error={typeof image === "string" ? image : "No image"} label="Image generation failed" />;
   }
   return (
-    <figure className="group/img relative my-2 w-fit max-w-full">
+    <figure className="group/img animate-blur-in relative my-2 w-fit max-w-full">
       <a href={image.url} target="_blank" rel="noreferrer">
         <img
           src={image.url}
@@ -147,7 +153,7 @@ function GeneratedImage({ args, result, running }: { args: unknown; result: unkn
         href={image.url}
         download={`${image.id}.png`}
         aria-label="Download image"
-        className="surface-glass text-muted-foreground hover:text-foreground absolute top-2 right-2 rounded-lg border p-1.5 opacity-0 transition-opacity group-hover/img:opacity-100"
+        className="surface-glass text-muted-foreground hover:text-foreground absolute top-2 right-2 rounded-lg border p-1.5 opacity-0 transition-opacity duration-(--motion-fast) ease-out-quart group-hover/img:opacity-100"
       >
         <DownloadIcon className="size-4" />
       </a>
@@ -175,18 +181,21 @@ function SubagentCard({ args, result, running }: { args: unknown; result: unknow
     .join(" · ");
   return (
     <div className="my-2 rounded-xl border text-sm">
-      <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center gap-3 px-3 py-2.5 text-left">
-        <span className="bg-muted flex size-8 shrink-0 items-center justify-center rounded-lg">
-          {busy ? <Loader2Icon className="size-4 animate-spin" /> : failed ? <TriangleAlertIcon className="text-warning size-4" /> : <BotIcon className="size-4" />}
+      <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors duration-(--motion-fast) ease-out-quart hover:bg-muted/40">
+        <span className="bg-muted relative flex size-8 shrink-0 items-center justify-center rounded-lg">
+          <Loader2Icon className={cn("absolute size-4 transition-[opacity,scale] duration-(--motion-fast) ease-out-quart motion-reduce:animate-none", busy ? "scale-100 animate-spin opacity-100" : "scale-50 opacity-0")} />
+          <span className={cn("absolute inset-0 flex items-center justify-center transition-[opacity,scale] duration-(--motion-base) ease-spring", busy ? "scale-50 opacity-0" : "scale-100 opacity-100")}>
+            {failed ? <TriangleAlertIcon className="text-warning size-4" /> : <BotIcon className="size-4" />}
+          </span>
         </span>
         <span className="min-w-0 flex-1">
           <span className={cn("block truncate font-medium", busy && "shimmer")}>{busy ? `${name} is working` : failed ? `${name} failed` : `${name} finished`}</span>
           <span className="text-muted-foreground block truncate text-xs">{failed ? (result as string) : detail || a.task}</span>
         </span>
-        <ChevronDownIcon className={cn("text-muted-foreground size-4 shrink-0 transition-transform", open && "rotate-180")} />
+        <ChevronDownIcon className={cn("text-muted-foreground size-4 shrink-0 transition-transform duration-(--motion-base) ease-out-expo", open && "rotate-180")} />
       </button>
       {open && (
-        <div className="flex flex-col gap-3 border-t px-3 py-3">
+        <div className="animate-rise-in flex flex-col gap-3 border-t px-3 py-3">
           {a.task && (
             <div>
               <p className="text-muted-foreground mb-1 text-xs font-medium">Task</p>

@@ -11,9 +11,6 @@ interface DataState {
   loaded: boolean;
   /** Model chosen in the composer. Falls back to settings.defaultModel. */
   selectedModel: string | null;
-  /** Plan mode: the model investigates read-only and proposes a plan instead of acting. */
-  planMode: boolean;
-  setPlanMode: (on: boolean) => void;
   projects: Project[];
   /** Sidebar filter and home of new chats. Null shows every chat. */
   activeProject: string | null;
@@ -27,7 +24,6 @@ interface DataState {
 }
 
 const SELECTED_KEY = "okaychat:selected-model";
-const PLAN_KEY = "okaychat:plan-mode";
 const PROJECT_KEY = "okaychat:active-project";
 
 export const useData = create<DataState>((set, get) => ({
@@ -38,11 +34,6 @@ export const useData = create<DataState>((set, get) => ({
   mcp: [],
   loaded: false,
   selectedModel: localStorage.getItem(SELECTED_KEY),
-  planMode: localStorage.getItem(PLAN_KEY) === "true",
-  setPlanMode: (on) => {
-    localStorage.setItem(PLAN_KEY, String(on));
-    set({ planMode: on });
-  },
   projects: [],
   activeProject: localStorage.getItem(PROJECT_KEY),
   setActiveProject: (id) => {

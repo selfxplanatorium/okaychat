@@ -1,0 +1,108 @@
+/* Motion owned by the shell area. Shared tokens live in motion.css. */
+
+/*
+ * Sidebar. The column animates its width (desktop) or its position (mobile)
+ * while its contents keep a fixed width and fade on their own, so labels never
+ * reflow line by line as the rail narrows. Closing is shorter and accelerates.
+ */
+.shell-sidebar-inner {
+  transition:
+    opacity var(--panel-animation-duration, 240ms) var(--ease-drawer),
+    transform var(--panel-animation-duration, 240ms) var(--ease-drawer);
+}
+.shell-sidebar[data-open="false"] .shell-sidebar-inner {
+  opacity: 0;
+  transform: translateX(-8px);
+  transition-duration: calc(var(--panel-animation-duration, 240ms) * 0.7);
+  transition-timing-function: var(--ease-in-quart);
+}
+
+/* Mobile backdrop stays mounted so it can fade out instead of disappearing. */
+.shell-scrim {
+  transition: opacity var(--panel-animation-duration, 240ms) var(--ease-drawer);
+}
+.shell-scrim[data-open="false"] {
+  opacity: 0;
+  pointer-events: none;
+  transition-duration: calc(var(--panel-animation-duration, 240ms) * 0.7);
+  transition-timing-function: var(--ease-in-quart);
+}
+
+/* The floating chat header waits for the sidebar to mostly collapse first. */
+@keyframes shell-header-in {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+}
+.shell-chat-header {
+  animation: shell-header-in var(--motion-base) var(--ease-out-expo)
+    calc(var(--panel-animation-duration, 240ms) * 0.6) both;
+}
+
+/*
+ * Artifact panel. It pushes the chat area, so the shell width animates while a
+ * fixed-width inner column slides and fades; the chat area shrinks smoothly
+ * instead of jumping. On mobile the panel overlays, so it slides fully away.
+ */
+.shell-artifact {
+  transition: width var(--panel-animation-duration, 240ms) var(--ease-drawer);
+}
+.shell-artifact-inner {
+  opacity: 0;
+  transform: translateX(24px);
+  transition:
+    opacity calc(var(--panel-animation-duration, 240ms) * 0.7) var(--ease-in-quart),
+    transform calc(var(--panel-animation-duration, 240ms) * 0.7) var(--ease-in-quart);
+}
+.shell-artifact[data-open="true"] .shell-artifact-inner {
+  opacity: 1;
+  transform: none;
+  transition-duration: var(--panel-animation-duration, 240ms);
+  transition-timing-function: var(--ease-drawer);
+}
+@media (width < 48rem) {
+  .shell-artifact-inner {
+    transform: translateX(100%);
+  }
+}
+
+/* Thread titles crossfade in place when they settle (generated or renamed). */
+@keyframes shell-title-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+@keyframes shell-title-out {
+  to {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+.shell-title-in {
+  animation: shell-title-in var(--motion-base) var(--ease-out-quart) both;
+}
+.shell-title-out {
+  animation: shell-title-out var(--motion-fast) var(--ease-in-quart) both;
+}
+
+/*
+ * Artifact cards lift on hover and sink when pressed. The shared `.press` rule
+ * replaces `transition` with transform-only, so the card declares its own state
+ * transitions to keep colours and shadows animated too.
+ */
+.shell-artifact-card {
+  transition:
+    background-color var(--motion-fast) var(--ease-out-quart),
+    border-color var(--motion-fast) var(--ease-out-quart),
+    box-shadow var(--motion-fast) var(--ease-out-quart),
+    transform var(--motion-fast) var(--ease-out-quart);
+}
+.shell-artifact-card:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+.shell-artifact-card:active:not(:disabled) {
+  transform: scale(0.985);
+  transition-duration: var(--motion-instant);
+}

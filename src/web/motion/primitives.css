@@ -1,0 +1,45 @@
+/* Motion owned by the primitives area. Shared tokens live in motion.css. */
+
+/*
+ * Skeleton: one calm highlight sweeping left to right. A pulse makes a whole
+ * page breathe at once; a sweep reads as "content is arriving".
+ * The highlight is a tint of the foreground, so it follows light and dark
+ * themes and the active appearance without extra tokens.
+ */
+@keyframes skeleton-shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.skeleton-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in oklab, var(--foreground) 7%, transparent) 50%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: skeleton-shimmer 1.4s var(--ease-in-out-quart) infinite;
+}
+
+/*
+ * Switch thumb: the travel between sides is a small spring, but the squeeze on
+ * press has to feel immediate, so it gets its own shorter timing.
+ */
+.switch-thumb {
+  transition:
+    translate var(--motion-base) var(--ease-spring),
+    scale var(--motion-instant) var(--ease-out-quart);
+}

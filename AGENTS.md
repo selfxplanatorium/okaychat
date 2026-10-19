@@ -97,7 +97,7 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 
 - assistant-ui puts unknown message metadata keys under `metadata.custom`. Server-side code that reads raw AI SDK messages sees them at the top level. `metadataOf()` and `currentContextTokens()` handle both.
 - `useAuiState` selectors must return primitives or stable references, or React re-renders forever.
-- The chat request body comes from `AssistantChatTransport`: thread id is `id`, model and effort are `config.modelName` / `config.reasoningEffort` (registered in `ModelContextBridge`), `planMode` comes from the transport `body` function.
+- The chat request body comes from `AssistantChatTransport`: thread id is `id`, model and effort are `config.modelName` / `config.reasoningEffort` (registered in `ModelContextBridge`).
 - OpenCode Go ids missing from models.dev inherit the wire format of a sibling in the same family (`qwen3.6-plus` uses Anthropic like `qwen3.8-max`).
 - DuckDuckGo HTML endpoints return 202 (bot wall) from many servers and Bing serves junk to scrapers. Search goes SearXNG, then Brave HTML, then DuckDuckGo lite.
 - Context fill uses the last step's input + output tokens, not the turn total.

@@ -18,6 +18,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "./collapsible-root";
+import { collapsePanel } from "./surfaces";
 
 export const ANIMATION_DURATION = 200;
 
@@ -184,7 +185,7 @@ function ReasoningTrigger({
     <CollapsibleTrigger
       data-slot="reasoning-trigger"
       className={cn(
-        "aui-reasoning-trigger group/trigger text-muted-foreground hover:text-foreground flex max-w-[75%] origin-left items-center gap-2 py-1.5 text-sm transition-[color,scale] active:scale-[0.98]",
+        "aui-reasoning-trigger group/trigger text-muted-foreground hover:text-foreground flex max-w-[75%] origin-left items-center gap-2 py-1.5 text-sm transition-[color,scale] duration-(--motion-fast) ease-out-quart active:scale-[0.98]",
         className,
       )}
       {...props}
@@ -206,7 +207,7 @@ function ReasoningTrigger({
         data-slot="reasoning-trigger-chevron"
         className={cn(
           "aui-reasoning-trigger-chevron mt-0.5 size-4 shrink-0",
-          "transition-transform duration-(--animation-duration) ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
+          "transition-transform duration-(--animation-duration) ease-out-expo motion-reduce:transition-none",
           "-rotate-90",
           "group-data-open/trigger:rotate-0",
           "group-data-panel-open/trigger:rotate-0",
@@ -227,13 +228,9 @@ function ReasoningContent({
     <CollapsibleContent
       data-slot="reasoning-content"
       className={cn(
-        "aui-reasoning-content text-muted-foreground relative overflow-hidden text-sm outline-none",
-        "group/collapsible-content ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:animate-none",
-        "data-closed:animate-collapsible-up",
-        "data-open:animate-collapsible-down",
-        "data-closed:fill-mode-forwards",
+        "aui-reasoning-content text-muted-foreground group/collapsible-content relative text-sm outline-none",
+        collapsePanel,
         "data-closed:pointer-events-none",
-        "[--tw-duration:var(--animation-duration)]",
         className,
       )}
       {...props}

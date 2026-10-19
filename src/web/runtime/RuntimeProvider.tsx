@@ -250,7 +250,6 @@ function useThreadTransport() {
       api: "/api/chat",
       credentials: "same-origin",
       fetch: cancellableFetch(() => storage.clear()),
-      body: () => ({ planMode: useData.getState().planMode }),
       resumable: { storage, resumeApi: (streamId) => `/api/chat/resume/${streamId}` },
     });
   }, [aui]);

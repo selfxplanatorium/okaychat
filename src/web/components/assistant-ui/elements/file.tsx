@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 import { AudioPlayer, VideoPlayer } from "./media-player";
 
 const fileVariants = cva(
-  "aui-file-root inline-flex items-center gap-3 rounded-lg transition-colors",
+  "aui-file-root animate-fade-in inline-flex items-center gap-3 rounded-lg transition-colors duration-(--motion-fast) ease-out-quart",
   {
     variants: {
       variant: {

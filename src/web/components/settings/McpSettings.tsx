@@ -1,5 +1,5 @@
 import { ChevronRightIcon, KeyRoundIcon, Loader2Icon, PencilIcon, PlusIcon, RefreshCwIcon, TrashIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import type { McpApproval, McpServerConfig, McpServerInfo, McpTransport } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -78,7 +78,7 @@ function ServerForm({ initial, onDone }: { initial?: ServerView; onDone: () => v
 
   return (
     <form
-      className="flex flex-col gap-3 px-4 py-4"
+      className="animate-rise-in flex flex-col gap-3 px-4 py-4"
       onSubmit={(e) => {
         e.preventDefault();
         void submit();
@@ -134,7 +134,7 @@ function ServerForm({ initial, onDone }: { initial?: ServerView; onDone: () => v
           ]}
         />
       </label>
-      {error && <p className="text-error text-xs">{error}</p>}
+      {error && <p className="text-error settings-error text-xs">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onDone}>
           Cancel
@@ -148,7 +148,7 @@ function ServerForm({ initial, onDone }: { initial?: ServerView; onDone: () => v
   );
 }
 
-function ServerRow({ server }: { server: ServerView }) {
+function ServerRow({ server, index }: { server: ServerView; index: number }) {
   const refresh = useData((s) => s.refreshMcp);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -168,11 +168,11 @@ function ServerRow({ server }: { server: ServerView }) {
   if (editing) return <ServerForm initial={server} onDone={() => setEditing(false)} />;
 
   return (
-    <div className="px-4 py-3">
+    <div className="stagger animate-rise-in px-4 py-3" style={{ "--i": index } as CSSProperties}>
       <div className="flex items-center gap-3">
         <button type="button" onClick={() => setOpen(!open)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-          <ChevronRightIcon className={cn("text-muted-foreground size-4 transition-transform", open && "rotate-90")} />
-          <span className={cn("size-2 shrink-0 rounded-full", status.dot)} />
+          <ChevronRightIcon className={cn("text-muted-foreground size-4 transition-transform duration-(--motion-fast) ease-out-quart", open && "rotate-90")} />
+          <span className={cn("size-2 shrink-0 rounded-full transition-colors duration-(--motion-base)", status.dot)} />
           <span className="truncate text-sm font-medium">{server.name}</span>
           <span className="text-muted-foreground truncate text-xs">
             {server.transport} · {status.label}
@@ -206,29 +206,31 @@ function ServerRow({ server }: { server: ServerView }) {
           <TrashIcon />
         </Button>
       </div>
-      {server.error && server.status === "error" && <p className="text-error mt-2 ml-10 text-xs">{server.error}</p>}
+      {server.error && server.status === "error" && <p className="text-error animate-fade-in mt-2 ml-10 text-xs">{server.error}</p>}
       {open && (
-        <div className="mt-3 ml-10 flex flex-col gap-1">
-          {server.tools.length === 0 && <p className="text-muted-foreground text-xs">No tools yet. Reconnect to list them.</p>}
-          {server.tools.map((tool) => (
-            <label key={tool.name} className="hover:bg-muted/50 flex items-start gap-3 rounded-lg px-2 py-1.5">
-              <Switch
-                className="mt-0.5"
-                checked={tool.enabled}
-                onCheckedChange={(enabled) => {
-                  const disabled = server.tools.filter((t) => (t.name === tool.name ? !enabled : !t.enabled)).map((t) => t.name);
-                  void act(() => api(`/mcp/${server.id}/tools`, { method: "PATCH", json: { disabledTools: disabled } }));
-                }}
-              />
-              <span className="min-w-0">
-                <span className="flex items-center gap-1.5 font-mono text-xs">
-                  {tool.name}
-                  {tool.needsApproval && <span className="bg-warning/12 text-warning rounded px-1 py-px font-sans text-[10px] font-medium">asks first</span>}
+        <div className="settings-collapse mt-3 ml-10">
+          <div className="flex flex-col gap-1">
+            {server.tools.length === 0 && <p className="text-muted-foreground text-xs">No tools yet. Reconnect to list them.</p>}
+            {server.tools.map((tool) => (
+              <label key={tool.name} className="hover:bg-muted/50 flex items-start gap-3 rounded-lg px-2 py-1.5 transition-colors duration-(--motion-fast)">
+                <Switch
+                  className="mt-0.5"
+                  checked={tool.enabled}
+                  onCheckedChange={(enabled) => {
+                    const disabled = server.tools.filter((t) => (t.name === tool.name ? !enabled : !t.enabled)).map((t) => t.name);
+                    void act(() => api(`/mcp/${server.id}/tools`, { method: "PATCH", json: { disabledTools: disabled } }));
+                  }}
+                />
+                <span className="min-w-0">
+                  <span className="flex items-center gap-1.5 font-mono text-xs">
+                    {tool.name}
+                    {tool.needsApproval && <span className="bg-warning/12 text-warning rounded px-1 py-px font-sans text-[10px] font-medium">asks first</span>}
+                  </span>
+                  {tool.description && <span className="text-muted-foreground line-clamp-2 block text-xs">{tool.description}</span>}
                 </span>
-                {tool.description && <span className="text-muted-foreground line-clamp-2 block text-xs">{tool.description}</span>}
-              </span>
-            </label>
-          ))}
+              </label>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -268,14 +270,14 @@ export function McpSettings() {
         }
       >
         {adding && <ServerForm onDone={() => setAdding(false)} />}
-        {servers.map((s) => (
-          <ServerRow key={s.id} server={s} />
+        {servers.map((s, index) => (
+          <ServerRow key={s.id} server={s} index={index} />
         ))}
-        {!adding && servers.length === 0 && <p className="text-muted-foreground px-4 py-6 text-center text-sm">No servers yet.</p>}
+        {!adding && servers.length === 0 && <p className="text-muted-foreground animate-fade-in px-4 py-6 text-center text-sm">No servers yet.</p>}
       </SettingsSection>
       <SettingsSection title="Quick add" description="Public servers that need no key.">
-        {PRESETS.filter((p) => !installed.has(p.name.toLowerCase())).map((p) => (
-          <div key={p.name} className="flex items-center justify-between gap-3 px-4 py-3">
+        {PRESETS.filter((p) => !installed.has(p.name.toLowerCase())).map((p, index) => (
+          <div key={p.name} className="stagger animate-rise-in flex items-center justify-between gap-3 px-4 py-3" style={{ "--i": index } as CSSProperties}>
             <div>
               <div className="text-sm font-medium">{p.name}</div>
               <div className="text-muted-foreground text-xs">{p.note}</div>

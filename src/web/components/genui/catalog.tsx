@@ -129,7 +129,8 @@ const Field = ({ label, children }: { label?: string; children: ReactNode }) => 
   </label>
 );
 
-const controlClass = "bg-background focus-visible:ring-ring/50 h-8 w-full rounded-lg border px-2.5 text-sm outline-none focus-visible:ring-2";
+const controlClass =
+  "bg-background focus-visible:ring-ring/50 h-8 w-full rounded-lg border px-2.5 text-sm outline-none transition-[border-color,box-shadow] duration-(--motion-fast) ease-out-quart focus-visible:ring-2";
 
 const safeUrl = (url: unknown) => (typeof url === "string" && /^https?:\/\//i.test(url) ? url : undefined);
 
@@ -153,7 +154,7 @@ export const components: SpecComponents = {
     </div>
   ),
   Card: ({ props, children, slots }: P<{ title?: string; description?: string }>) => (
-    <section className="bg-card text-card-foreground flex min-w-0 flex-col gap-3 rounded-xl border p-4">
+    <section className="bg-card text-card-foreground animate-rise-in flex min-w-0 flex-col gap-3 rounded-xl border p-4">
       {(props.title || props.description) && (
         <header>
           {props.title && <h3 className="font-semibold">{props.title}</h3>}
@@ -177,7 +178,7 @@ export const components: SpecComponents = {
     <span className={cn("inline-flex w-fit items-center rounded-md border border-transparent px-1.5 py-0.5 text-xs font-medium", toneSoft[props.tone ?? "default"])}>{props.text}</span>
   ),
   Metric: ({ props }: P<{ label: string; value: string | number; delta?: string; trend?: string; hint?: string }>) => (
-    <div className="flex min-w-0 flex-col gap-0.5 rounded-xl border p-3">
+    <div className="animate-rise-in flex min-w-0 flex-col gap-0.5 rounded-xl border p-3">
       <span className="text-muted-foreground text-xs font-medium">{props.label}</span>
       <span className="text-2xl font-semibold tracking-tight tabular-nums">{props.value}</span>
       {(props.delta || props.hint) && (
@@ -208,7 +209,7 @@ export const components: SpecComponents = {
         </thead>
         <tbody>
           {props.rows.map((row, i) => (
-            <tr key={i} className="border-t">
+            <tr key={i} className="animate-fade-in stagger border-t" style={{ "--i": i } as React.CSSProperties}>
               {props.columns.map((c) => (
                 <td key={c.key} className={cn("px-3 py-2 tabular-nums", c.align === "right" ? "text-right" : c.align === "center" ? "text-center" : "text-left")}>
                   {String(row[c.key] ?? "")}
@@ -225,7 +226,11 @@ export const components: SpecComponents = {
     return (
       <Tag className={cn("flex flex-col gap-1 ps-5", props.ordered ? "list-decimal" : "list-disc")}>
         {props.items.map((item, i) => (
-          <li key={i}>
+          <li
+            key={i}
+            className="animate-rise-in stagger"
+            style={{ "--i": i } as React.CSSProperties}
+          >
             <Inline text={item} />
           </li>
         ))}
@@ -236,8 +241,18 @@ export const components: SpecComponents = {
     <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
       {props.items.map((item, i) => (
         <div key={i} className="contents">
-          <dt className="text-muted-foreground">{item.label}</dt>
-          <dd className="text-right font-medium tabular-nums">{item.value}</dd>
+          <dt
+            className="text-muted-foreground animate-fade-in stagger"
+            style={{ "--i": i } as React.CSSProperties}
+          >
+            {item.label}
+          </dt>
+          <dd
+            className="animate-fade-in stagger text-right font-medium tabular-nums"
+            style={{ "--i": i } as React.CSSProperties}
+          >
+            {item.value}
+          </dd>
         </div>
       ))}
     </dl>
@@ -247,10 +262,14 @@ export const components: SpecComponents = {
     return (
       <div className="flex flex-col gap-1.5 text-sm">
         {props.items.map((item, i) => (
-          <div key={i} className="grid grid-cols-[minmax(0,10rem)_1fr_auto] items-center gap-3">
+          <div
+            key={i}
+            className="animate-rise-in stagger grid grid-cols-[minmax(0,10rem)_1fr_auto] items-center gap-3"
+            style={{ "--i": i } as React.CSSProperties}
+          >
             <span className="truncate">{item.label}</span>
             <span className="bg-muted h-2 overflow-hidden rounded-full">
-              <span className="bg-primary block h-full rounded-full" style={{ width: `${(Math.abs(Number(item.value) || 0) / max) * 100}%` }} />
+              <span className="chat-bar-grow bg-primary block h-full rounded-full" style={{ width: `${(Math.abs(Number(item.value) || 0) / max) * 100}%` }} />
             </span>
             <span className="text-muted-foreground tabular-nums">
               {item.value}
@@ -270,7 +289,7 @@ export const components: SpecComponents = {
         </span>
       )}
       <span className="bg-muted h-2 overflow-hidden rounded-full">
-        <span className="bg-primary block h-full rounded-full" style={{ width: `${Math.min(100, Math.max(0, props.value))}%` }} />
+        <span className="chat-bar-grow bg-primary block h-full rounded-full" style={{ width: `${Math.min(100, Math.max(0, props.value))}%` }} />
       </span>
     </div>
   ),
@@ -291,7 +310,7 @@ export const components: SpecComponents = {
       </figure>
     ) : null,
   Link: ({ props }: P<{ label: string; href: string }>) => (
-    <a href={safeUrl(props.href)} target="_blank" rel="noreferrer" className="text-primary w-fit text-sm underline-offset-2 hover:underline">
+    <a href={safeUrl(props.href)} target="_blank" rel="noreferrer" className="text-primary w-fit text-sm underline-offset-2 transition-opacity duration-(--motion-fast) ease-out-quart hover:underline hover:opacity-80">
       {props.label}
     </a>
   ),
@@ -300,7 +319,7 @@ export const components: SpecComponents = {
       type="button"
       onClick={() => emit("press")}
       className={cn(
-        "h-8 w-fit rounded-lg px-3 text-sm font-medium transition-colors",
+        "h-8 w-fit rounded-lg px-3 text-sm font-medium transition-[background-color,color,scale] duration-(--motion-fast) ease-out-quart active:scale-[0.97]",
         props.variant === "secondary" ? "bg-muted hover:bg-muted/70 border" : props.variant === "ghost" ? "hover:bg-muted" : "bg-primary text-primary-foreground hover:bg-primary/90",
       )}
     >
@@ -345,7 +364,7 @@ export const components: SpecComponents = {
     <label className="flex w-fit items-center gap-2 text-sm">
       <input
         type="checkbox"
-        className="accent-primary size-4"
+        className="accent-primary size-4 transition-colors duration-(--motion-fast) ease-out-quart"
         checked={!!props.checked}
         onChange={(e) => {
           setProp("checked", e.target.checked);
@@ -359,7 +378,7 @@ export const components: SpecComponents = {
     <Field label={props.label && `${props.label}: ${props.value ?? props.min}`}>
       <input
         type="range"
-        className="accent-primary w-full"
+        className="accent-primary w-full transition-colors duration-(--motion-fast) ease-out-quart"
         min={props.min}
         max={props.max}
         step={props.step ?? 1}

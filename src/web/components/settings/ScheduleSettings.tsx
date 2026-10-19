@@ -1,6 +1,6 @@
 import { useAui } from "@assistant-ui/react";
 import { Loader2Icon, MessageSquareIcon, PencilIcon, PlayIcon, PlusIcon, TrashIcon } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { useLocation } from "wouter";
 import type { Schedule, ScheduleSpec } from "@shared/types";
 import { Button } from "@/components/ui/button";
@@ -68,7 +68,7 @@ function ScheduleForm({ initial, onDone }: { initial?: Schedule; onDone: () => v
 
   return (
     <form
-      className="flex flex-col gap-3 px-4 py-4"
+      className="animate-rise-in flex flex-col gap-3 px-4 py-4"
       onSubmit={(e) => {
         e.preventDefault();
         void submit();
@@ -98,7 +98,10 @@ function ScheduleForm({ initial, onDone }: { initial?: Schedule; onDone: () => v
                   type="button"
                   aria-pressed={weekdays.includes(i)}
                   onClick={() => setWeekdays(weekdays.includes(i) ? weekdays.filter((w) => w !== i) : [...weekdays, i].sort())}
-                  className={cn("h-8 rounded-lg border px-2 text-xs", weekdays.includes(i) ? "bg-primary text-primary-foreground border-transparent" : "text-muted-foreground hover:bg-muted")}
+                  className={cn(
+                    "h-8 rounded-lg border px-2 text-xs transition-colors duration-(--motion-fast)",
+                    weekdays.includes(i) ? "bg-primary text-primary-foreground border-transparent" : "text-muted-foreground hover:bg-muted",
+                  )}
                 >
                   {d}
                 </button>
@@ -110,7 +113,7 @@ function ScheduleForm({ initial, onDone }: { initial?: Schedule; onDone: () => v
         )}
       </div>
       <p className="text-muted-foreground text-xs">Runs on the server, so your browser can be closed. Results land in this schedule's own chat. Tools that need approval wait until you open it.</p>
-      {error && <p className="text-error text-xs">{error}</p>}
+      {error && <p className="text-error settings-error text-xs">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onDone}>
           Cancel
@@ -172,8 +175,8 @@ export function ScheduleSettings() {
             }}
           />
         )}
-        {schedules?.length === 0 && editing !== "new" && <p className="text-muted-foreground px-4 py-6 text-sm">No schedules yet.</p>}
-        {schedules?.map((s) =>
+        {schedules?.length === 0 && editing !== "new" && <p className="text-muted-foreground animate-fade-in px-4 py-6 text-sm">No schedules yet.</p>}
+        {schedules?.map((s, index) =>
           editing === s.id ? (
             <ScheduleForm
               key={s.id}
@@ -184,7 +187,7 @@ export function ScheduleSettings() {
               }}
             />
           ) : (
-            <div key={s.id} className="flex items-start gap-3 px-4 py-3">
+            <div key={s.id} className="stagger animate-rise-in flex items-start gap-3 px-4 py-3" style={{ "--i": index } as CSSProperties}>
               <Switch className="mt-0.5" checked={s.enabled} onCheckedChange={(enabled) => void save(s, { enabled })} aria-label={`Enable ${s.title}`} />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium">{s.title}</p>
@@ -193,7 +196,7 @@ export function ScheduleSettings() {
                 </p>
                 <p className="text-muted-foreground text-xs">
                   {s.lastStatus === "running" ? (
-                    <span className="inline-flex items-center gap-1">
+                    <span className="animate-fade-in inline-flex items-center gap-1">
                       <Loader2Icon className="size-3 animate-spin" /> Running
                     </span>
                   ) : (

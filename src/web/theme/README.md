@@ -56,7 +56,7 @@ Appearance settings. Keep the T3Code names. The UI syncs them per user through `
 | --- | --- | --- | --- |
 | `glassOpacity` | 40 to 100, integer, step 5 | 80 | % of background for `surface-glass`, `dialog-glass`, `dropdown-glass`. 100 also removes blur. |
 | `appearanceContrast` | 50 to 200, integer, step 5 | 100 | Base up to 100%, boost above 100%. |
-| `panelAnimationDurationMs` | 0 to 400, step 25 | 0 | 0 disables animation. Set `--panel-animation-duration` on the layout element. Respect `prefers-reduced-motion`. |
+| `panelAnimationDurationMs` | 0 to 400, step 25 | 240 | 0 disables animation. Set `--panel-animation-duration` on the layout element. Respect `prefers-reduced-motion`. |
 | `chatWidth` | `comfortable`, `wide`, `full` | `comfortable` | `46rem`, `72rem`, `100%` of `--chat-content-max-width`. |
 | `fontSizeInterface` | 12 to 20 px | 16 | Sets `<html>` font size. |
 | `fontSizePrompt` | 12 to 20 px | 14 | |

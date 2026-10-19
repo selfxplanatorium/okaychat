@@ -141,7 +141,7 @@ export function AudioPlayer({
       data-slot="audio-player"
       className={cn(
         paper,
-        "flex w-full max-w-md items-center gap-3 rounded-2xl p-3",
+        "animate-fade-in flex w-full max-w-md items-center gap-3 rounded-2xl p-3",
         className,
       )}
       {...props}
@@ -248,7 +248,7 @@ export function VideoPlayer({
   return (
     <div
       data-slot="video-player"
-      className={cn("flex w-full max-w-xl flex-col gap-2", className)}
+      className={cn("animate-fade-in flex w-full max-w-xl flex-col gap-2", className)}
       {...props}
     >
       <div className={cn(field, "overflow-hidden rounded-xl", ratioClassName)}>

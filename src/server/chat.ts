@@ -42,22 +42,17 @@ const chatBody = z.object({
   // Browser-executed tools (generative UI) and the instructions that go with them.
   system: z.string().optional(),
   tools: z.record(z.string(), z.any()).optional(),
-  planMode: z.boolean().optional(),
 });
 
-const PLAN_INSTRUCTIONS = `# Plan mode
-The user wants a plan before anything changes. Investigate with the read-only tools you have, ask about anything that blocks a good plan, then reply with a numbered plan: the steps, what each changes, and open questions. Do not carry out the plan. The user switches to act mode to run it.`;
-
-function systemPrompt(userPrompt: string, project: string, mcpInstructions: string[], artifacts: boolean, clientSystem?: string, planMode?: boolean): string {
+function systemPrompt(userPrompt: string, project: string, mcpInstructions: string[], artifacts: boolean, clientSystem?: string): string {
   // Order matters for caching: static text first, nothing that changes per request.
   const parts = [BASE_SYSTEM, `Today's date: ${new Date().toISOString().slice(0, 10)}.`];
   if (artifacts) parts.push(ARTIFACT_INSTRUCTIONS);
   if (userPrompt.trim()) parts.push(`# User instructions\n${userPrompt.trim()}`);
   if (project) parts.push(project);
   if (mcpInstructions.length) parts.push(`# Tool server instructions\n${mcpInstructions.join("\n\n")}`);
-  // Last: these change per turn (UI interactions, mode toggle) and should not invalidate the rest.
+  // Last: these change per turn (UI interactions) and should not invalidate the rest.
   if (clientSystem?.trim()) parts.push(clientSystem.trim());
-  if (planMode) parts.push(PLAN_INSTRUCTIONS);
   return parts.join("\n\n");
 }
 
@@ -68,7 +63,6 @@ export interface TurnOptions {
   effort?: ReasoningEffort;
   /** The branch being continued, oldest first, ending with the new user message. */
   uiMessages: UIMessage[];
-  planMode?: boolean;
   /** Browser-executed tools and their instructions. Absent for server-side runs. */
   clientTools?: FrontendTools;
   clientSystem?: string;
@@ -77,7 +71,7 @@ export interface TurnOptions {
 
 /** One assistant turn as a UI message stream. Used by /api/chat and by scheduled runs. */
 export async function turnStream(opts: TurnOptions) {
-  const { userId, threadId, modelRef, uiMessages, signal, planMode = false } = opts;
+  const { userId, threadId, modelRef, uiMessages, signal } = opts;
   const user = { id: userId };
   const settings = getSettings(userId);
   const effort = (opts.effort ?? settings.reasoningEffort[modelRef]) as ReasoningEffort | undefined;
@@ -102,7 +96,7 @@ export async function turnStream(opts: TurnOptions) {
         writer.write({ type: "data-compaction", data: { status: "done", boundaryMessageId: compaction.boundaryMessageId, tokensBefore: compaction.tokensBefore }, transient: true });
       }
 
-      const mcp = model.toolCall ? await toolsForUser(user.id) : { tools: {}, readOnly: new Set<string>(), instructions: [], servers: [] };
+      const mcp = model.toolCall ? await toolsForUser(user.id) : { tools: {}, instructions: [], servers: [] };
       // Built-in tools first, then MCP tools in sorted order, so the tool block is identical across turns.
       const readOnlyTools = {
         ...(model.toolCall && settings.webTools ? webTools() : {}),
@@ -110,30 +104,23 @@ export async function turnStream(opts: TurnOptions) {
         ...Object.fromEntries(Object.entries(mcp.tools).filter(([, t]) => !t.needsApproval)),
       };
       const subagentModels = model.toolCall && settings.subagents ? await allowedSubagentModels(user.id, settings, model.ref) : [];
-      const useArtifacts = model.toolCall && settings.artifacts && !planMode;
-      const useGenerativeUI = model.toolCall && settings.generativeUI && !!opts.clientTools && !planMode;
+      const useArtifacts = model.toolCall && settings.artifacts;
+      const useGenerativeUI = model.toolCall && settings.generativeUI && !!opts.clientTools;
       const subagents = subagentModels.length
         ? subagentTools({ userId: user.id, threadId, allowed: subagentModels, subTools: readOnlyTools, signal: signal })
         : {};
-      // Plan mode keeps only tools that cannot change anything: web, sub-agents, and MCP tools marked read-only.
-      const tools = planMode
-        ? {
-            ...(model.toolCall && settings.webTools ? webTools() : {}),
-            ...subagents,
-            ...Object.fromEntries(Object.entries(mcp.tools).filter(([name]) => mcp.readOnly.has(name))),
-          }
-        : {
-            ...(model.toolCall && settings.webTools ? webTools() : {}),
-            ...subagents,
-            ...(useArtifacts ? artifactTools(threadId) : {}),
-            ...(model.toolCall && codexConnected(user.id) ? imageTools(user.id, threadId, signal) : {}),
-            ...(useGenerativeUI ? frontendTools(opts.clientTools!) : {}),
-            ...mcp.tools,
-          };
+      const tools = {
+        ...(model.toolCall && settings.webTools ? webTools() : {}),
+        ...subagents,
+        ...(useArtifacts ? artifactTools(threadId) : {}),
+        ...(model.toolCall && codexConnected(user.id) ? imageTools(user.id, threadId, signal) : {}),
+        ...(useGenerativeUI ? frontendTools(opts.clientTools!) : {}),
+        ...mcp.tools,
+      };
       const { messages: live, summary } = applyCompaction(uiMessages, compaction);
       const handle = createModel(model, conn, { affinity: threadId, effort });
       const converted = await convertToModelMessages(await adaptPdfParts(live, model), { tools, ignoreIncompleteToolCalls: true });
-      const { system, messages } = handle.markCache(systemPrompt(settings.systemPrompt, projectContext(userId, thread.projectId), mcp.instructions, useArtifacts, useGenerativeUI ? opts.clientSystem : undefined, planMode), [
+      const { system, messages } = handle.markCache(systemPrompt(settings.systemPrompt, projectContext(userId, thread.projectId), mcp.instructions, useArtifacts, useGenerativeUI ? opts.clientSystem : undefined), [
         ...(summary ? summaryMessages(summary) : []),
         ...converted,
       ]);
@@ -170,7 +157,7 @@ export async function turnStream(opts: TurnOptions) {
           sendSources: true,
           onError: describeProviderError,
           messageMetadata: ({ part }): AssistantMetadata | undefined => {
-            if (part.type === "start") return { modelRef, contextWindow: model.context, ...(planMode ? { mode: "plan" as const } : {}) };
+            if (part.type === "start") return { modelRef, contextWindow: model.context };
             if (part.type === "finish") {
               return {
                 modelRef,
@@ -180,7 +167,6 @@ export async function turnStream(opts: TurnOptions) {
                 contextWindow: model.context,
                 durationMs: Date.now() - startedAt,
                 compacted: compaction !== thread.compaction,
-                ...(planMode ? { mode: "plan" as const } : {}),
               };
             }
             return undefined;
@@ -216,7 +202,6 @@ export const chatRoutes = new Hono<AppEnv>()
         modelRef: parsed.data.config.modelName,
         effort: parsed.data.config.reasoningEffort as ReasoningEffort | undefined,
         uiMessages: parsed.data.messages as UIMessage[],
-        planMode: parsed.data.planMode === true,
         clientTools: parsed.data.tools as FrontendTools | undefined,
         clientSystem: parsed.data.system,
         signal: controller.signal,

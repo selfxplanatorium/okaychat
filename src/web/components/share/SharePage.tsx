@@ -1,5 +1,5 @@
 import { AppWindowIcon, CodeIcon, FileTextIcon, ImageIcon, WrenchIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import type { ArtifactVersion, SharedPart, SharedThread } from "@shared/types";
 import { FRAME_SANDBOX, frameDocument } from "@/components/artifacts/frame";
 import { Brand } from "@/components/layout/Brand";
@@ -46,30 +46,40 @@ export function SharePage({ token }: { token: string }) {
 
   return (
     <div className="h-full overflow-y-auto">
-      <header className="bg-background/80 sticky top-0 z-10 border-b backdrop-blur">
+      <header className="bg-background/80 animate-rise-in sticky top-0 z-10 border-b backdrop-blur">
         <div className="mx-auto flex h-12 max-w-3xl items-center justify-between px-4">
-          <a href="/">
+          <a href="/" className="transition-opacity duration-(--motion-fast) ease-out-quart hover:opacity-80">
             <Brand />
           </a>
           <span className="text-muted-foreground text-xs">Shared chat · read only</span>
         </div>
       </header>
       <main className="mx-auto max-w-3xl px-4 py-6">
-        {error && <p className="text-muted-foreground py-20 text-center">{error}</p>}
+        {error && <p className="text-muted-foreground animate-fade-in py-20 text-center">{error}</p>}
         {thread && (
           <>
-            <h1 className="mb-1 text-2xl font-semibold tracking-tight">{thread.title ?? "Shared chat"}</h1>
-            <p className="text-muted-foreground mb-6 text-sm">{new Date(thread.createdAt).toLocaleDateString(undefined, { dateStyle: "long" })}</p>
+            <h1 className="animate-rise-in mb-1 text-2xl font-semibold tracking-tight">{thread.title ?? "Shared chat"}</h1>
+            <p className="text-muted-foreground animate-fade-in mb-6 text-sm">
+              {new Date(thread.createdAt).toLocaleDateString(undefined, { dateStyle: "long" })}
+            </p>
             <div className="flex flex-col gap-6">
-              {thread.messages.map((m) =>
+              {thread.messages.map((m, index) =>
                 m.role === "user" ? (
-                  <div key={m.id} className="bg-muted ms-auto max-w-[85%] rounded-2xl px-4 py-2.5 whitespace-pre-wrap">
+                  <div
+                    key={m.id}
+                    style={{ "--i": Math.min(index, 7) } as CSSProperties}
+                    className="stagger animate-rise-in bg-muted ms-auto max-w-[85%] rounded-2xl px-4 py-2.5 whitespace-pre-wrap"
+                  >
                     {m.parts.map((p, i) =>
                       p.type === "text" ? <span key={i}>{p.text}</span> : p.type === "image" ? <img key={i} src={p.url} alt="" className="my-1 max-h-64 rounded-lg" /> : null,
                     )}
                   </div>
                 ) : (
-                  <div key={m.id} className="leading-relaxed">
+                  <div
+                    key={m.id}
+                    style={{ "--i": Math.min(index, 7) } as CSSProperties}
+                    className="stagger animate-rise-in leading-relaxed"
+                  >
                     {m.parts.map((p, i) =>
                       p.type === "text" ? (
                         <SimpleMarkdown key={i} className="text-base">

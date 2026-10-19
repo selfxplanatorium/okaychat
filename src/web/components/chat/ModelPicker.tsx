@@ -4,6 +4,7 @@ import { useLocation } from "wouter";
 import type { ModelInfo, ReasoningEffort } from "@shared/types";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuTrigger } from "@/components/ui/menu";
+import { TextSwap } from "@/components/assistant-ui/elements/surfaces";
 import { formatTokens } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useActiveModel, useData } from "@/state/data";
@@ -70,11 +71,11 @@ export function ModelPicker() {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
-        className="hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 max-w-56 min-w-0 items-center gap-1 rounded-lg px-2 text-xs font-medium"
+        className="group hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 max-w-56 min-w-0 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart"
         aria-label="Choose model"
       >
-        <span className="truncate">{active?.name ?? "Choose model"}</span>
-        <ChevronDownIcon className="size-3 shrink-0" />
+        <TextSwap value={active?.name ?? "Choose model"} className="truncate" />
+        <ChevronDownIcon className="size-3 shrink-0 transition-transform duration-(--motion-base) ease-out-expo group-aria-expanded:rotate-180" />
       </PopoverTrigger>
       <PopoverContent side="top" className="flex max-h-[min(32rem,70vh)] w-[min(26rem,92vw)] flex-col p-0">
         <div className="flex items-center gap-2 border-b px-3 py-2">
@@ -90,7 +91,7 @@ export function ModelPicker() {
         <div className="flex-1 overflow-y-auto p-1">
           {groups.map((group) => (
             <div key={group.id} className="mb-1">
-              <div className="text-muted-foreground sticky top-0 z-10 flex items-center gap-2 bg-inherit px-2 pt-2 pb-1 text-xs font-medium">
+              <div className="text-muted-foreground flex items-center gap-2 px-2 pt-2 pb-1 text-xs font-medium">
                 {group.label}
                 {group.id === OPENCODE_GO && <span className="bg-primary/10 text-primary rounded px-1.5 text-[10px]">Primary</span>}
               </div>
@@ -110,9 +111,9 @@ export function ModelPicker() {
                       setOpen(false);
                     }
                   }}
-                  className="group hover:bg-accent focus-visible:bg-accent flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 outline-none"
+                  className="group hover:bg-accent focus-visible:bg-accent flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 outline-none transition-colors duration-(--motion-fast) ease-out-quart"
                 >
-                  <CheckIcon className={cn("size-3.5 shrink-0", m.ref === active?.ref ? "opacity-100" : "opacity-0")} />
+                  <CheckIcon className={cn("size-3.5 shrink-0 transition-opacity duration-(--motion-fast) ease-out-quart", m.ref === active?.ref ? "opacity-100" : "opacity-0")} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 text-sm">
                       <span className="truncate">{m.name}</span>
@@ -131,7 +132,7 @@ export function ModelPicker() {
                       void toggleFavorite(m.ref);
                     }}
                     className={cn(
-                      "text-muted-foreground hover:text-foreground rounded p-1 opacity-0 group-hover:opacity-100",
+                      "text-muted-foreground hover:text-foreground rounded p-1 opacity-0 transition-[opacity,color] duration-(--motion-fast) ease-out-quart group-hover:opacity-100",
                       favorites.includes(m.ref) && "text-warning opacity-100",
                     )}
                   >
@@ -167,9 +168,9 @@ export function EffortPicker() {
   const current = efforts[active.ref];
   return (
     <Menu>
-      <MenuTrigger className="hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 items-center gap-1 rounded-lg px-2 text-xs font-medium">
+      <MenuTrigger className="hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart">
         <BrainIcon className="size-3.5" />
-        {current ? EFFORT_LABELS[current] : "Default"}
+        <TextSwap value={current ? EFFORT_LABELS[current] : "Default"} />
       </MenuTrigger>
       <MenuContent side="top">
         <MenuLabel>Reasoning effort</MenuLabel>

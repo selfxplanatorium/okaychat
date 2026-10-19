@@ -30,6 +30,7 @@ import {
   useState,
   useSyncExternalStore,
   type ComponentPropsWithoutRef,
+  type CSSProperties,
   type FC,
 } from "react";
 import { MessageSearchResults } from "@/components/layout/MessageSearchResults";
@@ -94,10 +95,16 @@ export const ThreadListRoot: FC<
 export const ThreadListItems: FC<
   ComponentPropsWithoutRef<"div"> & { searchQuery?: string }
 > = ({ className, searchQuery = "", ...props }) => {
+  const isLoading = useAuiState((s) => s.threads.isLoading);
   return (
     <div
       data-slot="aui_thread-list-items"
-      className={cn("flex flex-col gap-0.5", className)}
+      className={cn(
+        // A reload (another project, an archive) fades the list instead of swapping it.
+        "flex flex-col gap-0.5 transition-opacity duration-(--motion-fast) ease-out-quart",
+        isLoading && "opacity-50",
+        className,
+      )}
       {...props}
     >
       <AuiIf condition={(s) => s.threads.isLoading}>
@@ -214,6 +221,19 @@ export const useThreadListGroups = (searchQuery = "") => {
   }, [threadIds, threadItems, query, startOfToday]);
 };
 
+/** Rows rise in with a short stagger; the delay is capped so long lists start fast. */
+const ThreadListItemRow: FC<{ index: number }> = ({ index }) => (
+  <div
+    className="stagger animate-rise-in"
+    style={{ "--i": Math.min(index, 7) } as CSSProperties}
+  >
+    <ThreadListPrimitive.ItemByIndex
+      index={index}
+      components={{ ThreadListItem }}
+    />
+  </div>
+);
+
 const ThreadListItemGroups: FC<{ searchQuery?: string }> = ({
   searchQuery = "",
 }) => {
@@ -226,7 +246,7 @@ const ThreadListItemGroups: FC<{ searchQuery?: string }> = ({
     return (
       <div
         data-slot="aui_thread-list-empty"
-        className="text-muted-foreground px-2.5 py-2 text-sm"
+        className="text-muted-foreground animate-fade-in px-2.5 py-2 text-sm"
       >
         No titles match
       </div>
@@ -235,11 +255,7 @@ const ThreadListItemGroups: FC<{ searchQuery?: string }> = ({
 
   if (!groups) {
     return filteredIndices.map((index) => (
-      <ThreadListPrimitive.ItemByIndex
-        key={threadIds[index]}
-        index={index}
-        components={{ ThreadListItem }}
-      />
+      <ThreadListItemRow key={threadIds[index]} index={index} />
     ));
   }
 
@@ -247,16 +263,12 @@ const ThreadListItemGroups: FC<{ searchQuery?: string }> = ({
     <Fragment key={group.label}>
       <div
         data-slot="aui_thread-list-group-label"
-        className="text-muted-foreground px-2.5 pt-3 pb-1 text-xs font-medium"
+        className="text-muted-foreground animate-fade-in px-2.5 pt-3 pb-1 text-xs font-medium"
       >
         {group.label}
       </div>
       {group.indices.map((index) => (
-        <ThreadListPrimitive.ItemByIndex
-          key={threadIds[index]}
-          index={index}
-          components={{ ThreadListItem }}
-        />
+        <ThreadListItemRow key={threadIds[index]} index={index} />
       ))}
     </Fragment>
   ));
@@ -273,7 +285,7 @@ export const ThreadListNew = forwardRef<
         variant="ghost"
         data-slot="aui_thread-list-new"
         className={cn(
-          "hover:bg-muted data-active:bg-muted h-8 justify-start gap-2 rounded-md px-2.5 text-sm font-normal",
+          "hover:bg-muted data-active:bg-muted h-8 justify-start gap-2 rounded-md px-2.5 text-sm font-normal transition-colors duration-(--motion-fast) ease-out-quart",
           className,
         )}
         {...props}
@@ -338,7 +350,7 @@ export const ThreadListItem: FC = () => {
   return (
     <ThreadListItemPrimitive.Root
       data-slot="aui_thread-list-item"
-      className="group hover:bg-muted focus-visible:bg-muted data-active:bg-muted has-focus-visible:bg-muted has-data-[state=open]:bg-muted relative flex h-8 items-center rounded-md transition-colors focus-visible:outline-none"
+      className="group hover:bg-muted focus-visible:bg-muted data-active:bg-muted has-focus-visible:bg-muted has-data-[state=open]:bg-muted relative flex h-8 items-center rounded-md transition-colors duration-(--motion-fast) ease-out-quart focus-visible:outline-none"
     >
       {isRenaming ? (
         <ThreadListItemRename
@@ -360,17 +372,61 @@ export const ThreadListItem: FC = () => {
               className="text-muted-foreground me-1.5 size-3.5 shrink-0 animate-spin"
             />
           )}
-          <span
-            data-slot="aui_thread-list-item-title"
-            className="min-w-0 flex-1 truncate"
-          >
-            <ThreadListItemPrimitive.Title fallback="New Chat" />
-          </span>
+          <ThreadListItemTitle fallback="New Chat" />
           {isRunning && <span className="sr-only">Running</span>}
         </ThreadListItemPrimitive.Trigger>
       )}
       <ThreadListItemMore onRename={() => setIsRenaming(true)} />
     </ThreadListItemPrimitive.Root>
+  );
+};
+
+/**
+ * The runtime can stream a generated title in pieces, so a change is crossfaded
+ * only once it settles; a prefix update is treated as the same title growing.
+ */
+const ThreadListItemTitle: FC<{ fallback: string }> = ({ fallback }) => {
+  const title = useAuiState((s) => s.threadListItem.title) || fallback;
+  const [current, setCurrent] = useState(title);
+  const [outgoing, setOutgoing] = useState<string | null>(null);
+  const changedAt = useRef(0);
+
+  useEffect(() => {
+    if (title === current) return;
+    const growing = title.startsWith(current) || current.startsWith(title);
+    const settled = performance.now() - changedAt.current > 400;
+    changedAt.current = performance.now();
+    if (growing || !settled) {
+      setOutgoing(null);
+      setCurrent(title);
+      return;
+    }
+    setOutgoing(current);
+    setCurrent(title);
+    const timer = window.setTimeout(() => setOutgoing(null), 240);
+    return () => window.clearTimeout(timer);
+  }, [title, current]);
+
+  return (
+    <span
+      data-slot="aui-thread-list-item-title"
+      className="relative block min-w-0 flex-1 truncate"
+    >
+      {outgoing !== null && (
+        <span
+          aria-hidden
+          className="shell-title-out absolute inset-0 block truncate"
+        >
+          {outgoing}
+        </span>
+      )}
+      <span
+        key={current}
+        className={cn("block truncate", outgoing !== null && "shell-title-in")}
+      >
+        {current}
+      </span>
+    </span>
   );
 };
 
@@ -448,7 +504,7 @@ const ThreadListItemMore: FC<{ onRename: () => void }> = ({ onRename }) => {
           variant="ghost"
           size="icon"
           data-slot="aui_thread-list-item-more"
-          className="data-[state=open]:bg-accent absolute end-1.5 top-1/2 size-6 -translate-y-1/2 p-0 opacity-0 group-hover:opacity-100 group-has-focus-visible:opacity-100 group-data-active:opacity-100 data-[state=open]:opacity-100"
+          className="data-[state=open]:bg-accent absolute end-1.5 top-1/2 size-6 -translate-y-1/2 p-0 opacity-0 transition-[opacity,color,background-color] duration-(--motion-fast) ease-out-quart group-hover:opacity-100 group-has-focus-visible:opacity-100 group-data-active:opacity-100 data-[state=open]:opacity-100"
         >
           <MoreHorizontalIcon className="size-3.5" />
           <span className="sr-only">More options</span>
@@ -459,11 +515,11 @@ const ThreadListItemMore: FC<{ onRename: () => void }> = ({ onRename }) => {
         align="start"
         sideOffset={6}
         data-slot="aui_thread-list-item-more-content"
-        className="bg-popover text-popover-foreground data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:animate-out data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 min-w-32 overflow-hidden rounded-xl border p-1.5"
+        className="bg-popover text-popover-foreground data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:animate-out data-[side=bottom]:slide-in-from-top-1 data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1 data-[side=top]:slide-in-from-bottom-1 duration-(--motion-base) ease-out-expo data-[state=closed]:duration-(--motion-fast) data-[state=closed]:ease-in-quart z-50 min-w-32 overflow-hidden rounded-xl border p-1.5"
       >
         <ThreadListItemMorePrimitive.Item
           data-slot="aui_thread-list-item-more-item"
-          className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none"
+          className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none transition-colors duration-(--motion-instant) ease-out-quart"
           onSelect={onRename}
         >
           <PencilIcon className="size-4" />
@@ -472,7 +528,7 @@ const ThreadListItemMore: FC<{ onRename: () => void }> = ({ onRename }) => {
         <ThreadListItemPrimitive.Archive asChild>
           <ThreadListItemMorePrimitive.Item
             data-slot="aui_thread-list-item-more-item"
-            className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none"
+            className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none transition-colors duration-(--motion-instant) ease-out-quart"
           >
             <ArchiveIcon className="size-4" />
             Archive
@@ -481,7 +537,7 @@ const ThreadListItemMore: FC<{ onRename: () => void }> = ({ onRename }) => {
         <ThreadListItemPrimitive.Delete asChild>
           <ThreadListItemMorePrimitive.Item
             data-slot="aui_thread-list-item-more-item"
-            className="text-destructive hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:text-destructive flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none"
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:text-destructive flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none transition-colors duration-(--motion-instant) ease-out-quart"
           >
             <TrashIcon className="size-4" />
             Delete

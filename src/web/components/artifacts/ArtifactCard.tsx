@@ -47,7 +47,7 @@ export function ArtifactCard({ args, result, status, action }: { args: unknown; 
       type="button"
       disabled={running || !r?.id || !threadId}
       onClick={() => r && threadId && show(threadId, r.id, r.version)}
-      className="hover:bg-muted/60 my-2 flex w-full max-w-md items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors disabled:hover:bg-transparent"
+      className="shell-artifact-card hover:bg-muted/60 animate-rise-in my-2 flex w-full max-w-md items-center gap-3 rounded-xl border px-3 py-2.5 text-left hover:shadow-md disabled:hover:bg-transparent disabled:hover:shadow-none"
     >
       <span className="bg-muted flex size-9 shrink-0 items-center justify-center rounded-lg">
         {running ? <Loader2Icon className="size-4 animate-spin" /> : failed ? <TriangleAlertIcon className="text-warning size-4" /> : <Icon className="size-4" />}

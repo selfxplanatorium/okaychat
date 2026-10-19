@@ -1,5 +1,5 @@
 import { KeyRoundIcon, Loader2Icon, PlusIcon, TrashIcon } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import type { AdminUser, ProviderInfo } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,7 +19,7 @@ function NewUserForm({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState(false);
   return (
     <form
-      className="grid gap-2 px-4 py-3 sm:grid-cols-2"
+      className="animate-rise-in grid gap-2 px-4 py-3 sm:grid-cols-2"
       onSubmit={async (e) => {
         e.preventDefault();
         setBusy(true);
@@ -38,7 +38,7 @@ function NewUserForm({ onDone }: { onDone: () => void }) {
       <Input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
       <Input type="password" placeholder="Initial password (8+ characters)" value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required autoComplete="new-password" />
       <Select aria-label="Role" value={role} onValueChange={setRole} options={[{ value: "user", label: "User" }, { value: "admin", label: "Admin" }]} />
-      {error && <p className="text-error text-xs sm:col-span-2">{error}</p>}
+      {error && <p className="text-error settings-error text-xs sm:col-span-2">{error}</p>}
       <div className="flex justify-end gap-2 sm:col-span-2">
         <Button type="button" variant="ghost" onClick={onDone}>
           Cancel
@@ -90,9 +90,9 @@ function Users() {
           }}
         />
       )}
-      {error && <p className="text-error px-4 pt-2 text-xs">{error}</p>}
-      {users.map((u) => (
-        <div key={u.id} className="flex items-center gap-3 px-4 py-3">
+      {error && <p className="text-error settings-error px-4 pt-2 text-xs">{error}</p>}
+      {users.map((u, index) => (
+        <div key={u.id} className="stagger animate-rise-in flex items-center gap-3 px-4 py-3" style={{ "--i": index } as CSSProperties}>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium">
               {u.name} {u.id === me?.id && <span className="text-muted-foreground font-normal">(you)</span>}

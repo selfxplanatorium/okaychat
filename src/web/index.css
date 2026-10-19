@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "tw-shimmer";
 @import "./theme/theme.css";
+@import "./motion/motion.css";
 
 @source "./";
 

@@ -1,0 +1,92 @@
+/* Motion owned by the chat area. Shared tokens live in motion.css. */
+
+/*
+ * A message that arrives after history has loaded rises toward the reader from
+ * the composer's side. Assistant replies start a little softer because they do
+ * not replace something the reader just sent.
+ */
+@keyframes chat-message-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+@keyframes chat-message-in-soft {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes chat-history-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes chat-wait-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+@keyframes chat-wait-out {
+  to {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+@keyframes chat-edit-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@keyframes chat-text-swap-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+    filter: blur(2px);
+  }
+}
+@keyframes chat-text-swap-out {
+  to {
+    opacity: 0;
+    transform: translateY(-2px);
+    filter: blur(2px);
+  }
+}
+@keyframes chat-bar-in {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+.chat-message-in {
+  animation: chat-message-in var(--motion-base) var(--ease-out-expo) both;
+}
+.chat-message-in-soft {
+  animation: chat-message-in-soft var(--motion-base) var(--ease-out-expo) both;
+}
+/* One fast fade for the whole list on a thread switch, never one per message. */
+.chat-history-in {
+  animation: chat-history-in var(--motion-fast) var(--ease-out-quart) both;
+}
+.chat-wait-in {
+  animation: chat-wait-in var(--motion-fast) var(--ease-out-quart) both;
+}
+.chat-wait-out {
+  animation: chat-wait-out 120ms var(--ease-in-quart) both;
+}
+.chat-edit-in {
+  animation: chat-edit-in var(--motion-base) var(--ease-out-expo) both;
+}
+.chat-text-swap-in {
+  animation: chat-text-swap-in var(--motion-fast) var(--ease-out-quart) both;
+}
+.chat-text-swap-out {
+  animation: chat-text-swap-out var(--motion-fast) var(--ease-in-quart) both;
+}
+/* Values that change rarely grow from their origin instead of snapping. */
+.chat-bar-grow {
+  transform-origin: left;
+  animation: chat-bar-in var(--motion-slow) var(--ease-out-expo) both;
+}

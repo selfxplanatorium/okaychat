@@ -1,5 +1,5 @@
 import { FileTextIcon, Loader2Icon, PencilIcon, PlusIcon, TrashIcon, UploadIcon } from "lucide-react";
-import { useRef, useState } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import type { Project } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,7 +36,7 @@ function ProjectForm({ initial, onDone }: { initial?: Project; onDone: () => voi
 
   return (
     <form
-      className="flex flex-col gap-3 px-4 py-4"
+      className="animate-rise-in flex flex-col gap-3 px-4 py-4"
       onSubmit={(e) => {
         e.preventDefault();
         void submit();
@@ -56,7 +56,7 @@ function ProjectForm({ initial, onDone }: { initial?: Project; onDone: () => voi
         placeholder="Default model: keep the current one"
         options={models.map((m) => ({ value: m.ref, label: `${m.name} · ${m.providerId}` }))}
       />
-      {error && <p className="text-error text-xs">{error}</p>}
+      {error && <p className="text-error settings-error text-xs">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onDone}>
           Cancel
@@ -98,11 +98,11 @@ function ProjectFiles({ project }: { project: Project }) {
   return (
     <div className="mt-2 flex flex-col gap-1">
       {project.files.map((f) => (
-        <div key={f.id} className="text-muted-foreground flex items-center gap-2 text-xs">
+        <div key={f.id} className="text-muted-foreground animate-fade-in flex items-center gap-2 text-xs">
           <FileTextIcon className="size-3.5 shrink-0" />
           <span className="text-foreground truncate">{f.name}</span>
           <span className="shrink-0">~{formatTokens(Math.round(f.chars / 4))} tokens</span>
-          <button type="button" className="hover:text-foreground ms-auto" aria-label={`Remove ${f.name}`} onClick={() => void api(`/projects/${project.id}/files/${f.id}`, { method: "DELETE" }).then(refresh)}>
+          <button type="button" className="hover:text-foreground ms-auto transition-colors duration-(--motion-fast)" aria-label={`Remove ${f.name}`} onClick={() => void api(`/projects/${project.id}/files/${f.id}`, { method: "DELETE" }).then(refresh)}>
             <TrashIcon className="size-3.5" />
           </button>
         </div>
@@ -111,7 +111,7 @@ function ProjectFiles({ project }: { project: Project }) {
       <Button size="xs" variant="ghost" className="w-fit" disabled={busy} onClick={() => input.current?.click()}>
         {busy ? <Loader2Icon className="animate-spin" /> : <UploadIcon />} Pin files
       </Button>
-      {error && <p className="text-error text-xs">{error}</p>}
+      {error && <p className="text-error settings-error text-xs">{error}</p>}
     </div>
   );
 }
@@ -133,12 +133,12 @@ export function ProjectSettings() {
         }
       >
         {editing === "new" && <ProjectForm onDone={() => setEditing(null)} />}
-        {projects.length === 0 && editing !== "new" && <p className="text-muted-foreground px-4 py-6 text-sm">No projects yet.</p>}
-        {projects.map((p) =>
+        {projects.length === 0 && editing !== "new" && <p className="text-muted-foreground animate-fade-in px-4 py-6 text-sm">No projects yet.</p>}
+        {projects.map((p, index) =>
           editing === p.id ? (
             <ProjectForm key={p.id} initial={p} onDone={() => setEditing(null)} />
           ) : (
-            <div key={p.id} className="flex items-start gap-3 px-4 py-3">
+            <div key={p.id} className="stagger animate-rise-in flex items-start gap-3 px-4 py-3" style={{ "--i": index } as CSSProperties}>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium">{p.name}</p>
                 {p.instructions && <p className="text-muted-foreground line-clamp-2 text-xs">{p.instructions}</p>}

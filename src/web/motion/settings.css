@@ -1,0 +1,42 @@
+/* Motion owned by the settings area. Shared tokens live in motion.css. */
+
+/* Collapsible settings groups animate their real height with grid rows. They are
+   mounted while open, so closing is instant and no height is ever fixed. */
+.settings-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  animation: settings-collapse-in var(--motion-base) var(--ease-out-expo) both;
+}
+.settings-collapse > * {
+  min-height: 0;
+  /* Clip, with room for focus rings, which stay visible after the row opens. */
+  overflow: clip;
+  overflow-clip-margin: 4px;
+}
+@keyframes settings-collapse-in {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+
+/* A form error shakes once while fading in, so the shake never re-runs on a
+   re-render of an unchanged message. */
+.settings-error {
+  animation:
+    fade-in var(--motion-base) var(--ease-out-quart) both,
+    shake 360ms var(--ease-out-quart) both;
+}
+
+/* Usage bars are vertical, so they grow from the bottom: the layout-free
+   equivalent of growing a horizontal bar from the left. */
+.settings-bar {
+  transform-origin: bottom;
+  animation: settings-bar-grow var(--motion-base) var(--ease-out-expo) both;
+  animation-delay: calc(min(var(--i, 0), 12) * var(--motion-stagger));
+}
+@keyframes settings-bar-grow {
+  from {
+    transform: scaleY(0);
+  }
+}

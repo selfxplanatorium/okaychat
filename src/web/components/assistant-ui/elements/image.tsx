@@ -255,7 +255,7 @@ function ImagePreview({
       {!loaded && !error && (
         <div
           data-slot="image-preview-loading"
-          className="bg-muted/50 absolute inset-0 flex items-center justify-center"
+          className="bg-muted/50 animate-fade-in absolute inset-0 flex items-center justify-center"
         >
           <ImageIcon className="text-muted-foreground size-8 animate-pulse" />
         </div>
@@ -282,7 +282,9 @@ function ImagePreview({
                   "object-contain": fit === "contain",
                 })
               : "block h-auto w-full object-contain",
-            !loaded && "invisible",
+            // Decode finishes after the box exists: fade and unblur in place.
+            "transition-[opacity,filter] duration-(--motion-slow) ease-out-quart motion-reduce:transition-none",
+            loaded ? "opacity-100 blur-0" : "opacity-0 blur-md",
             className,
           )}
           onLoad={(e) => {
@@ -576,7 +578,7 @@ function RegenerateButton({
       disabled={isRegenerating}
       data-slot="image-regenerate"
       aria-label="Regenerate image"
-      className="hover:bg-muted inline-flex size-7 items-center justify-center rounded disabled:opacity-50"
+      className="hover:bg-muted inline-flex size-7 items-center justify-center rounded transition-colors duration-(--motion-fast) ease-out-quart disabled:opacity-50"
     >
       <RefreshCwIcon
         className={cn("size-4", isRegenerating && "animate-spin")}
@@ -596,7 +598,7 @@ function ImageActions({ part, onRegenerate, className }: ImageActionsProps) {
         onClick={() => downloadImagePart(part)}
         data-slot="image-download"
         aria-label="Download image"
-        className="hover:bg-muted inline-flex size-7 items-center justify-center rounded"
+        className="hover:bg-muted inline-flex size-7 items-center justify-center rounded transition-colors duration-(--motion-fast) ease-out-quart"
       >
         <DownloadIcon className="size-4" />
       </button>
@@ -607,7 +609,7 @@ function ImageActions({ part, onRegenerate, className }: ImageActionsProps) {
         }}
         data-slot="image-copy"
         aria-label="Copy image"
-        className="hover:bg-muted inline-flex size-7 items-center justify-center rounded"
+        className="hover:bg-muted inline-flex size-7 items-center justify-center rounded transition-colors duration-(--motion-fast) ease-out-quart"
       >
         <CopyIcon className="size-4" />
       </button>

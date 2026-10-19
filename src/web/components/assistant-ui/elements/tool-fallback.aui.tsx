@@ -36,6 +36,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "./collapsible-root";
+import { collapsePanel } from "./surfaces";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -170,19 +171,35 @@ function ToolFallbackTrigger({
     <CollapsibleTrigger
       data-slot="tool-fallback-trigger"
       className={cn(
-        "aui-tool-fallback-trigger group/trigger text-muted-foreground hover:text-foreground flex w-fit max-w-full origin-left items-center gap-2 py-1.5 text-sm transition-[color,scale] active:scale-[0.98]",
+        "aui-tool-fallback-trigger group/trigger text-muted-foreground hover:text-foreground flex w-fit max-w-full origin-left items-center gap-2 py-1.5 text-sm transition-[color,scale] duration-(--motion-fast) ease-out-quart active:scale-[0.98]",
         className,
       )}
       {...props}
     >
-      <Icon
+      {/* Both icons stay mounted so a finished call crossfades instead of cutting. */}
+      <span
         data-slot="tool-fallback-trigger-icon"
-        className={cn(
-          "aui-tool-fallback-trigger-icon size-4 shrink-0",
-          isCancelled && "text-muted-foreground",
-          isRunning && "animate-spin [animation-duration:0.6s]",
-        )}
-      />
+        className="aui-tool-fallback-trigger-icon relative size-4 shrink-0"
+      >
+        <LoaderIcon
+          aria-hidden
+          className={cn(
+            "absolute inset-0 size-4 transition-[opacity,scale] duration-(--motion-fast) ease-out-quart motion-reduce:animate-none",
+            isRunning
+              ? "scale-100 animate-spin opacity-100 [animation-duration:0.6s]"
+              : "scale-50 opacity-0",
+          )}
+        />
+        <Icon
+          aria-hidden
+          className={cn(
+            "absolute inset-0 size-4 transition-[opacity,scale,color] duration-(--motion-base) ease-spring",
+            isRunning ? "scale-50 opacity-0" : "scale-100 opacity-100",
+            isCancelled && "text-muted-foreground",
+            statusType === "incomplete" && !isCancelled && "text-error",
+          )}
+        />
+      </span>
       <span
         data-slot="tool-fallback-trigger-label"
         className={cn(
@@ -198,7 +215,7 @@ function ToolFallbackTrigger({
         data-slot="tool-fallback-trigger-chevron"
         className={cn(
           "aui-tool-fallback-trigger-chevron size-4 shrink-0",
-          "transition-transform duration-(--animation-duration) ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
+          "transition-transform duration-(--animation-duration) ease-out-expo motion-reduce:transition-none",
           "-rotate-90",
           "group-data-open/trigger:rotate-0",
           "group-data-panel-open/trigger:rotate-0",
@@ -217,20 +234,16 @@ function ToolFallbackContent({
     <CollapsibleContent
       data-slot="tool-fallback-content"
       className={cn(
-        "aui-tool-fallback-content relative overflow-hidden text-sm outline-none",
-        "group/collapsible-content ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:animate-none",
-        "data-closed:animate-collapsible-up",
-        "data-open:animate-collapsible-down",
-        "data-closed:fill-mode-forwards",
+        "aui-tool-fallback-content group/collapsible-content relative text-sm outline-none",
+        collapsePanel,
         "data-closed:pointer-events-none",
-        "[--tw-duration:var(--animation-duration)]",
         className,
       )}
       {...props}
     >
       <div
         className={cn(
-          "flex flex-col gap-2 ps-6 pt-1 pb-2 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:animate-none",
+          "flex flex-col gap-2 ps-6 pt-1 pb-2 ease-out-expo motion-reduce:animate-none",
           "group-data-open/collapsible-content:animate-in group-data-open/collapsible-content:fade-in-0 group-data-open/collapsible-content:blur-in-[2px] group-data-open/collapsible-content:slide-in-from-top-1",
           "group-data-closed/collapsible-content:animate-out group-data-closed/collapsible-content:fade-out-0 group-data-closed/collapsible-content:blur-out-[2px] group-data-closed/collapsible-content:slide-out-to-top-1",
           "group-data-closed/collapsible-content:animation-duration-(--animation-duration) group-data-open/collapsible-content:animation-duration-(--animation-duration)",
@@ -293,7 +306,7 @@ function ToolFallbackResult({
   return (
     <div
       data-slot="tool-fallback-result"
-      className={cn("aui-tool-fallback-result", className)}
+      className={cn("aui-tool-fallback-result animate-rise-in", className)}
       {...props}
     >
       <p className="aui-tool-fallback-result-header text-muted-foreground text-xs font-medium">
@@ -327,7 +340,10 @@ function ToolFallbackError({
   return (
     <div
       data-slot="tool-fallback-error"
-      className={cn("aui-tool-fallback-error", className)}
+      className={cn(
+        "aui-tool-fallback-error animate-rise-in transition-colors",
+        className,
+      )}
       {...props}
     >
       <p className="aui-tool-fallback-error-header text-muted-foreground font-semibold">

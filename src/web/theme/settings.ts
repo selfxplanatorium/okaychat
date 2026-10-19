@@ -16,7 +16,7 @@ export const DEFAULT_APPEARANCE_CONTRAST = 100;
 // Panel open/close animation length. 0 disables animation.
 export const MIN_PANEL_ANIMATION_DURATION_MS = 0;
 export const MAX_PANEL_ANIMATION_DURATION_MS = 400;
-export const DEFAULT_PANEL_ANIMATION_DURATION_MS = 0;
+export const DEFAULT_PANEL_ANIMATION_DURATION_MS = 240;
 
 // Chat content column width.
 export const CHAT_WIDTHS = ["comfortable", "wide", "full"] as const;

@@ -116,8 +116,6 @@ export interface AssistantMetadata {
   contextWindow?: number;
   durationMs?: number;
   compacted?: boolean;
-  /** Set when the turn ran in plan mode. */
-  mode?: "plan";
 }
 
 export interface CompactionState {

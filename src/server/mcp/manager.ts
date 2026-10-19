@@ -304,8 +304,6 @@ function toModelText(result: ToolOutput): string {
 
 export interface McpToolBundle {
   tools: ToolSet;
-  /** Exposed names of tools that declare `readOnlyHint: true`. Plan mode offers only these. */
-  readOnly: Set<string>;
   instructions: string[];
   servers: Array<{ name: string; status: McpStatus; error?: string }>;
 }
@@ -315,7 +313,6 @@ export async function toolsForUser(userId: string): Promise<McpToolBundle> {
   const servers = listServers(userId).filter((s) => s.enabled);
   const ready = await Promise.all(servers.map(async (s) => ({ server: s, entry: await ensure(s) })));
   const tools: ToolSet = {};
-  const readOnly = new Set<string>();
   const instructions: string[] = [];
   for (const { server, entry } of ready) {
     if (entry.status !== "connected") continue;
@@ -323,7 +320,6 @@ export async function toolsForUser(userId: string): Promise<McpToolBundle> {
     const sorted = [...entry.tools].sort((a, b) => a.name.localeCompare(b.name));
     for (const raw of sorted) {
       if (server.disabledTools.includes(raw.name)) continue;
-      if (raw.annotations?.readOnlyHint === true) readOnly.add(exposedToolName(server.name, raw.name));
       tools[exposedToolName(server.name, raw.name)] = dynamicTool({
         description: raw.description ?? `${raw.name} (${server.name})`,
         inputSchema: jsonSchema(raw.inputSchema ?? { type: "object", properties: {} }),
@@ -334,7 +330,6 @@ export async function toolsForUser(userId: string): Promise<McpToolBundle> {
   }
   return {
     tools,
-    readOnly,
     instructions,
     servers: ready.map(({ server, entry }) => ({ name: server.name, status: entry.status, error: entry.error })),
   };
