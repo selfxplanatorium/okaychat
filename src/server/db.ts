@@ -5,6 +5,10 @@ import { env } from "./env.js";
 export const db = new DatabaseSync(path.join(env.dataDir, "okaychat.db"));
 db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
 
+/** SQL for the joined text parts of a stored UI message (`{ role, parts, metadata }`). */
+const MESSAGE_TEXT = (row: string) =>
+  `coalesce((SELECT group_concat(json_extract(p.value, '$.text'), ' ') FROM json_each(${row}.content, '$.parts') p WHERE json_extract(p.value, '$.type') = 'text'), '')`;
+
 // Append-only. Each entry runs once, in order, tracked by user_version.
 const migrations: string[] = [
   `
@@ -149,6 +153,21 @@ const migrations: string[] = [
   );
   ALTER TABLE threads ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE SET NULL;
   CREATE INDEX threads_project ON threads(user_id, project_id, updated_at DESC);
+  `,
+  // Full-text search over the text parts of messages. Triggers keep it in sync with every writer.
+  `
+  CREATE VIRTUAL TABLE messages_fts USING fts5(text, thread_id UNINDEXED, message_id UNINDEXED, tokenize = 'unicode61 remove_diacritics 2');
+  CREATE TRIGGER messages_fts_insert AFTER INSERT ON messages BEGIN
+    INSERT INTO messages_fts (text, thread_id, message_id) VALUES (${MESSAGE_TEXT("new")}, new.thread_id, new.id);
+  END;
+  CREATE TRIGGER messages_fts_update AFTER UPDATE OF content ON messages BEGIN
+    DELETE FROM messages_fts WHERE thread_id = old.thread_id AND message_id = old.id;
+    INSERT INTO messages_fts (text, thread_id, message_id) VALUES (${MESSAGE_TEXT("new")}, new.thread_id, new.id);
+  END;
+  CREATE TRIGGER messages_fts_delete AFTER DELETE ON messages BEGIN
+    DELETE FROM messages_fts WHERE thread_id = old.thread_id AND message_id = old.id;
+  END;
+  INSERT INTO messages_fts (text, thread_id, message_id) SELECT ${MESSAGE_TEXT("messages")}, thread_id, id FROM messages;
   `,
 ];
 

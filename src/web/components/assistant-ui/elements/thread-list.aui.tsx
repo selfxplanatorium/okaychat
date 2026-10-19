@@ -32,6 +32,7 @@ import {
   type ComponentPropsWithoutRef,
   type FC,
 } from "react";
+import { MessageSearchResults } from "@/components/layout/MessageSearchResults";
 
 export const ThreadList: FC = () => {
   const [search, setSearch] = useState("");
@@ -44,6 +45,7 @@ export const ThreadList: FC = () => {
         <ThreadListSearch value={search} onValueChange={setSearch} />
       )}
       <ThreadListItems searchQuery={hasThreads ? search : ""} />
+      {hasThreads && <MessageSearchResults query={search} />}
     </ThreadListRoot>
   );
 };
@@ -219,13 +221,14 @@ const ThreadListItemGroups: FC<{ searchQuery?: string }> = ({
     useThreadListGroups(searchQuery);
   const query = searchQuery.trim();
 
+  // Message matches render below, so an empty title match is not a dead end.
   if (query && filteredIndices.length === 0) {
     return (
       <div
         data-slot="aui_thread-list-empty"
-        className="text-muted-foreground px-2.5 py-4 text-sm"
+        className="text-muted-foreground px-2.5 py-2 text-sm"
       >
-        No threads found
+        No titles match
       </div>
     );
   }

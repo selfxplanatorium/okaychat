@@ -10,6 +10,7 @@ import { chatRoutes } from "./chat.js";
 import { fileRoutes } from "./files.js";
 import { getProject, projectRoutes } from "./projects.js";
 import { scheduleRoutes } from "./schedules.js";
+import { searchRoutes } from "./search.js";
 import { deleteThreadImages, imageRoutes } from "./tools/image.js";
 import { callbackUrl, disconnectServer, serverInfo, testServer } from "./mcp/manager.js";
 import { pendingByState, StoredOAuthProvider } from "./mcp/oauth.js";
@@ -155,7 +156,8 @@ const api = new Hono<AppEnv>()
   .route("/", artifactRoutes)
   .route("/", imageRoutes)
   .route("/", scheduleRoutes)
-  .route("/", projectRoutes);
+  .route("/", projectRoutes)
+  .route("/", searchRoutes);
 
 /** OAuth redirect target. Not behind requireUser: the state parameter identifies the user and server. */
 export const mcpOAuthCallback = new Hono().get("/", async (c) => {

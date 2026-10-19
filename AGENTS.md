@@ -36,6 +36,7 @@ src/server/
   routes.ts           REST API (threads, providers, MCP, usage, settings)
   chat.ts             /api/chat and turnStream() (one turn, shared with schedules), auto-compaction, titles
   projects.ts         Projects: instructions, pinned files, system prompt section
+  search.ts           Full-text search over messages (FTS5, synced by triggers in db.ts)
   schedules.ts        Scheduled prompts: next-run math, 30 s ticker, server-side runs
   artifacts.ts        Artifact tools, versions table, panel API
   codex.ts            Codex CLI login (device code) and per-run CODEX_HOME with encrypted credentials
