@@ -1,7 +1,10 @@
 import { defineToolkit } from "@assistant-ui/react";
-import { BookOpenIcon, ChevronDownIcon, DownloadIcon, FileTextIcon, GlobeIcon, ImageIcon, Loader2Icon, SearchIcon, TriangleAlertIcon } from "lucide-react";
+import { BookOpenIcon, BotIcon, ChevronDownIcon, DownloadIcon, FileTextIcon, GlobeIcon, ImageIcon, Loader2Icon, SearchIcon, TriangleAlertIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { ArtifactCard } from "@/components/artifacts/ArtifactCard";
+import { SimpleMarkdown } from "@/components/ui/simple-markdown";
+import { formatCost } from "@/lib/api";
+import { useData } from "@/state/data";
 import { cn } from "@/lib/utils";
 
 type SearchResult = { title: string; url: string; snippet: string };
@@ -104,6 +107,10 @@ export const toolkit = defineToolkit({
       <ToolShell icon={<BookOpenIcon className="size-4" />} running={status?.type === "running"} label={`Read artifact ${(args as { id?: string })?.id ?? ""}`} />
     ),
   },
+  delegate_task: {
+    type: "backend",
+    render: ({ args, result, status }) => <SubagentCard args={args} result={result} running={status?.type === "running"} />,
+  },
   generate_image: {
     type: "backend",
     render: ({ args, result, status }) => <GeneratedImage args={args} result={result} running={status?.type === "running"} />,
@@ -145,5 +152,55 @@ function GeneratedImage({ args, result, running }: { args: unknown; result: unkn
         <DownloadIcon className="size-4" />
       </a>
     </figure>
+  );
+}
+
+type SubagentProgress = { model: string; status: "running" | "done"; text: string; steps: number; tools: string[]; cost?: number };
+
+function SubagentCard({ args, result, running }: { args: unknown; result: unknown; running: boolean }) {
+  const [open, setOpen] = useState(false);
+  const models = useData((s) => s.models);
+  const a = (args ?? {}) as { task?: string; model?: string };
+  const r = typeof result === "object" && result ? (result as SubagentProgress) : undefined;
+  const failed = !running && typeof result === "string";
+  const busy = running || r?.status === "running";
+  const ref = r?.model ?? a.model;
+  const name = models.find((m) => m.ref === ref)?.name ?? ref?.split("/").pop() ?? "Sub-agent";
+  const detail = [
+    r?.steps ? `${r.steps} step${r.steps === 1 ? "" : "s"}` : null,
+    r?.tools.length ? `${r.tools.length} tool call${r.tools.length === 1 ? "" : "s"}` : null,
+    r?.cost ? formatCost(r.cost) : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <div className="my-2 rounded-xl border text-sm">
+      <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center gap-3 px-3 py-2.5 text-left">
+        <span className="bg-muted flex size-8 shrink-0 items-center justify-center rounded-lg">
+          {busy ? <Loader2Icon className="size-4 animate-spin" /> : failed ? <TriangleAlertIcon className="text-warning size-4" /> : <BotIcon className="size-4" />}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className={cn("block truncate font-medium", busy && "shimmer")}>{busy ? `${name} is working` : failed ? `${name} failed` : `${name} finished`}</span>
+          <span className="text-muted-foreground block truncate text-xs">{failed ? (result as string) : detail || a.task}</span>
+        </span>
+        <ChevronDownIcon className={cn("text-muted-foreground size-4 shrink-0 transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="flex flex-col gap-3 border-t px-3 py-3">
+          {a.task && (
+            <div>
+              <p className="text-muted-foreground mb-1 text-xs font-medium">Task</p>
+              <p className="text-muted-foreground text-xs whitespace-pre-wrap">{a.task}</p>
+            </div>
+          )}
+          {r?.text && (
+            <div>
+              <p className="text-muted-foreground mb-1 text-xs font-medium">Report</p>
+              <SimpleMarkdown className="max-h-96 overflow-auto">{r.text}</SimpleMarkdown>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

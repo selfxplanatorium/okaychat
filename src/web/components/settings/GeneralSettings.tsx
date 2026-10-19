@@ -82,6 +82,26 @@ export function GeneralSettings() {
           control={<Switch checked={settings.generativeUI} onCheckedChange={(generativeUI) => update({ generativeUI })} aria-label="Generative UI" />}
         />
         <SettingsRow
+          label="Sub-agents"
+          description="Lets the chat model hand self-contained tasks to another model that works in its own context with web and read-only tools."
+          control={<Switch checked={settings.subagents} onCheckedChange={(subagents) => update({ subagents })} aria-label="Sub-agents" />}
+        />
+        {settings.subagents && (
+          <SettingsRow
+            label="Sub-agent model"
+            description="Default for delegated tasks. The utility model and the chat model are offered too."
+            control={
+              <Select
+                className="w-64"
+                value={settings.subagentModel ?? null}
+                onValueChange={(v) => update({ subagentModel: v })}
+                options={models.filter((m) => m.toolCall).map((m) => ({ value: m.ref, label: `${m.name} · ${m.providerId}` }))}
+                placeholder="Utility model"
+              />
+            }
+          />
+        )}
+        <SettingsRow
           label="Image generation"
           description="Create and edit images with your own ChatGPT plan through the Codex CLI. Sign in once with a one-time code."
           control={<CodexConnect />}

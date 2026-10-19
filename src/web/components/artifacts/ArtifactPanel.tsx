@@ -1,9 +1,8 @@
 import { CheckIcon, CodeIcon, CopyIcon, DownloadIcon, EyeIcon, Loader2Icon, RotateCwIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import type { ArtifactVersion } from "@shared/types";
 import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
+import { SimpleMarkdown } from "@/components/ui/simple-markdown";
 import { Select } from "@/components/ui/select";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { api } from "@/lib/api";
@@ -14,8 +13,6 @@ import { artifactFilename, FRAME_SANDBOX, frameDocument } from "./frame";
 
 const WIDTH_KEY = "okaychat:artifact-width";
 
-const MARKDOWN_CLASSES =
-  "text-sm leading-relaxed [&_a]:text-primary [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground [&_code]:bg-muted [&_code]:rounded [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.85em] [&_h1]:mt-6 [&_h1]:mb-3 [&_h1]:text-2xl [&_h1]:font-semibold [&_h2]:mt-5 [&_h2]:mb-2 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mt-4 [&_h3]:mb-2 [&_h3]:font-semibold [&_hr]:my-4 [&_li]:my-1 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-3 [&_pre]:bg-muted/60 [&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_table]:my-3 [&_table]:w-full [&_td]:border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6";
 
 function useArtifact(threadId: string, id: string, revision: number) {
   const [versions, setVersions] = useState<ArtifactVersion[] | null>(null);
@@ -164,9 +161,7 @@ function ArtifactPanelBody({ threadId, id, pinned, onClose }: { threadId: string
         ) : doc ? (
           <iframe key={`${current.version}-${reloadKey}`} title={current.title} sandbox={FRAME_SANDBOX} srcDoc={doc} className="h-full w-full border-0 bg-white" />
         ) : (
-          <div className={cn("h-full overflow-auto px-6 py-4", MARKDOWN_CLASSES)}>
-            <Markdown remarkPlugins={[remarkGfm]}>{current.content}</Markdown>
-          </div>
+          <SimpleMarkdown className="h-full overflow-auto px-6 py-4">{current.content}</SimpleMarkdown>
         )}
       </div>
     </aside>

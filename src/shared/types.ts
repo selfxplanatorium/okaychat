@@ -74,6 +74,10 @@ export interface UserSettings {
   artifacts: boolean;
   /** Generative UI: declarative components and sandboxed HTML/SVG widgets, rendered in the browser. */
   generativeUI: boolean;
+  /** Lets the chat model delegate tasks to sub-agents. */
+  subagents: boolean;
+  /** Default sub-agent model. The utility model and the chat model are also offered. */
+  subagentModel?: string;
 }
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
@@ -85,6 +89,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   webTools: true,
   artifacts: true,
   generativeUI: true,
+  subagents: true,
 };
 
 export interface TokenUsage {

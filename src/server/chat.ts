@@ -11,15 +11,16 @@ import {
 import { frontendTools, type FrontendTools } from "assistant-stream/ai-sdk";
 import { Hono } from "hono";
 import { z } from "zod";
-import type { AssistantMetadata, ReasoningEffort, TokenUsage } from "../shared/types.js";
+import type { AssistantMetadata, ModelInfo, ReasoningEffort, TokenUsage, UserSettings } from "../shared/types.js";
 import type { AppEnv } from "./auth.js";
 import { ARTIFACT_INSTRUCTIONS, artifactTools } from "./artifacts.js";
-import { resolveModel } from "./catalog/providers.js";
+import { listModels, resolveModel } from "./catalog/providers.js";
 import { isConnected as codexConnected } from "./codex.js";
 import { applyCompaction, compact, currentContextTokens, summaryMessages } from "./compaction.js";
 import { createModel } from "./llm.js";
 import { toolsForUser } from "./mcp/manager.js";
 import { imageTools } from "./tools/image.js";
+import { subagentTools } from "./tools/subagent.js";
 import { webTools } from "./tools/web.js";
 import { getSettings } from "./settings.js";
 import { ensureThread, getThread, setCompaction, updateThread } from "./threads.js";
@@ -92,8 +93,17 @@ export const chatRoutes = new Hono<AppEnv>()
         // Built-in tools first, then MCP tools in sorted order, so the tool block is identical across turns.
         const useArtifacts = model.toolCall && settings.artifacts;
         const useGenerativeUI = model.toolCall && settings.generativeUI && !!parsed.data.tools;
+        const readOnlyTools = {
+          ...(model.toolCall && settings.webTools ? webTools() : {}),
+          // Sub-agents run unattended, so they get no tool that waits for approval.
+          ...Object.fromEntries(Object.entries(mcp.tools).filter(([, t]) => !t.needsApproval)),
+        };
+        const subagentModels = model.toolCall && settings.subagents ? await allowedSubagentModels(user.id, settings, model.ref) : [];
         const tools = {
           ...(model.toolCall && settings.webTools ? webTools() : {}),
+          ...(subagentModels.length
+            ? subagentTools({ userId: user.id, threadId, allowed: subagentModels, subTools: readOnlyTools, signal: c.req.raw.signal })
+            : {}),
           ...(useArtifacts ? artifactTools(threadId) : {}),
           ...(model.toolCall && codexConnected(user.id) ? imageTools(user.id, threadId, c.req.raw.signal) : {}),
           ...(useGenerativeUI ? frontendTools(parsed.data.tools as FrontendTools) : {}),
@@ -204,6 +214,13 @@ export const chatRoutes = new Hono<AppEnv>()
     updateThread(user.id, threadId, { title });
     return c.json({ title });
   });
+
+/** The default sub-agent model first, then the utility and chat models. Only models that can call tools. */
+async function allowedSubagentModels(userId: string, settings: UserSettings, chatModel: string): Promise<ModelInfo[]> {
+  const models = await listModels(userId);
+  const refs = [...new Set([settings.subagentModel, settings.utilityModel, chatModel].filter((r): r is string => !!r))];
+  return refs.map((ref) => models.find((m) => m.ref === ref)).filter((m): m is ModelInfo => !!m?.toolCall);
+}
 
 function describeProviderError(error: unknown): string {
   console.error("[chat]", error);

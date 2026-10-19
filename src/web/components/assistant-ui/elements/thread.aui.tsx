@@ -118,6 +118,7 @@ const messageGroupBy = groupPartByType({
   "tool-call:edit_widget": [],
   "tool-call:render_spec": [],
   "tool-call:generate_image": [],
+  "tool-call:delegate_task": [],
 });
 
 type ThreadGroupKey =

@@ -40,7 +40,7 @@ src/server/
   llm.ts              Model factory per wire format, cache breakpoints, OpenCode headers
   catalog/            models.dev catalog + provider connections (encrypted keys)
   mcp/                MCP connection manager, OAuth provider, storage
-  tools/              Built-in tools: web_search, web_fetch (+ Scrapling fallback), generate_image (Codex)
+  tools/              Built-in tools: web_search, web_fetch (+ Scrapling fallback), generate_image (Codex), delegate_task (sub-agents)
   compaction.ts usage.ts files.ts threads.ts settings.ts auth.ts db.ts
 src/web/
   App.tsx             Auth gate, onboarding, shell, routes (wouter)
@@ -94,6 +94,7 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 - Tool calls collapse into a "N tool calls" group by default. Tools whose card must stay visible get a `"tool-call:<name>": []` entry in `messageGroupBy` (`thread.aui.tsx`).
 - Artifact frames have an opaque origin (no `allow-same-origin`), so `localStorage` throws. `frame.ts` injects in-memory storage before any artifact code runs.
 - Browser-executed tools need `sendAutomaticallyWhen` on `useChatRuntime`, or the turn stops after the first one. The server merges their schemas from the request body with `frontendTools`.
+- Tools can stream progress: an `async function*` execute yields preliminary outputs the UI renders live. `toModelOutput` controls what the model sees (sub-agents send only the report).
 - Messages are persisted by the client's history adapter, not by `/api/chat`. A chat sent with curl leaves the thread empty. Drive the UI to test persistence.
 
 ## Commands
