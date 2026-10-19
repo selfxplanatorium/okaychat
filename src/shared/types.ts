@@ -247,6 +247,14 @@ export interface ProjectFile {
   createdAt: number;
 }
 
+/** A font file the user uploaded. The browser loads it from `/api/fonts/:id/file`. */
+export interface InstalledFont {
+  id: string;
+  family: string;
+  filename: string;
+  bytes: number;
+}
+
 export interface Project {
   id: string;
   name: string;

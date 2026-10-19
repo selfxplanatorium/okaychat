@@ -59,14 +59,14 @@ Heading `Typography`. Header switch labeled `Advanced` (aria "Show advanced typo
 
 Each font row has:
 
-- Family control. When the browser grants local font access (`queryLocalFonts`), this is a searchable picker of installed families. Otherwise it is a text input, `maxLength=200`, `spellcheck=false`, with placeholder = the default family name. Typing commits after 400 ms, on blur, or on Enter. Escape discards.
+- Family control. A list picker: the default (Golos Text), then uploaded fonts (tagged "Uploaded"), then system fonts from `queryLocalFonts`. System fonts load when the list opens, which is the user gesture the browser needs. The code row lists monospace faces only. A stored family that is no longer installed still shows, so it stays visible.
 - Size select, `{n} px`, integer steps.
 - Reset button (shown when family or size differs from default). Reset restores family and size together.
 - Monospace rows accept only fixed-width families (checked by advance widths of glyphs `i M W 0 @ # . space` in four style variants).
 
 | Code | Searchable title | Row | Family default | Size control | Size range (px) | Size default (px) | Description text | Applies |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| S13 | Interface font | Family + size | System UI stack (`-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`), shown as the resolved family name | `""` (empty = default stack) | 12 to 20 | 16 | "Everything outside code blocks and the terminal." | Yes |
+| S13 | Interface font | Family + size | Golos Text (bundled), then the system UI stack (`-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`) | `""` (empty = default stack) | 12 to 20 | 16 | "Everything outside code blocks and the terminal." | Yes |
 | S14 | Prompt font | Family + size (advanced only) | Follows the interface family | `""` | 12 to 20 | 14 | "Only the box you write prompts in. Mono works well here." | Yes |
 | S15 | Code font | Family + size. Monospace only. Simple mode title: "Monospace font" | `"SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace` | `""` | 10 to 18 | 13 | "Code blocks, diffs, and file previews." (simple mode adds "and the terminal") | Yes |
 | S16 | Terminal font | Family + size (advanced only) | Follows code font | `""` | 8 to 20 | 12 | "Terminal output, independent from code blocks and diffs." | No |
@@ -165,7 +165,9 @@ Settings values (S6, S7, S11, S12, S13 to S18) live in T3Code's server or client
 - The theme editor is a dialog, not T3Code's resizable side panel. It edits seven key roles (accent, canvas, surface, text, sidebar, border, code background) with live preview. No inspect mode and no name field yet.
 - Theme cards show the wireframe plus per-mode swatches. T3Code's radial preview circles are not ported.
 - Font smoothing appears only in Advanced mode on macOS, as in T3Code.
-- Font family inputs accept installed families only, as in T3Code. Browsers without the Local Font Access API reject unknown typed names.
+- okaychat replaces the T3Code text input with a list picker, so typed names are gone. Browsers without the Local Font Access API show only the default and uploaded fonts.
+- Default interface font is Golos Text, bundled with `@fontsource-variable/golos-text` (self-hosted, no Google request). Stored `""` means Golos Text. The picker also lists bundled Liberation, DejaVu, and Ubuntu faces, see `bundled-fonts.md`.
+- Uploaded fonts ("Installed fonts" row) are stored in SQLite (`user_fonts`), checked by file signature (WOFF, WOFF2, TTF, OTF; 15 MB), and served at `/api/fonts/:id/file`. The family name is the file name. `state/fonts.ts` registers each one with `FontFace` when the shell loads, so it syncs with the account. Removing a font resets any setting that still uses it.
 - No toasts. Errors are shown inline.
 - Appearance preferences and custom themes now sync per account through `/api/appearance`, stored inside `user_settings.json`. `src/shared/appearance.ts` defines the validated wire format.
 - `useSyncAppearance` migrates the first device's local preferences once, then merges only changed fields. Separate account caches (`okaychat:appearance:<userId>`) retain unsaved edits, and `focus` / `online` retry them and fetch remote changes. Concurrent changes to the same field use the last server write; unrelated fields are preserved.

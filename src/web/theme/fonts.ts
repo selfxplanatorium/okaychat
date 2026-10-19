@@ -13,8 +13,10 @@ import {
   MIN_PROMPT_FONT_SIZE,
 } from "./settings";
 
+// Golos Text is bundled (see main.tsx), so it renders the same on every device.
+export const DEFAULT_SANS_FONT_LABEL = "Golos Text";
 export const DEFAULT_SANS_FONT_STACK =
-  '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
+  `"${DEFAULT_SANS_FONT_LABEL}", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`;
 
 // Concrete names first: some engines alias `ui-monospace` to the
 // proportional system UI font, which would break every code surface.
@@ -130,39 +132,7 @@ export function clampCodeFontSize(value: number): number {
   return clampFontSize(value, MIN_CODE_FONT_SIZE, MAX_CODE_FONT_SIZE, DEFAULT_CODE_FONT_SIZE);
 }
 
-const FONT_PROBE_TEXT = "mmmmmmmmMMWli1O0@# fjord";
 let fontProbeContext: CanvasRenderingContext2D | null | undefined;
-
-function probeWidth(fontList: string): number | null {
-  if (fontProbeContext === undefined) {
-    fontProbeContext = document.createElement("canvas").getContext("2d");
-  }
-  if (fontProbeContext === null) return null;
-  fontProbeContext.font = `16px ${fontList}`;
-  return fontProbeContext.measureText(FONT_PROBE_TEXT).width;
-}
-
-/**
- * Canvas metric probing instead of document.fonts.check(): check() reports true
- * for families that are not installed at all (nothing needs loading), so it
- * cannot filter the dropdown.
- */
-export function isFontFamilyAvailable(family: string): boolean {
-  const families = cssFontFamilies(family);
-  if (families === null) return false;
-  if (/^(system-ui|sans-serif|serif|monospace|ui-monospace)$/i.test(families)) return true;
-  try {
-    for (const generic of ["monospace", "serif", "sans-serif"]) {
-      const baseline = probeWidth(generic);
-      const candidate = probeWidth(`${families}, ${generic}`);
-      if (baseline === null || candidate === null) return false;
-      if (candidate !== baseline) return true;
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
 
 const MONOSPACE_PROBE_VARIANTS = ["normal 400", "normal 700", "italic 400", "italic 700"] as const;
 const MONOSPACE_PROBE_GLYPHS = ["i", "M", "W", "0", "@", "#", ".", " "] as const;
@@ -198,101 +168,6 @@ export function isMonospaceFamily(family: string): boolean {
   } catch {
     return true;
   }
-}
-
-const SANS_GENERIC_CANDIDATES = [
-  "Segoe UI",
-  "Roboto",
-  "Noto Sans",
-  "Ubuntu",
-  "Cantarell",
-  "DejaVu Sans",
-  "Liberation Sans",
-  "Helvetica Neue",
-  "Arial",
-] as const;
-const MONO_GENERIC_CANDIDATES = [
-  "Menlo",
-  "Consolas",
-  "Cascadia Mono",
-  "DejaVu Sans Mono",
-  "Ubuntu Mono",
-  "Liberation Mono",
-  "Noto Sans Mono",
-  "Roboto Mono",
-  "Monaco",
-  "Courier New",
-] as const;
-
-const GENERIC_PROBE_TEXT = "RagIl10O@ fjord quiz";
-
-/**
- * Advance width of the probe text laid out by the DOM - not canvas, whose
- * generic-family mapping diverges from real rendering (this engine draws
- * `ui-monospace` as the proportional UI font on canvas but not in CSS).
- */
-function measureDomProbeWidth(fontFamily: string): number | null {
-  try {
-    const body = document.body;
-    if (!body) return null;
-    const span = document.createElement("span");
-    span.style.cssText =
-      "position:absolute;left:-9999px;top:0;visibility:hidden;white-space:pre;font-size:100px;";
-    span.style.fontFamily = fontFamily;
-    span.textContent = GENERIC_PROBE_TEXT;
-    body.appendChild(span);
-    const width = span.getBoundingClientRect().width;
-    span.remove();
-    return width > 0 ? width : null;
-  } catch {
-    return null;
-  }
-}
-
-function widthsMatch(left: number, right: number): boolean {
-  return Math.abs(left - right) < 0.01;
-}
-
-function resolveGenericFamilyLabel(generic: string): string | null {
-  const lower = generic.toLowerCase();
-  if (lower === "serif") return null;
-  const monoLike = lower === "ui-monospace" || lower === "monospace";
-  const genericWidth = measureDomProbeWidth(generic);
-  if (genericWidth === null) return null;
-  for (const candidate of monoLike ? MONO_GENERIC_CANDIDATES : SANS_GENERIC_CANDIDATES) {
-    if (!isFontFamilyAvailable(candidate)) continue;
-    const candidateWidth = measureDomProbeWidth(`"${candidate}"`);
-    if (candidateWidth !== null && widthsMatch(genericWidth, candidateWidth)) {
-      return candidate;
-    }
-  }
-  // No nameable face matched; on Apple platforms that means one of the San
-  // Francisco faces, which CSS cannot name. Comparing against -apple-system
-  // tells the UI face apart from SF Mono.
-  if (/mac|iphone|ipad|ipod/i.test(navigator.platform)) {
-    const systemWidth = measureDomProbeWidth("-apple-system");
-    if (systemWidth !== null && widthsMatch(genericWidth, systemWidth)) return "SF Pro";
-    return monoLike ? "SF Mono" : "SF Pro";
-  }
-  return null;
-}
-
-export function resolveDefaultFamilyLabel(stack: string): string | null {
-  for (const raw of stack.split(",")) {
-    const family = raw.trim().replace(/^(['"])(.*)\1$/, "$2");
-    if (family.length === 0) continue;
-    if (
-      /^(system-ui|sans-serif|serif|monospace|ui-monospace|-apple-system|BlinkMacSystemFont)$/i.test(
-        family,
-      )
-    ) {
-      const resolved = resolveGenericFamilyLabel(family);
-      if (resolved !== null) return resolved;
-      continue;
-    }
-    if (isFontFamilyAvailable(family)) return family;
-  }
-  return null;
 }
 
 export interface InstalledFontFamiliesResult {

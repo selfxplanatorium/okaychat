@@ -9,6 +9,7 @@ import { Onboarding } from "@/components/Onboarding";
 import { ShareButton } from "@/components/share/ShareButton";
 import { RuntimeProvider } from "@/runtime/RuntimeProvider";
 import { useData } from "@/state/data";
+import { loadInstalledFonts } from "@/state/fonts";
 
 // Settings (theme editor, font discovery, VS Code import) are not needed to chat.
 const SettingsLayout = lazy(() => import("@/components/settings/SettingsLayout").then((m) => ({ default: m.SettingsLayout })));
@@ -54,6 +55,8 @@ export function Shell() {
   const reload = useCallback(() => {
     setLoadError(null);
     void load().then(() => setLoaded(true)).catch(() => setLoadError("Could not load your chats and settings."));
+    // Uploaded fonts apply on every page, so they load with the shell. A failure here must not block the app.
+    void loadInstalledFonts();
   }, [load]);
   useEffect(reload, [reload]);
 

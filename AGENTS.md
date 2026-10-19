@@ -47,7 +47,7 @@ src/server/
   catalog/            models.dev catalog + provider connections (encrypted keys)
   mcp/                MCP connection manager, OAuth provider, storage
   tools/              Built-in tools: web_search, web_fetch (+ Scrapling fallback), generate_image (Codex), delegate_task (sub-agents)
-  compaction.ts usage.ts files.ts threads.ts settings.ts auth.ts db.ts
+  compaction.ts usage.ts files.ts fonts.ts (uploaded font files, SQLite BLOBs) threads.ts settings.ts auth.ts db.ts
 src/web/
   App.tsx             Auth gate and lazy entry points (wouter)
   ChatShell.tsx       Authenticated shell, onboarding, chat and settings routes
@@ -57,8 +57,9 @@ src/web/
   components/genui    Generative UI catalog (render_spec components) and widget toolkit
   components/settings Settings pages
   components/share    Public share page and share button
-  theme/              T3Code theme engine port (see its README)
-  state/              zustand stores (data, appearance, thread meta); appearance-sync.ts handles account cache and outbox
+  theme/              T3Code theme engine port (see its README); bundled-fonts.ts lists the shipped font families
+  fonts/              Bundled Liberation TTFs and their CSS (see docs/research/bundled-fonts.md)
+  state/              zustand stores (data, appearance, fonts, thread meta); appearance-sync.ts handles account cache and outbox
 src/shared/types.ts   Types shared by both sides
 src/shared/appearance.ts  Appearance schema and shared types
 docs/                 Reusable documentation (see below)
@@ -76,6 +77,7 @@ docs/                 Reusable documentation (see below)
 - `docs/research/t3code-appearance.md`: what we ported from T3Code and how, including appearance sync.
 - `docs/research/web-bundle.md`: lazy route boundaries, library chunks, and production load verification.
 - `docs/research/web-search.md`, `docs/research/scrapling.md`: keyless search and page fetching.
+- `docs/research/bundled-fonts.md`: fonts shipped in the picker, their licenses, and the Liberation source.
 - `docs/research/codex-images.md`: image generation through the Codex CLI, login, credential handling.
 - `docs/research/generative-ui.md`: `generative-frame` widgets and spec mode, browser-executed tools.
 

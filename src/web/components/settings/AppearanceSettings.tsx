@@ -10,11 +10,14 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
-import { Select } from "@/components/ui/select";
+import { Select, type SelectOption } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { DEFAULT_APPEARANCE, useAppearance } from "@/state/appearance";
+import type { AppearanceSettings } from "@shared/appearance";
+import type { InstalledFont } from "@shared/types";
+import { installFont, removeFont, useInstalledFonts } from "@/state/fonts";
 import {
   applyThemeColorPreview,
   getCustomThemes,
@@ -41,13 +44,12 @@ import {
   type ThemePreferenceMode,
 } from "@/theme/palette";
 import { BUILT_IN_THEMES } from "@/theme/palettes";
+import { BUNDLED_FONTS } from "@/theme/bundled-fonts";
 import {
-  DEFAULT_CODE_FONT_STACK,
-  DEFAULT_SANS_FONT_STACK,
-  isFontFamilyAvailable,
+  cssFontFamilies,
+  DEFAULT_SANS_FONT_LABEL,
   isMonospaceFamily,
   queryInstalledFontFamilies,
-  resolveDefaultFamilyLabel,
 } from "@/theme/fonts";
 import {
   MAX_APPEARANCE_CONTRAST,
@@ -799,11 +801,24 @@ function ThemeImportDialog({ onClose }: { onClose: () => void }) {
 
 const FONT_LIST_CACHE = { families: null as readonly string[] | null };
 
+const FONT_FILE_ACCEPT = ".woff2,.woff,.ttf,.otf";
+
+function FontOptionLabel({ family, tag }: { family: string; tag?: string }) {
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      <span className="truncate" style={{ fontFamily: cssFontFamilies(family) ?? undefined }}>
+        {family}
+      </span>
+      {tag && <span className="bg-primary/10 text-primary shrink-0 rounded px-1.5 text-[10px]">{tag}</span>}
+    </span>
+  );
+}
+
 function FontRow({
   label,
   description,
   family,
-  placeholder,
+  defaultLabel,
   monospace = false,
   size,
   sizeMin,
@@ -816,7 +831,7 @@ function FontRow({
   label: string;
   description: string;
   family: string;
-  placeholder: string;
+  defaultLabel: string;
   monospace?: boolean;
   size: number;
   sizeMin: number;
@@ -826,42 +841,35 @@ function FontRow({
   onSizeChange: (size: number) => void;
   onReset: () => void;
 }) {
-  const listId = useId();
-  const [installedFamilies, setInstalledFamilies] = useState<readonly string[]>(FONT_LIST_CACHE.families ?? []);
-  const [draft, setDraft] = useState(family);
-  const [seenFamily, setSeenFamily] = useState(family);
-  const [rejected, setRejected] = useState(false);
-  const timer = useRef<number | null>(null);
-  if (seenFamily !== family) {
-    setSeenFamily(family);
-    setDraft(family);
-    setRejected(false);
+  const installed = useInstalledFonts((state) => state.fonts);
+  const [systemFamilies, setSystemFamilies] = useState<readonly string[]>(FONT_LIST_CACHE.families ?? []);
+
+  // Bundled, then uploaded, then system fonts. The code row shows only monospace faces.
+  const bundled = BUNDLED_FONTS.filter((font) => !monospace || font.monospace).map((font) => font.family);
+  const uploaded = installed.map((font) => font.family).filter((name) => !bundled.includes(name));
+  const listed = [...bundled, ...uploaded];
+  const system = systemFamilies.filter((name) => !listed.includes(name) && (!monospace || isMonospaceFamily(name)));
+  const options: Array<SelectOption<string>> = [
+    { value: "", label: `${defaultLabel} (default)` },
+    ...bundled.map((name) => ({ value: name, label: <FontOptionLabel family={name} tag="Bundled" /> })),
+    ...uploaded.map((name) => ({ value: name, label: <FontOptionLabel family={name} tag="Uploaded" /> })),
+    ...system.map((name) => ({ value: name, label: <FontOptionLabel family={name} /> })),
+  ];
+  // A family that is no longer installed still shows, so the choice stays visible and can be changed.
+  if (family !== "" && !options.some((option) => option.value === family)) {
+    options.push({ value: family, label: <FontOptionLabel family={family} /> });
   }
-  useEffect(
-    () => () => {
-      if (timer.current !== null) window.clearTimeout(timer.current);
-    },
-    [],
-  );
 
-  const cancelPending = () => {
-    if (timer.current !== null) window.clearTimeout(timer.current);
-    timer.current = null;
-  };
-  const accepts = (candidate: string) => isFontFamilyAvailable(candidate) && (!monospace || isMonospaceFamily(candidate));
-  const commit = (next: string) => {
-    cancelPending();
-    const trimmed = next.trim();
-    if (trimmed === family) return;
-    if (trimmed === "" || accepts(trimmed)) {
-      setRejected(false);
-      onFamilyChange(trimmed);
-    } else {
-      setRejected(true);
-    }
+  const openSystemFonts = (open: boolean) => {
+    if (!open || FONT_LIST_CACHE.families !== null) return;
+    // Opening the list is the user gesture the browser needs for the local-fonts prompt.
+    void queryInstalledFontFamilies().then((result) => {
+      if (result.status !== "granted") return;
+      FONT_LIST_CACHE.families = result.families;
+      setSystemFamilies(result.families);
+    });
   };
 
-  const options = monospace ? installedFamilies.filter((f) => isMonospaceFamily(f)) : installedFamilies;
   const sizeOptions = Array.from({ length: sizeMax - sizeMin + 1 }, (_, i) => sizeMin + i).map((px) => ({
     value: String(px),
     label: `${px} px`,
@@ -875,50 +883,14 @@ function FontRow({
       reset={changed ? onReset : null}
       control={
         <div className="flex w-full items-center gap-2 sm:w-96">
-          <Input
+          <Select<string>
             aria-label={`${label} family`}
-            aria-invalid={rejected || undefined}
-            autoCapitalize="off"
-            autoComplete="off"
-            maxLength={200}
-            spellCheck={false}
-            placeholder={placeholder}
-            list={listId}
-            value={draft}
-            onFocus={() => {
-              if (FONT_LIST_CACHE.families !== null) return;
-              void queryInstalledFontFamilies().then((result) => {
-                if (result.status !== "granted") return;
-                FONT_LIST_CACHE.families = result.families;
-                setInstalledFamilies(result.families);
-              });
-            }}
-            onChange={(event) => {
-              const next = event.currentTarget.value;
-              setDraft(next);
-              setRejected(false);
-              cancelPending();
-              timer.current = window.setTimeout(() => commit(next), 400);
-            }}
-            onBlur={() => commit(draft)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") commit(draft);
-              if (event.key === "Escape") {
-                // Discard typing without letting Escape close the settings page.
-                event.preventDefault();
-                event.stopPropagation();
-                cancelPending();
-                setDraft(family);
-                setRejected(false);
-              }
-            }}
-            className="min-w-0 flex-1"
+            className="h-8 min-w-0 flex-1"
+            value={family}
+            options={options}
+            onValueChange={onFamilyChange}
+            onOpenChange={openSystemFonts}
           />
-          <datalist id={listId}>
-            {options.map((f) => (
-              <option key={f} value={f} />
-            ))}
-          </datalist>
           <Select<string>
             aria-label={`${label} size`}
             className="w-24 shrink-0"
@@ -935,15 +907,94 @@ function FontRow({
   );
 }
 
+function InstalledFontsRow() {
+  const fonts = useInstalledFonts((state) => state.fonts);
+  const s = useAppearance();
+  const update = useAppearance((state) => state.update);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const install = async (file: File) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await installFont(file);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not install the font.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (font: InstalledFont) => {
+    // Settings that still point at the removed family fall back to their defaults.
+    const patch: Partial<Pick<AppearanceSettings, "fontFamilySans" | "fontFamilyComposer" | "fontFamilyCode">> = {};
+    if (s.fontFamilySans === font.family) patch.fontFamilySans = "";
+    if (s.fontFamilyComposer === font.family) patch.fontFamilyComposer = "";
+    if (s.fontFamilyCode === font.family) patch.fontFamilyCode = "";
+    if (Object.keys(patch).length > 0) update(patch);
+    setError(null);
+    try {
+      await removeFont(font.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not remove the font.");
+    }
+  };
+
+  return (
+    <SettingsRow
+      label="Installed fonts"
+      description="Font files you upload. They sync with your account. WOFF, WOFF2, TTF, or OTF, up to 15 MB."
+      control={
+        <div className="flex w-full flex-col gap-2 sm:w-96">
+          <div className="flex justify-end">
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => fileInput.current?.click()}>
+              <UploadIcon />
+              {busy ? "Installing" : "Install font"}
+            </Button>
+            <input
+              ref={fileInput}
+              type="file"
+              accept={FONT_FILE_ACCEPT}
+              className="hidden"
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = "";
+                if (file) void install(file);
+              }}
+            />
+          </div>
+          {fonts.length > 0 && (
+            <ul className="divide-y rounded-lg border">
+              {fonts.map((font) => (
+                <li key={font.id} className="flex items-center justify-between gap-2 px-2.5 py-1 text-sm">
+                  <span className="truncate" style={{ fontFamily: cssFontFamilies(font.family) ?? undefined }}>
+                    {font.family}
+                  </span>
+                  <Button variant="ghost" size="icon" aria-label={`Remove ${font.family}`} onClick={() => void remove(font)}>
+                    <Trash2Icon />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {error && (
+            <p role="alert" className="text-destructive text-xs">
+              {error}
+            </p>
+          )}
+        </div>
+      }
+    />
+  );
+}
+
 function TypographySection() {
   const s = useAppearance();
   const update = useAppearance((state) => state.update);
   const reset = useAppearance((state) => state.reset);
-  const [defaults] = useState(() => ({
-    sans: resolveDefaultFamilyLabel(DEFAULT_SANS_FONT_STACK) ?? "System default",
-    code: resolveDefaultFamilyLabel(DEFAULT_CODE_FONT_STACK) ?? "System monospace",
-  }));
-  const interfaceLabel = s.fontFamilySans.trim() || defaults.sans;
+  const interfaceLabel = s.fontFamilySans.trim() || DEFAULT_SANS_FONT_LABEL;
   // Font smoothing only changes rendering on macOS (T3Code shows the row there only).
   const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -965,7 +1016,7 @@ function TypographySection() {
         label="Interface font"
         description="Everything outside code blocks."
         family={s.fontFamilySans}
-        placeholder={defaults.sans}
+        defaultLabel={DEFAULT_SANS_FONT_LABEL}
         size={s.fontSizeInterface}
         sizeMin={MIN_INTERFACE_FONT_SIZE}
         sizeMax={MAX_INTERFACE_FONT_SIZE}
@@ -980,7 +1031,7 @@ function TypographySection() {
             label="Prompt font"
             description="Only the box you write prompts in. Mono works well here."
             family={s.fontFamilyComposer}
-            placeholder={interfaceLabel}
+            defaultLabel={interfaceLabel}
             size={s.fontSizePrompt}
             sizeMin={MIN_PROMPT_FONT_SIZE}
             sizeMax={MAX_PROMPT_FONT_SIZE}
@@ -995,7 +1046,7 @@ function TypographySection() {
         label={s.typographyAdvanced ? "Code font" : "Monospace font"}
         description="Code blocks and file previews."
         family={s.fontFamilyCode}
-        placeholder={defaults.code}
+        defaultLabel="System monospace"
         monospace
         size={s.fontSizeCode}
         sizeMin={MIN_CODE_FONT_SIZE}
@@ -1027,6 +1078,7 @@ function TypographySection() {
         reset={s.wordWrap !== DEFAULT_APPEARANCE.wordWrap ? () => reset("wordWrap") : null}
         control={<Switch aria-label="Word wrap in code blocks" checked={s.wordWrap} onCheckedChange={(checked) => update({ wordWrap: Boolean(checked) })} />}
       />
+      <InstalledFontsRow />
     </SettingsSection>
   );
 }

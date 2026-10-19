@@ -14,6 +14,7 @@ export function Select<T extends string>({
   options,
   className,
   placeholder,
+  onOpenChange,
   "aria-label": ariaLabel,
 }: {
   value: T | null;
@@ -21,11 +22,16 @@ export function Select<T extends string>({
   options: Array<SelectOption<T>>;
   className?: string;
   placeholder?: string;
+  onOpenChange?: (open: boolean) => void;
   "aria-label"?: string;
 }) {
   const current = options.find((o) => o.value === value);
   return (
-    <SelectPrimitive.Root value={value} onValueChange={(v) => v !== null && onValueChange(v as T)}>
+    <SelectPrimitive.Root
+      value={value}
+      onValueChange={(v) => v !== null && onValueChange(v as T)}
+      onOpenChange={onOpenChange}
+    >
       <SelectPrimitive.Trigger
         aria-label={ariaLabel}
         className={cn(

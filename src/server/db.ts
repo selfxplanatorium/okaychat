@@ -191,6 +191,18 @@ const migrations: string[] = [
     value TEXT NOT NULL
   );
   `,
+  `
+  CREATE TABLE user_fonts (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    family TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    data BLOB NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE (user_id, family)
+  );
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
