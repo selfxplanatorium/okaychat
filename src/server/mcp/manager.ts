@@ -20,6 +20,19 @@ interface RawTool {
   name: string;
   description?: string;
   inputSchema: Record<string, unknown>;
+  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean };
+}
+
+/**
+ * MCP's own defaults treat an unannotated tool as possibly destructive, which would prompt for nearly every
+ * tool. We ask only when the server says so: `destructiveHint: true`, or `readOnlyHint: false` without
+ * `destructiveHint: false`.
+ */
+function needsApproval(server: McpServerRecord, tool: RawTool): boolean {
+  const policy = server.config.approval ?? "destructive";
+  if (policy !== "destructive") return policy === "always";
+  const a = tool.annotations;
+  return a?.destructiveHint === true || (a?.readOnlyHint === false && a.destructiveHint !== false);
 }
 
 interface Entry {
@@ -237,6 +250,7 @@ function toolInfos(server: McpServerRecord, entry: Entry): McpToolInfo[] {
     exposedName: exposedToolName(server.name, t.name),
     description: t.description,
     enabled: !server.disabledTools.includes(t.name),
+    needsApproval: needsApproval(server, t),
   }));
 }
 
@@ -309,6 +323,7 @@ export async function toolsForUser(userId: string): Promise<McpToolBundle> {
       tools[exposedToolName(server.name, raw.name)] = dynamicTool({
         description: raw.description ?? `${raw.name} (${server.name})`,
         inputSchema: jsonSchema(raw.inputSchema ?? { type: "object", properties: {} }),
+        needsApproval: needsApproval(server, raw),
         execute: (args, { abortSignal }) => callTool(server, raw.name, args as Record<string, unknown>, abortSignal),
       });
     }

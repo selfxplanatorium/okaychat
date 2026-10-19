@@ -34,6 +34,7 @@ const mcpInput = z.object({
     args: z.array(z.string()).optional(),
     env: z.record(z.string(), z.string()).optional(),
     timeoutMs: z.number().int().min(1000).max(3_600_000).optional(),
+    approval: z.enum(["destructive", "always", "never"]).optional(),
   }),
 });
 

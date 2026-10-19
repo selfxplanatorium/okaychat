@@ -134,7 +134,12 @@ export interface McpServerConfig {
   env?: Record<string, string>;
   /** Per tool call timeout. */
   timeoutMs?: number;
+  /** When to ask the user before a tool runs. Default `destructive`. */
+  approval?: McpApproval;
 }
+
+/** `destructive`: tools that declare `destructiveHint` (or are not read-only with no hint either way). */
+export type McpApproval = "destructive" | "always" | "never";
 
 export type McpStatus = "disabled" | "idle" | "connecting" | "connected" | "error" | "needs-auth";
 
@@ -144,6 +149,8 @@ export interface McpToolInfo {
   exposedName: string;
   description?: string;
   enabled: boolean;
+  /** Asks for approval under the server's current policy. */
+  needsApproval: boolean;
 }
 
 export interface McpServerInfo {

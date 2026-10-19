@@ -1,6 +1,6 @@
 import { ChevronRightIcon, KeyRoundIcon, Loader2Icon, PencilIcon, PlusIcon, RefreshCwIcon, TrashIcon } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { McpServerConfig, McpServerInfo, McpTransport } from "@shared/types";
+import type { McpApproval, McpServerConfig, McpServerInfo, McpTransport } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -51,6 +51,7 @@ function ServerForm({ initial, onDone }: { initial?: ServerView; onDone: () => v
   const [command, setCommand] = useState([initial?.config.command, ...(initial?.config.args ?? [])].filter(Boolean).join(" "));
   const [env, setEnv] = useState(toLines(initial?.config.env));
   const [timeout, setTimeoutSec] = useState(String((initial?.config.timeoutMs ?? 120_000) / 1000));
+  const [approval, setApproval] = useState<McpApproval>(initial?.config.approval ?? "destructive");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,8 +61,8 @@ function ServerForm({ initial, onDone }: { initial?: ServerView; onDone: () => v
     const [cmd, ...args] = command.trim().split(/\s+/);
     const config: McpServerConfig =
       transport === "stdio"
-        ? { command: cmd, args, env: fromLines(env, "="), timeoutMs: Number(timeout) * 1000 }
-        : { url, headers: fromLines(headers, ":"), timeoutMs: Number(timeout) * 1000 };
+        ? { command: cmd, args, env: fromLines(env, "="), timeoutMs: Number(timeout) * 1000, approval }
+        : { url, headers: fromLines(headers, ":"), timeoutMs: Number(timeout) * 1000, approval };
     try {
       const body = { name, transport, enabled: initial?.enabled ?? true, config };
       if (initial) await api(`/mcp/${initial.id}`, { method: "PUT", json: body });
@@ -118,6 +119,20 @@ function ServerForm({ initial, onDone }: { initial?: ServerView; onDone: () => v
         Tool timeout
         <Input className="h-7 w-20" type="number" min={1} max={3600} value={timeout} onChange={(e) => setTimeoutSec(e.target.value)} />
         seconds
+      </label>
+      <label className="text-muted-foreground flex items-center gap-2 text-xs">
+        Ask before running
+        <Select
+          className="h-7 w-auto"
+          value={approval}
+          onValueChange={setApproval}
+          aria-label="Approval"
+          options={[
+            { value: "destructive", label: "Tools marked destructive" },
+            { value: "always", label: "Every tool" },
+            { value: "never", label: "Never" },
+          ]}
+        />
       </label>
       {error && <p className="text-error text-xs">{error}</p>}
       <div className="flex justify-end gap-2">
@@ -206,7 +221,10 @@ function ServerRow({ server }: { server: ServerView }) {
                 }}
               />
               <span className="min-w-0">
-                <span className="block font-mono text-xs">{tool.name}</span>
+                <span className="flex items-center gap-1.5 font-mono text-xs">
+                  {tool.name}
+                  {tool.needsApproval && <span className="bg-warning/12 text-warning rounded px-1 py-px font-sans text-[10px] font-medium">asks first</span>}
+                </span>
                 {tool.description && <span className="text-muted-foreground line-clamp-2 block text-xs">{tool.description}</span>}
               </span>
             </label>

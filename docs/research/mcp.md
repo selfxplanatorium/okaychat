@@ -418,3 +418,12 @@ Questions for the team:
 
 - Python MCP servers built on `mcp>=2.3` (Scrapling 0.5) answer `server/discover`, switch the connection to `2026-07-28`, and then reject the client's `initialize` fallback with JSON-RPC code `-32022` ("initialize handshake is not accepted"). Connecting with `protocolVersionDiscovery: false` works. `src/server/mcp/manager.ts` retries with discovery off when it sees this error.
 - DeepWiki (`https://mcp.deepwiki.com/mcp`, Streamable HTTP, no auth) connects, lists 3 tools, and executes `read_wiki_structure` through the manager.
+
+## Tool approvals
+
+Per-server policy in `config.approval` (Settings → MCP servers → edit): `destructive` (default), `always`, `never`.
+
+- `destructive` asks when a tool declares `annotations.destructiveHint: true`, or `readOnlyHint: false` without `destructiveHint: false`. MCP's spec defaults treat an unannotated tool as possibly destructive. Following that literally would prompt for almost every tool, so unannotated tools run without asking. Pick `always` for servers you do not trust.
+- The server sets AI SDK `needsApproval` on the `dynamicTool`. `streamText` stops with a `tool-approval-request`. The client shows Allow / Deny (assistant-ui `ToolFallback`), then `sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses` resends, and `streamText` runs or skips the call. Denied calls persist as `output-denied`.
+- The "N tool calls" group opens itself while a call waits for approval (`thread.aui.tsx`), or the prompt would be hidden.
+- MCP tools are `dynamic-tool` parts in UI messages, not `tool-<name>`.

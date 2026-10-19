@@ -12,7 +12,7 @@ import {
   type RemoteThreadListAdapter,
   type ThreadHistoryAdapter,
 } from "@assistant-ui/react";
-import { lastAssistantMessageIsCompleteWithToolCalls } from "ai";
+import { lastAssistantMessageIsCompleteWithApprovalResponses, lastAssistantMessageIsCompleteWithToolCalls } from "ai";
 import { createAssistantStream } from "assistant-stream";
 import { useEffect, useMemo, type ReactNode } from "react";
 import type { ThreadSummary } from "@shared/types";
@@ -173,8 +173,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       useChatRuntime({
         transport: new AssistantChatTransport({ api: "/api/chat", credentials: "same-origin" }),
         adapters: { attachments },
-        // Browser-executed tools (generative UI) add their output locally; this sends it back to finish the turn.
-        sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+        // Browser-executed tools (generative UI) and tool approvals resolve locally; this sends them back to finish the turn.
+        sendAutomaticallyWhen: (options) => lastAssistantMessageIsCompleteWithToolCalls(options) || lastAssistantMessageIsCompleteWithApprovalResponses(options),
       }),
     adapter: threadListAdapter,
   });

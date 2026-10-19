@@ -685,7 +685,8 @@ const AssistantMessage: FC = () => {
                   return <ToolGroup group={part}>{children}</ToolGroup>;
                 }
                 return (
-                  <ToolGroupRoot variant="ghost">
+                  // A call waiting for approval must be visible, so the group opens itself.
+                  <ToolGroupRoot variant="ghost" open={part.status.type === "requires-action" ? true : undefined}>
                     <ToolGroupTrigger
                       count={part.indices.length}
                       active={part.status.type === "running"}

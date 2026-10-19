@@ -12,6 +12,7 @@ Status as of 2026-10-19. Update this file when a feature ships or a plan changes
 | Model picker | Search, favorites, capability icons, context size, price, per-model reasoning effort | |
 | Files | Images (vision), PDF and DOCX (server text extraction), 60+ text/code formats | PDFs without a text layer get a clear note |
 | MCP | Streamable HTTP, SSE, stdio (admin only), OAuth with PKCE + dynamic registration, per-tool toggles, status, reconnect, timeouts, idle close | See `docs/research/mcp.md` |
+| Tool approvals | MCP tools marked destructive (or every tool, per server) wait for Allow / Deny in the thread | See `docs/research/mcp.md` |
 | Caching | Stable prompt prefix, Anthropic breakpoints, OpenAI `prompt_cache_key`, OpenCode session affinity headers | See `docs/research/prompt-caching.md` |
 | Usage | Per message (tokens, cache %, cost, time), per thread, dashboard by day/model/purpose, OpenCode Go 5 h/week/month spend | Cost uses models.dev prices incl. context tiers |
 | Context | Composer ring with fill %, auto-compact threshold marker, thread cost | |
@@ -25,7 +26,7 @@ Status as of 2026-10-19. Update this file when a feature ships or a plan changes
 
 ## Pass 2: next
 
-1. Agentic features: plan/act mode, sub-agents (delegate a task to another model), tool approval prompts for destructive MCP tools, scheduled prompts.
+1. Agentic features: plan/act mode, sub-agents (delegate a task to another model), scheduled prompts.
 2. Projects: per-project instructions, pinned files, and default model.
 3. Search across threads (SQLite FTS5).
 4. Sharing: read-only public link for a thread.
