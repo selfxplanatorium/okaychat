@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, BarChart3Icon, BlocksIcon, KeyRoundIcon, PaletteIcon, SlidersHorizontalIcon } from "lucide-react";
+import { ArrowLeftIcon, BarChart3Icon, BlocksIcon, CalendarClockIcon, KeyRoundIcon, PaletteIcon, SlidersHorizontalIcon } from "lucide-react";
 import type { ComponentType } from "react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
@@ -6,12 +6,14 @@ import { AppearanceSettings } from "./AppearanceSettings";
 import { GeneralSettings } from "./GeneralSettings";
 import { McpSettings } from "./McpSettings";
 import { ProvidersSettings } from "./ProvidersSettings";
+import { ScheduleSettings } from "./ScheduleSettings";
 import { UsageSettings } from "./UsageSettings";
 
 const SECTIONS: Array<{ id: string; label: string; icon: ComponentType<{ className?: string }>; component: ComponentType }> = [
   { id: "general", label: "General", icon: SlidersHorizontalIcon, component: GeneralSettings },
   { id: "providers", label: "Providers", icon: KeyRoundIcon, component: ProvidersSettings },
   { id: "mcp", label: "MCP servers", icon: BlocksIcon, component: McpSettings },
+  { id: "schedules", label: "Scheduled", icon: CalendarClockIcon, component: ScheduleSettings },
   { id: "usage", label: "Usage", icon: BarChart3Icon, component: UsageSettings },
   { id: "appearance", label: "Appearance", icon: PaletteIcon, component: AppearanceSettings },
 ];

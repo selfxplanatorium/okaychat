@@ -34,7 +34,8 @@ okaychat is a self-hosted AI chat app meant to replace LibreChat and Open WebUI.
 src/server/
   index.ts            Hono app, static files in production
   routes.ts           REST API (threads, providers, MCP, usage, settings)
-  chat.ts             /api/chat streaming, auto-compaction, titles
+  chat.ts             /api/chat and turnStream() (one turn, shared with schedules), auto-compaction, titles
+  schedules.ts        Scheduled prompts: next-run math, 30 s ticker, server-side runs
   artifacts.ts        Artifact tools, versions table, panel API
   codex.ts            Codex CLI login (device code) and per-run CODEX_HOME with encrypted credentials
   llm.ts              Model factory per wire format, cache breakpoints, OpenCode headers
@@ -95,7 +96,7 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 - Artifact frames have an opaque origin (no `allow-same-origin`), so `localStorage` throws. `frame.ts` injects in-memory storage before any artifact code runs.
 - Browser-executed tools need `sendAutomaticallyWhen` on `useChatRuntime`, or the turn stops after the first one. The server merges their schemas from the request body with `frontendTools`.
 - Tools can stream progress: an `async function*` execute yields preliminary outputs the UI renders live. `toModelOutput` controls what the model sees (sub-agents send only the report).
-- Messages are persisted by the client's history adapter, not by `/api/chat`. A chat sent with curl leaves the thread empty. Drive the UI to test persistence.
+- Messages are persisted by the client's history adapter, not by `/api/chat`. A chat sent with curl leaves the thread empty. Drive the UI to test persistence. Server-side writers (schedules) store `{ role, parts, metadata }` with format `ai-sdk/v6` and a `parent_id` chain; the current branch is the newest message and its ancestors.
 
 ## Commands
 

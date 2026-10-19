@@ -113,6 +113,24 @@ const migrations: string[] = [
     created_at INTEGER NOT NULL
   );
   `,
+  `
+  CREATE TABLE schedules (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    thread_id TEXT,
+    title TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    model_ref TEXT NOT NULL,
+    spec_json TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    next_run_at INTEGER,
+    last_run_at INTEGER,
+    last_status TEXT,
+    last_error TEXT,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX schedules_due ON schedules(enabled, next_run_at);
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

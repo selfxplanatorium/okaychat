@@ -56,133 +56,158 @@ function systemPrompt(userPrompt: string, mcpInstructions: string[], artifacts: 
   return parts.join("\n\n");
 }
 
+export interface TurnOptions {
+  userId: string;
+  threadId: string;
+  modelRef: string;
+  effort?: ReasoningEffort;
+  /** The branch being continued, oldest first, ending with the new user message. */
+  uiMessages: UIMessage[];
+  planMode?: boolean;
+  /** Browser-executed tools and their instructions. Absent for server-side runs. */
+  clientTools?: FrontendTools;
+  clientSystem?: string;
+  signal?: AbortSignal;
+}
+
+/** One assistant turn as a UI message stream. Used by /api/chat and by scheduled runs. */
+export async function turnStream(opts: TurnOptions) {
+  const { userId, threadId, modelRef, uiMessages, signal, planMode = false } = opts;
+  const user = { id: userId };
+  const settings = getSettings(userId);
+  const effort = (opts.effort ?? settings.reasoningEffort[modelRef]) as ReasoningEffort | undefined;
+  const { model, conn } = await resolveModel(userId, modelRef);
+  ensureThread(user.id, threadId);
+  updateThread(user.id, threadId, { modelRef });
+  const thread = getThread(user.id, threadId)!;
+
+  const stream = createUIMessageStream({
+    originalMessages: uiMessages,
+    onError: (error) => describeProviderError(error),
+    execute: async ({ writer }) => {
+      let compaction = thread.compaction;
+
+      // Auto-compact before the turn when the conversation no longer fits comfortably.
+      const threshold = settings.autoCompactAt;
+      const history = uiMessages.slice(0, -1);
+      if (threshold > 0 && history.length > 2 && currentContextTokens(applyCompaction(uiMessages, compaction).messages) > model.context * threshold) {
+        writer.write({ type: "data-compaction", data: { status: "running" }, transient: true });
+        compaction = await compact({ userId: user.id, threadId, messages: history, previous: compaction, model, conn });
+        setCompaction(user.id, threadId, compaction);
+        writer.write({ type: "data-compaction", data: { status: "done", boundaryMessageId: compaction.boundaryMessageId, tokensBefore: compaction.tokensBefore }, transient: true });
+      }
+
+      const mcp = model.toolCall ? await toolsForUser(user.id) : { tools: {}, readOnly: new Set<string>(), instructions: [], servers: [] };
+      // Built-in tools first, then MCP tools in sorted order, so the tool block is identical across turns.
+      const readOnlyTools = {
+        ...(model.toolCall && settings.webTools ? webTools() : {}),
+        // Sub-agents run unattended, so they get no tool that waits for approval.
+        ...Object.fromEntries(Object.entries(mcp.tools).filter(([, t]) => !t.needsApproval)),
+      };
+      const subagentModels = model.toolCall && settings.subagents ? await allowedSubagentModels(user.id, settings, model.ref) : [];
+      const useArtifacts = model.toolCall && settings.artifacts && !planMode;
+      const useGenerativeUI = model.toolCall && settings.generativeUI && !!opts.clientTools && !planMode;
+      const subagents = subagentModels.length
+        ? subagentTools({ userId: user.id, threadId, allowed: subagentModels, subTools: readOnlyTools, signal: signal })
+        : {};
+      // Plan mode keeps only tools that cannot change anything: web, sub-agents, and MCP tools marked read-only.
+      const tools = planMode
+        ? {
+            ...(model.toolCall && settings.webTools ? webTools() : {}),
+            ...subagents,
+            ...Object.fromEntries(Object.entries(mcp.tools).filter(([name]) => mcp.readOnly.has(name))),
+          }
+        : {
+            ...(model.toolCall && settings.webTools ? webTools() : {}),
+            ...subagents,
+            ...(useArtifacts ? artifactTools(threadId) : {}),
+            ...(model.toolCall && codexConnected(user.id) ? imageTools(user.id, threadId, signal) : {}),
+            ...(useGenerativeUI ? frontendTools(opts.clientTools!) : {}),
+            ...mcp.tools,
+          };
+      const { messages: live, summary } = applyCompaction(uiMessages, compaction);
+      const handle = createModel(model, conn, { affinity: threadId, effort });
+      const converted = await convertToModelMessages(live, { tools, ignoreIncompleteToolCalls: true });
+      const { system, messages } = handle.markCache(systemPrompt(settings.systemPrompt, mcp.instructions, useArtifacts, useGenerativeUI ? opts.clientSystem : undefined, planMode), [
+        ...(summary ? summaryMessages(summary) : []),
+        ...converted,
+      ]);
+
+      const startedAt = Date.now();
+      let total: TokenUsage = ZERO_USAGE;
+      let cost = 0;
+      let lastStep: LanguageModelUsage | undefined;
+
+      const result = streamText({
+        model: handle.model,
+        messages: system ? [system, ...messages] : messages,
+        allowSystemInMessages: true,
+        tools,
+        stopWhen: stepCountIs(settings.maxSteps),
+        providerOptions: handle.providerOptions,
+        maxOutputTokens: model.maxOutput,
+        abortSignal: signal,
+        onStepEnd: (step) => {
+          // Each step is its own request, so tier pricing applies per step.
+          const usage = normalizeUsage(step.usage);
+          total = addUsage(total, usage);
+          cost += costOf(model.cost, usage);
+          lastStep = step.usage;
+        },
+        onEnd: () => {
+          recordUsage({ userId: user.id, threadId, providerId: model.providerId, modelId: model.id, kind: "chat", usage: total, cost });
+        },
+      });
+
+      writer.merge(
+        result.toUIMessageStream({
+          sendReasoning: true,
+          sendSources: true,
+          onError: describeProviderError,
+          messageMetadata: ({ part }): AssistantMetadata | undefined => {
+            if (part.type === "start") return { modelRef, contextWindow: model.context, ...(planMode ? { mode: "plan" as const } : {}) };
+            if (part.type === "finish") {
+              return {
+                modelRef,
+                usage: total,
+                cost,
+                contextTokens: (lastStep?.inputTokens ?? 0) + (lastStep?.outputTokens ?? 0),
+                contextWindow: model.context,
+                durationMs: Date.now() - startedAt,
+                compacted: compaction !== thread.compaction,
+                ...(planMode ? { mode: "plan" as const } : {}),
+              };
+            }
+            return undefined;
+          },
+        }),
+      );
+    },
+  });
+  return stream;
+}
+
 export const chatRoutes = new Hono<AppEnv>()
   .post("/chat", async (c) => {
     const user = c.get("user");
     const parsed = chatBody.safeParse(await c.req.json());
     if (!parsed.success) return c.json({ error: "Pick a model before sending." }, 400);
-    const threadId = parsed.data.id;
-    const modelRef = parsed.data.config.modelName;
-    const uiMessages = parsed.data.messages as UIMessage[];
-    const settings = getSettings(user.id);
-    const effort = (parsed.data.config.reasoningEffort ?? settings.reasoningEffort[modelRef]) as ReasoningEffort | undefined;
-
-    let resolved;
     try {
-      resolved = await resolveModel(user.id, modelRef);
+      const stream = await turnStream({
+        userId: user.id,
+        threadId: parsed.data.id,
+        modelRef: parsed.data.config.modelName,
+        effort: parsed.data.config.reasoningEffort as ReasoningEffort | undefined,
+        uiMessages: parsed.data.messages as UIMessage[],
+        planMode: parsed.data.planMode === true,
+        clientTools: parsed.data.tools as FrontendTools | undefined,
+        clientSystem: parsed.data.system,
+        signal: c.req.raw.signal,
+      });
+      return createUIMessageStreamResponse({ stream });
     } catch (error) {
       return c.json({ error: (error as Error).message }, 400);
     }
-    const { model, conn } = resolved;
-    ensureThread(user.id, threadId);
-    updateThread(user.id, threadId, { modelRef });
-    const thread = getThread(user.id, threadId)!;
-
-    const stream = createUIMessageStream({
-      originalMessages: uiMessages,
-      onError: (error) => describeProviderError(error),
-      execute: async ({ writer }) => {
-        let compaction = thread.compaction;
-
-        // Auto-compact before the turn when the conversation no longer fits comfortably.
-        const threshold = settings.autoCompactAt;
-        const history = uiMessages.slice(0, -1);
-        if (threshold > 0 && history.length > 2 && currentContextTokens(applyCompaction(uiMessages, compaction).messages) > model.context * threshold) {
-          writer.write({ type: "data-compaction", data: { status: "running" }, transient: true });
-          compaction = await compact({ userId: user.id, threadId, messages: history, previous: compaction, model, conn });
-          setCompaction(user.id, threadId, compaction);
-          writer.write({ type: "data-compaction", data: { status: "done", boundaryMessageId: compaction.boundaryMessageId, tokensBefore: compaction.tokensBefore }, transient: true });
-        }
-
-        const mcp = model.toolCall ? await toolsForUser(user.id) : { tools: {}, readOnly: new Set<string>(), instructions: [], servers: [] };
-        // Built-in tools first, then MCP tools in sorted order, so the tool block is identical across turns.
-        const planMode = parsed.data.planMode === true;
-        const readOnlyTools = {
-          ...(model.toolCall && settings.webTools ? webTools() : {}),
-          // Sub-agents run unattended, so they get no tool that waits for approval.
-          ...Object.fromEntries(Object.entries(mcp.tools).filter(([, t]) => !t.needsApproval)),
-        };
-        const subagentModels = model.toolCall && settings.subagents ? await allowedSubagentModels(user.id, settings, model.ref) : [];
-        const useArtifacts = model.toolCall && settings.artifacts && !planMode;
-        const useGenerativeUI = model.toolCall && settings.generativeUI && !!parsed.data.tools && !planMode;
-        const subagents = subagentModels.length
-          ? subagentTools({ userId: user.id, threadId, allowed: subagentModels, subTools: readOnlyTools, signal: c.req.raw.signal })
-          : {};
-        // Plan mode keeps only tools that cannot change anything: web, sub-agents, and MCP tools marked read-only.
-        const tools = planMode
-          ? {
-              ...(model.toolCall && settings.webTools ? webTools() : {}),
-              ...subagents,
-              ...Object.fromEntries(Object.entries(mcp.tools).filter(([name]) => mcp.readOnly.has(name))),
-            }
-          : {
-              ...(model.toolCall && settings.webTools ? webTools() : {}),
-              ...subagents,
-              ...(useArtifacts ? artifactTools(threadId) : {}),
-              ...(model.toolCall && codexConnected(user.id) ? imageTools(user.id, threadId, c.req.raw.signal) : {}),
-              ...(useGenerativeUI ? frontendTools(parsed.data.tools as FrontendTools) : {}),
-              ...mcp.tools,
-            };
-        const { messages: live, summary } = applyCompaction(uiMessages, compaction);
-        const handle = createModel(model, conn, { affinity: threadId, effort });
-        const converted = await convertToModelMessages(live, { tools, ignoreIncompleteToolCalls: true });
-        const { system, messages } = handle.markCache(systemPrompt(settings.systemPrompt, mcp.instructions, useArtifacts, useGenerativeUI ? parsed.data.system : undefined, planMode), [
-          ...(summary ? summaryMessages(summary) : []),
-          ...converted,
-        ]);
-
-        const startedAt = Date.now();
-        let total: TokenUsage = ZERO_USAGE;
-        let cost = 0;
-        let lastStep: LanguageModelUsage | undefined;
-
-        const result = streamText({
-          model: handle.model,
-          messages: system ? [system, ...messages] : messages,
-          allowSystemInMessages: true,
-          tools,
-          stopWhen: stepCountIs(settings.maxSteps),
-          providerOptions: handle.providerOptions,
-          maxOutputTokens: model.maxOutput,
-          abortSignal: c.req.raw.signal,
-          onStepEnd: (step) => {
-            // Each step is its own request, so tier pricing applies per step.
-            const usage = normalizeUsage(step.usage);
-            total = addUsage(total, usage);
-            cost += costOf(model.cost, usage);
-            lastStep = step.usage;
-          },
-          onEnd: () => {
-            recordUsage({ userId: user.id, threadId, providerId: model.providerId, modelId: model.id, kind: "chat", usage: total, cost });
-          },
-        });
-
-        writer.merge(
-          result.toUIMessageStream({
-            sendReasoning: true,
-            sendSources: true,
-            onError: describeProviderError,
-            messageMetadata: ({ part }): AssistantMetadata | undefined => {
-              if (part.type === "start") return { modelRef, contextWindow: model.context, ...(planMode ? { mode: "plan" as const } : {}) };
-              if (part.type === "finish") {
-                return {
-                  modelRef,
-                  usage: total,
-                  cost,
-                  contextTokens: (lastStep?.inputTokens ?? 0) + (lastStep?.outputTokens ?? 0),
-                  contextWindow: model.context,
-                  durationMs: Date.now() - startedAt,
-                  compacted: compaction !== thread.compaction,
-                  ...(planMode ? { mode: "plan" as const } : {}),
-                };
-              }
-              return undefined;
-            },
-          }),
-        );
-      },
-    });
-    return createUIMessageStreamResponse({ stream });
   })
   .post("/threads/:id/compact", async (c) => {
     const user = c.get("user");

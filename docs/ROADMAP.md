@@ -15,6 +15,7 @@ Status as of 2026-10-19. Update this file when a feature ships or a plan changes
 | Tool approvals | MCP tools marked destructive (or every tool, per server) wait for Allow / Deny in the thread | See `docs/research/mcp.md` |
 | Sub-agents | `delegate_task` runs a self-contained task on an allowed model (default sub-agent model, utility model, chat model) with web and approval-free MCP tools. Progress streams into a card; only the report reaches the main context. Usage recorded as `subagent` | Toggle and default model in Settings → General |
 | Plan mode | Composer toggle. The server offers only web, sub-agent, and read-only MCP tools and asks for a numbered plan. "Execute plan" under the answer switches to act mode and runs it | Mode is per device. The mode instructions sit at the end of the system prompt |
+| Scheduled prompts | Settings → Scheduled: a prompt, model, and schedule (local time on chosen weekdays, or every N minutes). Runs on the server into the schedule's own chat, also with the browser closed. Run now, enable, edit | Server writes messages in the client's `ai-sdk/v6` history format. Tools that need approval wait until the chat is opened |
 | Caching | Stable prompt prefix, Anthropic breakpoints, OpenAI `prompt_cache_key`, OpenCode session affinity headers | See `docs/research/prompt-caching.md` |
 | Usage | Per message (tokens, cache %, cost, time), per thread, dashboard by day/model/purpose, OpenCode Go 5 h/week/month spend | Cost uses models.dev prices incl. context tiers |
 | Context | Composer ring with fill %, auto-compact threshold marker, thread cost | |
@@ -28,16 +29,15 @@ Status as of 2026-10-19. Update this file when a feature ships or a plan changes
 
 ## Pass 2: next
 
-1. Scheduled prompts: run a saved prompt in a thread on a schedule, server-side.
-2. Projects: per-project instructions, pinned files, and default model.
-3. Search across threads (SQLite FTS5).
-4. Sharing: read-only public link for a thread.
-5. Voice input (assistant-ui dictation adapter) and TTS.
-6. Native PDF input for models that support it (skip text extraction), image paste from clipboard.
-7. Admin page: users, sign-up toggle, server-wide provider keys.
-8. Resumable streams (survive reloads) using assistant-ui's resumable transport.
-9. Sync appearance settings to the server per user (now per device).
-10. Code-split the chat bundle (1.6 MB unminified main chunk: assistant-ui, Markdown, AI SDK client).
+1. Projects: per-project instructions, pinned files, and default model.
+2. Search across threads (SQLite FTS5).
+3. Sharing: read-only public link for a thread.
+4. Voice input (assistant-ui dictation adapter) and TTS.
+5. Native PDF input for models that support it (skip text extraction), image paste from clipboard.
+6. Admin page: users, sign-up toggle, server-wide provider keys.
+7. Resumable streams (survive reloads) using assistant-ui's resumable transport.
+8. Sync appearance settings to the server per user (now per device).
+9. Code-split the chat bundle (1.6 MB unminified main chunk: assistant-ui, Markdown, AI SDK client).
 
 ## Known gaps
 

@@ -215,3 +215,22 @@ export interface ArtifactToolResult {
   title: string;
   kind: ArtifactKind;
 }
+
+/** `daily`: at a local time on chosen weekdays (0 = Sunday). `interval`: every N minutes from the last run. */
+export type ScheduleSpec =
+  | { kind: "daily"; time: string; weekdays: number[]; timeZone: string }
+  | { kind: "interval"; minutes: number };
+
+export interface Schedule {
+  id: string;
+  threadId: string | null;
+  title: string;
+  prompt: string;
+  modelRef: string;
+  spec: ScheduleSpec;
+  enabled: boolean;
+  nextRunAt: number | null;
+  lastRunAt: number | null;
+  lastStatus: "ok" | "error" | "running" | null;
+  lastError: string | null;
+}
