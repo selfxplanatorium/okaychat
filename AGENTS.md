@@ -55,7 +55,7 @@ src/web/
   components/chat/    Composer controls, context meter, tool renderers
   components/artifacts Artifact card, side panel, sandboxed frame documents
   components/genui    Generative UI catalog (render_spec components) and widget toolkit
-  components/settings Settings pages
+  components/settings Settings pages; theme/ holds the T3Code theme library, editor panel, color picker, inspector
   components/share    Public share page and share button
   theme/              T3Code theme engine port (see its README); bundled-fonts.ts lists the shipped font families
   fonts/              Bundled Liberation TTFs and their CSS (see docs/research/bundled-fonts.md)

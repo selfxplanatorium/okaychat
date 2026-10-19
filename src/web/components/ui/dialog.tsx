@@ -56,7 +56,8 @@ function DialogContent({
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          "bg-popover text-popover-foreground ring-foreground/10 fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 scale-100 gap-4 rounded-xl p-5 text-sm ring-1 outline-none sm:max-w-sm",
+          // Glass surface (follows the Glass opacity setting) and spacing from T3Code's dialog.
+          "dialog-glass text-popover-foreground fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 scale-100 gap-5 rounded-xl border p-6 text-sm outline-none sm:max-w-lg",
           // Rises from just below its resting spot; the centering lives in the
           // same `translate` property so the two compose without extra wrappers.
           "transition-[opacity,translate,scale] duration-[var(--motion-base)] ease-out-expo",
@@ -129,7 +130,7 @@ function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
     <DialogPrimitive.Title
       data-slot="dialog-title"
       className={cn(
-        "cn-font-heading text-base leading-none font-medium",
+        "cn-font-heading text-xl leading-none font-semibold",
         className,
       )}
       {...props}

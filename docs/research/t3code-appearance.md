@@ -6,7 +6,7 @@ Source: T3Code (MIT, Copyright (c) 2026 T3 Tools Inc.), read from `/tmp/research
 - `apps/web/src/components/settings/ThemeSettings.tsx`: `ThemeLibrary`, `ThemeLibraryCard`, remove dialog
 - `apps/web/src/components/settings/ThemeImportDialog.tsx`, `ThemeEditorPanel.tsx`, `ThemePreviewCircles.tsx`, `ThemeWireframe.tsx`, `PanelAnimationsPreview.tsx`
 - Defaults and ranges: `packages/contracts/src/settings.ts`
-- Preview render specs: `packages/shared/src/themePreview.ts` (not ported yet)
+- Preview render specs: `packages/shared/src/themePreview.ts` (inlined in `theme/ThemePreviewCircles.tsx`)
 
 "Applies" means the setting makes sense in a chat app. Terminal, diff, branch strip, and environment settings do not apply.
 
@@ -160,10 +160,10 @@ Settings values (S6, S7, S11, S12, S13 to S18) live in T3Code's server or client
 
 ## okaychat implementation notes
 
-`src/web/components/settings/AppearanceSettings.tsx` rebuilds the panel with these deliberate differences:
+`src/web/components/settings/AppearanceSettings.tsx` rebuilds the panel. The theme library and editor are close ports in `src/web/components/settings/theme/`: preview circles, library cards (including collection cards with radial variants), the floating draggable and resizable editor panel (guided two-color mode, advanced grouped roles, merge by name), the HSV color picker, and the inspector. `ThemeEditorHost` is mounted by `ChatShell`, so the panel stays open across routes and the inspector works on the chat. Deliberate differences:
 
-- The theme editor is a dialog, not T3Code's resizable side panel. It edits seven key roles (accent, canvas, surface, text, sidebar, border, code background) with live preview. No inspect mode and no name field yet.
-- Theme cards show the wireframe plus per-mode swatches. T3Code's radial preview circles are not ported.
+- Environment themes are left out (okaychat has none).
+- The editor's appearance toggle is a plain segmented button pair (no `ToggleGroup` component here).
 - Font smoothing appears only in Advanced mode on macOS, as in T3Code.
 - okaychat replaces the T3Code text input with a list picker, so typed names are gone. Browsers without the Local Font Access API show only the default and uploaded fonts.
 - Default interface font is Golos Text, bundled with `@fontsource-variable/golos-text` (self-hosted, no Google request). Stored `""` means Golos Text. The picker also lists bundled Liberation, DejaVu, and Ubuntu faces, see `bundled-fonts.md`.

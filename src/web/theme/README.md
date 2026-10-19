@@ -36,6 +36,7 @@ DOM contract:
 - `--app-theme-*` inline on `<html>` (written by `applyThemePalette`).
 - `--appearance-contrast-*`, `--glass-opacity`, `--glass-blur`, `--font-sans`, `--font-mono`, `--font-composer`, `--font-size-prompt`, `--font-size-code`, `--diffs-font-size` inline on `<html>` (written by the apply functions).
 - `data-chat-width` on `<html>`.
+- `data-theme-ready` on `<html>` once the runtime has applied the theme. The boot `<style>` in `index.html` only paints `body` before it, so later theme changes are not overridden by load-time splash colors.
 
 Call order at mount, after the boot script (see below):
 

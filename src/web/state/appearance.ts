@@ -145,6 +145,9 @@ function applyTheme() {
   root.classList.toggle("dark", appearance === "dark");
   applyThemePalette(themeId, appearance);
   root.dataset.themeSelected = themeId ? "true" : "false";
+  // Replace the boot script's load-time splash colors with the live tokens.
+  root.style.backgroundColor = "var(--app-chrome-background)";
+  root.dataset.themeReady = "";
   const meta = document.querySelector('meta[name="theme-color"]');
   meta?.setAttribute("content", getComputedStyle(root).getPropertyValue("--background").trim() || (appearance === "dark" ? "#0a0a0a" : "#ffffff"));
 }

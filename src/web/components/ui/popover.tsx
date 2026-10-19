@@ -15,7 +15,7 @@ function PopoverContent({
 }: PopoverPrimitive.Popup.Props & Pick<PopoverPrimitive.Positioner.Props, "side" | "align" | "sideOffset">) {
   return (
     <PopoverPrimitive.Portal>
-      <PopoverPrimitive.Positioner side={side} align={align} sideOffset={sideOffset} className="isolate z-50">
+      <PopoverPrimitive.Positioner data-slot="popover-positioner" side={side} align={align} sideOffset={sideOffset} className="isolate z-50">
         <PopoverPrimitive.Popup
           className={cn(
             "dropdown-glass text-popover-foreground origin-(--transform-origin) rounded-xl border p-1.5 shadow-lg outline-none",

@@ -7,6 +7,7 @@ import { ChatView } from "@/components/chat/ChatView";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Onboarding } from "@/components/Onboarding";
 import { ShareButton } from "@/components/share/ShareButton";
+import { ThemeEditorHost } from "@/components/settings/theme/ThemeEditorHost";
 import { RuntimeProvider } from "@/runtime/RuntimeProvider";
 import { useData } from "@/state/data";
 import { loadInstalledFonts } from "@/state/fonts";
@@ -116,6 +117,7 @@ export function Shell() {
           {!location.startsWith("/settings") && <ArtifactPanel />}
         </div>
       </div>
+      <ThemeEditorHost />
     </RuntimeProvider>
   );
 }
