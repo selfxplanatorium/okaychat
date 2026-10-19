@@ -70,6 +70,11 @@ export function GeneralSettings() {
           description="Free, no keys. Lets models search the web and read pages, PDFs, and sites that block bots."
           control={<Switch checked={settings.webTools} onCheckedChange={(webTools) => update({ webTools })} aria-label="Web tools" />}
         />
+        <SettingsRow
+          label="Artifacts"
+          description="Lets models create pages, apps, diagrams, and documents that open in a side panel, with versions and download."
+          control={<Switch checked={settings.artifacts} onCheckedChange={(artifacts) => update({ artifacts })} aria-label="Artifacts" />}
+        />
       </SettingsSection>
 
       <SettingsSection title="Custom instructions" description="Added to the system prompt of every chat. Changing it resets the prompt cache once.">

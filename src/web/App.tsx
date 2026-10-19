@@ -2,6 +2,7 @@ import { PanelLeftIcon, SquarePenIcon } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { Route, Switch, useLocation } from "wouter";
 import { useAui } from "@assistant-ui/react";
+import { ArtifactPanel } from "@/components/artifacts/ArtifactPanel";
 import { AuthScreen } from "@/components/AuthScreen";
 import { ChatView } from "@/components/chat/ChatView";
 import { Sidebar } from "@/components/layout/Sidebar";
@@ -61,27 +62,30 @@ function Shell() {
       <div className="flex h-full">
         <Sidebar open={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} />
         {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => setSidebarOpen(false)} />}
-        <div className="relative flex min-w-0 flex-1 flex-col">
-          <Switch>
-            <Route path="/settings/:section">
-              {(p) => (
-                <Suspense fallback={null}>
-                  <SettingsLayout section={p.section} />
-                </Suspense>
-              )}
-            </Route>
-            <Route path="/settings">
-              {() => (
-                <Suspense fallback={null}>
-                  <SettingsLayout section="general" />
-                </Suspense>
-              )}
-            </Route>
-            <Route>
-              <ChatHeader sidebarOpen={sidebarOpen} onToggle={() => setSidebarOpen(true)} />
-              <ChatView />
-            </Route>
-          </Switch>
+        <div className="relative flex min-w-0 flex-1">
+          <div className="relative flex min-w-0 flex-1 flex-col">
+            <Switch>
+              <Route path="/settings/:section">
+                {(p) => (
+                  <Suspense fallback={null}>
+                    <SettingsLayout section={p.section} />
+                  </Suspense>
+                )}
+              </Route>
+              <Route path="/settings">
+                {() => (
+                  <Suspense fallback={null}>
+                    <SettingsLayout section="general" />
+                  </Suspense>
+                )}
+              </Route>
+              <Route>
+                <ChatHeader sidebarOpen={sidebarOpen} onToggle={() => setSidebarOpen(true)} />
+                <ChatView />
+              </Route>
+            </Switch>
+          </div>
+          {!location.startsWith("/settings") && <ArtifactPanel />}
         </div>
       </div>
     </RuntimeProvider>

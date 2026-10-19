@@ -1,6 +1,7 @@
 import { defineToolkit } from "@assistant-ui/react";
-import { ChevronDownIcon, FileTextIcon, GlobeIcon, Loader2Icon, SearchIcon, TriangleAlertIcon } from "lucide-react";
+import { BookOpenIcon, ChevronDownIcon, FileTextIcon, GlobeIcon, Loader2Icon, SearchIcon, TriangleAlertIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
+import { ArtifactCard } from "@/components/artifacts/ArtifactCard";
 import { cn } from "@/lib/utils";
 
 type SearchResult = { title: string; url: string; snippet: string };
@@ -34,7 +35,7 @@ function ToolShell({ icon, label, running, error, children }: { icon: ReactNode;
   );
 }
 
-export const webToolkit = defineToolkit({
+export const toolkit = defineToolkit({
   web_search: {
     type: "backend",
     render: ({ args, result, status }) => {
@@ -88,5 +89,19 @@ export const webToolkit = defineToolkit({
         </ToolShell>
       );
     },
+  },
+  create_artifact: {
+    type: "backend",
+    render: ({ args, result, status }) => <ArtifactCard args={args} result={result} status={status} action="create" />,
+  },
+  update_artifact: {
+    type: "backend",
+    render: ({ args, result, status }) => <ArtifactCard args={args} result={result} status={status} action="update" />,
+  },
+  read_artifact: {
+    type: "backend",
+    render: ({ args, status }) => (
+      <ToolShell icon={<BookOpenIcon className="size-4" />} running={status?.type === "running"} label={`Read artifact ${(args as { id?: string })?.id ?? ""}`} />
+    ),
   },
 });

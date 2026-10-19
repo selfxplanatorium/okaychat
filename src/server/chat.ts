@@ -12,6 +12,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AssistantMetadata, ReasoningEffort, TokenUsage } from "../shared/types.js";
 import type { AppEnv } from "./auth.js";
+import { ARTIFACT_INSTRUCTIONS, artifactTools } from "./artifacts.js";
 import { resolveModel } from "./catalog/providers.js";
 import { applyCompaction, compact, currentContextTokens, summaryMessages } from "./compaction.js";
 import { createModel } from "./llm.js";
@@ -32,9 +33,10 @@ const chatBody = z.object({
   config: z.object({ modelName: z.string().min(3), reasoningEffort: z.string().optional() }).loose(),
 });
 
-function systemPrompt(userPrompt: string, mcpInstructions: string[]): string {
+function systemPrompt(userPrompt: string, mcpInstructions: string[], artifacts: boolean): string {
   // Order matters for caching: static text first, nothing that changes per request.
   const parts = [BASE_SYSTEM, `Today's date: ${new Date().toISOString().slice(0, 10)}.`];
+  if (artifacts) parts.push(ARTIFACT_INSTRUCTIONS);
   if (userPrompt.trim()) parts.push(`# User instructions\n${userPrompt.trim()}`);
   if (mcpInstructions.length) parts.push(`# Tool server instructions\n${mcpInstructions.join("\n\n")}`);
   return parts.join("\n\n");
@@ -80,11 +82,16 @@ export const chatRoutes = new Hono<AppEnv>()
 
         const mcp = model.toolCall ? await toolsForUser(user.id) : { tools: {}, instructions: [], servers: [] };
         // Built-in tools first, then MCP tools in sorted order, so the tool block is identical across turns.
-        const tools = model.toolCall && settings.webTools ? { ...webTools(), ...mcp.tools } : mcp.tools;
+        const useArtifacts = model.toolCall && settings.artifacts;
+        const tools = {
+          ...(model.toolCall && settings.webTools ? webTools() : {}),
+          ...(useArtifacts ? artifactTools(threadId) : {}),
+          ...mcp.tools,
+        };
         const { messages: live, summary } = applyCompaction(uiMessages, compaction);
         const handle = createModel(model, conn, { affinity: threadId, effort });
         const converted = await convertToModelMessages(live, { tools, ignoreIncompleteToolCalls: true });
-        const { system, messages } = handle.markCache(systemPrompt(settings.systemPrompt, mcp.instructions), [
+        const { system, messages } = handle.markCache(systemPrompt(settings.systemPrompt, mcp.instructions, useArtifacts), [
           ...(summary ? summaryMessages(summary) : []),
           ...converted,
         ]);

@@ -111,6 +111,9 @@ const messageGroupBy = groupPartByType({
   reasoning: ["group-chainOfThought", "group-reasoning"],
   "tool-call": ["group-chainOfThought", "group-tool"],
   "standalone-tool-call": [],
+  // Artifact cards stay visible so they can be clicked and auto-open the panel.
+  "tool-call:create_artifact": [],
+  "tool-call:update_artifact": [],
 });
 
 type ThreadGroupKey =

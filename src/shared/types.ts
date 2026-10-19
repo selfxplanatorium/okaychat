@@ -70,6 +70,8 @@ export interface UserSettings {
   maxSteps: number;
   /** Built-in web_search and web_fetch tools. */
   webTools: boolean;
+  /** Built-in artifact tools: documents and apps shown in a side panel. */
+  artifacts: boolean;
 }
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
@@ -79,6 +81,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   autoCompactAt: 0.8,
   maxSteps: 20,
   webTools: true,
+  artifacts: true,
 };
 
 export interface TokenUsage {
@@ -173,4 +176,25 @@ export interface Me {
   email: string;
   name: string;
   role: "admin" | "user";
+}
+
+export type ArtifactKind = "html" | "react" | "svg" | "markdown" | "code";
+
+export interface ArtifactVersion {
+  id: string;
+  version: number;
+  title: string;
+  kind: ArtifactKind;
+  /** Language of `code` artifacts. */
+  language: string | null;
+  content: string;
+  createdAt: number;
+}
+
+/** What the artifact tools return to the model and the UI. Content stays out to save tokens. */
+export interface ArtifactToolResult {
+  id: string;
+  version: number;
+  title: string;
+  kind: ArtifactKind;
 }

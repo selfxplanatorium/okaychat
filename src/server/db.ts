@@ -84,6 +84,19 @@ const migrations: string[] = [
     UNIQUE (user_id, name)
   );
   `,
+  `
+  CREATE TABLE artifacts (
+    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    language TEXT,
+    content TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (thread_id, id, version)
+  );
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

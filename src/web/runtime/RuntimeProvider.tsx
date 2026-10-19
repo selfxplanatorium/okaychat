@@ -16,7 +16,7 @@ import { createAssistantStream } from "assistant-stream";
 import { useEffect, useMemo, type ReactNode } from "react";
 import type { ThreadSummary } from "@shared/types";
 import { api } from "@/lib/api";
-import { webToolkit } from "@/components/chat/tool-ui";
+import { toolkit } from "@/components/chat/tool-ui";
 import { useActiveModel, useData } from "@/state/data";
 
 const CODE_EXTENSIONS =
@@ -174,7 +174,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       }),
     adapter: threadListAdapter,
   });
-  const config = AuiConfig({ tools: Tools({ toolkit: webToolkit }) });
+  const config = AuiConfig({ tools: Tools({ toolkit }) });
   return (
     <AssistantRuntimeProvider runtime={runtime} config={config}>
       <ModelContextBridge />

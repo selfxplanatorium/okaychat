@@ -34,6 +34,7 @@ src/server/
   index.ts            Hono app, static files in production
   routes.ts           REST API (threads, providers, MCP, usage, settings)
   chat.ts             /api/chat streaming, auto-compaction, titles
+  artifacts.ts        Artifact tools, versions table, panel API
   llm.ts              Model factory per wire format, cache breakpoints, OpenCode headers
   catalog/            models.dev catalog + provider connections (encrypted keys)
   mcp/                MCP connection manager, OAuth provider, storage
@@ -43,6 +44,7 @@ src/web/
   App.tsx             Auth gate, onboarding, shell, routes (wouter)
   runtime/            assistant-ui runtime: thread list, history, attachments, model context
   components/chat/    Composer controls, context meter, tool renderers
+  components/artifacts Artifact card, side panel, sandboxed frame documents
   components/settings Settings pages
   theme/              T3Code theme engine port (see its README)
   state/              zustand stores (data, appearance, thread meta)
@@ -84,6 +86,9 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 - OpenCode Go ids missing from models.dev inherit the wire format of a sibling in the same family (`qwen3.6-plus` uses Anthropic like `qwen3.8-max`).
 - DuckDuckGo HTML endpoints return 202 (bot wall) from many servers and Bing serves junk to scrapers. Search goes SearXNG, then Brave HTML, then DuckDuckGo lite.
 - Context fill uses the last step's input + output tokens, not the turn total.
+- Tool calls collapse into a "N tool calls" group by default. Tools whose card must stay visible get a `"tool-call:<name>": []` entry in `messageGroupBy` (`thread.aui.tsx`).
+- Artifact frames have an opaque origin (no `allow-same-origin`), so `localStorage` throws. `frame.ts` injects in-memory storage before any artifact code runs.
+- Messages are persisted by the client's history adapter, not by `/api/chat`. A chat sent with curl leaves the thread empty. Drive the UI to test persistence.
 
 ## Commands
 
