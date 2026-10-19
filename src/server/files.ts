@@ -3,11 +3,11 @@ import mammoth from "mammoth";
 import { extractText, getDocumentProxy } from "unpdf";
 import type { AppEnv } from "./auth.js";
 
-const MAX_BYTES = 25 * 1024 * 1024;
+export const MAX_BYTES = 25 * 1024 * 1024;
 // Keep huge documents from blowing the context window in one attachment.
 const MAX_CHARS = 400_000;
 
-async function extract(name: string, type: string, data: Uint8Array): Promise<{ text: string; pages?: number }> {
+export async function extract(name: string, type: string, data: Uint8Array): Promise<{ text: string; pages?: number }> {
   const lower = name.toLowerCase();
   if (type === "application/pdf" || lower.endsWith(".pdf")) {
     const pdf = await getDocumentProxy(data);

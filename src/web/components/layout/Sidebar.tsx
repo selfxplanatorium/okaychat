@@ -2,6 +2,7 @@ import { LogOutIcon, PanelLeftIcon, SettingsIcon } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { ThreadList } from "@/components/assistant-ui/elements/thread-list.aui";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
+import { ProjectSwitcher } from "./ProjectSwitcher";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
@@ -35,6 +36,7 @@ export function Sidebar({ open, onToggle }: { open: boolean; onToggle: () => voi
           <PanelLeftIcon className="size-4" />
         </button>
       </div>
+      <ProjectSwitcher />
       <div className="min-h-0 flex-1 overflow-y-auto px-2" onClick={() => location !== "/" && navigate("/")}>
         <ThreadList />
       </div>

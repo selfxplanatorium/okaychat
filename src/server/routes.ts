@@ -8,6 +8,7 @@ import { deleteConnection, listModels, listProviders, saveConnection } from "./c
 import { artifactRoutes } from "./artifacts.js";
 import { chatRoutes } from "./chat.js";
 import { fileRoutes } from "./files.js";
+import { getProject, projectRoutes } from "./projects.js";
 import { scheduleRoutes } from "./schedules.js";
 import { deleteThreadImages, imageRoutes } from "./tools/image.js";
 import { callbackUrl, disconnectServer, serverInfo, testServer } from "./mcp/manager.js";
@@ -66,10 +67,16 @@ const api = new Hono<AppEnv>()
   .get("/models", async (c) => c.json(await listModels(c.get("user").id)))
 
   // Threads and history (assistant-ui ThreadHistoryAdapter rows)
-  .get("/threads", (c) => c.json(listThreads(c.get("user").id)))
+  .get("/threads", (c) => {
+    const project = c.req.query("project");
+    return c.json(listThreads(c.get("user").id, project === undefined ? undefined : project === "none" ? null : project));
+  })
   .post("/threads", async (c) => {
-    const { id } = (await c.req.json()) as { id?: string };
-    return c.json(ensureThread(c.get("user").id, id ?? newId("thr")));
+    const user = c.get("user");
+    const { id, projectId } = (await c.req.json()) as { id?: string; projectId?: string | null };
+    // A project id from the client must belong to the user, or the thread would read another user's files.
+    const project = projectId && getProject(user.id, projectId) ? projectId : null;
+    return c.json(ensureThread(user.id, id ?? newId("thr"), project));
   })
   .get("/threads/:id", (c) => {
     const thread = getThread(c.get("user").id, c.req.param("id"));
@@ -147,7 +154,8 @@ const api = new Hono<AppEnv>()
   .route("/", fileRoutes)
   .route("/", artifactRoutes)
   .route("/", imageRoutes)
-  .route("/", scheduleRoutes);
+  .route("/", scheduleRoutes)
+  .route("/", projectRoutes);
 
 /** OAuth redirect target. Not behind requireUser: the state parameter identifies the user and server. */
 export const mcpOAuthCallback = new Hono().get("/", async (c) => {

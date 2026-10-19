@@ -127,6 +127,7 @@ export interface ThreadSummary {
   title: string | null;
   status: "regular" | "archived";
   modelRef: string | null;
+  projectId: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -233,4 +234,20 @@ export interface Schedule {
   lastRunAt: number | null;
   lastStatus: "ok" | "error" | "running" | null;
   lastError: string | null;
+}
+
+export interface ProjectFile {
+  id: string;
+  name: string;
+  chars: number;
+  createdAt: number;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  instructions: string;
+  defaultModel: string | null;
+  files: ProjectFile[];
+  createdAt: number;
 }

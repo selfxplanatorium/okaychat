@@ -70,7 +70,8 @@ const attachments = new CompositeAttachmentAdapter([
 
 const threadListAdapter: RemoteThreadListAdapter = {
   async list() {
-    const threads = await api<ThreadSummary[]>("/threads");
+    const project = useData.getState().activeProject;
+    const threads = await api<ThreadSummary[]>(project ? `/threads?project=${encodeURIComponent(project)}` : "/threads");
     return {
       threads: threads.map((t) => ({
         remoteId: t.id,
@@ -80,7 +81,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
     };
   },
   async initialize() {
-    const thread = await api<ThreadSummary>("/threads", { method: "POST", json: {} });
+    const thread = await api<ThreadSummary>("/threads", { method: "POST", json: { projectId: useData.getState().activeProject } });
     return { remoteId: thread.id, externalId: undefined };
   },
   async rename(remoteId, title) {

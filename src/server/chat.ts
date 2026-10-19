@@ -22,6 +22,7 @@ import { toolsForUser } from "./mcp/manager.js";
 import { imageTools } from "./tools/image.js";
 import { subagentTools } from "./tools/subagent.js";
 import { webTools } from "./tools/web.js";
+import { projectContext } from "./projects.js";
 import { getSettings } from "./settings.js";
 import { ensureThread, getThread, setCompaction, updateThread } from "./threads.js";
 import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "./usage.js";
@@ -44,11 +45,12 @@ const chatBody = z.object({
 const PLAN_INSTRUCTIONS = `# Plan mode
 The user wants a plan before anything changes. Investigate with the read-only tools you have, ask about anything that blocks a good plan, then reply with a numbered plan: the steps, what each changes, and open questions. Do not carry out the plan. The user switches to act mode to run it.`;
 
-function systemPrompt(userPrompt: string, mcpInstructions: string[], artifacts: boolean, clientSystem?: string, planMode?: boolean): string {
+function systemPrompt(userPrompt: string, project: string, mcpInstructions: string[], artifacts: boolean, clientSystem?: string, planMode?: boolean): string {
   // Order matters for caching: static text first, nothing that changes per request.
   const parts = [BASE_SYSTEM, `Today's date: ${new Date().toISOString().slice(0, 10)}.`];
   if (artifacts) parts.push(ARTIFACT_INSTRUCTIONS);
   if (userPrompt.trim()) parts.push(`# User instructions\n${userPrompt.trim()}`);
+  if (project) parts.push(project);
   if (mcpInstructions.length) parts.push(`# Tool server instructions\n${mcpInstructions.join("\n\n")}`);
   // Last: these change per turn (UI interactions, mode toggle) and should not invalidate the rest.
   if (clientSystem?.trim()) parts.push(clientSystem.trim());
@@ -128,7 +130,7 @@ export async function turnStream(opts: TurnOptions) {
       const { messages: live, summary } = applyCompaction(uiMessages, compaction);
       const handle = createModel(model, conn, { affinity: threadId, effort });
       const converted = await convertToModelMessages(live, { tools, ignoreIncompleteToolCalls: true });
-      const { system, messages } = handle.markCache(systemPrompt(settings.systemPrompt, mcp.instructions, useArtifacts, useGenerativeUI ? opts.clientSystem : undefined, planMode), [
+      const { system, messages } = handle.markCache(systemPrompt(settings.systemPrompt, projectContext(userId, thread.projectId), mcp.instructions, useArtifacts, useGenerativeUI ? opts.clientSystem : undefined, planMode), [
         ...(summary ? summaryMessages(summary) : []),
         ...converted,
       ]);

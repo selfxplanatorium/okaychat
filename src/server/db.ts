@@ -131,6 +131,25 @@ const migrations: string[] = [
   );
   CREATE INDEX schedules_due ON schedules(enabled, next_run_at);
   `,
+  `
+  CREATE TABLE projects (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    instructions TEXT NOT NULL DEFAULT '',
+    default_model TEXT,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE project_files (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  ALTER TABLE threads ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE SET NULL;
+  CREATE INDEX threads_project ON threads(user_id, project_id, updated_at DESC);
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

@@ -6,6 +6,7 @@ interface ThreadRow {
   title: string | null;
   status: "regular" | "archived";
   model_ref: string | null;
+  project_id: string | null;
   compaction_json: string | null;
   created_at: number;
   updated_at: number;
@@ -16,14 +17,20 @@ const toSummary = (r: ThreadRow): ThreadSummary => ({
   title: r.title,
   status: r.status,
   modelRef: r.model_ref,
+  projectId: r.project_id,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
 
-export function listThreads(userId: string): ThreadSummary[] {
-  const rows = db
-    .prepare("SELECT * FROM threads WHERE user_id = ? ORDER BY updated_at DESC LIMIT 500")
-    .all(userId) as unknown as ThreadRow[];
+/** `projectId` undefined lists every thread; null lists threads outside any project. */
+export function listThreads(userId: string, projectId?: string | null): ThreadSummary[] {
+  const rows = (
+    projectId === undefined
+      ? db.prepare("SELECT * FROM threads WHERE user_id = ? ORDER BY updated_at DESC LIMIT 500").all(userId)
+      : projectId === null
+        ? db.prepare("SELECT * FROM threads WHERE user_id = ? AND project_id IS NULL ORDER BY updated_at DESC LIMIT 500").all(userId)
+        : db.prepare("SELECT * FROM threads WHERE user_id = ? AND project_id = ? ORDER BY updated_at DESC LIMIT 500").all(userId, projectId)
+  ) as unknown as ThreadRow[];
   return rows.map(toSummary);
 }
 
@@ -34,9 +41,9 @@ export function getThread(userId: string, id: string): (ThreadSummary & { compac
 }
 
 /** Idempotent: the client may call initialize more than once for the same id. */
-export function ensureThread(userId: string, id: string): ThreadSummary {
+export function ensureThread(userId: string, id: string, projectId: string | null = null): ThreadSummary {
   const now = Date.now();
-  db.prepare("INSERT OR IGNORE INTO threads (id, user_id, created_at, updated_at) VALUES (?, ?, ?, ?)").run(id, userId, now, now);
+  db.prepare("INSERT OR IGNORE INTO threads (id, user_id, project_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(id, userId, projectId, now, now);
   const thread = getThread(userId, id);
   if (!thread) throw new Error("Thread belongs to another user");
   return thread;

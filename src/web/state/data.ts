@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { McpServerInfo, Me, ModelInfo, ProviderInfo, UserSettings } from "@shared/types";
+import type { McpServerInfo, Me, ModelInfo, Project, ProviderInfo, UserSettings } from "@shared/types";
 import { api } from "@/lib/api";
 
 interface DataState {
@@ -14,6 +14,11 @@ interface DataState {
   /** Plan mode: the model investigates read-only and proposes a plan instead of acting. */
   planMode: boolean;
   setPlanMode: (on: boolean) => void;
+  projects: Project[];
+  /** Sidebar filter and home of new chats. Null shows every chat. */
+  activeProject: string | null;
+  setActiveProject: (id: string | null) => void;
+  refreshProjects: () => Promise<void>;
   load: () => Promise<void>;
   refreshProviders: () => Promise<void>;
   refreshMcp: () => Promise<void>;
@@ -23,6 +28,7 @@ interface DataState {
 
 const SELECTED_KEY = "okaychat:selected-model";
 const PLAN_KEY = "okaychat:plan-mode";
+const PROJECT_KEY = "okaychat:active-project";
 
 export const useData = create<DataState>((set, get) => ({
   me: null,
@@ -37,15 +43,32 @@ export const useData = create<DataState>((set, get) => ({
     localStorage.setItem(PLAN_KEY, String(on));
     set({ planMode: on });
   },
+  projects: [],
+  activeProject: localStorage.getItem(PROJECT_KEY),
+  setActiveProject: (id) => {
+    if (id) localStorage.setItem(PROJECT_KEY, id);
+    else localStorage.removeItem(PROJECT_KEY);
+    set({ activeProject: id });
+    const model = get().projects.find((p) => p.id === id)?.defaultModel;
+    if (model) get().selectModel(model);
+  },
+  refreshProjects: async () => {
+    const projects = await api<Project[]>("/projects");
+    // A deleted project must not keep filtering the sidebar.
+    const active = get().activeProject;
+    set({ projects, ...(active && !projects.some((p) => p.id === active) ? { activeProject: null } : {}) });
+  },
   load: async () => {
-    const [me, settings, providers, models, mcp] = await Promise.all([
+    const [me, settings, providers, models, mcp, projects] = await Promise.all([
       api<Me>("/me"),
       api<UserSettings>("/settings"),
       api<ProviderInfo[]>("/providers"),
       api<ModelInfo[]>("/models"),
       api<McpServerInfo[]>("/mcp"),
+      api<Project[]>("/projects"),
     ]);
-    set({ me, settings, providers, models, mcp, loaded: true });
+    const active = get().activeProject;
+    set({ me, settings, providers, models, mcp, projects, loaded: true, ...(active && !projects.some((p) => p.id === active) ? { activeProject: null } : {}) });
   },
   refreshProviders: async () => {
     const [providers, models] = await Promise.all([api<ProviderInfo[]>("/providers"), api<ModelInfo[]>("/models")]);
