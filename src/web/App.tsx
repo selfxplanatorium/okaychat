@@ -7,6 +7,8 @@ import { AuthScreen } from "@/components/AuthScreen";
 import { ChatView } from "@/components/chat/ChatView";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Onboarding } from "@/components/Onboarding";
+import { ShareButton } from "@/components/share/ShareButton";
+import { SharePage } from "@/components/share/SharePage";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { RuntimeProvider } from "@/runtime/RuntimeProvider";
@@ -81,6 +83,7 @@ function Shell() {
               </Route>
               <Route>
                 <ChatHeader sidebarOpen={sidebarOpen} onToggle={() => setSidebarOpen(true)} />
+                <ShareButton />
                 <ChatView />
               </Route>
             </Switch>
@@ -94,6 +97,14 @@ function Shell() {
 
 export function App() {
   useApplyAppearance();
+  const [location] = useLocation();
+  // Shared chats are public: no auth check, no app shell.
+  const share = location.match(/^\/share\/([\w-]+)$/);
+  if (share) return <SharePage token={share[1]!} />;
+  return <AuthedApp />;
+}
+
+function AuthedApp() {
   const [status, setStatus] = useState<AuthStatus | null>(null);
   const check = useCallback(() => void api<AuthStatus>("/auth/status").then(setStatus), []);
 

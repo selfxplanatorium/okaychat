@@ -6,7 +6,7 @@ import type { AppEnv } from "./auth.js";
 import { turnStream } from "./chat.js";
 import { newId } from "./crypto.js";
 import { db } from "./db.js";
-import { appendMessage, ensureThread, getThread, listMessages, updateThread } from "./threads.js";
+import { appendMessage, currentBranch, ensureThread, getThread, updateThread } from "./threads.js";
 
 // Scheduled prompts run on the server with nobody watching: append the prompt to the schedule's thread,
 // run one turn, and persist both messages in the client's history format so the thread opens normally.
@@ -68,17 +68,6 @@ export function nextRun(spec: ScheduleSpec, after: number): number | null {
     if (at > after) return at;
   }
   return null;
-}
-
-/** The branch the user last extended: newest message and its ancestors, oldest first. */
-function currentBranch(userId: string, threadId: string): UIMessage[] {
-  const rows = listMessages(userId, threadId);
-  const byId = new Map(rows.map((r) => [r.id, r]));
-  const out: UIMessage[] = [];
-  for (let row = rows.at(-1); row; row = row.parent_id ? byId.get(row.parent_id) : undefined) {
-    out.unshift({ id: row.id, ...(row.content as Omit<UIMessage, "id">) });
-  }
-  return out;
 }
 
 const running = new Set<string>();

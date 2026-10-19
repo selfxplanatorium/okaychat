@@ -18,6 +18,7 @@ Status as of 2026-10-19. Update this file when a feature ships or a plan changes
 | Scheduled prompts | Settings → Scheduled: a prompt, model, and schedule (local time on chosen weekdays, or every N minutes). Runs on the server into the schedule's own chat, also with the browser closed. Run now, enable, edit | Server writes messages in the client's `ai-sdk/v6` history format. Tools that need approval wait until the chat is opened |
 | Projects | Sidebar switcher filters chats by project; new chats join the active project. Per-project instructions, pinned files (PDF/DOCX/text, 300k chars total), default model. Settings → Projects | Project text sits in the system prompt after user instructions, so it caches across the project's turns |
 | Search | Sidebar search matches titles locally and message text through SQLite FTS5 (prefix match, diacritics folded, highlighted snippets), scoped to the active project | `messages_fts` is kept in sync by triggers on `messages`, so every writer is indexed |
+| Sharing | Share button on a chat creates a read-only public link (`/share/<token>`), revocable. Live: shows the current branch. Exposes text, generated images, and artifacts (rendered); hides reasoning, tool inputs, usage, and costs | Public endpoints under `/api/public/shares`, outside the auth middleware |
 | Caching | Stable prompt prefix, Anthropic breakpoints, OpenAI `prompt_cache_key`, OpenCode session affinity headers | See `docs/research/prompt-caching.md` |
 | Usage | Per message (tokens, cache %, cost, time), per thread, dashboard by day/model/purpose, OpenCode Go 5 h/week/month spend | Cost uses models.dev prices incl. context tiers |
 | Context | Composer ring with fill %, auto-compact threshold marker, thread cost | |
@@ -31,13 +32,12 @@ Status as of 2026-10-19. Update this file when a feature ships or a plan changes
 
 ## Pass 2: next
 
-1. Sharing: read-only public link for a thread.
-2. Voice input (assistant-ui dictation adapter) and TTS.
-3. Native PDF input for models that support it (skip text extraction), image paste from clipboard.
-4. Admin page: users, sign-up toggle, server-wide provider keys.
-5. Resumable streams (survive reloads) using assistant-ui's resumable transport.
-6. Sync appearance settings to the server per user (now per device).
-7. Code-split the chat bundle (1.6 MB unminified main chunk: assistant-ui, Markdown, AI SDK client).
+1. Voice input (assistant-ui dictation adapter) and TTS.
+2. Native PDF input for models that support it (skip text extraction), image paste from clipboard.
+3. Admin page: users, sign-up toggle, server-wide provider keys.
+4. Resumable streams (survive reloads) using assistant-ui's resumable transport.
+5. Sync appearance settings to the server per user (now per device).
+6. Code-split the chat bundle (1.6 MB unminified main chunk: assistant-ui, Markdown, AI SDK client).
 
 ## Known gaps
 

@@ -251,3 +251,16 @@ export interface Project {
   files: ProjectFile[];
   createdAt: number;
 }
+
+/** A message as a public share shows it: text and results, no reasoning, usage, or tool inputs. */
+export type SharedPart =
+  | { type: "text"; text: string }
+  | { type: "image"; url: string }
+  | { type: "artifact"; id: string; title: string; kind: ArtifactKind; version: number }
+  | { type: "tool"; name: string };
+
+export interface SharedThread {
+  title: string | null;
+  createdAt: number;
+  messages: Array<{ id: string; role: "user" | "assistant"; parts: SharedPart[] }>;
+}

@@ -9,6 +9,7 @@ import { authRoutes } from "./auth.js";
 import { env } from "./env.js";
 import { notePublicOrigin } from "./mcp/manager.js";
 import { api, mcpOAuthCallback } from "./routes.js";
+import { publicShareRoutes } from "./shares.js";
 
 const app = new Hono();
 app.use("/api/*", logger());
@@ -25,6 +26,7 @@ app.onError((error, c) => {
 app.get("/api/health", (c) => c.json({ ok: true, version: env.version }));
 app.route("/api/auth", authRoutes);
 app.route("/api/mcp/oauth/callback", mcpOAuthCallback);
+app.route("/api/public/shares", publicShareRoutes);
 app.route("/api", api);
 
 // Production: serve the built SPA. In dev, Vite serves it and proxies /api here.

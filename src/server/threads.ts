@@ -1,3 +1,4 @@
+import type { UIMessage } from "ai";
 import type { CompactionState, ThreadSummary } from "../shared/types.js";
 import { db } from "./db.js";
 
@@ -95,4 +96,15 @@ export function appendMessage(userId: string, threadId: string, row: MessageRow)
      ON CONFLICT (thread_id, id) DO UPDATE SET parent_id = excluded.parent_id, format = excluded.format, content = excluded.content`,
   ).run(row.id, threadId, row.parent_id, row.format, JSON.stringify(row.content), Date.now());
   db.prepare("UPDATE threads SET updated_at = ? WHERE id = ?").run(Date.now(), threadId);
+}
+
+/** The branch the user last extended: newest message and its ancestors, oldest first. */
+export function currentBranch(userId: string, threadId: string): UIMessage[] {
+  const rows = listMessages(userId, threadId);
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const out: UIMessage[] = [];
+  for (let row = rows.at(-1); row; row = row.parent_id ? byId.get(row.parent_id) : undefined) {
+    out.unshift({ id: row.id, ...(row.content as Omit<UIMessage, "id">) });
+  }
+  return out;
 }

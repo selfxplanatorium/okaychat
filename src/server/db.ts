@@ -169,6 +169,14 @@ const migrations: string[] = [
   END;
   INSERT INTO messages_fts (text, thread_id, message_id) SELECT ${MESSAGE_TEXT("messages")}, thread_id, id FROM messages;
   `,
+  `
+  CREATE TABLE shares (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL UNIQUE REFERENCES threads(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

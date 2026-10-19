@@ -36,6 +36,7 @@ src/server/
   routes.ts           REST API (threads, providers, MCP, usage, settings)
   chat.ts             /api/chat and turnStream() (one turn, shared with schedules), auto-compaction, titles
   projects.ts         Projects: instructions, pinned files, system prompt section
+  shares.ts           Public read-only links (/api/public/shares, no auth)
   search.ts           Full-text search over messages (FTS5, synced by triggers in db.ts)
   schedules.ts        Scheduled prompts: next-run math, 30 s ticker, server-side runs
   artifacts.ts        Artifact tools, versions table, panel API
@@ -52,6 +53,7 @@ src/web/
   components/artifacts Artifact card, side panel, sandboxed frame documents
   components/genui    Generative UI catalog (render_spec components) and widget toolkit
   components/settings Settings pages
+  components/share    Public share page and share button
   theme/              T3Code theme engine port (see its README)
   state/              zustand stores (data, appearance, thread meta)
 src/shared/types.ts   Types shared by both sides
