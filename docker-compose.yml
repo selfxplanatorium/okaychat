@@ -1,0 +1,30 @@
+services:
+  okaychat:
+    build: .
+    image: okaychat:latest
+    restart: unless-stopped
+    ports:
+      - "${OKAYCHAT_PORT:-8787}:8787"
+    environment:
+      # Required: 32+ random characters. Generate with: openssl rand -base64 32
+      OKAYCHAT_SECRET: ${OKAYCHAT_SECRET:?set OKAYCHAT_SECRET in .env}
+      OKAYCHAT_ALLOW_SIGNUP: ${OKAYCHAT_ALLOW_SIGNUP:-false}
+      # Public URL, used for MCP OAuth redirects behind a reverse proxy. Optional.
+      OKAYCHAT_PUBLIC_URL: ${OKAYCHAT_PUBLIC_URL:-}
+      OKAYCHAT_SEARXNG_URL: http://searxng:8080
+    volumes:
+      - okaychat-data:/data
+    depends_on:
+      - searxng
+
+  # Private metasearch for the web_search tool. No keys, not exposed outside the compose network.
+  searxng:
+    image: searxng/searxng:latest
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-okaychat-searxng-internal}
+    volumes:
+      - ./docker/searxng/settings.yml:/etc/searxng/settings.yml:ro
+
+volumes:
+  okaychat-data:

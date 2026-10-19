@@ -1,0 +1,198 @@
+import type { ModelInfo, ProviderConnectionInput, ProviderInfo } from "../../shared/types.js";
+import { decrypt, encrypt } from "../crypto.js";
+import { db } from "../db.js";
+import { USER_AGENT } from "../env.js";
+import { getCatalog, isSupportedProvider, resolveRoute, toModelInfo, unknownModel, type RawProvider } from "./models-dev.js";
+
+export const OPENCODE_GO = "opencode-go";
+const GO_MODELS_URL = "https://opencode.ai/inference/go/v1/models";
+
+// Shown first, in this order. OpenCode Go is the default connection.
+const PRIMARY = [OPENCODE_GO, "opencode", "anthropic", "openai", "google", "openrouter", "deepseek", "xai", "mistral", "groq"];
+
+interface ConnectionRow {
+  provider_id: string;
+  api_key_enc: string | null;
+  base_url: string | null;
+  config_json: string;
+  enabled: number;
+}
+
+export interface Connection {
+  providerId: string;
+  apiKey?: string;
+  baseURL?: string;
+  name?: string;
+  enabled: boolean;
+}
+
+function readConnections(userId: string): Map<string, Connection> {
+  const rows = db
+    .prepare("SELECT provider_id, api_key_enc, base_url, config_json, enabled FROM provider_connections WHERE user_id = ?")
+    .all(userId) as unknown as ConnectionRow[];
+  return new Map(
+    rows.map((r) => {
+      const config = JSON.parse(r.config_json) as { name?: string };
+      return [
+        r.provider_id,
+        {
+          providerId: r.provider_id,
+          apiKey: r.api_key_enc ? decrypt(r.api_key_enc) : undefined,
+          baseURL: r.base_url ?? undefined,
+          name: config.name,
+          enabled: r.enabled === 1,
+        },
+      ];
+    }),
+  );
+}
+
+export function getConnection(userId: string, providerId: string): Connection | undefined {
+  return readConnections(userId).get(providerId);
+}
+
+export function saveConnection(userId: string, providerId: string, input: ProviderConnectionInput) {
+  const existing = getConnection(userId, providerId);
+  // An omitted key keeps the stored one, so the UI never needs to read secrets back.
+  const apiKey = input.apiKey === undefined ? existing?.apiKey : input.apiKey || undefined;
+  const baseURL = input.baseURL === undefined ? existing?.baseURL : input.baseURL.trim() || undefined;
+  const name = input.name ?? existing?.name;
+  db.prepare(
+    `INSERT INTO provider_connections (user_id, provider_id, api_key_enc, base_url, config_json, enabled, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (user_id, provider_id) DO UPDATE SET
+       api_key_enc = excluded.api_key_enc, base_url = excluded.base_url,
+       config_json = excluded.config_json, enabled = excluded.enabled`,
+  ).run(
+    userId,
+    providerId,
+    apiKey ? encrypt(apiKey) : null,
+    baseURL ?? null,
+    JSON.stringify({ name }),
+    (input.enabled ?? existing?.enabled ?? true) ? 1 : 0,
+    Date.now(),
+  );
+  liveCache.clear();
+}
+
+export function deleteConnection(userId: string, providerId: string) {
+  db.prepare("DELETE FROM provider_connections WHERE user_id = ? AND provider_id = ?").run(userId, providerId);
+}
+
+const isCustom = (id: string) => id.startsWith("custom-");
+const isLocal = (url?: string) => !!url && /\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|host\.docker\.internal)/.test(url);
+
+export async function listProviders(userId: string): Promise<ProviderInfo[]> {
+  const catalog = await getCatalog();
+  const connections = readConnections(userId);
+  const out: ProviderInfo[] = [];
+  for (const provider of Object.values(catalog)) {
+    if (!isSupportedProvider(provider)) continue;
+    const conn = connections.get(provider.id);
+    out.push({
+      id: provider.id,
+      name: provider.name,
+      doc: provider.doc,
+      primary: PRIMARY.includes(provider.id),
+      custom: false,
+      needsBaseURL: isLocal(provider.api),
+      connected: !!conn && (!!conn.apiKey || !!conn.baseURL),
+      enabled: conn?.enabled ?? false,
+      baseURL: conn?.baseURL ?? provider.api,
+      modelCount: Object.keys(provider.models).length,
+    });
+  }
+  for (const conn of connections.values()) {
+    if (!isCustom(conn.providerId)) continue;
+    out.push({
+      id: conn.providerId,
+      name: conn.name ?? conn.providerId,
+      primary: false,
+      custom: true,
+      needsBaseURL: true,
+      connected: true,
+      enabled: conn.enabled,
+      baseURL: conn.baseURL,
+      modelCount: 0,
+    });
+  }
+  const rank = (p: ProviderInfo) => (p.primary ? PRIMARY.indexOf(p.id) : PRIMARY.length);
+  return out.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+}
+
+// Live `/models` lists, keyed by URL. Short TTL because providers add models often.
+const liveCache = new Map<string, { ids: string[]; at: number }>();
+const LIVE_TTL_MS = 15 * 60 * 1000;
+
+async function fetchLiveIds(url: string, apiKey?: string): Promise<string[] | null> {
+  const hit = liveCache.get(url);
+  if (hit && Date.now() - hit.at < LIVE_TTL_MS) return hit.ids;
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": USER_AGENT, ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) return hit?.ids ?? null;
+    const body = (await res.json()) as { data?: Array<{ id: string }> };
+    const ids = (body.data ?? []).map((m) => m.id);
+    liveCache.set(url, { ids, at: Date.now() });
+    return ids;
+  } catch {
+    return hit?.ids ?? null;
+  }
+}
+
+async function modelsForProvider(provider: RawProvider, conn: Connection): Promise<ModelInfo[]> {
+  const known = Object.values(provider.models)
+    .map((m) => toModelInfo(provider, m))
+    .filter((m): m is ModelInfo => m !== null)
+    .map((m) => (conn.baseURL && !provider.id.startsWith("opencode") ? { ...m, baseURL: conn.baseURL } : m));
+
+  if (provider.id !== OPENCODE_GO) return known;
+
+  // Go's lineup changes faster than models.dev. The live list is the source of truth for
+  // which ids exist; models.dev supplies format, limits, and prices where it knows them.
+  const live = await fetchLiveIds(GO_MODELS_URL);
+  if (!live) return known;
+  const byId = new Map(known.map((m) => [m.id, m]));
+  const fallback = resolveRoute(provider)!;
+  // Unknown ids usually share a wire format with their family (qwen3.6 with qwen3.8, grok-4.6 with grok-4.7).
+  const familyOf = (id: string) => id.match(/^[a-z]+/)?.[0] ?? id;
+  const sibling = (id: string) => known.find((m) => familyOf(m.id) === familyOf(id));
+  return live.map((id) => {
+    const hit = byId.get(id);
+    if (hit) return hit;
+    const kin = sibling(id);
+    return unknownModel(provider.id, id, kin?.format ?? fallback.format, kin?.baseURL ?? fallback.baseURL);
+  });
+}
+
+async function modelsForCustom(conn: Connection): Promise<ModelInfo[]> {
+  if (!conn.baseURL) return [];
+  const ids = (await fetchLiveIds(`${conn.baseURL.replace(/\/$/, "")}/models`, conn.apiKey)) ?? [];
+  return ids.map((id) => ({ ...unknownModel(conn.providerId, id, "openai-chat", conn.baseURL), name: id }));
+}
+
+export async function listModels(userId: string): Promise<ModelInfo[]> {
+  const catalog = await getCatalog();
+  const connections = [...readConnections(userId).values()].filter((c) => c.enabled && (c.apiKey || c.baseURL));
+  const lists = await Promise.all(
+    connections.map((conn) => {
+      if (isCustom(conn.providerId)) return modelsForCustom(conn);
+      const provider = catalog[conn.providerId];
+      return provider ? modelsForProvider(provider, conn) : Promise.resolve([]);
+    }),
+  );
+  return lists.flat();
+}
+
+export async function resolveModel(userId: string, ref: string): Promise<{ model: ModelInfo; conn: Connection }> {
+  const slash = ref.indexOf("/");
+  const providerId = ref.slice(0, slash);
+  const conn = getConnection(userId, providerId);
+  if (!conn || !conn.enabled) throw new Error(`Provider ${providerId} is not connected`);
+  const models = await listModels(userId);
+  const model = models.find((m) => m.ref === ref);
+  if (!model) throw new Error(`Unknown model ${ref}`);
+  return { model, conn };
+}

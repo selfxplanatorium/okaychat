@@ -1,0 +1,14 @@
+# Private SearXNG for okaychat's web_search tool. Only reachable on the compose network.
+use_default_settings: true
+general:
+  instance_name: okaychat-search
+server:
+  # Overridden by SEARXNG_SECRET in docker-compose.yml.
+  secret_key: "change-me"
+  limiter: false
+  image_proxy: false
+search:
+  safe_search: 1
+  formats:
+    - html
+    - json

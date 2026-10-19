@@ -1,0 +1,39 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "tw-shimmer";
+@import "./theme/theme.css";
+
+@source "./";
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+/* Panels animate with the T3Code "panel animation duration" setting. */
+.panel-transition {
+  transition-duration: var(--panel-animation-duration, 0ms);
+  transition-timing-function: var(--ease-drawer);
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel-transition {
+    transition-duration: 0ms;
+  }
+}
+
+/* Word wrap setting for code blocks. */
+html[data-word-wrap="false"] pre code {
+  white-space: pre;
+}
+html[data-word-wrap="true"] pre code {
+  white-space: pre-wrap;
+  word-break: break-word;
+}

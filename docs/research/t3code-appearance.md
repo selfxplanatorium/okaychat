@@ -1,0 +1,170 @@
+# T3Code Appearance settings
+
+Source: T3Code (MIT, Copyright (c) 2026 T3 Tools Inc.), read from `/tmp/research/t3code`:
+
+- `apps/web/src/components/settings/SettingsPanels.tsx`: `AppearanceSettingsPanel` (line 1069), `TypographySection` (line 1701) and its font rows
+- `apps/web/src/components/settings/ThemeSettings.tsx`: `ThemeLibrary`, `ThemeLibraryCard`, remove dialog
+- `apps/web/src/components/settings/ThemeImportDialog.tsx`, `ThemeEditorPanel.tsx`, `ThemePreviewCircles.tsx`, `ThemeWireframe.tsx`, `PanelAnimationsPreview.tsx`
+- Defaults and ranges: `packages/contracts/src/settings.ts`
+- Preview render specs: `packages/shared/src/themePreview.ts` (not ported yet)
+
+"Applies" means the setting makes sense in a chat app. Terminal, diff, branch strip, and environment settings do not apply.
+
+## Section: Colors & themes
+
+Heading `Color scheme`, then a `Themes` heading. Searchable titles are from `settingsSearch.ts`.
+
+| Code | Control | Label / text | Options or range | Default | Applies |
+| --- | --- | --- | --- | --- | --- |
+| S1 | Segmented group of 3 tiles (`role="group"`, `aria-label="Appearance mode"`) | `System`, `Light`, `Dark`. Each tile shows a wireframe preview. Tile `aria-label`: "Follow the system appearance" or "Use {mode} mode". | system, light, dark | system | Yes |
+| S2 | Theme card grid (`minmax(16rem, 1fr)` columns) | Cards: `T3 Code` (standard), `T3 Chat`, `Grove`, `Ocean`, `Ember`, `Iris` (built-ins), then environment themes (skip), then user themes and imported collections | One card per theme | `T3 Code` | Yes |
+| S3 | Per-mode picks on each card (light/dark halves) | Each card shows a light and a dark preview. Clicking one assigns that theme to that mode only. Stored as halves. | light, dark | none | Yes |
+| S4 | Buttons on the `Themes` row | `Create theme` (opens editor, outline, icon `PaintbrushIcon`), `Add theme` (opens import dialog, icon `PlusIcon`) | n/a | n/a | Yes |
+| S5 | Card action icons (per card) | Duplicate (`CopyIcon`), Edit (`PenLineIcon`, user themes only), Download JSON (`UploadIcon`), Remove (`Trash2Icon`, user themes only) | n/a | n/a | Yes |
+
+Card behavior:
+
+- Click the card name or the card body to use the theme for the current appearance mode.
+- A single-mode theme (only light or only dark) assigns to that mode's half.
+- Active cards get `box-shadow: inset 0 0 0 1px var(--ring)` and `bg-accent/30`.
+- Mode rings: each preview circle shows a `ring-2 ring-inset ring-ring` when that mode is active, plus a sun or moon badge (`size-4`, bottom-right).
+
+## Section: Interface
+
+| Code | Searchable title | Control | Range / options | Default | Description text | Applies |
+| --- | --- | --- | --- | --- | --- | --- |
+| S6 | Contrast | Range slider with output badge (`{value}%`) | 50 to 200, step 5 | 100 | "Adjust the contrast of colors and borders across the interface." | Yes |
+| S7 | Glass opacity | Range slider with output badge (`{value}%`) | 40 to 100, step 5 | 80 | "Higher values make menus, dialogs, and the composer more solid." | Yes |
+| S8 | Environment identification | Select: `artwork`, `pill`, `none` | 3 options | `artwork` | "Choose how Dev and Nightly environments are identified." Shown only in T3 environments | No |
+| S9 | Diff colors | Select: `Red & green (default)`, `Blue & orange` | 2 options | red-green | "Choose colors for additions and deletions, including change counts." | No |
+| S10 | Composer context | Switch | on or off | off | "Keep branch and worktree controls below the composer after a thread starts." | No |
+| S11 | Chat width | Select | Comfortable (default, 46rem max), Wide (72rem), Full (100%) | comfortable | "Set how wide messages and the composer can grow on large screens." | Yes |
+
+Notes on the `Contrast` and `Glass opacity` rows: each has a reset button that appears only when the value differs from the default.
+
+## Section: Motion
+
+| Code | Searchable title | Control | Range | Default | Description text | Applies |
+| --- | --- | --- | --- | --- | --- | --- |
+| S12 | Panel animations | Range slider with output (`{value} ms`) and a replay preview button (`Replay panel animation preview`) | 0 to 400 ms, step 25 | 0 (off) | "Set how fast panels open and close." | Yes |
+
+The preview is a small sidebar/content mock. It animates width and border with `duration-(--preview-duration) ease-out`. It respects `prefers-reduced-motion`.
+
+## Section: Typography
+
+Heading `Typography`. Header switch labeled `Advanced` (aria "Show advanced typography settings"). Stored in `localStorage` under `t3code:typography-advanced`, default off.
+
+- Simple mode shows: Interface font, Monospace font (code font), Word wrap.
+- Advanced mode shows: Interface font, Prompt font, Code font, Terminal font, Font smoothing (macOS only), Word wrap.
+
+Each font row has:
+
+- Family control. When the browser grants local font access (`queryLocalFonts`), this is a searchable picker of installed families. Otherwise it is a text input, `maxLength=200`, `spellcheck=false`, with placeholder = the default family name. Typing commits after 400 ms, on blur, or on Enter. Escape discards.
+- Size select, `{n} px`, integer steps.
+- Reset button (shown when family or size differs from default). Reset restores family and size together.
+- Monospace rows accept only fixed-width families (checked by advance widths of glyphs `i M W 0 @ # . space` in four style variants).
+
+| Code | Searchable title | Row | Family default | Size control | Size range (px) | Size default (px) | Description text | Applies |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| S13 | Interface font | Family + size | System UI stack (`-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`), shown as the resolved family name | `""` (empty = default stack) | 12 to 20 | 16 | "Everything outside code blocks and the terminal." | Yes |
+| S14 | Prompt font | Family + size (advanced only) | Follows the interface family | `""` | 12 to 20 | 14 | "Only the box you write prompts in. Mono works well here." | Yes |
+| S15 | Code font | Family + size. Monospace only. Simple mode title: "Monospace font" | `"SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace` | `""` | 10 to 18 | 13 | "Code blocks, diffs, and file previews." (simple mode adds "and the terminal") | Yes |
+| S16 | Terminal font | Family + size (advanced only) | Follows code font | `""` | 8 to 20 | 12 | "Terminal output, independent from code blocks and diffs." | No |
+| S17 | Font smoothing | Switch | on or off | on | "Use thinner grayscale text smoothing instead of the macOS default." Rendered on macOS only | Yes (macOS) |
+| S18 | Word wrap | Switch | on or off | on | "Wrap long lines in code blocks, tables, diffs, and file previews by default." | Partly (code blocks, tables) |
+
+Preview blocks: the prompt font preview, a code preview (diff sample), and a terminal preview sit below their rows. The chat app can use its own sample text.
+
+## Theme library UX
+
+### Layout
+
+1. Heading `Color scheme`.
+2. Three-tile mode group (S1). Each tile is a full-width button with a wireframe thumbnail on top and label below (`text-xs font-medium`). Active tile text is `text-foreground`, others `text-muted-foreground`.
+3. Row with `Themes` heading on the left and two outline buttons on the right: `Create theme`, `Add theme`.
+4. Card grid. Order: standard `T3 Code` card, the five built-in maintainer themes, then user-installed themes. Collections (multi-variant imports) render as one card with variant bubbles.
+5. Import dialog, remove dialog, and the theme editor panel are overlays opened from the grid or buttons.
+
+### Card anatomy
+
+- Outer: `rounded-xl border border-border/70 bg-card/60 overflow-hidden`, hover `bg-accent/10`, active `bg-accent/30`.
+- Preview area (top): two circles, one per mode that the theme defines, showing:
+  - Base: `color-mix(in oklab, canvas 80%, base)` where base is `#ffffff` in light and `#09090b` in dark.
+  - Accent radial gradient: light center `72% 22%`, dark center `28% 78%`.
+  - Action radial gradient: light center `18% 82%`, dark center `82% 18%`.
+  - Circle edge: inset 1px line plus a soft drop shadow.
+  - Light and dark circles sit side by side. Clicking a circle selects that mode.
+- Footer: name button (`text-sm font-medium`, truncated), then icon buttons (Duplicate, Edit, Download, Remove).
+
+### Collection (multi-variant) cards
+
+- The preview is a radial group. The root bubble for light sits at `-52px` from center, dark at `+52px`.
+- Each mode shows its selected variant (`Light: {label}` tooltip). If more variants exist, a `+{n}` pill appears.
+- Hovering or focusing a mode opens the other variants in an arc (68px spread, `35ms` stagger, each variant bubble scaled to `scale-[0.43]`). Each variant has `aria-label` "Use {label} for {mode} mode".
+- The active variant gets a `ring-2 ring-inset ring-ring` and a sun or moon badge.
+
+### Wireframe thumbnails (ThemeWireframe)
+
+A miniature app: a sidebar strip (22% width), a user message bubble, two assistant bars, a composer bar at the bottom with a send dot, and a floating card at top right with three colored rows. System mode renders two panes: left light, right dark, split at 50%.
+
+### Import dialog (`Add a theme`)
+
+- File zone (dashed border; drop highlight `border-ring bg-accent/20`): title "Theme file", subtitle "Drop T3 Code or VS Code .json files" (or the file name after reading), button `Choose files` (multiple files allowed). While reading, the button text is "Reading…".
+- Theme JSON textarea (`aria-label="Theme JSON"`, label "Theme JSON"). Paste works.
+- Footer: `Cancel` (ghost) and `Add theme` (plus icon, disabled when empty).
+- Errors (`Alert variant="error"`, `aria-live="polite"`): "That theme file is invalid.", "Could not read that file. Paste the JSON below instead."
+- Conflicts: if a theme id already exists, the dialog shows "Already installed" with the names, and buttons `Update existing`, `Keep both`, `Back`, `Cancel`.
+- Success toasts: "{label} added" with "It's now your {mode} theme." (single-mode theme assigned to a half) or "It's now active.". Bulk: "{n} themes added" or "updated".
+- VS Code theme files are converted on import. Light and dark files with the same base name are paired into one theme with variants.
+
+### Remove dialog
+
+- Single theme: title `Remove “{label}”?`, body "You can bring it back anytime by importing its JSON file." Buttons: Cancel and a destructive confirm action.
+- Collection: title `Remove themes from “{collection}”?`, body "Select the variants you want to remove. You can restore them by importing the extension again." Grid of variant checkboxes (cards with previews).
+- Failure toast: "Couldn't remove theme".
+
+### Theme editor (`Create theme` / `Edit theme`)
+
+Opens as a resizable, draggable side panel. Close button `Close the theme editor`.
+
+- Header: title `Create theme` or `Edit theme`. Buttons: `Inspect` (toggles "Pick a color from the app", which spotlights a DOM element and maps it to a color role), and close.
+- Name field: placeholder/label `Theme name`, max 48 characters.
+- Appearance tabs: `Light`, `Dark` (`aria-label="Theme appearance"`). Locked tabs show a reason ("“{label}” has no {mode} palette. Create a theme with the same name to add one.").
+- Mode toggle: `Use advanced theme colors` (switch).
+  - Simple (default): two color inputs, `Background` and `Accent`. Subtitle "Two colors, rest derived". All other roles are generated from those two.
+  - Advanced: all color roles, grouped:
+    - Foundation: Background, Surface, Raised surface, Overlay, Text, Muted text, Border, Input.
+    - Brand & content: Subtle surface, Highlight surface, Accent, Action, Message surface, Code surface.
+    - Status: see `ThemeEditorPanel.tsx` (Error, Warning).
+    - Context: Sidebar background, Sidebar controls, Sidebar selection, Terminal background.
+    - Search: Search matches, Current match.
+  - Color filter field, placeholder `Filter colors`, shows `No matches.` when empty.
+- Color picker popover, titled `Choose a color`. Each color input opens it. Read `ThemeColorPicker.tsx` for the exact controls.
+- Footer: `Cancel`, then `Create theme` (new) or `Save changes` (edit).
+- Save errors: toast "Could not save your theme".
+
+Saving a single-appearance theme writes `colors`. A dual-appearance theme writes `colors` for the base mode and `variants` for the other.
+
+## Persistence keys (T3Code)
+
+| Key | Purpose |
+| --- | --- |
+| `t3code:theme` | Selected theme id, or `light`, `dark`, `system`, empty = T3 Code |
+| `t3code:theme-appearance-mode` | `system`, `light`, or `dark` |
+| `t3code:theme-follow-system` | Legacy boolean. Fallback only |
+| `t3code:theme-halves:v1` | JSON `{ light?: id, dark?: id }` |
+| `t3code:themes:v1` | JSON array of user themes |
+| `t3code:typography-advanced` | Advanced typography switch |
+
+Settings values (S6, S7, S11, S12, S13 to S18) live in T3Code's server or client settings store. This port does not include that store. The defaults are listed in `src/web/theme/README.md`.
+
+## okaychat implementation notes
+
+`src/web/components/settings/AppearanceSettings.tsx` rebuilds the panel with these deliberate differences:
+
+- The theme editor is a dialog, not T3Code's resizable side panel. It edits seven key roles (accent, canvas, surface, text, sidebar, border, code background) with live preview. No inspect mode and no name field yet.
+- Theme cards show the wireframe plus per-mode swatches. T3Code's radial preview circles are not ported.
+- Font smoothing appears only in Advanced mode on macOS, as in T3Code.
+- Font family inputs accept installed families only, as in T3Code. Browsers without the Local Font Access API reject unknown typed names.
+- No toasts. Errors are shown inline.
+- Appearance settings are stored per device in localStorage (`okaychat:appearance`), not per user on the server.
