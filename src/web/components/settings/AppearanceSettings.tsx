@@ -1,3 +1,4 @@
+import { useAppearanceSyncStatus } from "@/state/appearance-sync";
 // Ported from T3Code (MIT, Copyright (c) 2026 T3 Tools Inc.).
 // Source: apps/web/src/components/settings/SettingsPanels.tsx (AppearanceSettingsPanel,
 // TypographySection, font rows), ThemeSettings.tsx (ThemeLibrary, cards), ThemeImportDialog.tsx,
@@ -1031,6 +1032,7 @@ function TypographySection() {
 // ---------------------------------------------------------------------------
 
 export function AppearanceSettings() {
+  const syncError = useAppearanceSyncStatus((s) => s.error);
   const s = useAppearance();
   const update = useAppearance((state) => state.update);
   const reset = useAppearance((state) => state.reset);
@@ -1045,7 +1047,8 @@ export function AppearanceSettings() {
   };
 
   return (
-    <SettingsPage title="Appearance" description="Colors, themes, and typography for the chat interface.">
+    <SettingsPage title="Appearance" description="Colors, themes, and typography synced across your devices.">
+      {syncError && <p role="status" className="text-muted-foreground mb-4 text-sm">{syncError}</p>}
       <ThemeLibrary
         theme={s.theme}
         halves={s.halves}

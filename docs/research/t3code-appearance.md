@@ -167,4 +167,7 @@ Settings values (S6, S7, S11, S12, S13 to S18) live in T3Code's server or client
 - Font smoothing appears only in Advanced mode on macOS, as in T3Code.
 - Font family inputs accept installed families only, as in T3Code. Browsers without the Local Font Access API reject unknown typed names.
 - No toasts. Errors are shown inline.
-- Appearance settings are stored per device in localStorage (`okaychat:appearance`), not per user on the server.
+- Appearance preferences and custom themes now sync per account through `/api/appearance`, stored inside `user_settings.json`. `src/shared/appearance.ts` defines the validated wire format.
+- `useSyncAppearance` migrates the first device's local preferences once, then merges only changed fields. Separate account caches (`okaychat:appearance:<userId>`) retain unsaved edits, and `focus` / `online` retry them and fetch remote changes. Concurrent changes to the same field use the last server write; unrelated fields are preserved.
+- The existing plain localStorage boot keys and `okaychat:appearance` remain as the last-used visual cache, so first paint still uses the theme before React. Login restores the current account before mounting the chat; an account without saved preferences starts from defaults if the cache belongs to someone else.
+- Theme library changes use the existing parser and notification mechanism (`replaceCustomThemes`). UI changes remain immediate, saves debounce 400 ms, and page unload attempts a keepalive write. Failures leave the outbox cached and show an inline sync status in Appearance settings. This is refresh-on-focus sync, not a live subscription between devices.

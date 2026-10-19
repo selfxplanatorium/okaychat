@@ -1,3 +1,5 @@
+import type { UserAppearance } from "./appearance.js";
+
 // Types shared by server and web. Keep free of runtime imports.
 
 export type WireFormat = "openai-responses" | "openai-chat" | "anthropic" | "google";
@@ -60,6 +62,8 @@ export interface ProviderConnectionInput {
 export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export interface UserSettings {
+  /** Synced appearance; absent until the first device migrates its local preferences. */
+  appearance?: UserAppearance;
   defaultModel?: string;
   /** Used for titles and compaction summaries. Falls back to the chat model. */
   utilityModel?: string;

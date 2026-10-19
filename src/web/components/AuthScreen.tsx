@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Brand } from "@/components/layout/Sidebar";
+import { Brand } from "@/components/layout/Brand";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";

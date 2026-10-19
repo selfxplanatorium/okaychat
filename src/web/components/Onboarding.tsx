@@ -1,6 +1,6 @@
 import { ExternalLinkIcon } from "lucide-react";
 import { Link } from "wouter";
-import { Brand } from "@/components/layout/Sidebar";
+import { Brand } from "@/components/layout/Brand";
 import { OPENCODE_GO_CONSOLE, ProviderForm } from "@/components/settings/ProvidersSettings";
 import { useData } from "@/state/data";
 

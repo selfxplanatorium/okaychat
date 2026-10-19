@@ -1,4 +1,4 @@
-import { AssistantChatTransport, useChatRuntime } from "@assistant-ui/ai-sdk";
+import { AssistantChatTransport, createResumableSessionStorage, RESUMABLE_STREAM_ID_HEADER, useChatRuntime } from "@assistant-ui/ai-sdk";
 import {
   AssistantRuntimeProvider,
   AuiConfig,
@@ -16,7 +16,7 @@ import {
 } from "@assistant-ui/react";
 import { generateId, lastAssistantMessageIsCompleteWithApprovalResponses, lastAssistantMessageIsCompleteWithToolCalls } from "ai";
 import { createAssistantStream } from "assistant-stream";
-import { useEffect, useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { ThreadSummary } from "@shared/types";
 import { api } from "@/lib/api";
 import { toolkit } from "@/components/chat/tool-ui";
@@ -213,16 +213,75 @@ function ModelContextBridge() {
   return null;
 }
 
+// The server keeps generating when the request drops, so a reload can reattach. Stop must therefore cancel
+// explicitly; a page unload must not.
+let unloading = false;
+addEventListener("pagehide", () => (unloading = true));
+addEventListener("pageshow", () => (unloading = false));
+
+const cancellableFetch = (onCancel: () => void): typeof fetch => async (input, init) => {
+  const res = await fetch(input, init);
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  const streamId = res.headers.get(RESUMABLE_STREAM_ID_HEADER) ?? url.match(/\/api\/chat\/resume\/([\w-]+)/)?.[1];
+  init?.signal?.addEventListener(
+    "abort",
+    () => {
+      if (streamId && !unloading) {
+        onCancel();
+        void fetch(`/api/chat/${streamId}/cancel`, { method: "POST", credentials: "same-origin", keepalive: true }).catch(() => {});
+      }
+    },
+    { once: true },
+  );
+  return res;
+};
+
+/** One transport per thread, with its own resumable stream slot so streams never resume in the wrong thread. */
+function useThreadTransport() {
+  const aui = useAui();
+  return useMemo(() => {
+    const storage = createResumableSessionStorage({
+      key: () => {
+        const remoteId = aui.threadListItem.getState().remoteId;
+        return remoteId ? `okaychat:stream:${remoteId}` : undefined;
+      },
+    });
+    return new AssistantChatTransport({
+      api: "/api/chat",
+      credentials: "same-origin",
+      fetch: cancellableFetch(() => storage.clear()),
+      body: () => ({ planMode: useData.getState().planMode }),
+      resumable: { storage, resumeApi: (streamId) => `/api/chat/resume/${streamId}` },
+    });
+  }, [aui]);
+}
+
 export function RuntimeProvider({ children }: { children: ReactNode }) {
+  // Keep selection per tab and account. A reload must mount the saved thread before automatic resume runs.
+  const userId = useData((s) => s.me?.id);
+  const selectionKey = `okaychat:thread:${userId}`;
+  const [initialThreadId] = useState(() => {
+    try {
+      return sessionStorage.getItem(selectionKey) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  });
   const runtime = useRemoteThreadListRuntime({
+    initialThreadId,
+    onThreadIdChange: (id) => {
+      try {
+        if (id) sessionStorage.setItem(selectionKey, id);
+        else sessionStorage.removeItem(selectionKey);
+      } catch {
+        // Session storage may be disabled.
+      }
+    },
     runtimeHook: () =>
       // eslint-disable-next-line react-hooks/rules-of-hooks
       useChatRuntime({
-        transport: new AssistantChatTransport({
-          api: "/api/chat",
-          credentials: "same-origin",
-          body: () => ({ planMode: useData.getState().planMode }),
-        }),
+        // eslint-disable-next-line react-hooks/rules-of-hooks
+        transport: useThreadTransport(),
         adapters: { attachments, ...voiceAdapters },
         // Browser-executed tools (generative UI) and tool approvals resolve locally; this sends them back to finish the turn.
         sendAutomaticallyWhen: (options) => lastAssistantMessageIsCompleteWithToolCalls(options) || lastAssistantMessageIsCompleteWithApprovalResponses(options),

@@ -273,3 +273,31 @@ Each toolkit entry can set `execute`, `render({ args, result, status })`, and `r
 - React usage of `AISDKThreads` through `AuiConfig`. Only Vue docs show it.
 - Whether `adapters.history` in `useChatRuntime({ adapters })` (Vue/v7 docs) or `unstable_useAdapters` (custom-adapter guide) is the preferred route for history in React. The custom-adapter guide uses `unstable_useAdapters`.
 - Whether `tw-shimmer` is required at runtime or only for its styles.
+
+## 7. Resumable streams (implemented and browser verified)
+
+`chat.ts` wraps the AI SDK SSE response body with `createResumableStreamContext`
+from `assistant-stream/resumable`. The producer uses a separate AbortController,
+so disconnecting the HTTP request leaves generation running. Each stream is bound
+to its authenticated user; resume and cancel check that owner. `GET
+/api/chat/resume/:streamId` replays from the beginning and then follows live chunks;
+204 means no retained stream. `POST /api/chat/:streamId/cancel` aborts generation.
+
+The client uses one `createResumableSessionStorage` per thread transport, keyed by
+remote thread id. `initialThreadId` and `onThreadIdChange` on the outer remote
+thread runtime preserve the selected chat in sessionStorage per account. Without
+this, reload mounts an empty new chat and never finds the pending stream.
+`AssistantChatTransport` clones preserve the resumable options automatically.
+
+Stop explicitly calls cancel and clears the checkpoint, including when stopping
+a resumed stream (the id comes from the resume URL). Page unload does neither.
+The transport clears the checkpoint when it reads the SSE finish marker. Messages
+still persist through the client's history adapter after replay finishes.
+
+Retention is in memory with a 15-minute TTL refreshed by appended chunks and
+finalization. A server restart loses pending streams; closing the tab loses its
+sessionStorage. This is reload recovery, not durable background message storage.
+Browser verification covered live reload/replay, completion and checkpoint cleanup,
+and Stop sending cancel with no checkpoint left. The dev server needed a restart
+before its new response header appeared; absence of a checkpoint alone does not
+imply a transport-cloning bug.

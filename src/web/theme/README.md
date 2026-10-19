@@ -50,7 +50,7 @@ Re-run each apply function when its setting changes.
 
 ## Settings keys and defaults
 
-Appearance settings. Keep the T3Code names. The UI can store them wherever the app stores settings.
+Appearance settings. Keep the T3Code names. The UI syncs them per user through `/api/appearance` and keeps a local cache for first paint and unsaved edits. See `src/web/state/appearance-sync.ts`.
 
 | Key | Range | Default | Notes |
 | --- | --- | --- | --- |

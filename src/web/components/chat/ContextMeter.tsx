@@ -128,7 +128,7 @@ export function MessageMeta() {
   const u = meta.usage;
   const cache = u?.input ? Math.round((u.cacheRead / u.input) * 100) : 0;
   return (
-    <div className="text-muted-foreground/80 ms-auto flex items-center gap-2 pe-2 text-[11px] tabular-nums opacity-0 transition-opacity group-hover/msg:opacity-100 [[data-slot=aui_assistant-message-root]:hover_&]:opacity-100">
+    <div className="text-muted-foreground/80 ms-auto flex items-center gap-2 pe-2 text-[11px] tabular-nums opacity-0 transition-opacity [[data-role=assistant]:hover_&]:opacity-100">
       <span>{name}</span>
       {u && (
         <span title={`Input ${u.input} (cached ${u.cacheRead}, written ${u.cacheWrite}) · Output ${u.output} (reasoning ${u.reasoning})`}>

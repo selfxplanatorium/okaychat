@@ -7,14 +7,7 @@ import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 
-export function Brand() {
-  return (
-    <div className="flex items-center gap-2 font-semibold tracking-tight">
-      <img src="/favicon.svg" alt="" className="size-6" />
-      okaychat
-    </div>
-  );
-}
+import { Brand } from "./Brand";
 
 export function Sidebar({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const me = useData((s) => s.me);

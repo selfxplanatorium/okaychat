@@ -1,10 +1,13 @@
 import { useEffect } from "react";
+import type { AppearanceSettings, UserAppearance } from "@shared/appearance";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { applyAppearanceContrast } from "@/theme/contrast";
 import { applyAppearanceFontVariables } from "@/theme/fonts";
 import {
   applyThemePalette,
+  getCustomThemes,
+  replaceCustomThemes,
   parseThemeHalves,
   resolveThemeAppearance,
   resolveThemeHalf,
@@ -24,27 +27,12 @@ import {
   DEFAULT_INTERFACE_FONT_SIZE,
   DEFAULT_PANEL_ANIMATION_DURATION_MS,
   DEFAULT_PROMPT_FONT_SIZE,
-  type ChatWidth,
 } from "@/theme/settings";
+
+export type { AppearanceSettings } from "@shared/appearance";
 
 // The boot script in index.html reads these three keys before React mounts. Keep them as plain strings.
 const THEME_KEY = "okaychat:theme";
-
-export interface AppearanceSettings {
-  glassOpacity: number;
-  appearanceContrast: number;
-  panelAnimationDurationMs: number;
-  chatWidth: ChatWidth;
-  fontFamilySans: string;
-  fontFamilyComposer: string;
-  fontFamilyCode: string;
-  fontSizeInterface: number;
-  fontSizePrompt: number;
-  fontSizeCode: number;
-  fontSmoothing: boolean;
-  wordWrap: boolean;
-  typographyAdvanced: boolean;
-}
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
   glassOpacity: DEFAULT_GLASS_OPACITY,
@@ -119,6 +107,27 @@ export const useAppearance = create<AppearanceState>()(
     },
   ),
 );
+
+export function appearanceSnapshot(): UserAppearance {
+  const s = useAppearance.getState();
+  return {
+    ...Object.fromEntries(Object.keys(DEFAULT_APPEARANCE).map((key) => [key, s[key as keyof AppearanceSettings]])) as AppearanceSettings,
+    theme: s.theme,
+    mode: s.mode,
+    halves: s.halves,
+    customThemes: [...getCustomThemes()],
+  };
+}
+
+export function restoreAppearance(value: UserAppearance) {
+  localStorage.setItem(THEME_KEY, value.theme);
+  localStorage.setItem(THEME_APPEARANCE_MODE_STORAGE_KEY, value.mode);
+  if (value.halves) localStorage.setItem(THEME_HALVES_STORAGE_KEY, JSON.stringify(value.halves));
+  else localStorage.removeItem(THEME_HALVES_STORAGE_KEY);
+  if (JSON.stringify(getCustomThemes()) !== JSON.stringify(value.customThemes)) replaceCustomThemes(value.customThemes);
+  const { customThemes: _themes, ...settings } = value;
+  useAppearance.setState(settings);
+}
 
 const systemDarkQuery = () => window.matchMedia("(prefers-color-scheme: dark)");
 

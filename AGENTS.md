@@ -35,6 +35,7 @@ src/server/
   index.ts            Hono app, static files in production
   routes.ts           REST API (threads, providers, MCP, usage, settings)
   chat.ts             /api/chat and turnStream() (one turn, shared with schedules), auto-compaction, titles
+  appearance.ts       Validated per-user appearance API (preferences + custom themes inside user_settings)
   projects.ts         Projects: instructions, pinned files, system prompt section
   admin.ts            Admin API: users, sign-up switch, server-wide provider keys
   shares.ts           Public read-only links (/api/public/shares, no auth)
@@ -48,7 +49,8 @@ src/server/
   tools/              Built-in tools: web_search, web_fetch (+ Scrapling fallback), generate_image (Codex), delegate_task (sub-agents)
   compaction.ts usage.ts files.ts threads.ts settings.ts auth.ts db.ts
 src/web/
-  App.tsx             Auth gate, onboarding, shell, routes (wouter)
+  App.tsx             Auth gate and lazy entry points (wouter)
+  ChatShell.tsx       Authenticated shell, onboarding, chat and settings routes
   runtime/            assistant-ui runtime: thread list, history, attachments, model context
   components/chat/    Composer controls, context meter, tool renderers
   components/artifacts Artifact card, side panel, sandboxed frame documents
@@ -56,8 +58,9 @@ src/web/
   components/settings Settings pages
   components/share    Public share page and share button
   theme/              T3Code theme engine port (see its README)
-  state/              zustand stores (data, appearance, thread meta)
+  state/              zustand stores (data, appearance, thread meta); appearance-sync.ts handles account cache and outbox
 src/shared/types.ts   Types shared by both sides
+src/shared/appearance.ts  Appearance schema and shared types
 docs/                 Reusable documentation (see below)
 ```
 
@@ -70,7 +73,8 @@ docs/                 Reusable documentation (see below)
 - `docs/research/prompt-caching.md`: cache strategy per wire format.
 - `docs/research/mcp.md`: `@ai-sdk/mcp` usage and reliability rules.
 - `docs/research/assistant-ui.md`: runtime, thread list, history, components.
-- `docs/research/t3code-appearance.md`: what we ported from T3Code and how.
+- `docs/research/t3code-appearance.md`: what we ported from T3Code and how, including appearance sync.
+- `docs/research/web-bundle.md`: lazy route boundaries, library chunks, and production load verification.
 - `docs/research/web-search.md`, `docs/research/scrapling.md`: keyless search and page fetching.
 - `docs/research/codex-images.md`: image generation through the Codex CLI, login, credential handling.
 - `docs/research/generative-ui.md`: `generative-frame` widgets and spec mode, browser-executed tools.
@@ -102,6 +106,8 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 - Web code must not use `crypto.randomUUID()`: it is missing on plain-HTTP origins (the tailnet dev URL), and assistant-ui swallows the resulting attachment errors. Use `generateId` from `ai`.
 - Browser-executed tools need `sendAutomaticallyWhen` on `useChatRuntime`, or the turn stops after the first one. The server merges their schemas from the request body with `frontendTools`.
 - Tools can stream progress: an `async function*` execute yields preliminary outputs the UI renders live. `toModelOutput` controls what the model sees (sub-agents send only the report).
+- Appearance has its own validated `/api/appearance` endpoint. Generic settings forms must not overwrite it. Only changed top-level appearance fields are patched; custom theme libraries travel with the preferences. First-device migration uses PUT without replacing an existing snapshot.
+- Chat reload recovery uses assistant-ui resumable session storage per thread and `initialThreadId` to restore selection per tab/account. The server retains SSE replay in memory for 15 minutes after the last update; Stop calls an explicit cancel endpoint, while page unload leaves generation running. See `docs/research/assistant-ui.md`.
 - Messages are persisted by the client's history adapter, not by `/api/chat`. A chat sent with curl leaves the thread empty. Drive the UI to test persistence. Server-side writers (schedules) store `{ role, parts, metadata }` with format `ai-sdk/v6` and a `parent_id` chain; the current branch is the newest message and its ancestors.
 
 ## Commands
@@ -110,6 +116,7 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 | --- | --- |
 | `npm run dev` | Server (tsx watch, 127.0.0.1:8787) + Vite (tailnet IP:5173, proxies `/api`) |
 | `npm run typecheck` | Both tsconfigs |
+| `npm test` | Node tests (appearance API validation, migration, merging, account isolation) |
 | `npm run build` / `npm start` | Production build and server |
 
 **Dev servers always run on the tailnet.** The user wants every dev server reachable over Tailscale. Vite binds to `tailscale ip -4` (override with `OKAYCHAT_DEV_HOST`) and allows `*.ts.net` hosts. Share the MagicDNS URL (`http://<host>.<tailnet>.ts.net:5173`), not localhost. Do not bind to `0.0.0.0`.

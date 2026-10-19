@@ -1047,6 +1047,11 @@ function saveCustomThemes(
   notifyCustomThemeListeners();
 }
 
+/** Replace a user's synced library through the same parser and notification path as local edits. */
+export function replaceCustomThemes(storedThemes: ReadonlyArray<unknown>): void {
+  saveCustomThemes(storedThemes, parseStoredThemes(storedThemes));
+}
+
 function requireWritableCustomThemeLibrary(
   snapshot: CustomThemeLibrarySnapshot,
 ): Extract<CustomThemeLibrarySnapshot, { status: "ready" }> {

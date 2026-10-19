@@ -36,6 +36,20 @@ Do not use a dir under `/tmp` for `CODEX_HOME`. The CLI warns and refuses to cre
 - Accept only a real PNG whose realpath is inside `$CODEX_HOME/generated_images/`.
 - Errors: `ERROR: {json}` lines on stderr. Surface only `error.message`. The transcript echoes the prompt.
 
+### Prompt fidelity
+
+The chat tool passes the user's image request in their own words, allowing only
+light cleanup and resolving conversational references. Short or vague requests
+are valid; the assistant must not invent style, composition, lighting, colors,
+text, aspect ratio, or other details. Embellishment requires an explicit user
+request or their agreement first.
+
+The Codex relay is instructed to forward that prompt verbatim to its image tool,
+excluding the `$imagegen` invocation. The server itself only prepends that
+invocation; it does not expand the prompt. These instructions apply at both model
+boundaries because the chat model's tool arguments and Codex's image-tool call
+can each otherwise introduce unwanted details.
+
 Output lands in `$OKAYCHAT_DATA_DIR/images/<userId>/<id>.png`, indexed in `images`, served by `GET /api/images/:id` (owner only). Deleting a thread deletes its images.
 
 ## Docker

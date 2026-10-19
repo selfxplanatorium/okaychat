@@ -1,3 +1,4 @@
+import { appearanceRoutes } from "./appearance.js";
 import { auth as mcpAuth } from "@ai-sdk/mcp";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -53,7 +54,12 @@ const api = new Hono<AppEnv>()
   .use(requireUser)
   .get("/me", (c) => c.json(c.get("user")))
   .get("/settings", (c) => c.json(getSettings(c.get("user").id)))
-  .patch("/settings", async (c) => c.json(updateSettings(c.get("user").id, (await c.req.json()) as Partial<UserSettings>)))
+  .patch("/settings", async (c) => {
+    // Appearance has its own validated endpoint and must not be overwritten by a stale settings form.
+    const { appearance: _appearance, ...patch } = (await c.req.json()) as Partial<UserSettings>;
+    return c.json(updateSettings(c.get("user").id, patch));
+  })
+  .route("/", appearanceRoutes)
 
   // Providers and models
   .get("/providers", async (c) => c.json(await listProviders(c.get("user").id)))

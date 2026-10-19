@@ -9,6 +9,7 @@ import {
   type UIMessage,
 } from "ai";
 import { frontendTools, type FrontendTools } from "assistant-stream/ai-sdk";
+import { createInMemoryResumableStreamStore, createResumableStreamContext, RESUMABLE_STREAM_ID_HEADER } from "assistant-stream/resumable";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AssistantMetadata, ModelInfo, ReasoningEffort, TokenUsage, UserSettings } from "../shared/types.js";
@@ -16,6 +17,7 @@ import type { AppEnv } from "./auth.js";
 import { ARTIFACT_INSTRUCTIONS, artifactTools } from "./artifacts.js";
 import { listModels, resolveModel } from "./catalog/providers.js";
 import { isConnected as codexConnected } from "./codex.js";
+import { newId } from "./crypto.js";
 import { applyCompaction, compact, currentContextTokens, summaryMessages } from "./compaction.js";
 import { createModel } from "./llm.js";
 import { toolsForUser } from "./mcp/manager.js";
@@ -190,11 +192,23 @@ export async function turnStream(opts: TurnOptions) {
   return stream;
 }
 
+// Streams live in memory for 15 minutes after their last update. A restart drops them; the client then shows what was saved.
+const RESUME_TTL_MS = 15 * 60_000;
+const resumable = createResumableStreamContext({
+  store: createInMemoryResumableStreamStore(),
+  ttlMs: RESUME_TTL_MS,
+  onFinalize: (streamId) => setTimeout(() => runs.delete(streamId), RESUME_TTL_MS).unref(),
+});
+const runs = new Map<string, { userId: string; controller: AbortController }>();
+
 export const chatRoutes = new Hono<AppEnv>()
   .post("/chat", async (c) => {
     const user = c.get("user");
     const parsed = chatBody.safeParse(await c.req.json());
     if (!parsed.success) return c.json({ error: "Pick a model before sending." }, 400);
+    // Generation is decoupled from this request so a reload can reattach. Stop sends an explicit cancel.
+    const streamId = newId("str");
+    const controller = new AbortController();
     try {
       const stream = await turnStream({
         userId: user.id,
@@ -205,12 +219,32 @@ export const chatRoutes = new Hono<AppEnv>()
         planMode: parsed.data.planMode === true,
         clientTools: parsed.data.tools as FrontendTools | undefined,
         clientSystem: parsed.data.system,
-        signal: c.req.raw.signal,
+        signal: controller.signal,
       });
-      return createUIMessageStreamResponse({ stream });
+      runs.set(streamId, { userId: user.id, controller });
+      const response = createUIMessageStreamResponse({ stream });
+      const body = await resumable.run(streamId, () => response.body!);
+      const headers = new Headers(response.headers);
+      headers.set(RESUMABLE_STREAM_ID_HEADER, streamId);
+      return new Response(body, { headers });
     } catch (error) {
+      controller.abort();
+      runs.delete(streamId);
       return c.json({ error: (error as Error).message }, 400);
     }
+  })
+  .get("/chat/resume/:streamId", async (c) => {
+    const run = runs.get(c.req.param("streamId"));
+    // 204 is the AI SDK's "no active stream" answer.
+    if (!run || run.userId !== c.get("user").id) return c.body(null, 204);
+    const body = await resumable.resume(c.req.param("streamId"));
+    if (!body) return c.body(null, 204);
+    return new Response(body, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "x-vercel-ai-ui-message-stream": "v1" } });
+  })
+  .post("/chat/:streamId/cancel", (c) => {
+    const run = runs.get(c.req.param("streamId"));
+    if (run?.userId === c.get("user").id) run.controller.abort();
+    return c.json({ ok: true });
   })
   .post("/threads/:id/compact", async (c) => {
     const user = c.get("user");

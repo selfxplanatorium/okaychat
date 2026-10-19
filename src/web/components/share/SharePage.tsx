@@ -2,7 +2,7 @@ import { AppWindowIcon, CodeIcon, FileTextIcon, ImageIcon, WrenchIcon } from "lu
 import { useEffect, useState } from "react";
 import type { ArtifactVersion, SharedPart, SharedThread } from "@shared/types";
 import { FRAME_SANDBOX, frameDocument } from "@/components/artifacts/frame";
-import { Brand } from "@/components/layout/Sidebar";
+import { Brand } from "@/components/layout/Brand";
 import { SimpleMarkdown } from "@/components/ui/simple-markdown";
 import { api } from "@/lib/api";
 
