@@ -115,6 +115,8 @@ export type ThemeDefinition = Readonly<{
   variants?: ThemeVariants;
   collection?: Readonly<{ id: string; label: string }>;
   sidebarArtwork?: boolean;
+  // Built-in only. Custom theme files and the zod schema do not carry it, so it never round-trips.
+  mark?: "eyes";
   managed?: boolean;
 }>;
 
@@ -248,7 +250,8 @@ export const T3_CODE_DARK_THEME_COLORS: ThemeColors = {
 
 export const T3_CHAT_THEME: ThemeDefinition = {
   id: "t3-chat",
-  label: "TeaTree Chat 👀",
+  label: "TeaTree Chat",
+  mark: "eyes",
   appearance: "light",
   colors: {
     canvas: "oklch(0.982446 0.010114 325.653)",

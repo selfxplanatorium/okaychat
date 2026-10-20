@@ -21,6 +21,7 @@ import {
   type ThemePreferenceMode,
 } from "@/theme/palette";
 import { BUILT_IN_THEMES } from "@/theme/palettes";
+import { EyesMark } from "./EyesMark";
 import { useThemeEditorStore } from "./themeEditorStore";
 import {
   STANDARD_THEME_CARDS,
@@ -176,8 +177,10 @@ function ThemeLibraryCard({
   onDownload,
   onRemove,
   variantNavigation,
+  mark,
 }: {
   theme: ThemeCardDefinition;
+  mark?: "eyes";
   onUse: () => void;
   onUseMode: (mode: ThemeMode) => void;
   activeModes: ReadonlyArray<ThemeMode>;
@@ -322,7 +325,10 @@ function ThemeLibraryCard({
                     onUse();
                   }}
                 >
-                  {variantNavigation?.collectionLabel ?? theme.label}
+                  <span className="inline-flex max-w-full items-center gap-1 align-middle">
+                    <span className="truncate">{variantNavigation?.collectionLabel ?? theme.label}</span>
+                    {mark && !variantNavigation ? <EyesMark className="size-[1.25em] shrink-0" /> : null}
+                  </span>
                 </button>
               </div>
               {onEdit || onDuplicate || onDownload || onRemove ? (
@@ -650,6 +656,7 @@ export function ThemeLibrary({
             key={builtIn.id}
             onDuplicate={() => duplicate(builtIn.id, builtIn.label)}
             onUse={() => store().setTheme(builtIn.id)}
+            mark={builtIn.mark}
             onUseMode={handlePairPick(builtIn.id)}
             theme={getThemeCardDefinition(builtIn)}
           />
