@@ -1,0 +1,52 @@
+/// <reference types="node" />
+import assert from "node:assert/strict";
+import { beforeEach, test } from "node:test";
+import { DEFAULT_USER_SETTINGS, type ModelInfo, type Project } from "../../shared/types.js";
+
+const storage = new Map<string, string>([["okaychat:selected-model", "p/deepseek"]]);
+Object.defineProperty(globalThis, "localStorage", { value: {
+  getItem: (key: string) => storage.get(key) ?? null,
+  setItem: (key: string, value: string) => storage.set(key, value),
+  removeItem: (key: string) => storage.delete(key),
+}, configurable: true });
+const { useData, getActiveModel } = await import("./data.js");
+const models = ["deepseek", "luna", "project"].map((id) => ({ ref: `p/${id}` })) as ModelInfo[];
+const initiallySelected = useData.getState().selectedModel;
+beforeEach(() => useData.setState({ settings: { ...DEFAULT_USER_SETTINGS, defaultModel: "p/luna" }, models, projects: [], activeProject: null, selectedModel: null }));
+
+test("a persisted composer choice cannot override the account default on load", () => {
+  assert.equal(initiallySelected, null);
+  assert.equal(getActiveModel()?.ref, "p/luna");
+});
+
+test("a new chat resets its composer override and uses the current default", () => {
+  useData.getState().selectModel("p/deepseek");
+  assert.equal(getActiveModel()?.ref, "p/deepseek");
+  useData.getState().resetModel();
+  assert.equal(getActiveModel()?.ref, "p/luna");
+  assert.equal(storage.has("okaychat:selected-model"), false);
+});
+
+test("project defaults inherit the account model after clearing or leaving the project", () => {
+  useData.setState({ projects: [{ id: "project", defaultModel: "p/project" }] as Project[] });
+  useData.getState().setActiveProject("project");
+  assert.equal(getActiveModel()?.ref, "p/project");
+  useData.setState({ projects: [{ id: "project", defaultModel: null }] as Project[] });
+  assert.equal(getActiveModel()?.ref, "p/luna");
+  useData.getState().setActiveProject(null);
+  assert.equal(getActiveModel()?.ref, "p/luna");
+});
+
+test("saving a default replaces the stale composer override and supports clearing", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_input, init) => Response.json({ ...useData.getState().settings, ...JSON.parse(init!.body as string) });
+  try {
+    useData.getState().selectModel("p/deepseek");
+    await useData.getState().updateSettings({ defaultModel: "p/luna" });
+    assert.equal(getActiveModel()?.ref, "p/luna");
+    await useData.getState().updateSettings({ defaultModel: null });
+    assert.equal(getActiveModel()?.ref, "p/deepseek");
+    useData.getState().selectModel("unavailable/model");
+    assert.equal(getActiveModel()?.ref, "p/deepseek");
+  } finally { globalThis.fetch = originalFetch; }
+});
