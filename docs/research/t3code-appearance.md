@@ -160,6 +160,10 @@ Settings values (S6, S7, S11, S12, S13 to S18) live in T3Code's server or client
 
 ## okaychat implementation notes
 
+The brand artwork lives in `src/web/public/icon.webp` (256 × 250, lossless WebP, about 50 KB). It is tightly cropped from the supplied 1304 × 1206 PNG at `(138, 103, 1029, 1005)`; alpha below 10/255 is discarded to remove stray border specks. The supplied asset is already transparent. The 64 px favicon and 180 px Apple touch icon are square PNG fallbacks with the original aspect ratio preserved.
+
+`src/web/theme/brand.ts` decodes the artwork once and shifts its HSL hue and saturation to the palette's `accent` (`--app-theme-accent`, not the subtle `--accent` surface or the separate action color used by solid controls). Lightness, white quotation marks, and alpha are preserved. This avoids CSS `hue-rotate` changing perceived saturation or clipping channels. Palette application and live editor previews both refresh the shared `--brand-icon` image and browser icon links; theme halves, OS mode changes, and account appearance restores use the same path. `Brand.tsx` is shared by the sidebar, sign-in, onboarding, and public shares. No image processing dependency is needed at runtime.
+
 `src/web/components/settings/AppearanceSettings.tsx` rebuilds the panel. The theme library and editor are close ports in `src/web/components/settings/theme/`: preview circles, library cards (including collection cards with radial variants), the floating draggable and resizable editor panel (guided two-color mode, advanced grouped roles, merge by name), the HSV color picker, and the inspector. `ThemeEditorHost` is mounted by `ChatShell`, so the panel stays open across routes and the inspector works on the chat. Deliberate differences:
 
 - Environment themes are left out (okaychat has none).

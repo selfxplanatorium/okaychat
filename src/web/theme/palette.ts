@@ -3,6 +3,7 @@
 // preview-sidebar, and collection-publishing code removed.
 import { converter, parse } from "culori/fn";
 import "culori/css";
+import { applyBrandAccent } from "./brand";
 import {
   BUILT_IN_THEMES,
   EMBER_THEME,
@@ -1330,6 +1331,7 @@ export function applyThemeColorPreview(colors: ThemeColors, appearance: ThemeApp
   for (const [role, value] of Object.entries(colors) as Array<[ThemeColorRole, string]>) {
     if (isThemeColor(value)) root.style.setProperty(APP_THEME_VARIABLES[role], value);
   }
+  void applyBrandAccent(colors.accent);
 }
 
 export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppearance): void {
@@ -1347,6 +1349,7 @@ export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppe
     for (const [role, value] of Object.entries(colors) as Array<[ThemeColorRole, string]>) {
       root.style.setProperty(APP_THEME_VARIABLES[role], value);
     }
+    void applyBrandAccent(colors.accent);
     return;
   }
 
@@ -1354,6 +1357,7 @@ export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppe
   for (const variable of Object.values(APP_THEME_VARIABLES)) {
     root.style.removeProperty(variable);
   }
+  void applyBrandAccent(getComputedStyle(root).getPropertyValue("--primary").trim());
 }
 
 export function resolveThemeAppearance(
