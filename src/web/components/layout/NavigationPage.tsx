@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { LibraryIcon } from "lucide-react";
+import { LibraryPage } from "@/components/library/LibraryPage";
 import { McpSettings } from "@/components/settings/McpSettings";
 import { ProjectSettings } from "@/components/settings/ProjectSettings";
 import { ScheduleSettings } from "@/components/settings/ScheduleSettings";
@@ -44,12 +45,13 @@ export function NavigationPage({ page }: { page: string }) {
   if (page === "scheduled") return <ScheduleSettings />;
   if (page === "projects") return <ProjectSettings />;
   if (page === "plugins") return <PluginsPage />;
+  if (page === "library") return <LibraryPage />;
   return (
-    <SettingsPage title="Library">
+    <SettingsPage title="Navigation">
       <div className="flex flex-col items-center py-16 text-center">
         <LibraryIcon aria-hidden className="text-muted-foreground mb-5 size-8" />
-        <h2 className="text-base font-medium">Your library is coming soon</h2>
-        <p className="text-muted-foreground mt-2 max-w-xs text-sm">A home for the files and creations you want to keep close.</p>
+        <h2 className="text-base font-medium">Nothing to see here</h2>
+        <p className="text-muted-foreground mt-2 max-w-xs text-sm">This page does not exist.</p>
       </div>
     </SettingsPage>
   );

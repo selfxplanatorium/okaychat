@@ -54,6 +54,25 @@ function storeUpload(userId: string, name: string, mime: string, data: Uint8Arra
 }
 
 export const fileRoutes = new Hono<AppEnv>()
+  // Library download/preview of a stored attachment. Inline only for the browser's own safe viewers
+  // (images, PDF); anything else downloads, so a model-crafted HTML file cannot script on our origin.
+  .get("/uploads/:id/file", (c) => {
+    const row = db
+      .prepare("SELECT name, mime, data FROM uploads WHERE id = ? AND user_id = ?")
+      .get(c.req.param("id"), c.get("user").id) as { name: string; mime: string; data: Uint8Array } | undefined;
+    if (!row) return c.json({ error: "Not found" }, 404);
+    const mime = row.mime || "application/octet-stream";
+    const inline = mime.startsWith("image/") || mime === "application/pdf";
+    return new Response(new Uint8Array(row.data) as unknown as BodyInit, {
+      headers: {
+        "Content-Type": mime,
+        "Content-Disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(row.name)}`,
+        // Inline images and PDFs render in the browser's own viewers; the rest downloads and gets no script.
+        ...(inline ? {} : { "Content-Security-Policy": "default-src 'none'; sandbox", "X-Content-Type-Options": "nosniff" }),
+        "Cache-Control": "private, max-age=60",
+      },
+    });
+  })
   // PDFs that a model reads natively never go through extraction. This keeps their bytes for
   // import_document without paying for text extraction the caller will not use.
   .post("/files/store", async (c) => {

@@ -13,6 +13,7 @@ import { artifactRoutes } from "./artifacts.js";
 import { chatRoutes } from "./chat.js";
 import { fileRoutes } from "./files.js";
 import { fontRoutes } from "./fonts.js";
+import { libraryRoutes } from "./library.js";
 import { getProject, projectRoutes } from "./projects.js";
 import { scheduleRoutes } from "./schedules.js";
 import { searchRoutes } from "./search.js";
@@ -172,6 +173,7 @@ const api = new Hono<AppEnv>()
   .route("/", chatRoutes)
   .route("/", fileRoutes)
   .route("/", fontRoutes)
+  .route("/", libraryRoutes)
   .route("/", artifactRoutes)
   .route("/", imageRoutes)
   .route("/", sandboxRoutes)

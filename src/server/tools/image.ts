@@ -62,7 +62,7 @@ export interface GeneratedImage {
 }
 
 const isPng = (buf: Buffer) => buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-const imagePath = (userId: string, id: string) => path.join(IMAGE_DIR, userId, `${id}.png`);
+export const imagePath = (userId: string, id: string) => path.join(IMAGE_DIR, userId, `${id}.png`);
 
 /** Codex prints `ERROR: {json}` lines. Return only the message, never the transcript, which echoes the prompt. */
 function codexError(stderr: string): string {
