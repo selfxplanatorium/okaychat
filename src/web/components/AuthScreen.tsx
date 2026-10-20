@@ -41,7 +41,7 @@ export function AuthScreen({ needsSetup, signupOpen, onDone }: { needsSetup: boo
   return (
     <div className="grid min-h-full place-items-center p-6">
       <div className="animate-rise-in-lg w-full max-w-sm">
-        <form ref={formRef} onSubmit={submit} className="surface-glass flex w-full flex-col gap-4 rounded-2xl border p-6 shadow-sm">
+        <form ref={formRef} onSubmit={submit} className="surface-glass depth-float flex w-full flex-col gap-4 rounded-2xl border p-6">
           <div className="stagger animate-rise-in" style={{ "--i": 0 } as CSSProperties}>
             <Brand />
           </div>

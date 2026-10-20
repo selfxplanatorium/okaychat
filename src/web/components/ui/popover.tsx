@@ -18,7 +18,7 @@ function PopoverContent({
       <PopoverPrimitive.Positioner data-slot="popover-positioner" side={side} align={align} sideOffset={sideOffset} className="isolate z-50">
         <PopoverPrimitive.Popup
           className={cn(
-            "dropdown-glass text-popover-foreground origin-(--transform-origin) rounded-xl border p-1.5 shadow-lg outline-none",
+            "dropdown-glass text-popover-foreground origin-(--transform-origin) rounded-xl border p-1.5 depth-float outline-none",
             "translate-x-0 translate-y-0 scale-100 transition-[opacity,scale,translate] duration-[var(--motion-base)] ease-out-expo",
             "data-[starting-style]:scale-96 data-[starting-style]:opacity-0",
             // Enters from the trigger's edge and settles outward, so the popup

@@ -1,0 +1,188 @@
+/*
+ * Depth layer. The visual language of the app icon: surfaces lit from above,
+ * a one-pixel inner highlight on the top edge, a faint inner shade on the
+ * bottom edge, and soft shadows tinted by the theme instead of plain black.
+ *
+ * Everything derives from the semantic tokens in theme.css, so every built-in,
+ * custom, and imported theme gets the same depth without new palette roles.
+ * Utilities are composable with Tailwind variants (md:depth-sidebar,
+ * data-active:depth-row-active, ...).
+ */
+
+:root {
+  /* Top-edge highlight and hairline outline shared by every raised surface. */
+  --depth-highlight: inset 0 1px 0 rgb(255 255 255 / 75%);
+  --depth-line: color-mix(in srgb, var(--contrast-foreground) 8%, transparent);
+  /* Shadow color: the foreground pulled toward the accent, so shadows read as
+     colored light falling on the canvas rather than gray smudges. */
+  --depth-shadow-tint: color-mix(in oklab, var(--foreground) 80%, var(--primary));
+  --shadow-raised:
+    0 0 0 1px var(--depth-line),
+    0 1px 1px color-mix(in srgb, var(--depth-shadow-tint) 4%, transparent),
+    0 2px 6px -2px color-mix(in srgb, var(--depth-shadow-tint) 12%, transparent);
+  --shadow-float:
+    0 0 0 1px var(--depth-line),
+    0 1px 1px color-mix(in srgb, var(--depth-shadow-tint) 4%, transparent),
+    0 4px 10px -2px color-mix(in srgb, var(--depth-shadow-tint) 6%, transparent),
+    0 18px 40px -14px color-mix(in srgb, var(--depth-shadow-tint) 18%, transparent);
+  /* Focus halo and canvas glow. */
+  --depth-glow: color-mix(in oklab, var(--primary) 22%, transparent);
+  --depth-canvas-glow: color-mix(in oklab, var(--primary) 13%, transparent);
+  /* Solid accent controls: lighter at the top, deeper at the bottom. */
+  --depth-primary-top: color-mix(in oklab, var(--primary), white 26%);
+  --depth-primary-bottom: color-mix(in oklab, var(--primary), black 16%);
+  --depth-primary-shadow: color-mix(in oklab, var(--primary) 60%, black);
+}
+
+:root.dark {
+  --depth-highlight: inset 0 1px 0 rgb(255 255 255 / 6%);
+  --depth-line: color-mix(in srgb, var(--contrast-foreground) 7%, transparent);
+  --depth-shadow-tint: black;
+  --shadow-raised:
+    0 0 0 1px var(--depth-line),
+    0 1px 1px rgb(0 0 0 / 25%),
+    0 2px 8px -2px rgb(0 0 0 / 35%);
+  --shadow-float:
+    0 0 0 1px var(--depth-line),
+    0 1px 1px rgb(0 0 0 / 30%),
+    0 6px 14px -4px rgb(0 0 0 / 40%),
+    0 24px 48px -16px rgb(0 0 0 / 60%);
+  --depth-glow: color-mix(in oklab, var(--primary) 18%, transparent);
+  --depth-canvas-glow: color-mix(in oklab, var(--primary) 9%, transparent);
+  /* Dark themes use a light accent, so the top only brightens a little. */
+  --depth-primary-top: color-mix(in oklab, var(--primary), white 12%);
+  --depth-primary-bottom: color-mix(in oklab, var(--primary), black 22%);
+}
+
+/* App background: the canvas with the accent glowing in from the top. */
+@utility depth-canvas {
+  background:
+    radial-gradient(120% 70% at 72% -12%, var(--depth-canvas-glow), transparent 62%),
+    linear-gradient(
+      180deg,
+      var(--background),
+      color-mix(in oklab, var(--background), var(--foreground) 3%)
+    );
+}
+
+/* Solid accent control (buttons, send, checked switch track). */
+@utility depth-primary {
+  background-color: var(--primary);
+  background-image: linear-gradient(
+    180deg,
+    var(--depth-primary-top),
+    var(--primary) 55%,
+    var(--depth-primary-bottom)
+  );
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 40%),
+    inset 0 -1px 0 rgb(0 0 0 / 12%),
+    0 1px 2px color-mix(in srgb, var(--depth-primary-shadow) 30%, transparent),
+    0 5px 12px -5px color-mix(in srgb, var(--depth-primary-shadow) 55%, transparent);
+
+  /* The box-shadow above replaces Tailwind's ring, so focus uses an outline. */
+  &:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--ring) 60%, transparent);
+    outline-offset: 2px;
+  }
+}
+
+/* A surface floating above content: composer, menus, popovers. */
+@utility depth-float {
+  box-shadow: var(--depth-highlight), var(--shadow-float);
+}
+
+/* Desktop sidebar: a frosted panel inset from the window edge. */
+@utility depth-sidebar {
+  background: color-mix(
+    in srgb,
+    var(--sidebar) min(100%, calc(var(--glass-opacity) + 25%)),
+    transparent
+  );
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  box-shadow:
+    var(--depth-highlight),
+    0 0 0 1px var(--depth-line),
+    0 10px 30px -18px color-mix(in srgb, var(--depth-shadow-tint) 35%, transparent);
+}
+
+/* Selected sidebar row: a raised card with an accent bar on its leading edge. */
+@utility depth-row-active {
+  background-color: var(--sidebar-row-selected);
+  box-shadow: var(--depth-highlight), var(--shadow-raised);
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset-block: 0.5rem;
+    inset-inline-start: -1px;
+    width: 3px;
+    border-radius: 3px;
+    background: linear-gradient(var(--depth-primary-top), var(--depth-primary-bottom));
+  }
+}
+
+/* Text fields: slightly sunken at rest, accent halo on focus. */
+@utility depth-field {
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--depth-shadow-tint) 7%, transparent);
+
+  &:focus-visible {
+    border-color: color-mix(in srgb, var(--primary) 55%, transparent);
+    box-shadow: 0 0 0 3px var(--depth-glow);
+  }
+}
+
+/* Composer shell: floats, and gains the accent halo while focused. */
+@utility depth-composer {
+  border-color: var(--depth-line);
+  box-shadow: var(--depth-highlight), var(--shadow-float);
+
+  &:focus-within {
+    border-color: color-mix(in srgb, var(--primary) 38%, transparent);
+    box-shadow: var(--depth-highlight), 0 0 0 3px var(--depth-glow), var(--shadow-float);
+  }
+}
+
+/* User message bubble: the message surface tinted toward the accent. */
+@utility depth-bubble {
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--message-surface), var(--primary) 7%),
+    color-mix(in oklab, var(--message-surface), var(--primary) 13%)
+  );
+  box-shadow:
+    var(--depth-highlight),
+    0 0 0 1px var(--depth-line),
+    0 3px 10px -6px color-mix(in srgb, var(--depth-primary-shadow) 35%, transparent);
+}
+
+/* Switch thumb: a lit knob. */
+@utility depth-knob {
+  background-image: linear-gradient(white, color-mix(in oklab, white, var(--foreground) 6%));
+  box-shadow:
+    0 1px 3px rgb(0 0 0 / 22%),
+    0 0 0 0.5px rgb(0 0 0 / 6%);
+}
+
+/*
+ * Buttons and other pressable controls: colors and shadows follow quickly,
+ * scale springs back with a small overshoot after the press.
+ * In the components layer so a utility passed by a caller still wins.
+ */
+@layer components {
+  .depth-press {
+    transition:
+      color var(--motion-fast) var(--ease-out-quart),
+      background-color var(--motion-fast) var(--ease-out-quart),
+      border-color var(--motion-fast) var(--ease-out-quart),
+      box-shadow var(--motion-fast) var(--ease-out-quart),
+      opacity var(--motion-fast) var(--ease-out-quart),
+      filter var(--motion-fast) var(--ease-out-quart),
+      scale var(--motion-slow) var(--ease-spring);
+  }
+  .depth-press:active:not(:disabled, [aria-haspopup]) {
+    scale: 0.95;
+    transition-duration: var(--motion-instant);
+  }
+}

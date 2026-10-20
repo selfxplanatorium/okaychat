@@ -27,6 +27,7 @@ okaychat is a self-hosted AI chat app meant to replace LibreChat and Open WebUI.
 | Files | `unpdf` (PDF), `mammoth` (DOCX) | Pure JS, no native deps |
 | Web | `linkedom` + `@mozilla/readability` + `turndown`; SearXNG sidecar for search | Free, no keys. See `docs/research/web-search.md` |
 | Theming | Port of T3Code appearance settings (MIT) | Required by the product brief |
+| Depth | `theme/depth.css`: lit surfaces, tinted shadows, accent gradients derived from theme tokens | Matches the brand icon. See `docs/research/visual-depth.md` |
 
 ## Layout
 
@@ -60,7 +61,7 @@ src/web/
   components/genui    Generative UI catalog (render_spec components) and widget toolkit
   components/settings Settings pages; theme/ holds the T3Code theme library, editor panel, color picker, inspector
   components/share    Public share page and share button
-  theme/              T3Code theme engine port (see its README); bundled-fonts.ts lists the shipped font families
+  theme/              T3Code theme engine port (see its README); bundled-fonts.ts lists the shipped font families; depth.css holds the depth utilities
   fonts/              Bundled Liberation TTFs and their CSS (see docs/research/bundled-fonts.md)
   state/              zustand stores (data, appearance, fonts, thread meta); appearance-sync.ts handles account cache and outbox
 sandbox/              Code sandbox container: runner.py (stdlib HTTP service), Dockerfile, pinned requirements.txt
@@ -79,6 +80,7 @@ docs/                 Reusable documentation (see below)
 - `docs/research/mcp.md`: `@ai-sdk/mcp` usage and reliability rules.
 - `docs/research/assistant-ui.md`: runtime, thread list, history, components.
 - `docs/research/t3code-appearance.md`: what we ported from T3Code and how, including appearance sync.
+- `docs/research/visual-depth.md`: depth tokens and utilities, where each is applied, and the rules for adding more.
 - `docs/research/web-bundle.md`: lazy route boundaries, library chunks, and production load verification.
 - `docs/research/web-search.md`, `docs/research/scrapling.md`: keyless search and page fetching.
 - `docs/research/bundled-fonts.md`: fonts shipped in the picker, their licenses, and the Liberation source.
@@ -116,6 +118,7 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 - `view_artifact` renders in the shared Chromium and returns a screenshot to the model. The image is injected once by `prepareStep` as a synthetic user message, never inside the tool result (OpenAI-compatible APIs stringify tool content). Only vision models get the tool, six screenshots per reply, and nothing image-related is persisted. PDF pages come from pdf.js, DOCX from docx-preview, XLSX from the preview JSON.
 - DuckDuckGo HTML endpoints return 202 (bot wall) from many servers and Bing serves junk to scrapers. Search goes SearXNG, then Brave HTML, then DuckDuckGo lite.
 - Context fill uses the last step's input + output tokens, not the turn total.
+- Depth (highlights, tinted shadows, accent gradients) comes from `depth-*` utilities in `theme/depth.css`, derived from semantic tokens with `color-mix`. Use them instead of `shadow-*`/`bg-primary` on primitives, and never hardcode colors there or theme switches break. See `docs/research/visual-depth.md`.
 - Tool calls collapse into a "N tool calls" group by default. Tools whose card must stay visible get a `"tool-call:<name>": []` entry in `messageGroupBy` (`thread.aui.tsx`).
 - Artifact frames have an opaque origin (no `allow-same-origin`), so `localStorage` throws. `frame.ts` injects in-memory storage before any artifact code runs.
 - Web code must not use `crypto.randomUUID()`: it is missing on plain-HTTP origins (the tailnet dev URL), and assistant-ui swallows the resulting attachment errors. Use `generateId` from `ai`.

@@ -36,7 +36,7 @@ export function SettingsSection({ title, description, action, children }: { titl
           {action}
         </div>
       )}
-      <div className="bg-card divide-border flex flex-col divide-y rounded-xl border">{children}</div>
+      <div className="bg-card divide-border flex flex-col divide-y rounded-xl shadow-[var(--depth-highlight),var(--shadow-raised)]">{children}</div>
     </section>
   );
 }

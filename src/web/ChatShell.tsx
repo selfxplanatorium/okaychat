@@ -82,7 +82,7 @@ export function Shell() {
 
   return (
     <RuntimeProvider>
-      <div className="animate-fade-in flex h-full">
+      <div className="animate-fade-in depth-canvas flex h-full">
         <Sidebar open={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} />
         {/* Always mounted so the backdrop can fade out; pointer events are off while closed. */}
         <div

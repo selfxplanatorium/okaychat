@@ -14,6 +14,7 @@ Source files are listed in each module header. The T3Code clone used for the por
 | `contrast.ts` | Writes `--appearance-contrast-*` variables from the contrast setting. | `apps/web/src/appearanceContrast.ts` |
 | `fonts.ts` | Font stacks, font family list parsing, font variable writes, size clamps, monospace detection, installed font discovery. | `apps/web/src/appearanceFonts.ts` |
 | `vscode-import.ts` | VS Code theme JSON to `ThemeDefinition`. Pairs light and dark files. Resolves label collisions. | `apps/web/src/vscodeThemeImport.ts` |
+| `depth.css` | Depth tokens and `depth-*` utilities (lit surfaces, tinted shadows, accent gradients, spring press). okaychat original, derived from the semantic tokens. See `docs/research/visual-depth.md`. | n/a |
 | `theme.css` | Tailwind v4 layer. Maps `--app-theme-*` to semantic tokens, exposes them as `@theme inline` colors, defines glass, contrast, chat width, font variables, and `.settings-slider`. | `apps/web/src/index.css` (extracted blocks) |
 
 `palette.ts` depends on `culori` (already in `package.json`).
@@ -25,6 +26,7 @@ Stylesheet (`src/web/index.css`):
 ```css
 @import "tailwindcss";
 @import "./theme/theme.css";
+@import "./theme/depth.css";
 ```
 
 `theme.css` defines `@custom-variant dark (&:is(.dark, .dark *))`. The `dark` class on `<html>` drives `dark:` utilities, replacing Tailwind's default `prefers-color-scheme` variant.

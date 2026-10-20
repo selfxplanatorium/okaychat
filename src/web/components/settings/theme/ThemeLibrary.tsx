@@ -203,7 +203,7 @@ function ThemeLibraryCard({
       <TooltipTrigger
         render={
           <div
-            className="border-border/70 bg-card/60 hover:bg-accent/10 cursor-pointer overflow-hidden rounded-xl border transition-colors"
+            className="bg-card hover:bg-accent/10 cursor-pointer overflow-hidden rounded-xl shadow-[var(--depth-highlight),var(--shadow-raised)] transition-[background-color,box-shadow,translate] duration-(--motion-fast) ease-out-quart hover:-translate-y-px"
             data-theme-library-card={theme.id}
             onClick={onUse}
           >
@@ -583,11 +583,16 @@ export function ThemeLibrary({
               aria-label={mode === "system" ? "Follow the system appearance" : `Use ${mode} mode`}
               aria-pressed={isActive}
               className={cn(
-                "focus-visible:outline-ring flex cursor-pointer flex-col items-stretch gap-1.5 rounded-xl border p-2 outline-none transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-solid",
-                isActive ? "bg-accent/30 border-transparent" : "border-border/70 bg-card/60 hover:bg-accent/10",
+                "focus-visible:outline-ring bg-card flex cursor-pointer flex-col items-stretch gap-1.5 rounded-xl p-2 outline-none transition-[background-color,box-shadow] duration-(--motion-base) ease-out-quart focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-solid",
+                !isActive && "hover:bg-accent/10",
               )}
               key={mode}
-              style={isActive ? { boxShadow: "inset 0 0 0 1px var(--ring)" } : undefined}
+              // The selected mode gets the accent ring and halo used for focus elsewhere.
+              style={{
+                boxShadow: isActive
+                  ? "var(--depth-highlight), 0 0 0 1.5px var(--ring), 0 0 0 5px var(--depth-glow), var(--shadow-raised)"
+                  : "var(--depth-highlight), var(--shadow-raised)",
+              }}
               onClick={() => store().setMode(mode)}
               type="button"
             >

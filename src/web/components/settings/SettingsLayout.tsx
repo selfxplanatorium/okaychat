@@ -65,7 +65,7 @@ export function SettingsLayout({ section }: { section: string }) {
     <div className="flex h-full min-h-0 flex-1 max-md:flex-col">
       <nav
         ref={navRef}
-        className="bg-sidebar border-sidebar-border relative flex shrink-0 gap-1 border-r p-2 md:w-56 md:flex-col max-md:overflow-x-auto max-md:border-r-0 max-md:border-b"
+        className="max-md:bg-sidebar max-md:border-sidebar-border md:depth-sidebar relative flex shrink-0 gap-1 p-2 md:m-2 md:w-56 md:flex-col md:self-start md:rounded-2xl max-md:overflow-x-auto max-md:border-b"
       >
         {/* A single pill moves between sections; items paint above it. On the phone
             row layout item widths differ, so only the offset is transitioned. */}
@@ -73,7 +73,7 @@ export function SettingsLayout({ section }: { section: string }) {
           <span
             aria-hidden
             className={cn(
-              "bg-sidebar-row-active pointer-events-none absolute top-0 left-0 rounded-lg will-change-transform",
+              "depth-row-active pointer-events-none absolute top-0 left-0 rounded-lg will-change-transform",
               slide && "transition-transform duration-(--motion-base) ease-out-expo",
             )}
             style={{ width: pill.width, height: pill.height, transform: `translate3d(${pill.x}px, ${pill.y}px, 0)` }}

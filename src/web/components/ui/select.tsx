@@ -46,7 +46,7 @@ export function Select<T extends string>({
         <SelectPrimitive.Positioner sideOffset={6} alignItemWithTrigger={false} className="isolate z-50">
           <SelectPrimitive.Popup
             className={cn(
-              "dropdown-glass text-popover-foreground max-h-80 min-w-(--anchor-width) origin-(--transform-origin) overflow-y-auto rounded-xl border p-1 shadow-lg outline-none",
+              "dropdown-glass text-popover-foreground max-h-80 min-w-(--anchor-width) origin-(--transform-origin) overflow-y-auto rounded-xl border p-1 depth-float outline-none",
               "translate-x-0 translate-y-0 scale-100 transition-[opacity,scale,translate] duration-[var(--motion-base)] ease-out-expo",
               "data-[starting-style]:scale-96 data-[starting-style]:opacity-0",
               // Enters from the trigger's edge and settles outward, so the popup
@@ -60,7 +60,7 @@ export function Select<T extends string>({
               <SelectPrimitive.Item
                 key={o.value}
                 value={o.value}
-                className="data-highlighted:bg-accent data-highlighted:text-accent-foreground flex cursor-default items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none transition-colors duration-[var(--motion-instant)] ease-out-quart"
+                className="data-highlighted:depth-primary data-highlighted:text-primary-foreground flex cursor-default items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none transition-colors duration-[var(--motion-instant)] ease-out-quart"
               >
                 <SelectPrimitive.ItemText>{o.label}</SelectPrimitive.ItemText>
                 <SelectPrimitive.ItemIndicator className="transition-[opacity,scale] duration-[var(--motion-base)] ease-spring data-[starting-style]:scale-0 data-[starting-style]:opacity-0">

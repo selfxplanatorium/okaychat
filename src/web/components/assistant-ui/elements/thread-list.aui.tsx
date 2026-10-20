@@ -289,10 +289,10 @@ export const ThreadListNew = forwardRef<
           if (!item.remoteId) useChatPrivacyStore.getState().set(item.id, { temporary: false, personalized: true });
           onClick?.(event);
         }}
-        variant="ghost"
+        variant="default"
         data-slot="aui_thread-list-new"
         className={cn(
-          "hover:bg-muted data-active:bg-muted h-8 justify-start gap-2 rounded-md px-2.5 text-sm font-normal transition-colors duration-(--motion-fast) ease-out-quart",
+          "h-8 justify-center gap-2 rounded-lg px-2.5 text-sm font-medium",
           className,
         )}
         {...props}
@@ -357,7 +357,7 @@ export const ThreadListItem: FC = () => {
   return (
     <ThreadListItemPrimitive.Root
       data-slot="aui_thread-list-item"
-      className="group hover:bg-muted focus-visible:bg-muted data-active:bg-muted has-focus-visible:bg-muted has-data-[state=open]:bg-muted relative flex h-8 items-center rounded-md transition-colors duration-(--motion-fast) ease-out-quart focus-visible:outline-none"
+      className="group hover:bg-sidebar-row-hover focus-visible:bg-sidebar-row-hover data-active:depth-row-active has-focus-visible:bg-sidebar-row-hover has-data-[state=open]:bg-sidebar-row-hover relative flex h-8 items-center rounded-lg transition-[background-color,box-shadow] duration-(--motion-fast) ease-out-quart focus-visible:outline-none"
     >
       {isRenaming ? (
         <ThreadListItemRename

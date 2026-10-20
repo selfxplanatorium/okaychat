@@ -45,6 +45,7 @@ Notes on the `Contrast` and `Glass opacity` rows: each has a reset button that a
 Glass implementation notes:
 
 - `surface-glass` reads `--glass-opacity` / `--glass-blur`; `glassOpacity = 100` also sets `--glass-blur: 0px`.
+- okaychat deviation: the composer uses the card color at glass opacity + 30% and the desktop sidebar the sidebar color at glass opacity + 25% (`depth-sidebar`), both capped at 100%. They float on shadows, so the plain glass value read too thin. See `docs/research/visual-depth.md`.
 - A `backdrop-filter` element cannot see through an ancestor stacking context that paints above the content. Keep `z-*` on the glass element itself (the floating chat header and chat actions do), not on a wrapper around it.
 - Ancestor opacity animations must not retain their final value (`both` / `forwards`); a retained animation keeps the ancestor a backdrop root and disables the blur for descendants. Use `backwards` when the element needs to stay hidden during a delay.
 

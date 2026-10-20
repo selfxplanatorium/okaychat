@@ -17,14 +17,15 @@ export function Sidebar({ open, onToggle }: { open: boolean; onToggle: () => voi
     <aside
       data-open={open}
       className={cn(
-        "shell-sidebar bg-sidebar text-sidebar-foreground border-sidebar-border panel-transition flex h-full shrink-0 flex-col overflow-hidden border-r transition-[width,margin]",
-        open ? "w-72" : "w-0 border-r-0",
+        "shell-sidebar text-sidebar-foreground border-sidebar-border panel-transition flex h-full shrink-0 flex-col overflow-hidden transition-[width,margin]",
+        open ? "w-72" : "w-0",
         // On mobile the rail is an overlay: it keeps its width and slides off screen.
-        "max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:w-72 max-md:shadow-xl max-md:transition-transform",
+        "max-md:bg-sidebar max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:w-72 max-md:border-r max-md:shadow-xl max-md:transition-transform",
         open ? "max-md:translate-x-0" : "max-md:-translate-x-full",
       )}
     >
-      <div className="shell-sidebar-inner flex h-full w-72 shrink-0 flex-col">
+      {/* On desktop the panel floats inside the rail, inset from the window edge. */}
+      <div className="shell-sidebar-inner md:depth-sidebar flex h-full w-72 shrink-0 flex-col md:m-2 md:h-[calc(100%-1rem)] md:w-[calc(18rem-1rem)] md:rounded-2xl">
         <div className="flex h-12 shrink-0 items-center justify-between px-3">
           <Link href="/" onClick={() => location !== "/" && navigate("/")}>
             <Brand />

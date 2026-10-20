@@ -16,7 +16,7 @@ function MenuContent({
       <MenuPrimitive.Positioner side={side} align={align} sideOffset={sideOffset} className="isolate z-50">
         <MenuPrimitive.Popup
           className={cn(
-            "dropdown-glass text-popover-foreground min-w-40 origin-(--transform-origin) rounded-xl border p-1 shadow-lg outline-none",
+            "dropdown-glass text-popover-foreground min-w-40 origin-(--transform-origin) rounded-xl border p-1 depth-float outline-none",
             "translate-x-0 translate-y-0 scale-100 transition-[opacity,scale,translate] duration-[var(--motion-base)] ease-out-expo",
             "data-[starting-style]:scale-96 data-[starting-style]:opacity-0",
             // Enters from the trigger's edge and settles outward, so the popup
@@ -37,7 +37,7 @@ function MenuItem({ className, ...props }: MenuPrimitive.Item.Props) {
   return (
     <MenuPrimitive.Item
       className={cn(
-        "data-highlighted:bg-accent data-highlighted:text-accent-foreground flex cursor-default items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none transition-colors duration-[var(--motion-instant)] ease-out-quart data-disabled:opacity-50 [&_svg]:size-4",
+        "data-highlighted:depth-primary data-highlighted:text-primary-foreground flex cursor-default items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none transition-colors duration-[var(--motion-instant)] ease-out-quart data-disabled:opacity-50 [&_svg]:size-4",
         className,
       )}
       {...props}
