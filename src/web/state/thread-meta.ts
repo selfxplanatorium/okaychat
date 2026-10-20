@@ -3,8 +3,10 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import type { AssistantMetadata, CompactionState, UsageRow } from "@shared/types";
 import { api } from "@/lib/api";
+import { isAnonymousChat } from "./chat-privacy";
 
 interface ThreadMeta {
+  memoryDisabled: boolean;
   compaction: CompactionState | null;
   usage: UsageRow | null;
 }
@@ -17,9 +19,10 @@ interface ThreadMetaState {
 export const useThreadMetaStore = create<ThreadMetaState>((set) => ({
   byId: {},
   refresh: async (threadId) => {
+    if (isAnonymousChat(threadId)) return;
     try {
-      const t = await api<{ compaction: CompactionState | null; usage: UsageRow }>(`/threads/${threadId}`);
-      set((s) => ({ byId: { ...s.byId, [threadId]: { compaction: t.compaction, usage: t.usage } } }));
+      const t = await api<{ compaction: CompactionState | null; usage: UsageRow; memoryDisabled: boolean }>(`/threads/${threadId}`);
+      set((s) => ({ byId: { ...s.byId, [threadId]: { compaction: t.compaction, usage: t.usage, memoryDisabled: t.memoryDisabled } } }));
     } catch {
       // Thread not created yet.
     }

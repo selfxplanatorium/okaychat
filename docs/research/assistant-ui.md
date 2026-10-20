@@ -301,3 +301,9 @@ Browser verification covered live reload/replay, completion and checkpoint clean
 and Stop sending cancel with no checkpoint left. The dev server needed a restart
 before its new response header appeared; absence of a checkpoint alone does not
 imply a transport-cloning bug.
+
+## 8. Anonymous threads
+
+The top-right chat menu marks a new local thread anonymous in the in-memory `chat-privacy` store. `RemoteThreadListAdapter.initialize(localId)` binds it to a generated `tmp_` remote id without calling `/threads`. History load/append/update, remote metadata operations, title generation, selected-thread storage, and resumable checkpoints skip those ids. The sidebar filters them from its indexed rows. Reload mounts a fresh normal chat, not the discarded anonymous conversation.
+
+The thread adapter owns attachments through `unstable_useAdapters`. Do not override it with a global `attachments` runtime option: AI SDK gives explicit options precedence over context adapters, which would bypass anonymous document extraction. The adapter resolves privacy lazily from its own `threadListItem` so background or switched threads use the correct mode.

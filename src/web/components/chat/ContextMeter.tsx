@@ -8,6 +8,7 @@ import { api, formatCost, formatTokens } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useActiveModel, useData } from "@/state/data";
 import { metadataOf, useContextUsage, useCurrentThreadId, useThreadMeta, useThreadMetaStore } from "@/state/thread-meta";
+import { useChatPrivacy } from "@/state/chat-privacy";
 
 function Ring({ fraction }: { fraction: number }) {
   const r = 7;
@@ -36,11 +37,13 @@ function Ring({ fraction }: { fraction: number }) {
 
 /** Context window fill, thread cost, cache hits, and manual compaction. */
 export function ContextMeter() {
+  const privacy = useChatPrivacy();
   const usage = useContextUsage();
   const meta = useThreadMeta();
   const model = useActiveModel();
   const threadId = useCurrentThreadId();
-  const autoCompactAt = useData((s) => s.settings?.autoCompactAt ?? 0.8);
+  const configuredAutoCompactAt = useData((s) => s.settings?.autoCompactAt ?? 0.8);
+  const autoCompactAt = privacy.temporary ? 0 : configuredAutoCompactAt;
   const running = useAuiState((s) => s.thread.isRunning);
   const aui = useAui();
   const refresh = useThreadMetaStore((s) => s.refresh);
@@ -114,10 +117,10 @@ export function ContextMeter() {
           </p>
         )}
         {error && <p className="text-error mt-2 text-xs">{error}</p>}
-        <Button size="sm" variant="outline" className="mt-3 w-full" disabled={!threadId || running || compacting} onClick={compactNow}>
+        {!privacy.temporary && <Button size="sm" variant="outline" className="mt-3 w-full" disabled={!threadId || running || compacting} onClick={compactNow}>
           {compacting ? <Loader2Icon className="animate-spin" /> : <ShrinkIcon />}
           {compacting ? "Summarizing…" : "Compact now"}
-        </Button>
+        </Button>}
       </PopoverContent>
     </Popover>
   );

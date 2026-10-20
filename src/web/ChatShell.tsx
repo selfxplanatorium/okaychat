@@ -6,11 +6,12 @@ import { ArtifactPanel } from "@/components/artifacts/ArtifactPanel";
 import { ChatView } from "@/components/chat/ChatView";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Onboarding } from "@/components/Onboarding";
-import { ShareButton } from "@/components/share/ShareButton";
+import { ChatPrivacyMenu } from "@/components/chat/ChatPrivacyMenu";
 import { ThemeEditorHost } from "@/components/settings/theme/ThemeEditorHost";
 import { RuntimeProvider } from "@/runtime/RuntimeProvider";
 import { useData } from "@/state/data";
 import { loadInstalledFonts } from "@/state/fonts";
+import { useChatPrivacyStore } from "@/state/chat-privacy";
 
 // Settings (theme editor, font discovery, VS Code import) are not needed to chat.
 const SettingsLayout = lazy(() => import("@/components/settings/SettingsLayout").then((m) => ({ default: m.SettingsLayout })));
@@ -32,8 +33,9 @@ function ChatHeader({ sidebarOpen, onToggle }: { sidebarOpen: boolean; onToggle:
       <button
         type="button"
         aria-label="New chat"
-        onClick={() => {
-          aui.threads.switchToNewThread();
+        onClick={async () => {
+          await aui.threads.switchToNewThread();
+          useChatPrivacyStore.getState().set(aui.threadListItem.getState().id, { temporary: false, personalized: true });
           navigate("/");
         }}
         className="surface-glass text-muted-foreground hover:text-foreground rounded-lg border p-1.5 transition-colors duration-(--motion-fast) ease-out-quart"
@@ -109,7 +111,7 @@ export function Shell() {
               </Route>
               <Route>
                 <ChatHeader sidebarOpen={sidebarOpen} onToggle={() => setSidebarOpen(true)} />
-                <ShareButton />
+                <ChatPrivacyMenu />
                 <ChatView />
               </Route>
             </Switch>

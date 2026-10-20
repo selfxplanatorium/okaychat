@@ -1,6 +1,10 @@
 import type { UIMessage } from "ai";
+import { HTTPException } from "hono/http-exception";
 import type { CompactionState, ThreadSummary } from "../shared/types.js";
 import { db } from "./db.js";
+
+/** Anonymous conversations exist only in browser memory; their ids must never become stored threads. */
+export const isTemporaryThread = (id: string): boolean => id.startsWith("tmp_");
 
 interface ThreadRow {
   id: string;
@@ -45,6 +49,7 @@ export function getThread(userId: string, id: string): (ThreadSummary & { compac
 
 /** Idempotent: the client may call initialize more than once for the same id. */
 export function ensureThread(userId: string, id: string, projectId: string | null = null): ThreadSummary {
+  if (isTemporaryThread(id)) throw new HTTPException(400, { message: "Anonymous chats cannot be saved" });
   const now = Date.now();
   db.prepare("INSERT OR IGNORE INTO threads (id, user_id, project_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(id, userId, projectId, now, now);
   const thread = getThread(userId, id);

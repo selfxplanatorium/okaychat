@@ -22,6 +22,7 @@ import { api } from "@/lib/api";
 import { toolkit } from "@/components/chat/tool-ui";
 import { WidgetInstructions, widgets } from "@/components/genui/toolkit";
 import { useActiveModel, useData } from "@/state/data";
+import { chatPrivacyFor, isAnonymousChat, useChatPrivacy, useChatPrivacyStore } from "@/state/chat-privacy";
 
 const CODE_EXTENSIONS =
   ".txt,.md,.mdx,.csv,.tsv,.json,.jsonl,.yaml,.yml,.toml,.xml,.html,.css,.scss,.js,.jsx,.ts,.tsx,.mjs,.cjs,.py,.rb,.go,.rs,.java,.kt,.swift,.c,.h,.cpp,.hpp,.cs,.php,.sh,.bash,.zsh,.sql,.graphql,.proto,.ini,.env,.log,.r,.lua,.dart,.vue,.svelte,.tex";
@@ -42,6 +43,7 @@ const readDataUrl = (file: File) =>
  * Word files are always converted to text on the server.
  */
 class DocumentAttachmentAdapter implements AttachmentAdapter {
+  constructor(private readonly temporary: () => boolean = () => false) {}
   accept =
     "application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
@@ -63,7 +65,7 @@ class DocumentAttachmentAdapter implements AttachmentAdapter {
       // The bytes stay with us too, so the model can import and restructure the PDF later.
       const form = new FormData();
       form.append("file", attachment.file);
-      const stored = await api<{ fileId: string | null }>("/files/store", {
+      const stored = await api<{ fileId: string | null }>(`/files/store${this.temporary() ? "?temporary=1" : ""}`, {
         method: "POST",
         body: form,
         signal: options?.signal,
@@ -79,7 +81,7 @@ class DocumentAttachmentAdapter implements AttachmentAdapter {
     }
     const form = new FormData();
     form.append("file", attachment.file);
-    const { text, pages, fileId } = await api<{ text: string; pages?: number; fileId?: string }>("/files/extract", {
+    const { text, pages, fileId } = await api<{ text: string; pages?: number; fileId?: string }>(this.temporary() ? "/files/extract?temporary=1" : "/files/extract", {
       method: "POST",
       body: form,
       signal: options?.signal,
@@ -99,12 +101,6 @@ class DocumentAttachmentAdapter implements AttachmentAdapter {
 class CodeAttachmentAdapter extends SimpleTextAttachmentAdapter {
   override accept = `${new SimpleTextAttachmentAdapter().accept},${CODE_EXTENSIONS}`;
 }
-
-const attachments = new CompositeAttachmentAdapter([
-  new SimpleImageAttachmentAdapter(),
-  new DocumentAttachmentAdapter(),
-  new CodeAttachmentAdapter(),
-]);
 
 /** Reads the answer, not its Markdown: code blocks, link targets, and formatting marks are dropped. */
 class SpokenTextAdapter extends WebSpeechSynthesisAdapter {
@@ -139,27 +135,38 @@ const threadListAdapter: RemoteThreadListAdapter = {
       })),
     };
   },
-  async initialize() {
+  async initialize(localId) {
+    if (chatPrivacyFor({ id: localId }).temporary) {
+      const remoteId = `tmp_${generateId()}`;
+      useChatPrivacyStore.getState().bind(localId, remoteId);
+      return { remoteId, externalId: undefined };
+    }
     const thread = await api<ThreadSummary>("/threads", { method: "POST", json: { projectId: useData.getState().activeProject } });
     return { remoteId: thread.id, externalId: undefined };
   },
   async rename(remoteId, title) {
+    if (isAnonymousChat(remoteId)) return;
     await api(`/threads/${remoteId}`, { method: "PATCH", json: { title } });
   },
   async archive(remoteId) {
+    if (isAnonymousChat(remoteId)) return;
     await api(`/threads/${remoteId}`, { method: "PATCH", json: { status: "archived" } });
   },
   async unarchive(remoteId) {
+    if (isAnonymousChat(remoteId)) return;
     await api(`/threads/${remoteId}`, { method: "PATCH", json: { status: "regular" } });
   },
   async delete(remoteId) {
+    if (isAnonymousChat(remoteId)) return;
     await api(`/threads/${remoteId}`, { method: "DELETE" });
   },
   async fetch(remoteId) {
+    if (isAnonymousChat(remoteId)) return { remoteId, status: "regular", title: "Anonymous chat" };
     const t = await api<ThreadSummary>(`/threads/${remoteId}`);
     return { remoteId: t.id, status: t.status, title: t.title ?? undefined };
   },
   async generateTitle(remoteId, messages) {
+    if (isAnonymousChat(remoteId)) return createAssistantStream(async (controller) => { controller.appendText("Anonymous chat"); });
     const text = messages
       .filter((m) => m.role === "user")
       .flatMap((m) => m.content)
@@ -183,7 +190,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
         withFormat: (fmt) => ({
           async load() {
             const { remoteId } = aui.threadListItem.getState();
-            if (!remoteId) return { messages: [] };
+            if (!remoteId || isAnonymousChat(remoteId)) return { messages: [] };
             const rows = await api<Array<{ id: string; parent_id: string | null; format: string; content: unknown }>>(
               `/threads/${remoteId}/messages`,
             );
@@ -191,6 +198,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
           },
           async append(item) {
             const { remoteId } = await aui.threadListItem.initialize();
+            if (isAnonymousChat(remoteId)) return;
             await api(`/threads/${remoteId}/messages`, {
               method: "POST",
               json: { id: fmt.getId(item.message), parent_id: item.parentId, format: fmt.format, content: fmt.encode(item) },
@@ -198,6 +206,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
           },
           async update(item, localMessageId) {
             const { remoteId } = await aui.threadListItem.initialize();
+            if (isAnonymousChat(remoteId)) return;
             await api(`/threads/${remoteId}/messages`, {
               method: "POST",
               json: { id: localMessageId, parent_id: item.parentId, format: fmt.format, content: fmt.encode(item) },
@@ -207,7 +216,12 @@ const threadListAdapter: RemoteThreadListAdapter = {
       }),
       [aui],
     );
-    return useMemo(() => ({ history, attachments }), [history]);
+    const threadAttachments = useMemo(() => new CompositeAttachmentAdapter([
+      new SimpleImageAttachmentAdapter(),
+      new DocumentAttachmentAdapter(() => chatPrivacyFor(aui.threadListItem.getState()).temporary),
+      new CodeAttachmentAdapter(),
+    ]), [aui]);
+    return useMemo(() => ({ history, attachments: threadAttachments }), [history, threadAttachments]);
   },
 };
 
@@ -215,13 +229,14 @@ const threadListAdapter: RemoteThreadListAdapter = {
 function ModelContextBridge() {
   const aui = useAui();
   const model = useActiveModel();
+  const privacy = useChatPrivacy();
   const effort = useData((s) => (model ? s.settings?.reasoningEffort[model.ref] : undefined));
   useEffect(
     () =>
       aui.modelContext.register({
-        getModelContext: () => ({ config: { modelName: model?.ref, reasoningEffort: effort } }),
+        getModelContext: () => ({ config: { modelName: model?.ref, reasoningEffort: effort, temporaryPersonalization: chatPrivacyFor(aui.threadListItem.getState()).personalized } }),
       }),
-    [aui, model?.ref, effort],
+    [aui, model?.ref, effort, privacy.personalized, privacy.temporary],
   );
   return null;
 }
@@ -256,7 +271,7 @@ function useThreadTransport() {
     const storage = createResumableSessionStorage({
       key: () => {
         const remoteId = aui.threadListItem.getState().remoteId;
-        return remoteId ? `okaychat:stream:${remoteId}` : undefined;
+        return remoteId && !isAnonymousChat(remoteId) ? `okaychat:stream:${remoteId}` : undefined;
       },
     });
     return new AssistantChatTransport({
@@ -274,7 +289,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const selectionKey = `okaychat:thread:${userId}`;
   const [initialThreadId] = useState(() => {
     try {
-      return sessionStorage.getItem(selectionKey) ?? undefined;
+      const saved = sessionStorage.getItem(selectionKey);
+      return saved && !isAnonymousChat(saved) ? saved : undefined;
     } catch {
       return undefined;
     }
@@ -283,7 +299,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     initialThreadId,
     onThreadIdChange: (id) => {
       try {
-        if (id) sessionStorage.setItem(selectionKey, id);
+        if (id && !isAnonymousChat(id)) sessionStorage.setItem(selectionKey, id);
         else sessionStorage.removeItem(selectionKey);
       } catch {
         // Session storage may be disabled.
@@ -294,7 +310,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       useChatRuntime({
         // eslint-disable-next-line react-hooks/rules-of-hooks
         transport: useThreadTransport(),
-        adapters: { attachments, ...voiceAdapters },
+        adapters: { ...voiceAdapters },
         // Browser-executed tools (generative UI) and tool approvals resolve locally; this sends them back to finish the turn.
         sendAutomaticallyWhen: (options) => lastAssistantMessageIsCompleteWithToolCalls(options) || lastAssistantMessageIsCompleteWithApprovalResponses(options),
       }),

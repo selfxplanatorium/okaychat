@@ -34,6 +34,7 @@ import {
   type FC,
 } from "react";
 import { MessageSearchResults } from "@/components/layout/MessageSearchResults";
+import { isAnonymousChat, useChatPrivacyStore } from "@/state/chat-privacy";
 
 export const ThreadList: FC = () => {
   const [search, setSearch] = useState("");
@@ -183,10 +184,10 @@ export const useThreadListGroups = (searchQuery = "") => {
       .map((id, index) => ({ id, index }))
       .filter(
         ({ id }) =>
-          !query ||
-          (itemsById.get(id)?.title || "New Chat")
+          !isAnonymousChat(itemsById.get(id)?.remoteId) &&
+          (!query || (itemsById.get(id)?.title || "New Chat")
             .toLowerCase()
-            .includes(query),
+            .includes(query)),
       )
       .map(({ index }) => index);
     if (
@@ -277,11 +278,17 @@ const ThreadListItemGroups: FC<{ searchQuery?: string }> = ({
 export const ThreadListNew = forwardRef<
   HTMLButtonElement,
   ComponentPropsWithoutRef<typeof Button> & { labelClassName?: string }
->(({ className, labelClassName, children, ...props }, ref) => {
+>(({ className, labelClassName, children, onClick, ...props }, ref) => {
+  const aui = useAui();
   return (
     <ThreadListPrimitive.New asChild>
       <Button
         ref={ref}
+        onClick={(event) => {
+          const item = aui.threadListItem.getState();
+          if (!item.remoteId) useChatPrivacyStore.getState().set(item.id, { temporary: false, personalized: true });
+          onClick?.(event);
+        }}
         variant="ghost"
         data-slot="aui_thread-list-new"
         className={cn(
