@@ -7,15 +7,17 @@ A self-hosted AI chat that is simple to run and pleasant to use. OpenCode Go is 
 ```sh
 cp .env.example .env
 echo "OKAYCHAT_SECRET=$(openssl rand -base64 32)" >> .env
+echo "OKAYCHAT_SANDBOX_TOKEN=$(openssl rand -base64 32)" >> .env
 docker compose up -d --build
 ```
 
 Open http://localhost:8787. The first account you create is the admin. Paste your OpenCode Go key (https://opencode.ai/console) on the first screen, or connect another provider under Settings → Providers.
 
-Compose starts two containers:
+Compose starts three containers:
 
 - `okaychat`: the app, with data in the `okaychat-data` volume (SQLite + caches).
 - `searxng`: a private search engine for the `web_search` tool. It is not exposed outside the compose network.
+- `sandbox`: runs Python and Bash for the `run_code` tool, with one private workspace per chat. It has no internet access and holds no app secrets. See `docs/research/code-sandbox.md`.
 
 Smaller image without the headless browser used for JavaScript-heavy pages:
 
@@ -30,6 +32,7 @@ docker compose build --build-arg SCRAPLING_BROWSER=false
 | `OKAYCHAT_SECRET` | required | Encrypts provider keys and MCP tokens. Do not change it after setup. |
 | `OKAYCHAT_ALLOW_SIGNUP` | `false` | Let people create accounts after the admin exists. |
 | `OKAYCHAT_PUBLIC_URL` | auto | Public origin for MCP OAuth redirects behind a reverse proxy. |
+| `OKAYCHAT_SANDBOX_TOKEN` | required | Shared secret between the app and the code sandbox. |
 | `OKAYCHAT_SEARXNG_URL` | set by compose | SearXNG instance for web search. Without it, search falls back to scraping public engines. |
 | `OKAYCHAT_PORT` | `8787` | Host port in compose. |
 

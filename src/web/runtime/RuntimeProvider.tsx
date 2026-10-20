@@ -100,6 +100,23 @@ class DocumentAttachmentAdapter implements AttachmentAdapter {
 
 class CodeAttachmentAdapter extends SimpleTextAttachmentAdapter {
   override accept = `${new SimpleTextAttachmentAdapter().accept},${CODE_EXTENSIONS}`;
+  constructor(private readonly temporary: () => boolean = () => false) {
+    super();
+  }
+
+  override async send(attachment: Parameters<AttachmentAdapter["send"]>[0], options?: { signal?: AbortSignal }) {
+    const sent = await super.send(attachment, options);
+    if (this.temporary()) return sent;
+    // With a code sandbox on the server the bytes are kept, so run_code can copy the file in by file_id.
+    const form = new FormData();
+    form.append("file", attachment.file);
+    const { fileId } = await api<{ fileId: string | null }>("/files/store", { method: "POST", body: form, signal: options?.signal }).catch(() => ({ fileId: null }));
+    if (!fileId) return sent;
+    return {
+      ...sent,
+      content: sent.content.map((part) => (part.type === "text" ? { ...part, text: part.text.replace(/^<attachment name="([^"]*)">/, `<attachment name="$1" file_id="${fileId}">`) } : part)),
+    };
+  }
 }
 
 /** Reads the answer, not its Markdown: code blocks, link targets, and formatting marks are dropped. */
@@ -219,7 +236,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
     const threadAttachments = useMemo(() => new CompositeAttachmentAdapter([
       new SimpleImageAttachmentAdapter(),
       new DocumentAttachmentAdapter(() => chatPrivacyFor(aui.threadListItem.getState()).temporary),
-      new CodeAttachmentAdapter(),
+      new CodeAttachmentAdapter(() => chatPrivacyFor(aui.threadListItem.getState()).temporary),
     ]), [aui]);
     return useMemo(() => ({ history, attachments: threadAttachments }), [history, threadAttachments]);
   },

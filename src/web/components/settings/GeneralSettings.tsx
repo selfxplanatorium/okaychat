@@ -3,6 +3,7 @@ import { DEFAULT_USER_SETTINGS } from "@shared/types";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { api } from "@/lib/api";
 import { useData } from "@/state/data";
 import { CodexConnect } from "./CodexConnect";
 import { SettingsPage, SettingsRow, SettingsSection, SettingsSlider } from "./SettingsUI";
@@ -12,7 +13,11 @@ export function GeneralSettings() {
   const models = useData((s) => s.models);
   const update = useData((s) => s.updateSettings);
   const [prompt, setPrompt] = useState(settings?.systemPrompt ?? "");
+  const [sandbox, setSandbox] = useState<{ configured: boolean; reachable: boolean } | null>(null);
   useEffect(() => setPrompt(settings?.systemPrompt ?? ""), [settings?.systemPrompt]);
+  useEffect(() => {
+    api<{ configured: boolean; reachable: boolean }>("/sandbox").then(setSandbox, () => setSandbox({ configured: false, reachable: false }));
+  }, []);
   if (!settings) return null;
 
   const modelOptions = models.map((m) => ({ value: m.ref, label: `${m.name} · ${m.providerId}` }));
@@ -109,6 +114,17 @@ export function GeneralSettings() {
             />
           </div>
         )}
+        <SettingsRow
+          label="Code execution"
+          description={
+            sandbox && !sandbox.configured
+              ? "Not set up on this server. An admin can add the sandbox container (see docker-compose.yml)."
+              : sandbox && !sandbox.reachable
+                ? "The sandbox container is configured but not reachable right now."
+                : "Lets models run Python and Bash in a private sandbox for each chat, with files that persist between runs."
+          }
+          control={<Switch checked={settings.codeExecution && !!sandbox?.configured} disabled={!sandbox?.configured} onCheckedChange={(codeExecution) => update({ codeExecution })} aria-label="Code execution" />}
+        />
         <SettingsRow
           label="Image generation"
           description="Create and edit images with your own ChatGPT plan through the Codex CLI. Sign in once with a one-time code."

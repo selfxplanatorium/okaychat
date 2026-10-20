@@ -18,6 +18,9 @@ export const env = {
   allowSignup: process.env.OKAYCHAT_ALLOW_SIGNUP === "true",
   // Admins may add stdio MCP servers. They run as the server process, so other users never get this.
   production: process.env.NODE_ENV === "production",
+  // Code sandbox container (sandbox/). run_code is offered only when both are set.
+  sandboxUrl: (process.env.OKAYCHAT_SANDBOX_URL ?? "").replace(/\/+$/, ""),
+  sandboxToken: process.env.OKAYCHAT_SANDBOX_TOKEN ?? "",
   version: "0.1.0",
 };
 

@@ -84,6 +84,8 @@ export interface UserSettings {
   generativeUI: boolean;
   /** Lets the chat model delegate tasks to sub-agents. */
   subagents: boolean;
+  /** run_code in the server's code sandbox. Offered only when the server has one configured. */
+  codeExecution: boolean;
   /** Default sub-agent model. The utility model and the chat model are also offered. */
   subagentModel?: string;
 }
@@ -99,6 +101,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   artifacts: true,
   generativeUI: true,
   subagents: true,
+  codeExecution: true,
 };
 
 export interface TokenUsage {

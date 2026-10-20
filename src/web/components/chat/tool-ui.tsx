@@ -1,5 +1,5 @@
 import { defineToolkit } from "@assistant-ui/react";
-import { BookOpenIcon, BotIcon, ChevronDownIcon, DownloadIcon, EyeIcon, FileTextIcon, GlobeIcon, ImageIcon, Loader2Icon, SearchIcon, TriangleAlertIcon } from "lucide-react";
+import { BookOpenIcon, BotIcon, ChevronDownIcon, DownloadIcon, EyeIcon, FileTextIcon, GlobeIcon, ImageIcon, Loader2Icon, SearchIcon, SquareTerminalIcon, TriangleAlertIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { ArtifactCard } from "@/components/artifacts/ArtifactCard";
 import { SimpleMarkdown } from "@/components/ui/simple-markdown";
@@ -155,7 +155,67 @@ export const toolkit = defineToolkit({
     type: "backend",
     render: ({ args, result, status }) => <GeneratedImage args={args} result={result} running={status?.type === "running"} />,
   },
+  run_code: {
+    type: "backend",
+    render: ({ args, result, status }) => <RunCodeCard args={args} result={result} running={status?.type === "running"} />,
+  },
 });
+
+type RunCodeResult = {
+  language: "python" | "bash";
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  stopped: string | null;
+  durationMs: number;
+  files: Array<{ path: string; size: number; url: string; image: boolean }>;
+};
+
+const formatBytes = (n: number) => (n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 ** 2).toFixed(1)} MB`);
+
+function RunCodeCard({ args, result, running }: { args: unknown; result: unknown; running: boolean }) {
+  const a = (args ?? {}) as { language?: "python" | "bash"; code?: string };
+  const r = typeof result === "object" && result ? (result as RunCodeResult) : undefined;
+  const lang = (r?.language ?? a.language) === "bash" ? "Bash" : "Python";
+  const failed = !running && (typeof result === "string" || (r ? r.exitCode !== 0 : false));
+  const seconds = r ? `${(r.durationMs / 1000).toFixed(1)} s` : "";
+  const label = running
+    ? `Running ${lang}…`
+    : typeof result === "string" || !r
+      ? `${lang} could not run`
+      : r.stopped
+        ? `${lang} ${r.stopped}`
+        : r.exitCode === 0
+          ? `Ran ${lang} · ${seconds}`
+          : `${lang} exited with ${r.exitCode} · ${seconds}`;
+  const images = r?.files.filter((f) => f.image) ?? [];
+  return (
+    <div className="my-2">
+      <ToolShell icon={<SquareTerminalIcon className="size-4" />} running={running} error={failed && typeof result === "string" ? result : undefined} label={label}>
+        <div className="flex flex-col gap-2">
+          {a.code && <pre className="bg-muted/40 max-h-80 overflow-auto rounded-lg p-3 font-mono text-xs">{a.code}</pre>}
+          {r?.stdout && <pre className="max-h-80 overflow-auto rounded-lg border p-3 font-mono text-xs whitespace-pre-wrap">{r.stdout}</pre>}
+          {r?.stderr && <pre className={cn("max-h-80 overflow-auto rounded-lg border p-3 font-mono text-xs whitespace-pre-wrap", failed ? "text-warning" : "text-muted-foreground")}>{r.stderr}</pre>}
+          {r && !r.stdout && !r.stderr && <p className="text-muted-foreground text-xs">No output.</p>}
+        </div>
+      </ToolShell>
+      {images.map((f) => (
+        <img key={f.path} src={f.url} alt={f.path} className="animate-blur-in my-2 ml-6 h-auto max-h-[28rem] w-auto max-w-[calc(100%-1.5rem)] rounded-xl border bg-white" />
+      ))}
+      {r && r.files.length > 0 && (
+        <div className="ml-6 flex flex-wrap gap-1.5">
+          {r.files.map((f) => (
+            <a key={f.path} href={f.url} download={f.path.split("/").pop()} className="hover:bg-muted/60 text-muted-foreground hover:text-foreground flex max-w-full items-center gap-1.5 rounded-lg border px-2 py-1 text-xs transition-colors duration-(--motion-fast) ease-out-quart">
+              <DownloadIcon className="size-3.5 shrink-0" />
+              <span className="truncate">{f.path}</span>
+              <span className="shrink-0 opacity-70">{formatBytes(f.size)}</span>
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function GeneratedImage({ args, result, running }: { args: unknown; result: unknown; running: boolean }) {
   const prompt = (args as { prompt?: string })?.prompt ?? "";

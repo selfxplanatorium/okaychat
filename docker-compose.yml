@@ -12,10 +12,14 @@ services:
       # Public URL, used for MCP OAuth redirects behind a reverse proxy. Optional.
       OKAYCHAT_PUBLIC_URL: ${OKAYCHAT_PUBLIC_URL:-}
       OKAYCHAT_SEARXNG_URL: http://searxng:8080
+      OKAYCHAT_SANDBOX_URL: http://sandbox:8080
+      OKAYCHAT_SANDBOX_TOKEN: ${OKAYCHAT_SANDBOX_TOKEN:?set OKAYCHAT_SANDBOX_TOKEN in .env}
     volumes:
       - okaychat-data:/data
+    networks: [default, sandbox]
     depends_on:
       - searxng
+      - sandbox
 
   # Private metasearch for the web_search tool. No keys, not exposed outside the compose network.
   searxng:
@@ -26,5 +30,36 @@ services:
     volumes:
       - ./docker/searxng/settings.yml:/etc/searxng/settings.yml:ro
 
+  # Runs model-written code for run_code. It holds no app secrets or data, and only the app can reach it.
+  # See docs/research/code-sandbox.md.
+  sandbox:
+    build: ./sandbox
+    image: okaychat-sandbox:latest
+    restart: unless-stopped
+    environment:
+      SANDBOX_TOKEN: ${OKAYCHAT_SANDBOX_TOKEN:?set OKAYCHAT_SANDBOX_TOKEN in .env}
+    volumes:
+      - okaychat-sandbox:/work
+    # The internal network has no route out: code cannot reach the internet, SearXNG, or the host.
+    # For internet access, add a second, non-internal network here.
+    networks: [sandbox]
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    cap_drop: [ALL]
+    # Only what the runner needs to create workspaces and switch each run to its workspace user.
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: 2g
+    cpus: 2
+
+networks:
+  sandbox:
+    internal: true
+
 volumes:
   okaychat-data:
+  okaychat-sandbox:

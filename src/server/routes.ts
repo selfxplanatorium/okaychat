@@ -18,6 +18,7 @@ import { scheduleRoutes } from "./schedules.js";
 import { searchRoutes } from "./search.js";
 import { shareRoutes } from "./shares.js";
 import { deleteThreadImages, imageRoutes } from "./tools/image.js";
+import { deleteSandboxWorkspace, sandboxRoutes } from "./tools/sandbox.js";
 import { callbackUrl, disconnectServer, serverInfo, testServer } from "./mcp/manager.js";
 import { pendingByState, StoredOAuthProvider } from "./mcp/oauth.js";
 import * as mcpStore from "./mcp/store.js";
@@ -106,6 +107,7 @@ const api = new Hono<AppEnv>()
   .delete("/threads/:id", async (c) => {
     deleteThread(c.get("user").id, c.req.param("id"));
     await deleteThreadImages(c.get("user").id, c.req.param("id"));
+    await deleteSandboxWorkspace(c.get("user").id, c.req.param("id"));
     return c.json({ ok: true });
   })
   .get("/threads/:id/messages", (c) => c.json(listMessages(c.get("user").id, c.req.param("id"))))
@@ -172,6 +174,7 @@ const api = new Hono<AppEnv>()
   .route("/", fontRoutes)
   .route("/", artifactRoutes)
   .route("/", imageRoutes)
+  .route("/", sandboxRoutes)
   .route("/", scheduleRoutes)
   .route("/", projectRoutes)
   .route("/", searchRoutes)

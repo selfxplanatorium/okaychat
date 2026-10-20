@@ -49,7 +49,7 @@ src/server/
   llm.ts              Model factory per wire format, cache breakpoints, OpenCode headers
   catalog/            models.dev catalog + provider connections (encrypted keys)
   mcp/                MCP connection manager, OAuth provider, storage
-  tools/              Built-in tools: web_search, web_fetch (+ Scrapling fallback), generate_image (Codex), delegate_task (sub-agents)
+  tools/              Built-in tools: web_search, web_fetch (+ Scrapling fallback), generate_image (Codex), delegate_task (sub-agents), run_code (sandbox client)
   compaction.ts usage.ts files.ts fonts.ts (uploaded font files, SQLite BLOBs) threads.ts settings.ts auth.ts db.ts
 src/web/
   App.tsx             Auth gate and lazy entry points (wouter)
@@ -63,6 +63,7 @@ src/web/
   theme/              T3Code theme engine port (see its README); bundled-fonts.ts lists the shipped font families
   fonts/              Bundled Liberation TTFs and their CSS (see docs/research/bundled-fonts.md)
   state/              zustand stores (data, appearance, fonts, thread meta); appearance-sync.ts handles account cache and outbox
+sandbox/              Code sandbox container: runner.py (stdlib HTTP service), Dockerfile, pinned requirements.txt
 src/shared/types.ts   Types shared by both sides
 src/shared/appearance.ts  Appearance schema and shared types
 docs/                 Reusable documentation (see below)
@@ -87,6 +88,7 @@ docs/                 Reusable documentation (see below)
 - `docs/research/memory.md`: official Claude/ChatGPT memory research, okaychat memory controls, and transfer formats.
 - `docs/research/account-profile.md`: profile photo validation, resizing, storage, and private serving.
 - `docs/research/step-limits.md`: independent agent/search limits and shared delegated-search budgets.
+- `docs/research/code-sandbox.md`: the `run_code` sandbox container, its safeguards, and the runner API.
 
 Add a new file under `docs/research/` whenever you research an external API or library.
 
@@ -127,13 +129,15 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 - Anonymous chats use reserved `tmp_` ids and never create a thread, messages, usage records, uploads, artifacts, or memory entries. They have no replay buffer or browser storage checkpoint; reload discards them. `RuntimeProvider` skips history/title APIs and the sidebar hides them. The top-right menu starts them with personalization off; optional personalization reads only global memory and custom instructions, never writes memories or includes project context. `DocumentAttachmentAdapter` must use `/files/extract?temporary=1`; its per-thread adapter comes from `unstable_useAdapters` (a global runtime attachment override would silently bypass this). Anonymous tools are limited to web search/page reading and optional read-only memory search; persistent tools and compaction are unavailable.
 - `maxSteps` (default 20) and `maxSearches` (default 5) are independent. A turn and all its delegates share ONE `SearchBudget` and the same built-in web tools object; create it before constructing either tool set. Browser-tool continuations recover search counts from current-turn tool history. Page reads do not consume search queries.
 
+- Model code never runs in the app container. `run_code` calls the `sandbox` container, which has no app secrets, no `/data`, and no network but the internal one to the app. One workspace per chat, each with its own uid; every process of that uid dies after each run. Read `docs/research/code-sandbox.md` before changing either side.
+
 ## Commands
 
 | Command | What it does |
 | --- | --- |
 | `npm run dev` | Server (tsx watch, 127.0.0.1:8787) + Vite (tailnet IP:5173, proxies `/api`) |
 | `npm run typecheck` | Both tsconfigs |
-| `npm test` | Node tests (appearance, account pictures, independent tool limits, memory isolation/imports, and streamed-chat integration) |
+| `npm test` | Node tests (appearance, account pictures, independent tool limits, memory isolation/imports, sandbox client, and streamed-chat integration) |
 | `npm run build` / `npm start` | Production build and server |
 
 **Dev servers always run on the tailnet.** The user wants every dev server reachable over Tailscale. Vite binds to `tailscale ip -4` (override with `OKAYCHAT_DEV_HOST`) and allows `*.ts.net` hosts. Share the MagicDNS URL (`http://<host>.<tailnet>.ts.net:5173`), not localhost. Do not bind to `0.0.0.0`.
@@ -142,5 +146,7 @@ Local dev needs `.env` with `OKAYCHAT_SECRET` (see `.env.example`). Web tools in
 
 - SearXNG container `okaychat-dev-searxng` on `127.0.0.1:8888` (`OKAYCHAT_SEARXNG_URL`). Command in `.env.example`.
 - Scrapling via `scripts/dev-scrapling.sh`, which runs it from the `okaychat:latest` image (`OKAYCHAT_SCRAPLING_COMMAND`). Build the image first.
+
+Code execution in dev: set `OKAYCHAT_SANDBOX_TOKEN` and `OKAYCHAT_SANDBOX_URL=http://127.0.0.1:8790` in `.env`, then run `scripts/dev-sandbox.sh` (container `okaychat-dev-sandbox`). Unlike compose, the dev sandbox has internet access.
 
 The server reads `.env` only at start. Restart `npm run dev` after editing it.

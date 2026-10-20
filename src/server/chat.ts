@@ -23,6 +23,7 @@ import { applyCompaction, compact, currentContextTokens, summaryMessages } from 
 import { createModel } from "./llm.js";
 import { toolsForUser } from "./mcp/manager.js";
 import { imageTools } from "./tools/image.js";
+import { sandboxConfigured, sandboxTools } from "./tools/sandbox.js";
 import { subagentTools } from "./tools/subagent.js";
 import { injectScreenshots } from "./tools/screenshots.js";
 import type { VisualShot } from "./documents/visual.js";
@@ -139,6 +140,7 @@ export async function turnStream(opts: TurnOptions) {
         ...subagents,
         ...(useArtifacts ? artifactTools(threadId, user.id, { shots, canViewImages: model.inputModalities.includes("image") }) : {}),
         ...(model.toolCall && !temporary && codexConnected(user.id) ? imageTools(user.id, threadId, signal) : {}),
+        ...(model.toolCall && !temporary && settings.codeExecution && sandboxConfigured() ? sandboxTools(user.id, threadId, signal) : {}),
         ...(useGenerativeUI ? frontendTools(opts.clientTools!) : {}),
         ...mcp.tools,
       };

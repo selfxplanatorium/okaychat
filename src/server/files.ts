@@ -5,14 +5,15 @@ import type { AppEnv } from "./auth.js";
 import { newId } from "./crypto.js";
 import { db } from "./db.js";
 import { readXlsx } from "./documents/xlsx.js";
+import { sandboxConfigured } from "./tools/sandbox.js";
 
 export const MAX_BYTES = 25 * 1024 * 1024;
 // Keep huge documents from blowing the context window in one attachment.
 const MAX_CHARS = 400_000;
 
-/** Attachments the document tools can import later. Everything else is only read as text. */
+/** Attachments a tool can use later: the document tools import these, and run_code can copy any of them. */
 function importable(name: string): boolean {
-  return /\.(pdf|docx|xlsx|xlsm)$/i.test(name);
+  return sandboxConfigured() || /\.(pdf|docx|xlsx|xlsm)$/i.test(name);
 }
 
 export async function extract(name: string, type: string, data: Uint8Array): Promise<{ text: string; pages?: number }> {
