@@ -7,6 +7,7 @@ import {
   streamText,
   type LanguageModelUsage,
   type UIMessage,
+  type ToolSet,
 } from "ai";
 import { frontendTools, type FrontendTools } from "assistant-stream/ai-sdk";
 import { createInMemoryResumableStreamStore, createResumableStreamContext, RESUMABLE_STREAM_ID_HEADER } from "assistant-stream/resumable";
@@ -24,10 +25,12 @@ import { toolsForUser } from "./mcp/manager.js";
 import { imageTools } from "./tools/image.js";
 import { subagentTools } from "./tools/subagent.js";
 import { webTools } from "./tools/web.js";
+import { SearchBudget, searchesInCurrentTurn, agentStepsInCurrentTurn } from "./tools/search-budget.js";
+import { conversationMemory, temporaryMemory } from "./memory.js";
 import { adaptPdfParts } from "./pdf-parts.js";
 import { projectContext } from "./projects.js";
 import { getSettings } from "./settings.js";
-import { ensureThread, getThread, setCompaction, updateThread } from "./threads.js";
+import { ensureThread, getThread, isTemporaryThread, setCompaction, updateThread } from "./threads.js";
 import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "./usage.js";
 
 const BASE_SYSTEM = `You are okaychat, a helpful assistant. Use Markdown. Use fenced code blocks with a language tag.
@@ -38,19 +41,20 @@ When you use web results, cite sources inline as Markdown links.`;
 const chatBody = z.object({
   messages: z.array(z.any()),
   id: z.string().min(1),
-  config: z.object({ modelName: z.string().min(3), reasoningEffort: z.string().optional() }).loose(),
+  config: z.object({ modelName: z.string().min(3), reasoningEffort: z.string().optional(), temporaryPersonalization: z.boolean().optional() }).loose(),
   // Browser-executed tools (generative UI) and the instructions that go with them.
   system: z.string().optional(),
   tools: z.record(z.string(), z.any()).optional(),
 });
 
-function systemPrompt(userPrompt: string, project: string, mcpInstructions: string[], artifacts: boolean, clientSystem?: string): string {
+function systemPrompt(userPrompt: string, project: string, mcpInstructions: string[], artifacts: boolean, clientSystem?: string, memory?: string): string {
   // Order matters for caching: static text first, nothing that changes per request.
   const parts = [BASE_SYSTEM, `Today's date: ${new Date().toISOString().slice(0, 10)}.`];
   if (artifacts) parts.push(ARTIFACT_INSTRUCTIONS);
   if (userPrompt.trim()) parts.push(`# User instructions\n${userPrompt.trim()}`);
   if (project) parts.push(project);
   if (mcpInstructions.length) parts.push(`# Tool server instructions\n${mcpInstructions.join("\n\n")}`);
+  if (memory) parts.push(memory);
   // Last: these change per turn (UI interactions) and should not invalidate the rest.
   if (clientSystem?.trim()) parts.push(clientSystem.trim());
   return parts.join("\n\n");
@@ -66,61 +70,84 @@ export interface TurnOptions {
   /** Browser-executed tools and their instructions. Absent for server-side runs. */
   clientTools?: FrontendTools;
   clientSystem?: string;
+  /** Only anonymous chats use this flag. Personalization is read-only and off by default. */
+  temporaryPersonalization?: boolean;
   signal?: AbortSignal;
 }
 
 /** One assistant turn as a UI message stream. Used by /api/chat and by scheduled runs. */
 export async function turnStream(opts: TurnOptions) {
   const { userId, threadId, modelRef, uiMessages, signal } = opts;
+  const temporary = isTemporaryThread(threadId);
+  const personalized = !temporary || opts.temporaryPersonalization === true;
+  const describeError = (error: unknown) => describeProviderError(error, !temporary);
   const user = { id: userId };
   const settings = getSettings(userId);
   const effort = (opts.effort ?? settings.reasoningEffort[modelRef]) as ReasoningEffort | undefined;
   const { model, conn } = await resolveModel(userId, modelRef);
-  ensureThread(user.id, threadId);
-  updateThread(user.id, threadId, { modelRef });
-  const thread = getThread(user.id, threadId)!;
+  if (!temporary) {
+    ensureThread(user.id, threadId);
+    updateThread(user.id, threadId, { modelRef });
+  }
+  const thread = temporary ? { projectId: null, compaction: null } : getThread(user.id, threadId)!;
 
   const stream = createUIMessageStream({
     originalMessages: uiMessages,
-    onError: (error) => describeProviderError(error),
+    onError: describeError,
     execute: async ({ writer }) => {
       let compaction = thread.compaction;
 
       // Auto-compact before the turn when the conversation no longer fits comfortably.
       const threshold = settings.autoCompactAt;
       const history = uiMessages.slice(0, -1);
-      if (threshold > 0 && history.length > 2 && currentContextTokens(applyCompaction(uiMessages, compaction).messages) > model.context * threshold) {
+      if (!temporary && threshold > 0 && history.length > 2 && currentContextTokens(applyCompaction(uiMessages, compaction).messages) > model.context * threshold) {
         writer.write({ type: "data-compaction", data: { status: "running" }, transient: true });
         compaction = await compact({ userId: user.id, threadId, messages: history, previous: compaction, model, conn });
         setCompaction(user.id, threadId, compaction);
         writer.write({ type: "data-compaction", data: { status: "done", boundaryMessageId: compaction.boundaryMessageId, tokensBefore: compaction.tokensBefore }, transient: true });
       }
 
-      const mcp = model.toolCall ? await toolsForUser(user.id) : { tools: {}, instructions: [], servers: [] };
+      const mcp = model.toolCall && !temporary ? await toolsForUser(user.id) : { tools: {}, instructions: [], servers: [] };
+      const searchBudget = new SearchBudget(settings.maxSearches, searchesInCurrentTurn(uiMessages));
+      const remainingSteps = Math.max(0, settings.maxSteps - agentStepsInCurrentTurn(uiMessages));
+      const builtInWeb = model.toolCall && settings.webTools ? webTools({ searchBudget }) : {};
+      const lastUser = uiMessages.findLast((message) => message.role === "user");
+      const query = lastUser?.parts.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n") ?? "";
+      const memory = temporary
+        ? personalized ? temporaryMemory(userId, query) : { context: "", instructions: undefined, tools: {} }
+        : conversationMemory(userId, threadId, query);
       // Built-in tools first, then MCP tools in sorted order, so the tool block is identical across turns.
       const readOnlyTools = {
-        ...(model.toolCall && settings.webTools ? webTools() : {}),
+        ...builtInWeb,
         // Sub-agents run unattended, so they get no tool that waits for approval.
         ...Object.fromEntries(Object.entries(mcp.tools).filter(([, t]) => !t.needsApproval)),
       };
-      const subagentModels = model.toolCall && settings.subagents ? await allowedSubagentModels(user.id, settings, model.ref) : [];
-      const useArtifacts = model.toolCall && settings.artifacts;
-      const useGenerativeUI = model.toolCall && settings.generativeUI && !!opts.clientTools;
+      const subagentModels = model.toolCall && settings.subagents && !temporary ? await allowedSubagentModels(user.id, settings, model.ref) : [];
+      const useArtifacts = model.toolCall && settings.artifacts && !temporary;
+      const useGenerativeUI = model.toolCall && settings.generativeUI && !!opts.clientTools && !temporary;
       const subagents = subagentModels.length
-        ? subagentTools({ userId: user.id, threadId, allowed: subagentModels, subTools: readOnlyTools, signal: signal })
+        ? subagentTools({ userId: user.id, threadId, allowed: subagentModels, subTools: readOnlyTools, maxSteps: settings.maxSteps, searchBudget, signal: signal })
         : {};
-      const tools = {
-        ...(model.toolCall && settings.webTools ? webTools() : {}),
+      const tools: ToolSet = {
+        ...builtInWeb,
+        ...(model.toolCall ? memory.tools : {}),
         ...subagents,
         ...(useArtifacts ? artifactTools(threadId, user.id) : {}),
-        ...(model.toolCall && codexConnected(user.id) ? imageTools(user.id, threadId, signal) : {}),
+        ...(model.toolCall && !temporary && codexConnected(user.id) ? imageTools(user.id, threadId, signal) : {}),
         ...(useGenerativeUI ? frontendTools(opts.clientTools!) : {}),
         ...mcp.tools,
       };
       const { messages: live, summary } = applyCompaction(uiMessages, compaction);
       const handle = createModel(model, conn, { affinity: threadId, effort });
       const converted = await convertToModelMessages(await adaptPdfParts(live, model), { tools, ignoreIncompleteToolCalls: true });
-      const { system, messages } = handle.markCache(systemPrompt(settings.systemPrompt, projectContext(userId, thread.projectId), mcp.instructions, useArtifacts, useGenerativeUI ? opts.clientSystem : undefined), [
+      // Retrieved facts change with the query. Keep them near the current request so a
+      // different subset does not invalidate the stable system and conversation prefix.
+      if (memory.context) {
+        const lastUserIndex = converted.findLastIndex((message) => message.role === "user");
+        converted.splice(lastUserIndex < 0 ? converted.length : lastUserIndex, 0, { role: "user", content: memory.context });
+      }
+      const memoryInstructions = [temporary ? "This is an anonymous chat. It is not saved in okaychat history and must never create or change saved memories. Do not claim that this hides the conversation from the selected model provider." : "", memory.instructions].filter(Boolean).join("\n\n");
+      const { system, messages } = handle.markCache(systemPrompt(personalized ? settings.systemPrompt : "", temporary ? "" : projectContext(userId, thread.projectId), mcp.instructions, useArtifacts, useGenerativeUI ? opts.clientSystem : undefined, memoryInstructions), [
         ...(summary ? summaryMessages(summary) : []),
         ...converted,
       ]);
@@ -135,7 +162,13 @@ export async function turnStream(opts: TurnOptions) {
         messages: system ? [system, ...messages] : messages,
         allowSystemInMessages: true,
         tools,
-        stopWhen: stepCountIs(settings.maxSteps),
+        // Reserve one final response without tools, so hitting the limit cannot restart the
+        // allowance through the client's automatic tool-result continuation.
+        stopWhen: stepCountIs(remainingSteps + 1),
+        prepareStep: ({ stepNumber }) => ({
+          activeTools: stepNumber >= remainingSteps ? [] : Object.keys(tools).filter((name) => name !== "web_search" || searchBudget.remaining > 0),
+          ...(stepNumber >= remainingSteps ? { toolChoice: "none" as const } : {}),
+        }),
         providerOptions: handle.providerOptions,
         maxOutputTokens: model.maxOutput,
         abortSignal: signal,
@@ -147,7 +180,7 @@ export async function turnStream(opts: TurnOptions) {
           lastStep = step.usage;
         },
         onEnd: () => {
-          recordUsage({ userId: user.id, threadId, providerId: model.providerId, modelId: model.id, kind: "chat", usage: total, cost });
+          if (!temporary) recordUsage({ userId: user.id, threadId, providerId: model.providerId, modelId: model.id, kind: "chat", usage: total, cost });
         },
       });
 
@@ -155,7 +188,7 @@ export async function turnStream(opts: TurnOptions) {
         result.toUIMessageStream({
           sendReasoning: true,
           sendSources: true,
-          onError: describeProviderError,
+          onError: describeError,
           messageMetadata: ({ part }): AssistantMetadata | undefined => {
             if (part.type === "start") return { modelRef, contextWindow: model.context };
             if (part.type === "finish") {
@@ -192,6 +225,23 @@ export const chatRoutes = new Hono<AppEnv>()
     const user = c.get("user");
     const parsed = chatBody.safeParse(await c.req.json());
     if (!parsed.success) return c.json({ error: "Pick a model before sending." }, 400);
+    if (isTemporaryThread(parsed.data.id)) {
+      try {
+        const stream = await turnStream({
+          userId: user.id,
+          threadId: parsed.data.id,
+          modelRef: parsed.data.config.modelName,
+          effort: parsed.data.config.reasoningEffort as ReasoningEffort | undefined,
+          temporaryPersonalization: parsed.data.config.temporaryPersonalization ?? false,
+          uiMessages: parsed.data.messages as UIMessage[],
+          // Anonymous turns have no resumable copy and end when the request disconnects.
+          signal: c.req.raw.signal,
+        });
+        return createUIMessageStreamResponse({ stream, headers: { "Cache-Control": "no-store" } });
+      } catch (error) {
+        return c.json({ error: (error as Error).message }, 400);
+      }
+    }
     // Generation is decoupled from this request so a reload can reattach. Stop sends an explicit cancel.
     const streamId = newId("str");
     const controller = new AbortController();
@@ -234,6 +284,7 @@ export const chatRoutes = new Hono<AppEnv>()
   .post("/threads/:id/compact", async (c) => {
     const user = c.get("user");
     const threadId = c.req.param("id");
+    if (isTemporaryThread(threadId)) return c.json({ error: "Anonymous chats cannot save compaction" }, 400);
     const body = (await c.req.json()) as { messages: UIMessage[]; modelRef: string };
     const thread = getThread(user.id, threadId);
     if (!thread) return c.json({ error: "Thread not found" }, 404);
@@ -246,12 +297,14 @@ export const chatRoutes = new Hono<AppEnv>()
     return c.json(state);
   })
   .delete("/threads/:id/compact", (c) => {
+    if (isTemporaryThread(c.req.param("id"))) return c.json({ error: "Anonymous chats cannot save compaction" }, 400);
     setCompaction(c.get("user").id, c.req.param("id"), null);
     return c.json({ ok: true });
   })
   .post("/threads/:id/title", async (c) => {
     const user = c.get("user");
     const threadId = c.req.param("id");
+    if (isTemporaryThread(threadId)) return c.json({ title: "Anonymous chat" });
     const body = (await c.req.json()) as { text: string; modelRef?: string };
     const fallback = body.text.trim().split("\n")[0]!.slice(0, 60) || "New chat";
     const ref = getSettings(user.id).utilityModel ?? body.modelRef;
@@ -284,8 +337,8 @@ async function allowedSubagentModels(userId: string, settings: UserSettings, cha
   return refs.map((ref) => models.find((m) => m.ref === ref)).filter((m): m is ModelInfo => !!m?.toolCall);
 }
 
-function describeProviderError(error: unknown): string {
-  console.error("[chat]", error);
+function describeProviderError(error: unknown, log = true): string {
+  if (log) console.error("[chat]", error);
   const e = error as { statusCode?: number; message?: string; responseBody?: string };
   if (e?.statusCode === 401 || e?.statusCode === 403) return `The provider rejected the API key: ${e.message ?? "unauthorized"} Update it in Settings → Providers.`;
   if (e?.statusCode === 429) return "Rate or usage limit reached. Wait, or switch models.";

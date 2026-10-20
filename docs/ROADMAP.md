@@ -1,12 +1,16 @@
 # Roadmap
 
-Status as of 2026-10-19. Update this file when a feature ships or a plan changes.
+Status as of 2026-10-20. Update this file when a feature ships or a plan changes.
 
 ## Pass 1: core (built)
 
 | Area | What exists | Notes |
 | --- | --- | --- |
 | Accounts | Email + password, first user is admin. Settings → Admin: add users, change roles, reset passwords (signs the user out), delete users, open or close sign-up | scrypt hashes, 30-day httpOnly session cookie. The sign-up switch overrides `OKAYCHAT_ALLOW_SIGNUP` once set |
+| Profile | Settings → Account: change display name, upload/change/remove a profile picture; account menu displays the saved image | Private per-account raster images in SQLite, server format/dimension/size checks, browser resize and metadata removal |
+| Memory | Settings → Memory: opt-in encrypted facts, automatic or approval-based saves, in-chat save/search/forget, manual CRUD/search/reset, project scopes, top-right per-chat exclusion | Used across providers and schedules. Reviewed Claude/ChatGPT text/Markdown imports, okaychat JSON round-trip, and readable exports. Selective model-controlled saving; no direct provider-account synchronization |
+| Anonymous chats | Top-right chat options start an unsaved conversation with personalization off; a separate switch can read saved global memory/custom instructions | Never creates memories or database history/usage/upload/artifact records. Browser memory only, no replay; reload discards it. Normal chats keep their existing persistence |
+| Tool limits | Independent agent steps (default 20) and web searches (default 5; 0 disables searches) in Settings → General | Hard query budget shared with delegated tasks, retained over browser-tool continuations; page reads remain available |
 | Server-wide keys | Admins connect providers for every user (Settings → Admin). A user's own key for the same provider wins. Users see a "Server key" badge | `shared_connections`, merged under each user's connections in `catalog/providers.ts` |
 | Providers | OpenCode Go first (onboarding), OpenCode Zen, and every models.dev provider that speaks OpenAI, OpenAI-compatible, Anthropic, or Google APIs. Custom OpenAI-compatible endpoints (Ollama, LM Studio, vLLM) | Keys AES-256-GCM encrypted. Go model list is live from `/v1/models`, enriched by models.dev |
 | Chat | assistant-ui Thread: streaming, Markdown, reasoning, tool calls, branches, edit, regenerate, copy, export; streams resume after reload | Threads and branching history persisted in SQLite. Selected chat and pending stream stored per tab; replay held in server memory for 15 minutes after the last update |
@@ -27,6 +31,7 @@ Status as of 2026-10-19. Update this file when a feature ships or a plan changes
 | Appearance | Port of T3Code: theme library, light/dark/system, per-mode halves, custom + VS Code theme import, contrast, glass opacity, chat width, panel motion, fonts and sizes, word wrap. Synced per user across devices, including custom themes | Local cache for instant application; unsaved edits survive reloads and retry on focus/reconnect. MIT, credited in `src/web/theme/` |
 | Web | `web_search` (SearXNG sidecar, then Brave HTML, then DuckDuckGo lite) and `web_fetch` (Readability → Markdown, PDFs, paging, Scrapling fallback with optional headless Chromium). Source cards in the UI | No keys. Toggle in Settings → General |
 | Artifacts | `create_artifact` / `update_artifact` (exact find/replace edits or full rewrite) / `read_artifact`. HTML, React (TSX via Babel + esm.sh + Tailwind browser build), SVG, Markdown, code. Side panel with preview/code, versions, copy, download, resize | Sandboxed iframe without `allow-same-origin`. Preview needs internet for the CDNs. Toggle in Settings → General |
+| Documents | `create_document` / `edit_document` / `read_document` / `import_document` for PDF, Word, and Excel. HTML/CSS becomes a vector PDF through Chromium (started on demand, closed after 60 s idle) or a Word file through `docx`; a JSON workbook becomes XLSX through `exceljs`, with formulas evaluated and row/column inserts shifting references. Uploaded PDF/DOCX/XLSX files are imported and edited in place. Panel previews: browser PDF viewer, `docx-preview`, spreadsheet grid; source and download alongside | See `docs/research/documents.md`. PDF creation needs the image built with `SCRAPLING_BROWSER=true`; other formats work without Chromium |
 | Generative UI | `render_spec` (declarative components from our themed catalog: cards, tables, metrics, bars, forms) and `show_widget` / `edit_widget` (HTML/SVG in a null-origin sandbox with render reports for repair), via `generative-frame` | Tools run in the browser. See `docs/research/generative-ui.md`. Toggle in Settings → General |
 | Image generation | `generate_image` through each user's own ChatGPT plan via the Codex CLI. Device-code login in Settings → General, credentials encrypted at rest, references for edits, images inline with download | See `docs/research/codex-images.md` |
 | Deploy | Dockerfile (Node 22 + Python venv with Scrapling, optional Chromium), Compose with SearXNG | `SCRAPLING_BROWSER=false` build arg for a smaller image |
@@ -42,6 +47,7 @@ No planned core items remain. New work can be tracked as a subsequent pass.
 ## Known gaps
 
 - Stream replay is kept in server memory for 15 minutes after the last update. Reload recovery works; pending generations do not survive a server restart.
+- Documents can be read back as text, but the model cannot see their layout yet. A visual check would need a server-side page renderer; see the gaps in `docs/research/documents.md`.
 
 - No public usage/limits API for OpenCode Go was found. Go windows show our own recorded spend, not the remaining quota.
 - Live chat, tools, and web search are confirmed working against OpenCode Go with the user's key. The earlier local key had expired, which is why the first end-to-end test failed.

@@ -36,12 +36,15 @@ src/server/
   routes.ts           REST API (threads, providers, MCP, usage, settings)
   chat.ts             /api/chat and turnStream() (one turn, shared with schedules), auto-compaction, titles
   appearance.ts       Validated per-user appearance API (preferences + custom themes inside user_settings)
+  account.ts          Account display name and private PNG/JPEG/WebP profile pictures (SQLite BLOBs)
+  memory.ts           Encrypted account/project memories, model tools, reviewed import and portable export
   projects.ts         Projects: instructions, pinned files, system prompt section
   admin.ts            Admin API: users, sign-up switch, server-wide provider keys
   shares.ts           Public read-only links (/api/public/shares, no auth)
   search.ts           Full-text search over messages (FTS5, synced by triggers in db.ts)
   schedules.ts        Scheduled prompts: next-run math, 30 s ticker, server-side runs
-  artifacts.ts        Artifact tools, versions table, panel API
+  artifacts.ts        Artifact and document tools, versions table, panel/file API
+  documents/          PDF (Chromium), DOCX creation + OOXML editing, XLSX read/write/preview
   codex.ts            Codex CLI login (device code) and per-run CODEX_HOME with encrypted credentials
   llm.ts              Model factory per wire format, cache breakpoints, OpenCode headers
   catalog/            models.dev catalog + provider connections (encrypted keys)
@@ -80,6 +83,10 @@ docs/                 Reusable documentation (see below)
 - `docs/research/bundled-fonts.md`: fonts shipped in the picker, their licenses, and the Liberation source.
 - `docs/research/codex-images.md`: image generation through the Codex CLI, login, credential handling.
 - `docs/research/generative-ui.md`: `generative-frame` widgets and spec mode, browser-executed tools.
+- `docs/research/documents.md`: PDF/DOCX/XLSX tools, the HTML subset, in-place editing, Chromium lifecycle.
+- `docs/research/memory.md`: official Claude/ChatGPT memory research, okaychat memory controls, and transfer formats.
+- `docs/research/account-profile.md`: profile photo validation, resizing, storage, and private serving.
+- `docs/research/step-limits.md`: independent agent/search limits and shared delegated-search budgets.
 
 Add a new file under `docs/research/` whenever you research an external API or library.
 
@@ -101,6 +108,9 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 - `useAuiState` selectors must return primitives or stable references, or React re-renders forever.
 - The chat request body comes from `AssistantChatTransport`: thread id is `id`, model and effort are `config.modelName` / `config.reasoningEffort` (registered in `ModelContextBridge`).
 - OpenCode Go ids missing from models.dev inherit the wire format of a sibling in the same family (`qwen3.6-plus` uses Anthropic like `qwen3.8-max`).
+- Documents are artifacts with bytes: `content` is the HTML/JSON source and `data`/`size` the built file. `edit_document` with source edits rebuilds; with `ops` it edits the binary and clears the source so a rebuild cannot undo it. Imported attachments are only editable with `ops`.
+- The PDF renderer never starts at boot: `documents/render.ts` launches Chromium on the first job, shares it, and closes it 60 s after the last one. Every request except the injected document is aborted, so model HTML cannot reach the network or `file://`.
+- `tsconfig.server.json` includes the DOM lib because `linkedom`/`@xmldom/xmldom` types refer to `Element`/`Document`. Use the xmldom aliases (`XmlElement`, `Document as XmlDocument`) in OOXML code.
 - DuckDuckGo HTML endpoints return 202 (bot wall) from many servers and Bing serves junk to scrapers. Search goes SearXNG, then Brave HTML, then DuckDuckGo lite.
 - Context fill uses the last step's input + output tokens, not the turn total.
 - Tool calls collapse into a "N tool calls" group by default. Tools whose card must stay visible get a `"tool-call:<name>": []` entry in `messageGroupBy` (`thread.aui.tsx`).
@@ -111,6 +121,10 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 - Appearance has its own validated `/api/appearance` endpoint. Generic settings forms must not overwrite it. Only changed top-level appearance fields are patched; custom theme libraries travel with the preferences. First-device migration uses PUT without replacing an existing snapshot.
 - Chat reload recovery uses assistant-ui resumable session storage per thread and `initialThreadId` to restore selection per tab/account. The server retains SSE replay in memory for 15 minutes after the last update; Stop calls an explicit cancel endpoint, while page unload leaves generation running. See `docs/research/assistant-ui.md`.
 - Messages are persisted by the client's history adapter, not by `/api/chat`. A chat sent with curl leaves the thread empty. Drive the UI to test persistence. Server-side writers (schedules) store `{ role, parts, metadata }` with format `ai-sdk/v6` and a `parent_id` chain; the current branch is the newest message and its ancestors.
+- Memory is opt-in and stored separately from chats. `turnStream()` injects bounded global/current-project facts and exposes save/search/forget tools only when enabled for the account and chat. Automatic saves are model-selected; with automatic saving off, mutations require approval. The top-right chat options menu disables memory use and writes for a normal chat while keeping its history. Manual deletion/editing, reset, preference changes, and tool-based forgetting revoke already-offered memory tools through a revision counter. Changing a thread's project also revokes its old memory tools. No subagent receives the memory-writing tools. Retrieved facts sit immediately before the current user message; only stable memory policy belongs in the system prefix.
+- Memory transfers use reviewed text/Markdown or okaychat JSON; they do not connect to Claude/ChatGPT accounts. Content is encrypted with `OKAYCHAT_SECRET`. JSON preserves project scope for the same account; unavailable scopes become global only in the review preview, with a warning. Chat deletion does not delete saved memories.
+- Anonymous chats use reserved `tmp_` ids and never create a thread, messages, usage records, uploads, artifacts, or memory entries. They have no replay buffer or browser storage checkpoint; reload discards them. `RuntimeProvider` skips history/title APIs and the sidebar hides them. The top-right menu starts them with personalization off; optional personalization reads only global memory and custom instructions, never writes memories or includes project context. `DocumentAttachmentAdapter` must use `/files/extract?temporary=1`; its per-thread adapter comes from `unstable_useAdapters` (a global runtime attachment override would silently bypass this). Anonymous tools are limited to web search/page reading and optional read-only memory search; persistent tools and compaction are unavailable.
+- `maxSteps` (default 20) and `maxSearches` (default 5) are independent. A turn and all its delegates share ONE `SearchBudget` and the same built-in web tools object; create it before constructing either tool set. Browser-tool continuations recover search counts from current-turn tool history. Page reads do not consume search queries.
 
 ## Commands
 
@@ -118,7 +132,7 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 | --- | --- |
 | `npm run dev` | Server (tsx watch, 127.0.0.1:8787) + Vite (tailnet IP:5173, proxies `/api`) |
 | `npm run typecheck` | Both tsconfigs |
-| `npm test` | Node tests (appearance API validation, migration, merging, account isolation) |
+| `npm test` | Node tests (appearance, account pictures, independent tool limits, memory isolation/imports, and streamed-chat integration) |
 | `npm run build` / `npm start` | Production build and server |
 
 **Dev servers always run on the tailnet.** The user wants every dev server reachable over Tailscale. Vite binds to `tailscale ip -4` (override with `OKAYCHAT_DEV_HOST`) and allows `*.ts.net` hosts. Share the MagicDNS URL (`http://<host>.<tailnet>.ts.net:5173`), not localhost. Do not bind to `0.0.0.0`.
