@@ -51,7 +51,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
 };
 
 interface AppearanceState extends AppearanceSettings {
-  /** Theme id, or "" for the default T3 Code palette. */
+  /** Theme id, or "" for the default Okaychat palette. */
   theme: string;
   mode: ThemePreferenceMode;
   halves: ThemeHalves | null;

@@ -21,7 +21,7 @@
 
 /* Panels animate with the T3Code "panel animation duration" setting. */
 .panel-transition {
-  transition-duration: var(--panel-animation-duration, 0ms);
+  transition-duration: var(--panel-animation-duration, 200ms);
   transition-timing-function: var(--ease-drawer);
 }
 @media (prefers-reduced-motion: reduce) {

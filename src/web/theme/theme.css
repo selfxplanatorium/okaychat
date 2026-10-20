@@ -100,42 +100,43 @@
   --radius-3xl: calc(var(--radius) + 12px);
 }
 
-/* Light defaults, used when no theme is applied. */
+/* Okaychat default (warm gray, olive accent), used when no theme is applied.
+   Keep in sync with the default colors in palettes.ts. */
 :root {
   color-scheme: light;
   --radius: 0.625rem;
-  --background: var(--color-zinc-25);
+  --background: #f9f7f5;
   --app-chrome-background: var(--background);
-  --foreground: var(--color-zinc-800);
-  --card: var(--color-white);
-  --card-foreground: var(--color-zinc-800);
-  --popover: var(--color-white);
-  --popover-foreground: var(--color-zinc-800);
-  --primary: oklch(0.488 0.217 264);
+  --foreground: #242320;
+  --card: #fefdfc;
+  --card-foreground: #242320;
+  --popover: #fefdfc;
+  --popover-foreground: #242320;
+  --primary: #62691b;
   --primary-foreground: var(--color-white);
-  --secondary: var(--color-zinc-50);
-  --secondary-foreground: var(--color-zinc-800);
-  --muted: var(--color-zinc-50);
-  --muted-foreground: var(--color-zinc-500);
+  --secondary: #f2f1ee;
+  --secondary-foreground: #242320;
+  --muted: #f2f1ee;
+  --muted-foreground: #66635e;
   --placeholder: var(--muted-foreground);
   --secondary-label: var(--muted-foreground);
   --icon-muted: var(--muted-foreground);
   --surface-raised: color-mix(in srgb, var(--card) 20%, transparent);
-  --message-surface: var(--accent);
+  --message-surface: #edebe7;
   --message-foreground: var(--foreground);
   --message-action: var(--primary);
   --message-action-foreground: var(--primary-foreground);
   --message-action-hover: color-mix(in srgb, var(--primary) 90%, var(--background));
-  --accent: var(--color-zinc-100);
-  --accent-foreground: var(--color-zinc-900);
+  --accent: #eeecea;
+  --accent-foreground: #1a1815;
   --error: var(--color-red-500);
   --error-foreground: var(--color-red-700);
   --tool-error-icon: var(--error);
   --error-surface: color-mix(in srgb, var(--error) 8%, transparent);
   --destructive: var(--error);
   --destructive-foreground: var(--error-foreground);
-  --border: var(--color-zinc-200);
-  --input: var(--color-zinc-300);
+  --border: #e1dfdc;
+  --input: #d3d1cd;
   --ring: var(--primary);
   --info: var(--color-blue-500);
   --info-foreground: var(--color-blue-700);
@@ -147,13 +148,13 @@
   --update: var(--primary);
   --update-foreground: var(--primary);
   --update-surface: color-mix(in srgb, var(--update) 12%, transparent);
-  --sidebar: var(--color-zinc-50);
+  --sidebar: #f2f1ee;
   --sidebar-foreground: var(--foreground);
   --sidebar-muted-foreground: var(--muted-foreground);
-  --sidebar-control-surface: var(--color-zinc-100);
-  --sidebar-row-hover: var(--color-zinc-25);
-  --sidebar-row-active: var(--color-white);
-  --sidebar-row-selected: var(--color-white);
+  --sidebar-control-surface: #ebe9e6;
+  --sidebar-row-hover: #f7f5f3;
+  --sidebar-row-active: #fefdfc;
+  --sidebar-row-selected: #fefdfc;
   --sidebar-border: var(--border);
   --sidebar-stage-fade: var(--sidebar);
   --code-background: color-mix(in srgb, var(--card) 90%, var(--background));
@@ -168,38 +169,40 @@
 
 :root.dark {
   color-scheme: dark;
-  --background: var(--color-neutral-950);
-  --surface-raised: color-mix(in srgb, var(--background) 97%, var(--color-white));
-  --foreground: var(--color-neutral-100);
-  --card: color-mix(in srgb, var(--background) 97%, var(--color-white));
-  --card-foreground: var(--color-neutral-100);
-  --popover: color-mix(in srgb, var(--background) 97%, var(--color-white));
-  --popover-foreground: var(--color-neutral-100);
-  --primary: oklch(0.571 0.21 264);
-  --secondary: color-mix(in srgb, var(--color-white) 3%, transparent);
-  --secondary-foreground: var(--color-neutral-100);
-  --muted: color-mix(in srgb, var(--color-white) 3%, transparent);
-  --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-white));
-  --accent: color-mix(in srgb, var(--color-white) 4%, transparent);
-  --accent-foreground: var(--color-neutral-100);
+  --background: #181716;
+  --surface-raised: #1f1e1c;
+  --foreground: #eeecea;
+  --card: #1f1e1c;
+  --card-foreground: #eeecea;
+  --popover: #23211f;
+  --popover-foreground: #eeecea;
+  --primary: #b5c062;
+  --secondary: #1f1e1c;
+  --secondary-foreground: #eeecea;
+  --muted: #1f1e1c;
+  --muted-foreground: #a19e9a;
+  --accent: #262523;
+  --accent-foreground: #eeecea;
   --error: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
   --error-foreground: var(--color-red-400);
   --tool-error-icon: #fca5a5;
   --error-surface: color-mix(in srgb, var(--error) 16%, transparent);
-  --border: color-mix(in srgb, var(--color-white) 6%, transparent);
-  --input: color-mix(in srgb, var(--color-white) 8%, transparent);
+  --border: #2b2a27;
+  --input: #373532;
   --info-foreground: var(--color-blue-400);
   --success-foreground: var(--color-emerald-400);
   --warning-foreground: var(--color-amber-400);
   --warning-surface: color-mix(in srgb, var(--warning) 16%, transparent);
-  --update-foreground: var(--color-blue-400);
+  --update-foreground: #beca74;
   --update-surface: color-mix(in srgb, var(--update) 18%, transparent);
-  --sidebar: var(--card);
-  --sidebar-control-surface: var(--muted);
-  --sidebar-row-hover: var(--accent);
-  --sidebar-row-active: var(--accent);
-  --sidebar-row-selected: var(--muted);
-  --sidebar-stage-fade: var(--card);
+  --sidebar: #121110;
+  --sidebar-control-surface: #181716;
+  --sidebar-row-hover: #1d1c1a;
+  --sidebar-row-active: #252422;
+  --sidebar-row-selected: #21201e;
+  --sidebar-stage-fade: #121110;
+  --primary-foreground: #111308;
+  --message-surface: #2a2926;
 }
 
 /* Appearance variables. settings.ts and contrast.ts overwrite these inline. */
@@ -209,7 +212,7 @@
   --appearance-contrast-border-boost: 0%;
   --appearance-contrast-target: black;
   --glass-blur: 12px;
-  --glass-opacity: 80%;
+  --glass-opacity: 50%;
   --glass-saturation: 1.14;
   --chat-content-max-width: 46rem;
   --font-size-prompt: 14px;

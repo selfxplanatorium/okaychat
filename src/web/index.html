@@ -3,27 +3,27 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
-    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="theme-color" content="#181716" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <!-- Theme boot script ported from T3Code (MIT). Applies the stored theme before first paint. Keep storage keys in sync with src/web/theme/palette.ts. -->
     <script>
       (() => {
-        const LIGHT_BACKGROUND = "#ffffff";
-        const DARK_BACKGROUND = "#0a0a0a";
+        const LIGHT_BACKGROUND = "#f9f7f5";
+        const DARK_BACKGROUND = "#181716";
         const CUSTOM_THEMES_STORAGE_KEY = "okaychat:themes:v1";
         const THEME_FOLLOW_SYSTEM_STORAGE_KEY = "okaychat:theme-follow-system";
         const THEME_APPEARANCE_MODE_STORAGE_KEY = "okaychat:theme-appearance-mode";
         const THEME_HALVES_STORAGE_KEY = "okaychat:theme-halves:v1";
         const SPLASH_COLORS = {
           light: {
-            background: "#ffffff",
-            foreground: "#262626",
-            accent: "#4f46e5",
+            background: "#f9f7f5",
+            foreground: "#242320",
+            accent: "#62691b",
           },
           dark: {
-            background: "#0a0a0a",
-            foreground: "#f5f5f5",
-            accent: "#818cf8",
+            background: "#181716",
+            foreground: "#eeecea",
+            accent: "#b5c062",
           },
         };
         // These are the runtime defaults used to complete a custom palette
@@ -119,7 +119,7 @@
           },
         };
         // Keep the built-in mode list in sync with the runtime so the selected
-        // T3 Chat palette is visible before React has mounted.
+        // TeaTree Chat palette is visible before React has mounted.
         const BUILT_IN_THEME_MODES = Object.fromEntries(
           Object.entries(BUILT_IN_THEME_PALETTES).map(([id, palettes]) => [
             id,
@@ -215,7 +215,7 @@
         try {
           const storedTheme = window.localStorage.getItem("okaychat:theme");
           const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-          // Older builds stored the dark T3 Chat palette as its own theme id
+          // Older builds stored the dark TeaTree Chat palette as its own theme id
           // and every maintainer theme under a t3- prefix; keep those
           // preferences readable. Mirrors the runtime's legacy alias table.
           const LEGACY_THEME_IDS = {
@@ -400,8 +400,8 @@
     <style>
       html, body, #root { width: 100%; height: 100%; margin: 0; }
       /* Splash only. Once the runtime applies the theme (data-theme-ready), theme.css owns body colors. */
-      html:not([data-theme-ready]) body { background: #ffffff; color: #262626; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
-      html.dark:not([data-theme-ready]) body { background: #0a0a0a; color: #f5f5f5; }
+      html:not([data-theme-ready]) body { background: #f9f7f5; color: #242320; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+      html.dark:not([data-theme-ready]) body { background: #181716; color: #eeecea; }
       html[data-theme-selected="true"]:not([data-theme-ready]) body { background: var(--boot-background); color: var(--boot-foreground); }
     </style>
     <title>okaychat</title>

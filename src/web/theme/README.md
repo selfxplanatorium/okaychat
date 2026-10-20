@@ -8,7 +8,7 @@ Source files are listed in each module header. The T3Code clone used for the por
 
 | File | Purpose | Ported from |
 | --- | --- | --- |
-| `palettes.ts` | Built-in themes (`t3-chat`, `grove`, `ocean`, `ember`, `iris`), T3 Code default light and dark colors, `THEME_COLOR_ROLES`, and types. Values are verbatim. | `packages/shared/src/themePalettes.ts` |
+| `palettes.ts` | Built-in themes (`t3-chat`, `grove`, `ocean`, `ember`, `iris`), Okaychat default light and dark colors, `THEME_COLOR_ROLES`, and types. Values are verbatim. | `packages/shared/src/themePalettes.ts` |
 | `palette.ts` | Theme lookup, custom theme storage (install, update, remove, list, subscribe), theme file parse and serialize, color validation and canonical OKLCH form, mode and half resolution, DOM application (`applyThemePalette`, `applyThemeColorPreview`), `--app-theme-*` variable map. | `apps/web/src/themePalette.ts` |
 | `settings.ts` | Ranges and defaults for glass opacity, contrast, panel animation, chat width, and font sizes. Clamp helpers. DOM writers for glass and chat width. | `packages/contracts/src/settings.ts`, `apps/web/src/routes/__root.tsx` |
 | `contrast.ts` | Writes `--appearance-contrast-*` variables from the contrast setting. | `apps/web/src/appearanceContrast.ts` |
@@ -55,9 +55,9 @@ Appearance settings. Keep the T3Code names. The UI syncs them per user through `
 
 | Key | Range | Default | Notes |
 | --- | --- | --- | --- |
-| `glassOpacity` | 40 to 100, integer, step 5 | 80 | % of background for `surface-glass`, `dialog-glass`, `dropdown-glass`. 100 also removes blur. |
+| `glassOpacity` | 40 to 100, integer, step 5 | 50 | % of background for `surface-glass`, `dialog-glass`, `dropdown-glass`. 100 also removes blur. |
 | `appearanceContrast` | 50 to 200, integer, step 5 | 100 | Base up to 100%, boost above 100%. |
-| `panelAnimationDurationMs` | 0 to 400, step 25 | 240 | 0 disables animation. Set `--panel-animation-duration` on the layout element. Respect `prefers-reduced-motion`. |
+| `panelAnimationDurationMs` | 0 to 400, step 25 | 200 | 0 disables animation. Set `--panel-animation-duration` on the layout element. Respect `prefers-reduced-motion`. |
 | `chatWidth` | `comfortable`, `wide`, `full` | `comfortable` | `46rem`, `72rem`, `100%` of `--chat-content-max-width`. |
 | `fontSizeInterface` | 12 to 20 px | 16 | Sets `<html>` font size. |
 | `fontSizePrompt` | 12 to 20 px | 14 | |
@@ -75,7 +75,7 @@ Theme selection (localStorage):
 
 | Key | Value |
 | --- | --- |
-| `okaychat:theme` | Theme id, `light`, `dark`, `system`, or empty for T3 Code default |
+| `okaychat:theme` | Theme id, `light`, `dark`, `system`, or empty for the Okaychat default |
 | `okaychat:theme-appearance-mode` | `system`, `light`, `dark` (default `system`) |
 | `okaychat:theme-halves:v1` | `{"light": "<id>", "dark": "<id>"}` |
 | `okaychat:themes:v1` | JSON array of custom themes (`version` 1 theme files stored by id) |
