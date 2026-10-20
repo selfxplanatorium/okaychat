@@ -4,7 +4,9 @@ import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
 import { extractText, getDocumentProxy } from "unpdf";
 import { z } from "zod";
+import { DEFAULT_USER_SETTINGS } from "../../shared/types.js";
 import { scraplingFetch } from "./scrapling.js";
+import { SearchBudget } from "./search-budget.js";
 
 // Free web access with no keys: SearXNG sidecar when configured, Brave's public HTML results otherwise.
 // DuckDuckGo's HTML endpoints answer 202 (bot wall) from many servers and Bing serves junk to scrapers,
@@ -97,7 +99,7 @@ export async function webSearch(query: string, limit = 8): Promise<{ engine: str
 }
 
 const turndown = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced", bulletListMarker: "-" });
-turndown.remove(["script", "style", "noscript", "iframe", "svg", "form"]);
+turndown.remove(["script", "style", "noscript", "iframe", "svg", "form"] as never);
 
 function htmlToMarkdown(html: string, url: string): { title: string; markdown: string } {
   const { document } = parseHTML(html);
@@ -165,16 +167,22 @@ export async function webFetch(url: string): Promise<{ title: string; content: s
 }
 
 /** Built-in tools every chat gets when the model supports tool calls. */
-export function webTools(): ToolSet {
+export function webTools(opts: { searchBudget?: SearchBudget } = {}): ToolSet {
+  const searchBudget = opts.searchBudget ?? new SearchBudget(DEFAULT_USER_SETTINGS.maxSearches);
   return {
     web_search: tool({
       description:
-        "Search the web. Returns titles, URLs, and snippets. Use for current events, facts you are unsure about, docs, prices, or anything after your knowledge cutoff. Follow up with web_fetch to read a result.",
+        `Search the web. Returns titles, URLs, and snippets. Use targeted queries for facts that need verification; stop once you have enough evidence. At most ${searchBudget.limit} search queries are allowed for the entire reply, shared with sub-agents. Follow up with web_fetch to read a result; reading pages does not count toward this limit.`,
       inputSchema: z.object({
         query: z.string().min(1).describe("Search query, as you would type it into a search engine"),
         limit: z.number().int().min(1).max(20).optional().describe("Max results, default 8"),
       }),
-      execute: async ({ query, limit }) => webSearch(query, limit ?? 8),
+      execute: async ({ query, limit }) => {
+        if (!searchBudget.reserve()) {
+          throw new Error(`The web search limit (${searchBudget.limit} queries per reply) has been reached. Answer using the evidence already collected; you may still read known URLs with web_fetch.`);
+        }
+        return webSearch(query, limit ?? 8);
+      },
     }),
     web_fetch: tool({
       description:

@@ -4,6 +4,7 @@ import type { ModelInfo, TokenUsage } from "../../shared/types.js";
 import { resolveModel } from "../catalog/providers.js";
 import { createModel } from "../llm.js";
 import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "../usage.js";
+import type { SearchBudget } from "./search-budget.js";
 
 // A sub-agent runs one self-contained task on a model the user allows, in its own context, with the
 // read-only tools. Only its final report goes back to the main model, which keeps the main context small.
@@ -28,7 +29,7 @@ export interface SubagentProgress {
  * @param allowed Models the main model may pick, first is the default.
  * @param subTools Tools the sub-agent may use. Must not need approval: nobody is there to answer.
  */
-export function subagentTools(opts: { userId: string; threadId: string; allowed: ModelInfo[]; subTools: ToolSet; signal?: AbortSignal }): ToolSet {
+export function subagentTools(opts: { userId: string; threadId: string; allowed: ModelInfo[]; subTools: ToolSet; maxSteps?: number; searchBudget?: SearchBudget; signal?: AbortSignal }): ToolSet {
   const refs = opts.allowed.map((m) => m.ref) as [string, ...string[]];
   const list = opts.allowed.map((m) => `\`${m.ref}\` (${m.name}${m.context ? `, ${Math.round(m.context / 1000)}k context` : ""})`).join(", ");
   return {
@@ -44,13 +45,18 @@ export function subagentTools(opts: { userId: string; threadId: string; allowed:
         let usage = ZERO_USAGE;
         let cost = 0;
         const progress: SubagentProgress = { model: model.ref, status: "running", text: "", steps: 0, tools: [] };
+        const maxSteps = Math.min(opts.maxSteps ?? MAX_STEPS, MAX_STEPS);
         const result = streamText({
           model: handle.model,
           providerOptions: handle.providerOptions,
-          system: SUBAGENT_SYSTEM,
+          system: SUBAGENT_SYSTEM + (opts.searchBudget ? `\nWeb searches share the parent reply's budget: ${opts.searchBudget.remaining} queries remain. Use targeted searches and finish from collected evidence when the budget is exhausted.` : ""),
           prompt: task,
           tools: opts.subTools,
-          stopWhen: stepCountIs(MAX_STEPS),
+          stopWhen: stepCountIs(maxSteps + 1),
+          prepareStep: ({ stepNumber }) => ({
+            activeTools: stepNumber >= maxSteps ? [] : Object.keys(opts.subTools).filter((name) => name !== "web_search" || !opts.searchBudget || opts.searchBudget.remaining > 0),
+            ...(stepNumber >= maxSteps ? { toolChoice: "none" as const } : {}),
+          }),
           maxOutputTokens: model.maxOutput,
           abortSignal: opts.signal,
           onStepEnd: (step) => {

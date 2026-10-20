@@ -59,9 +59,15 @@ export function GeneralSettings() {
         />
         <SettingsRow
           label="Max agent steps"
-          description="How many tool round trips the model may take in one reply."
+          description="Tool rounds per reply, followed by a final answer without tools. Web searches have a separate limit."
           reset={settings.maxSteps !== DEFAULT_USER_SETTINGS.maxSteps ? () => update({ maxSteps: DEFAULT_USER_SETTINGS.maxSteps }) : null}
           control={<SettingsSlider label="Max agent steps" value={settings.maxSteps} min={1} max={50} step={1} onChange={(v) => update({ maxSteps: v })} />}
+        />
+        <SettingsRow
+          label="Max web searches"
+          description="Search queries per reply, shared by the assistant and its sub-agents. Reading pages does not count. 0 turns searching off."
+          reset={settings.maxSearches !== DEFAULT_USER_SETTINGS.maxSearches ? () => update({ maxSearches: DEFAULT_USER_SETTINGS.maxSearches }) : null}
+          control={<SettingsSlider label="Max web searches" value={settings.maxSearches} min={0} max={50} step={1} onChange={(v) => update({ maxSearches: v })} />}
         />
       </SettingsSection>
 

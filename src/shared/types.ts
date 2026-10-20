@@ -74,6 +74,8 @@ export interface UserSettings {
   autoCompactAt: number;
   /** Max agent steps (tool round trips) per turn. */
   maxSteps: number;
+  /** Max built-in web searches per reply, shared with sub-agents. 0 disables searching. */
+  maxSearches: number;
   /** Built-in web_search and web_fetch tools. */
   webTools: boolean;
   /** Built-in artifact tools: documents and apps shown in a side panel. */
@@ -92,6 +94,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   systemPrompt: "",
   autoCompactAt: 0.8,
   maxSteps: 20,
+  maxSearches: 5,
   webTools: true,
   artifacts: true,
   generativeUI: true,
