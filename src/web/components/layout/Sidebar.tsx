@@ -20,8 +20,9 @@ export function Sidebar({ open, onToggle }: { open: boolean; onToggle: () => voi
         "shell-sidebar text-sidebar-foreground border-sidebar-border panel-transition flex h-full shrink-0 flex-col overflow-hidden transition-[width,margin]",
         open ? "w-72" : "w-0",
         // On mobile the rail is an overlay: it keeps its width and slides off screen.
-        "max-md:bg-sidebar max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:w-72 max-md:border-r max-md:shadow-xl max-md:transition-transform",
-        open ? "max-md:translate-x-0" : "max-md:-translate-x-full",
+        // Visibility is transitioned too: the hidden drawer keeps its shadow until it has slid off, then disappears.
+        "max-md:bg-sidebar max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:w-72 max-md:border-r max-md:shadow-xl max-md:transition-[transform,visibility]",
+        open ? "max-md:translate-x-0" : "max-md:-translate-x-full max-md:invisible",
       )}
     >
       {/* On desktop the panel floats inside the rail, inset from the window edge. */}

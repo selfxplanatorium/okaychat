@@ -20,7 +20,14 @@ export function GeneralSettings() {
   }, []);
   if (!settings) return null;
 
-  const modelOptions = models.map((m) => ({ value: m.ref, label: `${m.name} · ${m.providerId}` }));
+  // The provider id is secondary, so it is the part that gives way when the trigger is narrow.
+  const modelLabel = (m: { name: string; providerId: string }) => (
+    <span className="flex min-w-0 items-baseline">
+      <span className="min-w-0 truncate">{m.name}</span>
+      <span className="text-muted-foreground shrink-0 whitespace-pre">{` · ${m.providerId}`}</span>
+    </span>
+  );
+  const modelOptions = models.map((m) => ({ value: m.ref, label: modelLabel(m) }));
 
   return (
     <SettingsPage title="General">
@@ -28,14 +35,14 @@ export function GeneralSettings() {
         <SettingsRow
           label="Default model"
           description="Used for new chats until you pick another in the composer."
-          control={<Select className="w-64" value={settings.defaultModel ?? null} onValueChange={(v) => update({ defaultModel: v })} options={modelOptions} placeholder="First available" />}
+          control={<Select className="w-full md:w-80" value={settings.defaultModel ?? null} onValueChange={(v) => update({ defaultModel: v })} options={modelOptions} placeholder="First available" />}
         />
         <SettingsRow
           label="Utility model"
           description="Writes chat titles and compaction summaries. A fast, cheap model works best."
           control={
             <Select
-              className="w-64"
+              className="w-full md:w-80"
               value={settings.utilityModel ?? null}
               onValueChange={(v) => update({ utilityModel: v })}
               options={modelOptions}
@@ -104,10 +111,10 @@ export function GeneralSettings() {
               description="Default for delegated tasks. The utility model and the chat model are offered too."
               control={
                 <Select
-                  className="w-64"
+                  className="w-full md:w-80"
                   value={settings.subagentModel ?? null}
                   onValueChange={(v) => update({ subagentModel: v })}
-                  options={models.filter((m) => m.toolCall).map((m) => ({ value: m.ref, label: `${m.name} · ${m.providerId}` }))}
+                  options={models.filter((m) => m.toolCall).map((m) => ({ value: m.ref, label: modelLabel(m) }))}
                   placeholder="Utility model"
                 />
               }

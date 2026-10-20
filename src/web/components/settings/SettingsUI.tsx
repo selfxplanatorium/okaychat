@@ -28,7 +28,8 @@ export function SettingsSection({ title, description, action, children }: { titl
   return (
     <section className="flex flex-col gap-3">
       {(title || action) && (
-        <div className="flex items-end justify-between gap-4">
+        // A lone title centers on the action. With a description, the action sits level with its last line.
+        <div className={cn("flex justify-between gap-4", description ? "items-end" : "items-center")}>
           <div>
             {title && <h2 className="text-sm font-medium">{title}</h2>}
             {description && <p className="text-muted-foreground text-xs">{description}</p>}
@@ -98,7 +99,6 @@ export function SettingsSlider({
   } as CSSProperties;
   return (
     <div className="flex w-full items-center gap-3 sm:w-56">
-      <output className="bg-muted text-foreground min-w-14 rounded-md px-2 py-1 text-center font-mono text-xs font-medium tabular-nums">{format(value)}</output>
       <input
         type="range"
         aria-label={label}
@@ -110,6 +110,7 @@ export function SettingsSlider({
         style={style}
         onChange={(e) => onChange(Number(e.currentTarget.value))}
       />
+      <output className="text-foreground w-10 shrink-0 text-right font-sans text-sm tabular-nums">{format(value)}</output>
     </div>
   );
 }

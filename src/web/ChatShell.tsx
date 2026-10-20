@@ -1,7 +1,7 @@
 import { PanelLeftIcon, SquarePenIcon } from "lucide-react";
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Route, Switch, useLocation } from "wouter";
-import { useAui } from "@assistant-ui/react";
+import { useAui, useAuiState } from "@assistant-ui/react";
 import { ArtifactPanel } from "@/components/artifacts/ArtifactPanel";
 import { ChatView } from "@/components/chat/ChatView";
 import { Sidebar } from "@/components/layout/Sidebar";
@@ -46,6 +46,18 @@ function ChatHeader({ sidebarOpen, onToggle }: { sidebarOpen: boolean; onToggle:
   );
 }
 
+// Fires when the active thread changes, so picking a chat in the drawer also closes it on mobile.
+function ThreadSwitchWatcher({ onSwitch }: { onSwitch: () => void }) {
+  const threadId = useAuiState((s) => s.threads.mainThreadId);
+  const seen = useRef(threadId);
+  useEffect(() => {
+    if (seen.current === threadId) return;
+    seen.current = threadId;
+    onSwitch();
+  }, [threadId, onSwitch]);
+  return null;
+}
+
 export function Shell() {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -53,7 +65,16 @@ export function Shell() {
   const connected = useData((s) => s.providers.some((p) => p.connected));
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
   const [location] = useLocation();
-  const route = location.startsWith("/settings") ? "settings" : "chat";
+  const inSettings = location.startsWith("/settings");
+  const route = inSettings ? "settings" : "chat";
+
+  // Mobile drawer is an overlay: close it after navigation so the page underneath is visible.
+  const closeOnMobile = useCallback(() => {
+    if (window.matchMedia("(max-width: 767px)").matches) setSidebarOpen(false);
+  }, []);
+  useEffect(() => {
+    closeOnMobile();
+  }, [location, closeOnMobile]);
 
   const reload = useCallback(() => {
     setLoadError(null);
@@ -78,19 +99,23 @@ export function Shell() {
         Loading your chats…
       </div>
     );
-  if (!connected && !location.startsWith("/settings")) return <Onboarding />;
+  if (!connected && !inSettings) return <Onboarding />;
 
   return (
     <RuntimeProvider>
       <div className="animate-fade-in depth-canvas flex h-full">
-        <Sidebar open={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} />
+        <ThreadSwitchWatcher onSwitch={closeOnMobile} />
+        {/* Settings has its own navigation rail. sidebarOpen is kept here, so the sidebar returns in the same state. */}
+        {!inSettings && <Sidebar open={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} />}
         {/* Always mounted so the backdrop can fade out; pointer events are off while closed. */}
-        <div
-          aria-hidden
-          data-open={sidebarOpen}
-          onClick={() => setSidebarOpen(false)}
-          className="shell-scrim fixed inset-0 z-30 bg-black/30 md:hidden"
-        />
+        {!inSettings && (
+          <div
+            aria-hidden
+            data-open={sidebarOpen}
+            onClick={() => setSidebarOpen(false)}
+            className="shell-scrim fixed inset-0 z-30 bg-black/30 md:hidden"
+          />
+        )}
         <div className="relative flex min-w-0 flex-1">
           {/* Keyed by the top-level route: chat and settings crossfade, sections inside settings do not. */}
           <div key={route} className="shell-route-in relative flex min-w-0 flex-1 flex-col">
@@ -105,7 +130,7 @@ export function Shell() {
               <Route path="/settings">
                 {() => (
                   <Suspense fallback={null}>
-                    <SettingsLayout section="general" />
+                    <SettingsLayout />
                   </Suspense>
                 )}
               </Route>
@@ -116,7 +141,7 @@ export function Shell() {
               </Route>
             </Switch>
           </div>
-          {!location.startsWith("/settings") && <ArtifactPanel />}
+          {!inSettings && <ArtifactPanel />}
         </div>
       </div>
       <ThemeEditorHost />

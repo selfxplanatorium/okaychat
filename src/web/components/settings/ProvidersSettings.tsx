@@ -210,7 +210,7 @@ export function ProviderLists() {
     ));
 
   return (
-    <>
+    <div className="flex flex-col gap-8">
       {connected.length > 0 && <SettingsSection title="Connected">{rows(connected)}</SettingsSection>}
       <SettingsSection
         title="Add a provider"
@@ -235,6 +235,6 @@ export function ProviderLists() {
         )}
       </SettingsSection>
       {rest.length > 0 && <SettingsSection title={`All providers (${rest.length})`}>{rows(rest)}</SettingsSection>}
-    </>
+    </div>
   );
 }
