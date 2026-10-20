@@ -10,6 +10,9 @@ const GO_MODELS_URL = "https://opencode.ai/inference/go/v1/models";
 // Shown first, in this order. OpenCode Go is the default connection.
 const PRIMARY = [OPENCODE_GO, "opencode", "anthropic", "openai", "google", "openrouter", "deepseek", "xai", "mistral", "groq"];
 
+// models.dev calls the pay-as-you-go gateway just "OpenCode", which reads like OpenCode Go.
+const NAMES: Record<string, string> = { opencode: "Opencode Zen" };
+
 interface ConnectionRow {
   provider_id: string;
   api_key_enc: string | null;
@@ -113,7 +116,7 @@ export async function listProviders(scope: ConnectionScope): Promise<ProviderInf
     const conn = connections.get(provider.id);
     out.push({
       id: provider.id,
-      name: provider.name,
+      name: NAMES[provider.id] ?? provider.name,
       doc: provider.doc,
       primary: PRIMARY.includes(provider.id),
       custom: false,
