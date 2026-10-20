@@ -1,5 +1,5 @@
 import { defineToolkit } from "@assistant-ui/react";
-import { BookOpenIcon, BotIcon, ChevronDownIcon, DownloadIcon, FileTextIcon, GlobeIcon, ImageIcon, Loader2Icon, SearchIcon, TriangleAlertIcon } from "lucide-react";
+import { BookOpenIcon, BotIcon, ChevronDownIcon, DownloadIcon, EyeIcon, FileTextIcon, GlobeIcon, ImageIcon, Loader2Icon, SearchIcon, TriangleAlertIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { ArtifactCard } from "@/components/artifacts/ArtifactCard";
 import { SimpleMarkdown } from "@/components/ui/simple-markdown";
@@ -130,6 +130,22 @@ export const toolkit = defineToolkit({
     render: ({ args, status }) => (
       <ToolShell icon={<BookOpenIcon className="size-4" />} running={status?.type === "running"} label={`Read document ${(args as { id?: string })?.id ?? ""}`} />
     ),
+  },
+  view_artifact: {
+    type: "backend",
+    render: ({ args, result, status }) => {
+      const a = (args ?? {}) as { id?: string; page?: number; sheet?: string };
+      const r = (result ?? {}) as { capture?: string; width?: number; height?: number };
+      const running = status?.type === "running";
+      const target = a.sheet ?? (a.page ? `page ${a.page}` : "page 1");
+      return (
+        <ToolShell
+          icon={<EyeIcon className="size-4" />}
+          running={running}
+          label={running ? `Looking at ${a.id ?? "artifact"}…` : `Looked at ${a.id ?? "artifact"} (${r.capture ?? target})`}
+        />
+      );
+    },
   },
   delegate_task: {
     type: "backend",

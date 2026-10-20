@@ -24,6 +24,8 @@ import { createModel } from "./llm.js";
 import { toolsForUser } from "./mcp/manager.js";
 import { imageTools } from "./tools/image.js";
 import { subagentTools } from "./tools/subagent.js";
+import { injectScreenshots } from "./tools/screenshots.js";
+import type { VisualShot } from "./documents/visual.js";
 import { webTools } from "./tools/web.js";
 import { SearchBudget, searchesInCurrentTurn, agentStepsInCurrentTurn } from "./tools/search-budget.js";
 import { conversationMemory, temporaryMemory } from "./memory.js";
@@ -128,11 +130,14 @@ export async function turnStream(opts: TurnOptions) {
       const subagents = subagentModels.length
         ? subagentTools({ userId: user.id, threadId, allowed: subagentModels, subTools: readOnlyTools, maxSteps: settings.maxSteps, searchBudget, signal: signal })
         : {};
+      // view_artifact stores its PNG here; prepareStep attaches it once as a user image message.
+      const shots = new Map<string, VisualShot>();
+      const injectedShots = new Set<string>();
       const tools: ToolSet = {
         ...builtInWeb,
         ...(model.toolCall ? memory.tools : {}),
         ...subagents,
-        ...(useArtifacts ? artifactTools(threadId, user.id) : {}),
+        ...(useArtifacts ? artifactTools(threadId, user.id, { shots, canViewImages: model.inputModalities.includes("image") }) : {}),
         ...(model.toolCall && !temporary && codexConnected(user.id) ? imageTools(user.id, threadId, signal) : {}),
         ...(useGenerativeUI ? frontendTools(opts.clientTools!) : {}),
         ...mcp.tools,
@@ -165,10 +170,14 @@ export async function turnStream(opts: TurnOptions) {
         // Reserve one final response without tools, so hitting the limit cannot restart the
         // allowance through the client's automatic tool-result continuation.
         stopWhen: stepCountIs(remainingSteps + 1),
-        prepareStep: ({ stepNumber }) => ({
-          activeTools: stepNumber >= remainingSteps ? [] : Object.keys(tools).filter((name) => name !== "web_search" || searchBudget.remaining > 0),
-          ...(stepNumber >= remainingSteps ? { toolChoice: "none" as const } : {}),
-        }),
+        prepareStep: ({ stepNumber, messages: stepMessages }) => {
+          const withShots = injectScreenshots(stepMessages, shots, injectedShots);
+          return {
+            ...(withShots !== stepMessages ? { messages: withShots } : {}),
+            activeTools: stepNumber >= remainingSteps ? [] : Object.keys(tools).filter((name) => name !== "web_search" || searchBudget.remaining > 0),
+            ...(stepNumber >= remainingSteps ? { toolChoice: "none" as const } : {}),
+          };
+        },
         providerOptions: handle.providerOptions,
         maxOutputTokens: model.maxOutput,
         abortSignal: signal,

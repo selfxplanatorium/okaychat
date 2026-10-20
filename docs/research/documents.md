@@ -10,6 +10,7 @@ Status: built 2026-10-20.
 | `edit_document` | Either change the source (`edits` / `content`) and rebuild, or edit the binary in place (`docx_ops`, `xlsx_ops`, `pdf_ops`). |
 | `read_document` | Text view: PDF pages and form fields, Word paragraphs with styles, spreadsheet cells and formulas. |
 | `import_document` | Copy an attachment's original bytes (from `/api/files/extract`) into a document artifact. |
+| `view_artifact` | Render the current version and return a screenshot to the model. One page or sheet per call, vision models only. |
 
 Attachment bytes land in the `uploads` table (seven-day retention) before the model asks for them:
 `/api/files/extract` stores docx/xlsx and large PDFs, and `/api/files/store` stores a PDF that a model
@@ -78,6 +79,33 @@ An imported document has no source. It is only editable through `ops`. `read_doc
 reliable path: paragraph indices for DOCX, sheet/cell addresses for XLSX, page numbers and field names
 for PDF.
 
+## Visual self-check
+
+`view_artifact(id, page?, sheet?)` gives the model its own eyes. It renders the current version in the
+same Chromium and returns a PNG:
+
+- HTML, React, and SVG: the artifact document from `src/shared/artifact-frame.ts`, so the screenshot is
+  the same DOM the panel shows. React still needs the public CDNs (Babel, esm.sh, Tailwind); only those
+  hosts are allowed, everything else is aborted. Tall pages are clipped to 1800 CSS pixels.
+- PDF: `pdfjs-dist` is served into the page from `node_modules` and draws the requested page to a
+  canvas; the canvas is captured at 1000 px wide. This is exact, including form fields and embedded
+  fonts. Pages are addressed with `page`, default 1.
+- DOCX: `docx-preview` and `jszip` are served into the page, the file renders into Word-like pages, and
+  the requested `section.docx` is captured. This uses docx-preview's layout, which is close to Word but
+  not identical.
+- XLSX: the same `SheetPreview` JSON the web grid uses becomes a styled table, captured at its content
+  size. `sheet` picks a sheet; the first 60 rows and 20 columns are shown.
+
+Screenshots are not placed inside the tool result. OpenAI-compatible chat APIs serialize tool content,
+so the result stays text and the image is appended once as a synthetic user message by `prepareStep`
+(`src/server/tools/screenshots.ts`). That shape works for every vision provider, and the persisted
+history stays text-only, so later turns do not resend images. A reply may spend six screenshots; the
+model is told the image follows and that it is not repeated. Page JavaScript errors and console errors
+come back in the tool text even for a model that cannot see images.
+
+Non-vision models do not get the tool. Without Chromium, the tool is absent and the text tools keep
+working.
+
 ## Chromium lifecycle and isolation
 
 `src/server/documents/render.ts`:
@@ -121,19 +149,21 @@ The public share page uses the same component with the public artifact routes.
 | `@xmldom/xmldom` | Serializes OOXML faithfully (namespaces, `xml:space`). |
 | `docx-preview` | Browser-side Word rendering, lazy chunk. |
 | `fast-formula-parser` | Formula evaluation, small and dependency-free. |
+| `pdfjs-dist` | Renders PDF pages to canvases for the visual check; served locally, never bundled into the web app. |
 
 `pdfmake` was evaluated and rejected: it needs its own declarative layout dialect and models write better
 HTML/CSS. `pdfjs-dist` was removed after the preview settled on the browser viewer.
 
 ## Known gaps
 
-- **No visual self-check yet.** The model can read a document back but cannot see it. A server-side
-  screenshot would need Chromium to render the PDF (pdf.js in the page) or a second engine; the tab-relay
-  approach was rejected because it needs an open tab. This is the next step if layout mistakes matter.
 - DOCX created from HTML cannot use arbitrary CSS layout (flex, grid, absolute positioning). Word has no
   CSS model; the converter covers documents, not magazine layouts.
 - An imported DOCX's pages are not re-laid-out: inserting a paragraph can push content across a page
   differently than `read_document` suggests, but nothing is lost.
+- DOCX screenshots come from docx-preview, not Word, so exotic fields, text boxes, and SmartArt can look
+  different from the file the user opens.
+- The visual check costs image tokens. It is offered per page/sheet, capped per reply, and never sent
+  again in later turns.
 - Liberation fonts cover Latin, Greek, and Cyrillic. CJK falls back to whatever the system provides in
   DOCX and PDF output.
 - Formula evaluation is approximate for functions outside the supported set; the cached value may be

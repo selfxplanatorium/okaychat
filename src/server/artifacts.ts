@@ -8,7 +8,9 @@ import { db } from "./db.js";
 import { createDocx, docxOp, editDocx, readDocxText } from "./documents/docx.js";
 import { editPdf, pdfOp, readPdf } from "./documents/pdf.js";
 import { htmlToPdf, pageFurniture, printDocument, rendererAvailable } from "./documents/render.js";
+import { screenshotArtifact, type VisualShot } from "./documents/visual.js";
 import { createXlsx, editXlsx, previewXlsx, readXlsx, workbookSpec, xlsxOp } from "./documents/xlsx.js";
+import { MAX_SHOTS_PER_TURN } from "./tools/screenshots.js";
 import { getThread } from "./threads.js";
 
 // Artifacts are versioned per thread. The model addresses them by a short id it picks, so it can edit
@@ -32,7 +34,13 @@ Use create_document for files the user downloads and opens outside the app: PDF,
 - To change a document, call edit_document with the same kind of source you created it with. Prefer \`edits\` (exact find/replace) over resending the whole source.
 - A file the user attached carries a \`file_id\` in its <attachment> header. Call import_document with it, then read_document, then edit with that format's \`ops\` (docx paragraphs, xlsx cells/rows/sheets, pdf pages/forms). Those edit the file in place.
 - read_document before editing a file whose structure you do not know. Do not repeat a document's HTML or JSON in your reply.
-- Documents show in the side panel with the source alongside. Summarize what you made or changed.`;
+- Documents show in the side panel with the source alongside. Summarize what you made or changed.
+
+# Visual check
+When a layout matters, look at it before you call the work finished. view_artifact renders the current version and returns a PNG screenshot to you: HTML, React, and SVG pages in full, one PDF or Word page per call (\`page\`), or one spreadsheet sheet (\`sheet\`). It reports JavaScript errors from the page too.
+- Check new or changed PDFs, Word files, spreadsheets, and web artifacts for clipped text, broken tables, overlaps, overflow, and missing content. Fix them with edit_document or update_artifact and look again.
+- One screenshot per call, at most ${MAX_SHOTS_PER_TURN} per reply. The image is shown once; it is not repeated in later turns.
+- This tool is absent on non-vision models and servers without Chromium. Text-only artifacts (markdown, code) are read with read_artifact.`;
 
 interface Row {
   id: string;
@@ -194,7 +202,15 @@ function kindOfUpload(name: string): DocumentArtifactKind | null {
   return null;
 }
 
-export function artifactTools(threadId: string, userId: string): ToolSet {
+export interface ArtifactToolOptions {
+  /** Per-turn screenshots, keyed by tool call id, injected into the next model step by chat.ts. */
+  shots?: Map<string, VisualShot>;
+  /** Only vision models get view_artifact. */
+  canViewImages?: boolean;
+}
+
+export function artifactTools(threadId: string, userId: string, visual: ArtifactToolOptions = {}): ToolSet {
+  const shots = visual.shots;
   return {
     create_artifact: tool({
       description: "Create an artifact shown in a side panel. See the Artifacts section of the system prompt for when to use it.",
@@ -309,6 +325,45 @@ export function artifactTools(threadId: string, userId: string): ToolSet {
         return { id, version: artifact.version, kind, text };
       },
     }),
+    ...(visual.canViewImages && shots && rendererAvailable()
+      ? {
+          view_artifact: tool({
+            description:
+              "Render the current version of an artifact and see a screenshot of it. Use for layout checks on PDF, Word, spreadsheet, HTML, React, or SVG artifacts. One page or sheet per call.",
+            inputSchema: z.object({
+              id: z.string(),
+              page: z.number().int().min(1).optional().describe("PDF or Word page number. Default 1."),
+              sheet: z.string().optional().describe("Spreadsheet sheet name. Default the first sheet."),
+            }),
+            execute: async ({ id, page, sheet }, { toolCallId }) => {
+              if (shots.size >= MAX_SHOTS_PER_TURN) {
+                throw new Error(`This reply has used its ${MAX_SHOTS_PER_TURN} screenshots. Finish from what you have already seen, or ask the user to check the artifact.`);
+              }
+              const artifact = latestArtifact(threadId, id);
+              if (!artifact) throw new Error(`No artifact with id \`${id}\` in this chat.`);
+              const data = artifact.size ? artifactData(threadId, id) : null;
+              const shot = await screenshotArtifact({
+                kind: artifact.kind,
+                content: artifact.content,
+                data,
+                page,
+                sheet,
+              });
+              shots.set(toolCallId, shot);
+              return {
+                id,
+                version: artifact.version,
+                kind: artifact.kind,
+                capture: shot.label,
+                width: shot.width,
+                height: shot.height,
+                ...(shot.errors.length ? { pageErrors: shot.errors.slice(0, 5) } : {}),
+                note: "The screenshot is attached to your next step. It is not repeated in later turns.",
+              };
+            },
+          }),
+        }
+      : {}),
     import_document: tool({
       description:
         "Copy a file the user attached into this chat as an editable document artifact. Use the attachment's file_id, or its filename when the header has none.",

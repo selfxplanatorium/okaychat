@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import { createDocx, editDocx, readDocxText } from "./docx.js";
 import { editPdf, readPdf } from "./pdf.js";
-import { htmlToPdf, pageFurniture, printDocument, rendererAvailable } from "./render.js";
+import { closeRenderer, htmlToPdf, pageFurniture, printDocument, rendererAvailable } from "./render.js";
 import { createXlsx, editXlsx, previewXlsx, readXlsx, loadXlsx } from "./xlsx.js";
+
+// Do not leave Chromium alive until its idle timer during a test run.
+after(closeRenderer);
 
 const text = new TextDecoder();
 
