@@ -6,12 +6,17 @@ import type { AppEnv } from "../auth.js";
 import { sha256 } from "../crypto.js";
 import { db } from "../db.js";
 import { env } from "../env.js";
+import { assertStorage, QuotaError } from "../quota.js";
 import { getThread } from "../threads.js";
 
 // run_code executes model-written Python and Bash in the sandbox container (sandbox/runner.py). Each chat
-// has its own workspace whose files persist between runs. See docs/research/code-sandbox.md.
+// has its own workspace; the container wipes idle workspaces, so every produced file is copied into
+// `sandbox_files` right after the run and the app serves it from SQLite. See docs/research/code-sandbox.md.
 
 const MAX_TIMEOUT_S = 300;
+// The runner refuses to serve files over 50 MB, so larger outputs cannot be copied out. They keep the
+// direct sandbox URL, which dies with the workspace.
+const RUNNER_MAX_FILE = 50 * 1024 * 1024;
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 const TYPES: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
@@ -20,7 +25,7 @@ const TYPES: Record<string, string> = {
 
 const DESCRIPTION = `Run Python 3.12 or Bash in this chat's private Linux sandbox and get stdout, stderr, the exit code, and the files the run created or changed.
 Use it for calculations, data analysis, file conversion, charts, and checking code by running it.
-- The working directory persists between calls in this chat. Variables do not: each call is a new process, so save intermediate results to files.
+- The working directory persists between calls in this chat, but only for about 30 minutes after the last call; produced files are saved to the chat's storage automatically, so links keep working. Variables do not persist: each call is a new process, so save intermediate results to files.
 - Preinstalled: numpy, pandas, scipy, matplotlib, sympy, scikit-learn, pillow, openpyxl, python-docx, pypdf, requests, beautifulsoup4, lxml, pyyaml, tabulate; CLI tools curl, jq, sqlite3, git, zip, unzip, ripgrep. Internet access may be blocked, so do not rely on installing packages.
 - A file the user attached carries a \`file_id\` in its <attachment> header. Pass it in \`input_files\` to copy the file into the working directory under its name.
 - Images the run writes (png, jpg, gif, webp, svg) are shown to the user, and every created file gets a download link. Save charts with plt.savefig instead of plt.show. Do not paste file contents back unless asked.
@@ -37,7 +42,7 @@ interface RunnerResult {
   stderr: string;
   stopped: string | null;
   durationMs: number;
-  files: Array<{ path: string; size: number }>;
+  files: Array<{ path: string; size: number; storedUrl?: string }>;
   deleted: string[];
 }
 
@@ -45,6 +50,8 @@ export interface RunCodeResult extends Omit<RunnerResult, "files"> {
   language: "python" | "bash";
   files: Array<{ path: string; size: number; url: string; image: boolean }>;
   inputs: string[];
+  /** Set when produced files could not all be saved to the user's storage. */
+  storageWarning?: string;
 }
 
 async function call(route: string, init: RequestInit = {}, timeoutMs = 30_000, signal?: AbortSignal): Promise<Response> {
@@ -80,6 +87,40 @@ async function copyInputs(userId: string, ws: string, fileIds: string[]): Promis
   return names;
 }
 
+/**
+ * Saves a run's produced files into the user's storage (same SQLite bytes as other user files) before
+ * the sandbox wipes the workspace. Rewriting a file replaces its stored copy instead of piling up
+ * versions. Best effort: a file that cannot be stored keeps its direct sandbox URL.
+ */
+async function storeOutputs(userId: string, threadId: string, ws: string, files: RunnerResult["files"]): Promise<string | undefined> {
+  let warning: string | undefined;
+  for (const file of files) {
+    if (file.size > RUNNER_MAX_FILE) {
+      warning ??= `Some files over 50 MB could not be saved to chat storage and only live in the sandbox until it is wiped.`;
+      continue;
+    }
+    try {
+      const res = await call(`/workspaces/${ws}/files?path=${encodeURIComponent(file.path)}`, {}, 60_000);
+      const data = Buffer.from(await res.arrayBuffer());
+      assertStorage(userId, data.byteLength);
+      const ext = path.extname(file.path).toLowerCase();
+      db.prepare(
+        `INSERT INTO sandbox_files (id, user_id, thread_id, path, mime, data, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (user_id, thread_id, path) DO UPDATE SET mime = excluded.mime, data = excluded.data, size = excluded.size, created_at = excluded.created_at`,
+      ).run(`${ws}-${file.path}`, userId, threadId, file.path, TYPES[ext] ?? "application/octet-stream", data, data.byteLength, Date.now());
+      // The version parameter keeps a later run that rewrites the file from changing earlier cards' cache.
+      file.storedUrl = `/api/sandbox/${encodeURIComponent(threadId)}/stored?path=${encodeURIComponent(file.path)}&v=${Date.now().toString(36)}`;
+    } catch (error) {
+      if (error instanceof QuotaError) {
+        warning = `Sandbox: ${error.message}`;
+        break;
+      }
+      warning ??= `Some files could not be saved to chat storage and only live in the sandbox until it is wiped.`;
+    }
+  }
+  return warning;
+}
+
 export async function runCode(opts: { userId: string; threadId: string; language: "python" | "bash"; code: string; timeoutS?: number; inputFiles?: string[]; signal?: AbortSignal }): Promise<RunCodeResult> {
   const ws = workspaceId(opts.userId, opts.threadId);
   const inputs = await copyInputs(opts.userId, ws, opts.inputFiles ?? []);
@@ -95,13 +136,15 @@ export async function runCode(opts: { userId: string; threadId: string; language
       (timeout + 45) * 1000,
     );
     const result = (await res.json()) as RunnerResult;
+    // The sandbox wipes idle workspaces, so produced files move into the user's storage right away.
+    const storageWarning = await storeOutputs(opts.userId, opts.threadId, ws, result.files);
     const base = `/api/sandbox/${encodeURIComponent(opts.threadId)}/files?path=`;
     return {
       ...result,
       language: opts.language,
       inputs,
-      // The version parameter keeps a later run that rewrites the file from changing earlier cards' cache.
-      files: result.files.map((f) => ({ ...f, url: `${base}${encodeURIComponent(f.path)}&v=${Date.now().toString(36)}`, image: IMAGE.test(f.path) })),
+      files: result.files.map((f) => ({ ...f, url: f.storedUrl ?? `${base}${encodeURIComponent(f.path)}&v=${Date.now().toString(36)}`, image: IMAGE.test(f.path) })),
+      ...(storageWarning ? { storageWarning } : {}),
     };
   } finally {
     opts.signal?.removeEventListener("abort", cancel);
@@ -137,11 +180,22 @@ export function sandboxTools(userId: string, threadId: string, signal?: AbortSig
           files: output.files.map((f) => ({ path: f.path, size: f.size })),
           ...(output.deleted.length ? { deleted: output.deleted } : {}),
           ...(output.inputs.length ? { inputs: output.inputs } : {}),
+          ...(output.storageWarning ? { storageWarning: output.storageWarning } : {}),
         },
       }),
     }),
   };
 }
+
+/** Model-written files are untrusted. Opening one directly must never run script on our origin (an SVG
+ * could). <img> ignores both headers, so inline previews still work. */
+const downloadHeaders = (name: string, mime: string) => ({
+  "Content-Type": mime,
+  "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+  "Content-Security-Policy": "default-src 'none'; sandbox",
+  "X-Content-Type-Options": "nosniff",
+  "Cache-Control": "private, max-age=300",
+});
 
 export const sandboxRoutes = new Hono<AppEnv>()
   .get("/sandbox", async (c) => {
@@ -158,17 +212,22 @@ export const sandboxRoutes = new Hono<AppEnv>()
       const res = await call(`/workspaces/${workspaceId(user.id, threadId)}/files?path=${encodeURIComponent(file)}`, {}, 60_000);
       const name = path.basename(file);
       return new Response(res.body, {
-        headers: {
-          "Content-Type": TYPES[path.extname(name).toLowerCase()] ?? "application/octet-stream",
-          // Model-written files are untrusted. Opening one directly must never run script on our origin
-          // (an SVG could). <img> ignores both headers, so inline previews still work.
-          "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
-          "Content-Security-Policy": "default-src 'none'; sandbox",
-          "X-Content-Type-Options": "nosniff",
-          "Cache-Control": "private, max-age=300",
-        },
+        headers: downloadHeaders(name, TYPES[path.extname(name).toLowerCase()] ?? "application/octet-stream"),
       });
     } catch (error) {
       return c.json({ error: (error as Error).message }, 404);
     }
+  })
+  // The durable copy of a produced file, stored in SQLite right after the run. The sandbox wipes idle
+  // workspaces, so this route, not the proxy above, backs the download URLs the model hands out.
+  .get("/sandbox/:threadId/stored", (c) => {
+    const user = c.get("user");
+    const threadId = c.req.param("threadId");
+    const file = c.req.query("path");
+    if (!file || !getThread(user.id, threadId)) return c.json({ error: "Not found" }, 404);
+    const row = db
+      .prepare("SELECT path, mime, data FROM sandbox_files WHERE user_id = ? AND thread_id = ? AND path = ?")
+      .get(user.id, threadId, file) as { path: string; mime: string; data: Uint8Array } | undefined;
+    if (!row) return c.json({ error: "Not found" }, 404);
+    return new Response(new Uint8Array(row.data), { headers: downloadHeaders(path.basename(row.path), row.mime) });
   });

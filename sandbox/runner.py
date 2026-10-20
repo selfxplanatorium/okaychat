@@ -32,6 +32,9 @@ WORKSPACE_MB = int(os.environ.get("SANDBOX_WORKSPACE_MB", "1024"))
 MAX_PROCS = int(os.environ.get("SANDBOX_MAX_PROCS", "64"))
 CONCURRENCY = int(os.environ.get("SANDBOX_CONCURRENCY", "4"))
 TTL_DAYS = float(os.environ.get("SANDBOX_TTL_DAYS", "14"))
+# Scratch space only: a workspace idle past this grace period is wiped completely. The app copies
+# produced files into its own storage right after each run, so nothing of value is lost.
+IDLE_MINUTES = float(os.environ.get("SANDBOX_IDLE_MINUTES", "30"))
 OUTPUT_HEAD = 48 * 1024
 OUTPUT_TAIL = 16 * 1024
 MAX_UPLOAD = 50 * 1024 * 1024
@@ -422,6 +425,29 @@ def expire_loop() -> None:
         time.sleep(3600)
 
 
+def idle_loop() -> None:
+    """Wipes workspaces idle past the grace period, along with their uid processes.
+
+    Each run touches the workspace's mtime, so inactivity is measured from the last run. A workspace
+    swept between two runs is simply recreated by the next one; produced files are already safe in
+    the app's database.
+    """
+    while True:
+        cutoff = time.time() - IDLE_MINUTES * 60
+        try:
+            names = os.listdir(ROOT)
+        except OSError:
+            names = []
+        for name in names:
+            try:
+                if WS_RE.match(name) and os.stat(os.path.join(ROOT, name)).st_mtime < cutoff:
+                    delete_workspace(name)
+            except OSError:
+                pass
+        # Sweep at least four times within one grace period, but never busier than every 15 s.
+        time.sleep(max(15.0, min(IDLE_MINUTES * 60 / 4, 300)))
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -501,6 +527,11 @@ def main() -> None:
         raise SystemExit("SANDBOX_TOKEN must be at least 32 characters")
     os.makedirs(ROOT, exist_ok=True)
     os.chmod(ROOT, 0o711)  # Users can enter their own workspace but not list the others.
+    # Nothing survives a restart: the container holds only scratch space. Wipe every workspace left
+    # over from the previous container life before serving.
+    for name in os.listdir(ROOT):
+        if WS_RE.match(name):
+            shutil.rmtree(os.path.join(ROOT, name), ignore_errors=True)
     for name in os.listdir(ROOT):
         try:
             if WS_RE.match(name):
@@ -508,6 +539,7 @@ def main() -> None:
         except OSError:
             pass
     threading.Thread(target=expire_loop, daemon=True).start()
+    threading.Thread(target=idle_loop, daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
 

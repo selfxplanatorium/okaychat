@@ -38,6 +38,7 @@ services:
     restart: unless-stopped
     environment:
       SANDBOX_TOKEN: ${OKAYCHAT_SANDBOX_TOKEN:?set OKAYCHAT_SANDBOX_TOKEN in .env}
+      SANDBOX_IDLE_MINUTES: ${SANDBOX_IDLE_MINUTES:-30}
     volumes:
       - okaychat-sandbox:/work
     # The internal network has no route out: code cannot reach the internet, SearXNG, or the host.

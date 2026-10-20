@@ -25,11 +25,19 @@ Built 2026-10-20. Models run Python 3.12 and Bash in a separate container, one w
 
 Verified against the real container on 2026-10-20: cross-workspace reads, `/work` listing, token in env and `/proc`, read-only root, `/tmp` cleanup, background and `setsid` and non-dumpable processes, timeout, fork bomb, 3 GB allocation, output cap, symlink downloads to another workspace and `/etc/passwd`, `.okaychat` symlink swap, upload path traversal, and no egress on an internal network.
 
-Not covered: kernel or container escapes (same blast radius as any container), and side channels between concurrent runs such as CPU timing. Files persist on the `okaychat-sandbox` volume until the chat is deleted or the workspace sits unused for 14 days.
+Not covered: kernel or container escapes (same blast radius as any container), and side channels between concurrent runs such as CPU timing.
+
+## Retention
+
+The sandbox is scratch space, never the source of truth:
+
+- Every workspace is wiped ~30 minutes after its last run (`SANDBOX_IDLE_MINUTES`, default 30; a run touches the workspace's mtime). The sweep runs in a background thread and kills the workspace's uid processes. The container also wipes every workspace when the runner starts.
+- Right after each run, the app downloads the files the run produced and stores them in SQLite (`sandbox_files` table), counted against the user's storage quota (see below). Download URLs in the tool result point at `/api/sandbox/:threadId/stored`, which serves the stored copy with the same untrusted-content headers. Files over the runner's 50 MB download cap keep a direct sandbox URL and die with the workspace; the tool result then carries a `storageWarning` for the model.
+- Rewriting a file in a later run replaces its stored copy instead of piling up versions. Deleting the chat deletes the stored copies (foreign-key cascade).
 
 ## Behavior
 
-- Each call is a new process: variables do not persist, files do. Background processes end with the call.
+- Each call is a new process: variables do not persist, files do — until the workspace is wiped (see Retention). Background processes end with the call.
 - Output keeps the first 48 KB and last 16 KB of each stream. Timeout default 60 s, max 300 s. Up to 4 runs at once; a run waits up to 30 s for a slot.
 - Stop in the chat calls `/cancel`, which kills the workspace's processes.
 - Attachments: with a sandbox configured, every non-anonymous attachment is stored (`/files/store`) and its header carries `file_id`; `input_files` copies it into the workspace. Text and code files were browser-only before.
@@ -50,7 +58,7 @@ All routes except `/health` need `Authorization: Bearer <token>`. `ws` is `[a-f0
 | `PUT /workspaces/:ws/files?path=` | Upload, 50 MB max |
 | `DELETE /workspaces/:ws` | Delete the workspace |
 
-Runner env: `SANDBOX_MAX_TIMEOUT` (300), `SANDBOX_MEMORY_MB` (2048), `SANDBOX_WORKSPACE_MB` (1024), `SANDBOX_MAX_PROCS` (64), `SANDBOX_CONCURRENCY` (4), `SANDBOX_TTL_DAYS` (14).
+Runner env: `SANDBOX_MAX_TIMEOUT` (300), `SANDBOX_MEMORY_MB` (2048), `SANDBOX_WORKSPACE_MB` (1024), `SANDBOX_MAX_PROCS` (64), `SANDBOX_CONCURRENCY` (4), `SANDBOX_IDLE_MINUTES` (30), `SANDBOX_TTL_DAYS` (14, superseded in practice by the idle sweep).
 
 ## Image
 

@@ -46,7 +46,7 @@ after(() => {
 });
 beforeEach(() => {
   calls.length = 0;
-  db.exec("DELETE FROM uploads; DELETE FROM threads;");
+  db.exec("DELETE FROM uploads; DELETE FROM sandbox_files; DELETE FROM threads;");
   ensureThread("alice", "thr_alice");
 });
 
@@ -67,7 +67,10 @@ test("run_code authenticates, copies the owner's uploads, and hides download URL
   assert.equal(calls[0]!.url, `/workspaces/${ws}/files?path=data.csv`);
   assert.equal(calls[0]!.body.toString(), "a,b\n1,2\n");
   assert.deepEqual(JSON.parse(calls[1]!.body.toString()), { language: "python", code: "print(42)", timeout: 60 });
-  assert.match(output.files[0].url, /^\/api\/sandbox\/thr_alice\/files\?path=out%2Fplot\.png&v=/);
+  assert.match(output.files[0].url, /^\/api\/sandbox\/thr_alice\/stored\?path=out%2Fplot\.png&v=/);
+  // The fake runner answers any download with its SVG body.
+  const stored = db.prepare("SELECT size FROM sandbox_files WHERE user_id = 'alice' AND thread_id = 'thr_alice' AND path = 'out/plot.png'").get() as { size: number } | undefined;
+  assert.equal(stored?.size, 21);
   const modelView = await tool.toModelOutput!({ toolCallId: "1", input: {}, output });
   assert.doesNotMatch(JSON.stringify(modelView), /api\/sandbox/);
   assert.deepEqual((modelView as { value: { files: unknown } }).value.files, [{ path: "out/plot.png", size: 10 }]);
@@ -89,4 +92,37 @@ test("downloads require owning the chat and can never render on the app origin",
   assert.match(res.headers.get("Content-Security-Policy") ?? "", /sandbox/);
   assert.equal(res.headers.get("X-Content-Type-Options"), "nosniff");
   assert.equal(calls[0]!.url, `/workspaces/${workspaceId("alice", "thr_alice")}/files?path=x.svg`);
+});
+
+test("stored outputs are served from chat storage with the same safeguards, only to the owner", async () => {
+  db.prepare("INSERT INTO sandbox_files (id, user_id, thread_id, path, mime, data, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
+    "sf_1",
+    "alice",
+    "thr_alice",
+    "out/plot.png",
+    "image/png",
+    Buffer.from("png-bytes"),
+    9,
+    Date.now(),
+  );
+  assert.equal((await as("bob", "/sandbox/thr_alice/stored?path=out/plot.png")).status, 404);
+  const res = await as("alice", "/sandbox/thr_alice/stored?path=out/plot.png");
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("Content-Type"), "image/png");
+  assert.match(res.headers.get("Content-Disposition") ?? "", /^attachment/);
+  assert.match(res.headers.get("Content-Security-Policy") ?? "", /sandbox/);
+  assert.equal((await res.arrayBuffer()).byteLength, 9);
+  assert.equal((await as("alice", "/sandbox/thr_alice/stored?path=other.png")).status, 404);
+});
+
+test("outputs that would pass the storage quota keep their sandbox URL and warn the model", async () => {
+  db.prepare("UPDATE users SET storage_limit = 20 WHERE id = 'alice'").run();
+  const tool = sandboxTools("alice", "thr_alice").run_code!;
+  const output = await tool.execute!({ language: "python", code: "print(1)" }, { toolCallId: "3", messages: [] });
+  assert.match(output.storageWarning ?? "", /quota/i);
+  assert.match(output.files[0]!.url, /\/files\?path=/);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM sandbox_files").get()?.n, 0);
+  const modelView = await tool.toModelOutput!({ toolCallId: "3", input: {}, output });
+  assert.match(JSON.stringify(modelView), /quota/i);
+  db.prepare("UPDATE users SET storage_limit = NULL WHERE id = 'alice'").run();
 });

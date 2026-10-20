@@ -45,6 +45,7 @@ src/server/
   search.ts           Full-text search over messages (FTS5, synced by triggers in db.ts)
   schedules.ts        Scheduled prompts: next-run math, 30 s ticker, server-side runs
   artifacts.ts        Artifact and document tools, versions table, panel/file API
+  quota.ts            Per-user storage quota: used-byte SQL, limits, assertStorage for every write path
   documents/          PDF (Chromium), DOCX creation + OOXML editing, XLSX read/write/preview
   codex.ts            Codex CLI login (device code) and per-run CODEX_HOME with encrypted credentials
   llm.ts              Model factory per wire format, cache breakpoints, OpenCode headers
@@ -92,6 +93,7 @@ docs/                 Reusable documentation (see below)
 - `docs/research/account-profile.md`: profile photo validation, resizing, storage, and private serving.
 - `docs/research/step-limits.md`: independent agent/search limits and shared delegated-search budgets.
 - `docs/research/code-sandbox.md`: the `run_code` sandbox container, its safeguards, and the runner API.
+- `docs/research/storage-quota.md`: what counts against the per-user storage quota and where it is enforced.
 - `docs/research/mobile-pwa.md`: manifest, service worker, install requirements, safe areas, touch sizing, drawer gestures.
 
 Add a new file under `docs/research/` whenever you research an external API or library.
@@ -141,7 +143,8 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 
 - The service worker registers only in production builds and only on secure origins, so the plain-HTTP tailnet dev URL is never installable. It never handles `/api/*`. Touch sizing uses `pointer-coarse:`, not breakpoints. See `docs/research/mobile-pwa.md`.
 
-- Model code never runs in the app container. `run_code` calls the `sandbox` container, which has no app secrets, no `/data`, and no network but the internal one to the app. One workspace per chat, each with its own uid; every process of that uid dies after each run. Read `docs/research/code-sandbox.md` before changing either side.
+- Model code never runs in the app container. `run_code` calls the `sandbox` container, which has no app secrets, no `/data`, and no network but the internal one to the app. One workspace per chat, each with its own uid; every process of that uid dies after each run. The container wipes workspaces ~30 min after the last run (`SANDBOX_IDLE_MINUTES`) and everything on runner start; `run_code` outputs are copied into `sandbox_files` (SQLite) right after each run and served from `/api/sandbox/:threadId/stored`, so the sandbox is never the source of truth. Read `docs/research/code-sandbox.md` before changing either side.
+- Storage is quotaed per user (`src/server/quota.ts`, `docs/research/storage-quota.md`): uploads, artifact versions (source + built bytes), generated images, sandbox outputs, fonts, avatar, memories, project files. `assertStorage` throws `QuotaError` (HTTP 413 on routes, a tool error for the model). Default limit `OKAYCHAT_STORAGE_LIMIT` (1 GiB), per-user override in nullable `users.storage_limit` set via the admin API. `/api/storage` returns `{ used, limit, defaultLimit }`; the chat shell warns from 90% (`StorageNotice`).
 
 ## Commands
 
@@ -149,7 +152,7 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 | --- | --- |
 | `npm run dev` | Server (tsx watch, 127.0.0.1:8787) + Vite (tailnet IP:5173, proxies `/api`) |
 | `npm run typecheck` | Both tsconfigs |
-| `npm test` | Node tests (appearance, account pictures, independent tool limits, memory isolation/imports, sandbox client, and streamed-chat integration) |
+| `npm test` | Node tests (appearance, account pictures, storage quota, independent tool limits, memory isolation/imports, sandbox client, and streamed-chat integration) |
 | `npm run build` / `npm start` | Production build and server |
 
 **Dev servers always run on the tailnet.** The user wants every dev server reachable over Tailscale. Vite binds to `tailscale ip -4` (override with `OKAYCHAT_DEV_HOST`) and allows `*.ts.net` hosts. Share the MagicDNS URL (`http://<host>.<tailnet>.ts.net:5173`), not localhost. Do not bind to `0.0.0.0`.
