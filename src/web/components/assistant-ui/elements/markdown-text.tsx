@@ -10,13 +10,22 @@ import {
   useIsMarkdownCodeBlock,
 } from "@assistant-ui/react-markdown";
 import remarkGfm from "remark-gfm";
-import { type FC, memo, useMemo, useRef } from "react";
+import {
+  type ComponentProps,
+  type FC,
+  memo,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { ImageOffIcon } from "lucide-react";
 import type { TextMessagePartProps } from "@assistant-ui/react";
 
 import { CopyFeedbackIcon } from "@/components/assistant-ui/elements/surfaces";
 import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { cn } from "@/lib/utils";
+import { safeHref } from "../utils/href";
 
 type MarkdownTextProps = Partial<TextMessagePartProps> & {
   components?: Parameters<typeof memoizeMarkdownComponents>[0];
@@ -82,6 +91,59 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
         <CopyFeedbackIcon copied={isCopied} />
       </TooltipIconButton>
     </div>
+  );
+};
+
+// A model-written image URL often 404s or is blocked. The browser's broken
+// icon and wrapped alt text read as a layout bug, so a failed load becomes a
+// compact chip. The error is keyed to its src so a new URL retries the image.
+const MarkdownImage: FC<ComponentProps<"img">> = ({
+  className,
+  src,
+  alt,
+  onError,
+  ...props
+}) => {
+  const [errorSrc, setErrorSrc] = useState<string | null>(null);
+  const failed = errorSrc !== null && errorSrc === (src ?? "");
+
+  if (!failed) {
+    return (
+      <img
+        src={src}
+        alt={alt}
+        className={className}
+        onError={(e) => {
+          setErrorSrc(src ?? "");
+          onError?.(e);
+        }}
+        {...props}
+      />
+    );
+  }
+
+  const label = alt?.trim() || "Image unavailable";
+  const href = safeHref(src);
+  const isWebUrl = href !== undefined && /^https?:\/\//i.test(href);
+
+  return (
+    <span
+      data-slot="markdown-image-fallback"
+      className="bg-muted/50 border-border text-muted-foreground inline-flex max-w-full items-center gap-2 rounded-lg border px-3 py-2 align-middle text-sm"
+    >
+      <ImageOffIcon aria-hidden className="size-4 shrink-0" />
+      <span className="min-w-0 truncate">{label}</span>
+      {isWebUrl && (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="text-foreground shrink-0 underline-offset-4 hover:underline"
+        >
+          Open link
+        </a>
+      )}
+    </span>
   );
 };
 
@@ -253,6 +315,7 @@ const defaultComponents = memoizeMarkdownComponents({
       {...props}
     />
   ),
+  img: MarkdownImage,
   code: function Code({ className, ...props }) {
     const isCodeBlock = useIsMarkdownCodeBlock();
     return (
