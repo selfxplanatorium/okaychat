@@ -1,0 +1,44 @@
+/* Keep overflow on the pre, never the block: the header sticks to the chat viewport. */
+.aui-code-block[data-wrap="true"] > pre > code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.aui-code-block[data-wrap="false"] > pre > code {
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+/* Once pinned, square corners cover the code scrolling behind the toolbar. */
+.aui-code-block[data-stuck="true"] > .aui-code-header-root {
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
+}
+
+/* Mix token colors toward the theme foreground to stay legible in custom themes. */
+.aui-code-block .hljs { color: var(--foreground); }
+.aui-code-block .hljs-comment,
+.aui-code-block .hljs-quote { color: var(--muted-foreground); font-style: italic; }
+.aui-code-block .hljs-keyword,
+.aui-code-block .hljs-selector-tag,
+.aui-code-block .hljs-literal { color: color-mix(in oklab, var(--primary) 65%, var(--foreground)); font-weight: 600; }
+.aui-code-block .hljs-string,
+.aui-code-block .hljs-regexp,
+.aui-code-block .hljs-addition { color: color-mix(in oklab, var(--success, var(--primary)) 65%, var(--foreground)); }
+.aui-code-block .hljs-number,
+.aui-code-block .hljs-symbol,
+.aui-code-block .hljs-bullet,
+.aui-code-block .hljs-attr,
+.aui-code-block .hljs-attribute { color: color-mix(in oklab, var(--warning, var(--primary)) 65%, var(--foreground)); }
+.aui-code-block .hljs-title,
+.aui-code-block .hljs-section,
+.aui-code-block .hljs-built_in,
+.aui-code-block .hljs-type { color: color-mix(in oklab, var(--info, var(--primary)) 65%, var(--foreground)); }
+.aui-code-block .hljs-meta,
+.aui-code-block .hljs-tag,
+.aui-code-block .hljs-name,
+.aui-code-block .hljs-selector-class { color: color-mix(in oklab, var(--primary) 65%, var(--foreground)); }
+.aui-code-block .hljs-deletion { color: var(--destructive); }
+.aui-code-block .hljs-emphasis { font-style: italic; }
+.aui-code-block .hljs-strong { font-weight: 600; }

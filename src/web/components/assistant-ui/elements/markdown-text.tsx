@@ -3,7 +3,6 @@
 import "@assistant-ui/react-markdown/styles/dot.css";
 
 import {
-  type CodeHeaderProps,
   MarkdownTextPrimitive,
   type MarkdownTextPrimitiveProps,
   memoizeMarkdownComponents,
@@ -21,9 +20,7 @@ import {
 import { ImageOffIcon } from "lucide-react";
 import type { TextMessagePartProps } from "@assistant-ui/react";
 
-import { CopyFeedbackIcon } from "@/components/assistant-ui/elements/surfaces";
-import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
-import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { CodeBlock } from "@/components/ui/code-block";
 import { cn } from "@/lib/utils";
 import { safeHref } from "../utils/href";
 
@@ -74,25 +71,6 @@ const MarkdownTextImpl: FC<MarkdownTextProps> = ({
 };
 
 export const MarkdownText = memo(MarkdownTextImpl);
-
-const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
-  const { isCopied, copyToClipboard } = useCopyToClipboard();
-  const onCopy = () => {
-    if (!code || isCopied) return;
-    copyToClipboard(code);
-  };
-
-  return (
-    <div className="aui-code-header-root border-border/50 bg-muted/50 mt-3 flex items-center justify-between rounded-t-xl border border-b-0 px-3.5 py-1.5 text-xs">
-      <span className="aui-code-header-language text-muted-foreground font-medium lowercase">
-        {language}
-      </span>
-      <TooltipIconButton tooltip="Copy" onClick={onCopy}>
-        <CopyFeedbackIcon copied={isCopied} />
-      </TooltipIconButton>
-    </div>
-  );
-};
 
 // A model-written image URL often 404s or is blocked. The browser's broken
 // icon and wrapped alt text read as a layout bug, so a failed load becomes a
@@ -329,5 +307,6 @@ const defaultComponents = memoizeMarkdownComponents({
       />
     );
   },
-  CodeHeader,
+  CodeHeader: () => null,
+  SyntaxHighlighter: CodeBlock,
 });

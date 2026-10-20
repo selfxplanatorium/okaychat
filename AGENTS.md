@@ -79,6 +79,7 @@ docs/                 Reusable documentation (see below)
 - `docs/research/prompt-caching.md`: cache strategy per wire format.
 - `docs/research/mcp.md`: `@ai-sdk/mcp` usage and reliability rules.
 - `docs/research/assistant-ui.md`: runtime, thread list, history, components.
+- `docs/research/code-blocks.md`: lazy syntax highlighting, per-block wrapping, sticky toolbars, and HTTP clipboard fallback.
 - `docs/research/t3code-appearance.md`: what we ported from T3Code and how, including appearance sync.
 - `docs/research/visual-depth.md`: depth tokens and utilities, where each is applied, and the rules for adding more.
 - `docs/research/web-bundle.md`: lazy route boundaries, library chunks, and production load verification.

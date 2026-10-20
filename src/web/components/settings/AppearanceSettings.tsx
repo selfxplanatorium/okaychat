@@ -574,7 +574,7 @@ function TypographySection() {
       )}
       <SettingsRow
         label="Word wrap"
-        description="Wrap long lines in code blocks and tables by default."
+        description="Wrap long lines in code blocks by default. Use the wrap button on a block to override it."
         reset={s.wordWrap !== DEFAULT_APPEARANCE.wordWrap ? () => reset("wordWrap") : null}
         control={<Switch aria-label="Word wrap in code blocks" checked={s.wordWrap} onCheckedChange={(checked) => update({ wordWrap: Boolean(checked) })} />}
       />

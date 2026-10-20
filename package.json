@@ -47,6 +47,7 @@
     "fast-formula-parser": "^1.0.19",
     "fflate": "^0.8.3",
     "generative-frame": "^0.0.6",
+    "highlight.js": "^11.12.0",
     "hono": "^4.13.13",
     "linkedom": "^0.18.13",
     "lucide-react": "^1.59.0",

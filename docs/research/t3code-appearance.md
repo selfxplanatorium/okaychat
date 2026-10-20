@@ -78,7 +78,7 @@ Each font row has:
 | S15 | Code font | Family + size. Monospace only. Simple mode title: "Monospace font" | `"SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace` | `""` | 10 to 18 | 13 | "Code blocks, diffs, and file previews." (simple mode adds "and the terminal") | Yes |
 | S16 | Terminal font | Family + size (advanced only) | Follows code font | `""` | 8 to 20 | 12 | "Terminal output, independent from code blocks and diffs." | No |
 | S17 | Font smoothing | Switch | on or off | on | "Use thinner grayscale text smoothing instead of the macOS default." Rendered on macOS only | Yes (macOS) |
-| S18 | Word wrap | Switch | on or off | on | "Wrap long lines in code blocks, tables, diffs, and file previews by default." | Partly (code blocks, tables) |
+| S18 | Word wrap | Switch | on or off | on | "Wrap long lines in code blocks by default. Use the wrap button on a block to override it." | Code blocks (local overrides described in `code-blocks.md`) |
 
 Preview blocks: the prompt font preview, a code preview (diff sample), and a terminal preview sit below their rows. The chat app can use its own sample text.
 
