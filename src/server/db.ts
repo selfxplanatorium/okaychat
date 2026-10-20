@@ -219,6 +219,33 @@ const migrations: string[] = [
   );
   CREATE INDEX uploads_user ON uploads(user_id, created_at DESC);
   `,
+  `
+  CREATE TABLE user_avatars (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    mime TEXT NOT NULL,
+    data BLOB NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE memory_preferences (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    auto_save INTEGER NOT NULL DEFAULT 1,
+    revision INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE memories (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    scope TEXT NOT NULL DEFAULT '',
+    content_enc TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    source TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(user_id, scope, content_hash)
+  );
+  CREATE INDEX memories_user ON memories(user_id, scope, created_at);
+  ALTER TABLE threads ADD COLUMN memory_disabled INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

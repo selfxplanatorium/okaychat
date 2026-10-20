@@ -32,11 +32,19 @@ function userFromToken(token: string | undefined): Me | null {
   if (!token) return null;
   const row = db
     .prepare(
-      `SELECT u.id, u.email, u.name, u.role FROM sessions s JOIN users u ON u.id = s.user_id
+      `SELECT u.id FROM sessions s JOIN users u ON u.id = s.user_id
        WHERE s.token_hash = ? AND s.expires_at > ?`,
     )
-    .get(sha256(token), Date.now()) as Me | undefined;
-  return row ?? null;
+    .get(sha256(token), Date.now()) as { id: string } | undefined;
+  return row ? accountProfile(row.id) : null;
+}
+
+export function accountProfile(userId: string): Me | null {
+  const row = db.prepare(`SELECT u.id, u.email, u.name, u.role, a.updated_at AS avatarVersion
+    FROM users u LEFT JOIN user_avatars a ON a.user_id = u.id WHERE u.id = ?`).get(userId) as (Me & { avatarVersion: number | null }) | undefined;
+  if (!row) return null;
+  const { avatarVersion, ...user } = row;
+  return { ...user, ...(avatarVersion === null ? {} : { avatarUrl: `/api/account/avatar?v=${avatarVersion}` }) };
 }
 
 export const requireUser: MiddlewareHandler<AppEnv> = async (c, next) => {

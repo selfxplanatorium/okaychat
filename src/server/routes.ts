@@ -1,4 +1,5 @@
 import { appearanceRoutes } from "./appearance.js";
+import { accountRoutes } from "./account.js";
 import { auth as mcpAuth } from "@ai-sdk/mcp";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -61,6 +62,7 @@ const api = new Hono<AppEnv>()
     return c.json(updateSettings(c.get("user").id, patch));
   })
   .route("/", appearanceRoutes)
+  .route("/account", accountRoutes)
 
   // Providers and models
   .get("/providers", async (c) => c.json(await listProviders(c.get("user").id)))

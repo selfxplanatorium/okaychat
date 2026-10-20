@@ -198,6 +198,7 @@ export interface Me {
   email: string;
   name: string;
   role: "admin" | "user";
+  avatarUrl?: string;
 }
 
 export type TextArtifactKind = "html" | "react" | "svg" | "markdown" | "code";

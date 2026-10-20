@@ -1,7 +1,8 @@
-import { LogOutIcon, PanelLeftIcon, SettingsIcon } from "lucide-react";
+import { LogOutIcon, PanelLeftIcon, SettingsIcon, UserRoundIcon } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { ThreadList } from "@/components/assistant-ui/elements/thread-list.aui";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
+import { AccountAvatar } from "@/components/ui/account-avatar";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -44,15 +45,16 @@ export function Sidebar({ open, onToggle }: { open: boolean; onToggle: () => voi
         <div className="border-sidebar-border flex items-center gap-1 border-t p-2">
           <Menu>
             <MenuTrigger className="hover:bg-sidebar-row-hover flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors duration-(--motion-fast) ease-out-quart">
-              <span className="bg-primary text-primary-foreground grid size-7 shrink-0 place-items-center rounded-full text-xs font-medium uppercase">
-                {me?.name.slice(0, 1)}
-              </span>
+              <AccountAvatar user={me} className="size-7 [&_[data-slot=avatar-fallback]]:text-xs" />
               <span className="min-w-0">
                 <span className="block truncate font-medium">{me?.name}</span>
                 <span className="text-sidebar-muted-foreground block truncate text-xs">{me?.email}</span>
               </span>
             </MenuTrigger>
             <MenuContent side="top" className="w-60">
+              <MenuItem onClick={() => navigate("/settings/account")}>
+                <UserRoundIcon /> Account
+              </MenuItem>
               <MenuItem onClick={() => navigate("/settings/general")}>
                 <SettingsIcon /> Settings
               </MenuItem>
