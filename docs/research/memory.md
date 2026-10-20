@@ -50,7 +50,15 @@ The implementation should use the existing Node/SQLite stack, without a vector d
 
 ### Implemented API and limits
 
-`src/server/memory.ts` owns `/api/memory`, entry CRUD, preferences, preview/import, and JSON/text exports. The table encrypts content and keeps a content hash for duplicate detection. Memory starts disabled with automatic saving selected; enabling it allows memory tools and a bounded prompt section across providers. With automatic saving disabled, memory write tools require the existing in-chat approval flow. `ChatPrivacyMenu` in the top-right header persists a normal-chat memory exclusion in `threads.memory_disabled`; that chat remains in history. The composer has no memory control.
+`src/server/memory.ts` owns `/api/memory`, entry CRUD, preferences, preview/import, and JSON/text exports. The table encrypts content and keeps a content hash for duplicate detection.
+
+Threat model for memory encryption (`crypto.ts`, AES-256-GCM, one server-wide key derived from `OKAYCHAT_SECRET`):
+
+- Covers: a copy of `okaychat.db` without the secret (stolen backup, copied volume, leaked table dump). Memory text and provider/MCP secrets are unreadable there.
+- Does not cover: anyone who can run code in the app process or read its environment. The key is in memory and in the environment, and the server must decrypt memory to build prompts.
+- Does not cover: other users of the same server. All users share the key; access control is in the routes.
+- Does not cover: guessing. `content_hash` is an unkeyed SHA-256 of normalized text, so a known or short phrase can be confirmed against the database.
+- Operational: store `OKAYCHAT_SECRET` apart from `okaychat.db` backups. Losing or changing it makes all encrypted data unreadable. Memory starts disabled with automatic saving selected; enabling it allows memory tools and a bounded prompt section across providers. With automatic saving disabled, memory write tools require the existing in-chat approval flow. `ChatPrivacyMenu` in the top-right header persists a normal-chat memory exclusion in `threads.memory_disabled`; that chat remains in history. The composer has no memory control.
 
 The account holds up to 500 entries and 200,000 content characters, with at most 2,000 characters per entry. Import text is limited to 200,000 characters. Text parsing splits bullets/paragraphs without an extra model call; preview is editable through source text and selectable entry checkboxes before commit. Unknown project scopes in imported backups become global with a preview warning. JSON export uses `{ format: "okaychat-memory", version: 1, entries }`; text export uses a Markdown-style list. Settings preference changes dispatch `okaychat:memory` to refresh the header control.
 

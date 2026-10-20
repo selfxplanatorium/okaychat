@@ -98,7 +98,7 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 
 - TypeScript strict. ESM only.
 - Server code never imports from `src/web`. Shared types live in `src/shared`.
-- Secrets (provider keys, MCP tokens) are encrypted at rest with `OKAYCHAT_SECRET` (AES-256-GCM). Never log them.
+- Secrets (provider keys, MCP tokens) and memory content are encrypted at rest with `OKAYCHAT_SECRET` (AES-256-GCM). This protects a copied database file only, not a compromised server, which holds the key. See the threat model in `docs/research/memory.md`. Never log secrets.
 - Match the surrounding code style. Comments explain why, not what.
 - Commits: no co-author lines.
 
