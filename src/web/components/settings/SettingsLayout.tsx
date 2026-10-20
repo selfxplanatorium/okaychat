@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, BarChart3Icon, BlocksIcon, CalendarClockIcon, FolderIcon, KeyRoundIcon, ShieldIcon, PaletteIcon, SlidersHorizontalIcon, UserRoundIcon } from "lucide-react";
+import { ArrowLeftIcon, BarChart3Icon, BlocksIcon, BrainIcon, CalendarClockIcon, FolderIcon, KeyRoundIcon, ShieldIcon, PaletteIcon, SlidersHorizontalIcon, UserRoundIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from "react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
@@ -12,10 +12,12 @@ import { ProvidersSettings } from "./ProvidersSettings";
 import { ScheduleSettings } from "./ScheduleSettings";
 import { UsageSettings } from "./UsageSettings";
 import { AccountSettings } from "./AccountSettings";
+import { MemorySettings } from "./MemorySettings";
 
 const SECTIONS: Array<{ id: string; label: string; icon: ComponentType<{ className?: string }>; component: ComponentType; admin?: boolean }> = [
   { id: "general", label: "General", icon: SlidersHorizontalIcon, component: GeneralSettings },
   { id: "account", label: "Account", icon: UserRoundIcon, component: AccountSettings },
+  { id: "memory", label: "Memory", icon: BrainIcon, component: MemorySettings },
   { id: "providers", label: "Providers", icon: KeyRoundIcon, component: ProvidersSettings },
   { id: "mcp", label: "MCP servers", icon: BlocksIcon, component: McpSettings },
   { id: "projects", label: "Projects", icon: FolderIcon, component: ProjectSettings },
@@ -79,7 +81,7 @@ export function SettingsLayout({ section }: { section: string }) {
         )}
         <Link
           href="/"
-          className="text-sidebar-muted-foreground hover:bg-sidebar-row-hover relative mb-2 flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm transition-colors duration-(--motion-fast) max-md:mb-0"
+          className="text-sidebar-muted-foreground hover:bg-sidebar-row-hover relative mb-2 flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm whitespace-nowrap transition-colors duration-(--motion-fast) max-md:mb-0"
         >
           <ArrowLeftIcon className="size-4" /> Back to chat
         </Link>

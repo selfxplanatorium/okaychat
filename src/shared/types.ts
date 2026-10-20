@@ -132,6 +132,7 @@ export interface ThreadSummary {
   status: "regular" | "archived";
   modelRef: string | null;
   projectId: string | null;
+  memoryDisabled: boolean;
   createdAt: number;
   updatedAt: number;
 }

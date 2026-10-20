@@ -9,6 +9,7 @@ interface ThreadRow {
   model_ref: string | null;
   project_id: string | null;
   compaction_json: string | null;
+  memory_disabled: number;
   created_at: number;
   updated_at: number;
 }
@@ -19,6 +20,7 @@ const toSummary = (r: ThreadRow): ThreadSummary => ({
   status: r.status,
   modelRef: r.model_ref,
   projectId: r.project_id,
+  memoryDisabled: !!r.memory_disabled,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -50,12 +52,13 @@ export function ensureThread(userId: string, id: string, projectId: string | nul
   return thread;
 }
 
-export function updateThread(userId: string, id: string, patch: { title?: string; status?: "regular" | "archived"; modelRef?: string }) {
+export function updateThread(userId: string, id: string, patch: { title?: string; status?: "regular" | "archived"; modelRef?: string; memoryDisabled?: boolean }) {
   const sets: string[] = [];
   const values: Array<string | number> = [];
   if (patch.title !== undefined) sets.push("title = ?"), values.push(patch.title);
   if (patch.status !== undefined) sets.push("status = ?"), values.push(patch.status);
   if (patch.modelRef !== undefined) sets.push("model_ref = ?"), values.push(patch.modelRef);
+  if (patch.memoryDisabled !== undefined) sets.push("memory_disabled = ?"), values.push(Number(patch.memoryDisabled));
   sets.push("updated_at = ?");
   values.push(Date.now());
   db.prepare(`UPDATE threads SET ${sets.join(", ")} WHERE user_id = ? AND id = ?`).run(...values, userId, id);

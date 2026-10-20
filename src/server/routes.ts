@@ -1,5 +1,6 @@
 import { appearanceRoutes } from "./appearance.js";
 import { accountRoutes } from "./account.js";
+import { memoryRoutes } from "./memory.js";
 import { auth as mcpAuth } from "@ai-sdk/mcp";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -63,6 +64,7 @@ const api = new Hono<AppEnv>()
   })
   .route("/", appearanceRoutes)
   .route("/account", accountRoutes)
+  .route("/memory", memoryRoutes)
 
   // Providers and models
   .get("/providers", async (c) => c.json(await listProviders(c.get("user").id)))
@@ -95,7 +97,10 @@ const api = new Hono<AppEnv>()
     return thread ? c.json({ ...thread, usage: threadUsage(c.get("user").id, thread.id) }) : c.json({ error: "Not found" }, 404);
   })
   .patch("/threads/:id", async (c) => {
-    updateThread(c.get("user").id, c.req.param("id"), (await c.req.json()) as { title?: string; status?: "regular" | "archived" });
+    const parsed = z.object({ title: z.string().max(200).optional(), status: z.enum(["regular", "archived"]).optional(), memoryDisabled: z.boolean().optional() }).safeParse(await c.req.json());
+    if (!parsed.success) return c.json({ error: "Invalid chat settings" }, 400);
+    if (!getThread(c.get("user").id, c.req.param("id"))) return c.json({ error: "Thread not found" }, 404);
+    updateThread(c.get("user").id, c.req.param("id"), parsed.data);
     return c.json({ ok: true });
   })
   .delete("/threads/:id", async (c) => {
