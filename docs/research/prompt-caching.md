@@ -33,3 +33,10 @@ Use the tier price when the request's input tokens exceed `tier.size`. Clamp non
 ## What we show
 
 Per message: input, cached, output, reasoning tokens, cost. Per thread: cache hit ratio = cacheRead / input across the thread.
+
+## Skills
+
+The enabled-skills index is current-turn context beside the latest user message, never part of the
+system prefix. Skill bodies arrive through load/read tool results. Installing or creating a skill,
+including during an approval continuation, leaves the system prompt unchanged. Stored attachment
+copies and legacy migration likewise preserve the original data URL/text message parts.

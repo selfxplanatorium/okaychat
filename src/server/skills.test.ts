@@ -308,7 +308,7 @@ test("uploading a .md or .zip installs skills with validation and binary skippin
   const { installed, skipped } = await res.json();
   assert.deepEqual(installed.map((s: { name: string }) => s.name).sort(), ["beta-thing", "python-upgrade"]);
   const alpha = installed.find((s: { name: string }) => s.name === "python-upgrade");
-  assert.deepEqual(alpha.files, [{ name: "skills/alpha/references/deps.md", chars: "pin the deps".length }], "binary file inside the skill folder is skipped");
+  assert.deepEqual(alpha.files, [{ name: "references/deps.md", chars: "pin the deps".length }], "binary file inside the skill folder is skipped");
   assert.ok(skipped.some((note: string) => note.includes("frontmatter")), skipped.join("|"));
   assert.ok(skipped.some((note: string) => note.includes("bin.md")), skipped.join("|"));
   // A SKILL.md upload imports one skill directly.
@@ -332,7 +332,7 @@ test("uploading a .zip whose SKILL.md files all fail imports nothing and says wh
 
 test("unreachable sources report errors without throwing for listings", async () => {
   const { listSkillsInSource, listSources } = await import("./skills.js");
-  saveSource("alice", { name: "dead", url: "https://127.0.0.1:9/pack.zip" });
+  saveSource("alice", { name: "dead", url: "https://127.0.0.1/pack.zip" });
   const listing = await listSkillsInSource("alice", listSources("alice")[0]!);
   assert.equal(listing.entries.length, 0);
   assert.equal(listing.errors.length, 1, `errors: ${listing.errors.join("; ")}`);
@@ -346,4 +346,145 @@ test("static routes are not shadowed by /:id (Hono matches in registration order
   form.append("file", new Blob(["---\nname: import-me\ndescription: Imported\n---\nBody."], { type: "text/markdown" }), "SKILL.md");
   const imported = await app.request("http://app/skills/import", { method: "POST", headers: { cookie: "okaychat_session=alice" }, body: form });
   assert.equal(imported.status, 200);
+});
+
+test("renaming edits the same skill, preserves its origin, and does not leave a duplicate", async () => {
+  const original = saveSkill("alice", { name: "old-name", description: D, body: "Instructions", files: [{ name: "x.md", content: "Reference" }] }, "conversation");
+  const response = await request("PUT", `/${original.id}`, { name: "new-name", description: D, body: "Revised", files: [{ name: "a\\b.md", content: "New reference" }] });
+  assert.equal(response.status, 200);
+  const edited = await response.json();
+  assert.equal(edited.id, original.id);
+  assert.equal(edited.name, "new-name");
+  assert.equal(edited.origin, "conversation");
+  assert.equal(edited.fileContents[0].name, "a/b.md");
+  assert.equal((await (await request("GET")).json()).length, 1);
+});
+
+test("skill bodies, metadata, and references count UTF-8 bytes and deleting a skill frees quota", async () => {
+  const { storageUsed } = await import("./quota.js");
+  const draft = { name: "utf-skill", description: "é", body: "猫", files: [{ name: "ref.md", content: "🦊" }] };
+  const bytes = Buffer.byteLength(draft.name + draft.description + draft.body + draft.files[0]!.name + draft.files[0]!.content);
+  db.prepare("UPDATE users SET storage_limit = ? WHERE id = 'alice'").run(bytes);
+  const skill = saveSkill("alice", draft, "manual");
+  assert.equal(storageUsed("alice"), bytes);
+  // Replacing the same bytes is allowed at quota; growth is rejected atomically.
+  assert.equal(saveSkill("alice", draft, "manual").id, skill.id);
+  const rejected = await request("PUT", `/${skill.id}`, { ...draft, body: "猫x" });
+  assert.equal(rejected.status, 413);
+  assert.equal((await (await request("GET", `/${skill.id}`)).json()).body, "猫");
+  await enable();
+  await assert.rejects(() => execute(turnSkills("alice", { temporary: false, canCallTools: true }).tools, "create_skill", { name: "new-skill", description: D, instructions: "Body" }), /Storage quota exceeded/);
+  await request("DELETE", `/${skill.id}`);
+  assert.equal(storageUsed("alice"), 0);
+  db.prepare("UPDATE users SET storage_limit = NULL WHERE id = 'alice'").run();
+});
+
+test("ZIP imports enforce expanded-size bounds before decompressing and keep nested skills separate", async () => {
+  const importZip = (entries: Record<string, Uint8Array>) => {
+    const form = new FormData();
+    form.set("file", new File([zipSync(entries)], "pack.zip"));
+    return app.request("http://app/skills/import", { method: "POST", headers: { cookie: "okaychat_session=alice" }, body: form });
+  };
+  const bomb = await importZip({ "SKILL.md": strToU8(SKILL_MD), "bomb.txt": new Uint8Array(21 * 1024 * 1024) });
+  assert.equal(bomb.status, 400);
+  assert.match(await bomb.text(), /expanded size/);
+  const response = await importZip({
+    "SKILL.md": strToU8(SKILL_MD),
+    "root.md": strToU8("root"),
+    "nested/SKILL.md": strToU8("---\nname: nested\ndescription: Nested\n---\nBody"),
+    "nested/secret.md": strToU8("child reference"),
+    "../escape/SKILL.md": strToU8(SKILL_MD),
+  });
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  const root = result.installed.find((s: { name: string }) => s.name === "python-upgrade");
+  assert.deepEqual(root.files.map((f: { name: string }) => f.name), ["root.md"]);
+  assert.ok(result.skipped.some((s: string) => s.includes("invalid path")));
+});
+
+test("a multi-skill import rolls back every write on a quota failure", async () => {
+  db.prepare("UPDATE users SET storage_limit = 70 WHERE id = 'alice'").run();
+  const form = new FormData();
+  form.set("file", new File([zipSync({
+    "a/SKILL.md": strToU8("---\nname: first\ndescription: First\n---\n" + "a".repeat(30)),
+    "b/SKILL.md": strToU8("---\nname: second\ndescription: Second\n---\n" + "b".repeat(30)),
+  })], "pack.zip"));
+  const response = await app.request("http://app/skills/import", { method: "POST", headers: { cookie: "okaychat_session=alice" }, body: form });
+  assert.equal(response.status, 413);
+  assert.equal((await (await request("GET")).json()).length, 0);
+  db.prepare("UPDATE users SET storage_limit = NULL WHERE id = 'alice'").run();
+});
+
+test("changing a source origin clears its saved token", () => {
+  const first = saveSource("alice", { name: "source", url: "https://first.example/SKILL.md", token: "private-token" });
+  const next = saveSource("alice", { name: "source", url: "https://other.example/SKILL.md" }, first.id);
+  assert.equal(next.hasToken, false);
+});
+
+test("remote installs enforce quota and recheck approval revocation after downloading", async (t) => {
+  const https = (await import("node:https")).default;
+  const dns = (await import("node:dns/promises")).default;
+  const { EventEmitter } = await import("node:events");
+  const { Readable } = await import("node:stream");
+  const { installSkillFromSource } = await import("./skills.js");
+  t.mock.method(dns, "lookup", async () => [{ address: "93.184.216.34", family: 4 }]);
+  let revoke = false;
+  t.mock.method(https, "request", (_url: URL, options: any, done: (response: unknown) => void) => {
+    const req = new EventEmitter() as EventEmitter & { end: () => void };
+    req.end = () => options.lookup("skills.example", { all: true }, (error: Error | null) => {
+      if (error) { req.emit("error", error); return; }
+      if (revoke) setSkillPreferences("alice", { enabled: false });
+      const response = Readable.from([Buffer.from(SKILL_MD)]);
+      Object.assign(response, { statusCode: 200, headers: { "content-length": String(Buffer.byteLength(SKILL_MD)) } });
+      done(response);
+    });
+    return req;
+  });
+  const source = saveSource("alice", { url: "https://skills.example/SKILL.md" });
+  db.prepare("UPDATE users SET storage_limit = 1 WHERE id = 'alice'").run();
+  await assert.rejects(installSkillFromSource("alice", source.id, "python-upgrade"), /Storage quota exceeded/);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM skills").get()!.n, 0);
+  db.prepare("UPDATE users SET storage_limit = NULL WHERE id = 'alice'").run();
+  await enable();
+  const tools = turnSkills("alice", { temporary: false, canCallTools: true }).tools;
+  revoke = true;
+  await assert.rejects(execute(tools, "install_skill", { source: source.id, skill: "python-upgrade" }), /Skills were disabled/);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM skills").get()!.n, 0);
+  revoke = false;
+  const { skill } = await installSkillFromSource("alice", source.id, "python-upgrade");
+  assert.equal(skill.name, "python-upgrade");
+});
+
+test("forged ZIP uncompressed-size headers cannot bypass the actual inflate limit", async () => {
+  const zip = Buffer.from(zipSync({ "SKILL.md": strToU8(SKILL_MD), "forged.txt": new Uint8Array(2 * 1024 * 1024) }));
+  // Forge both local and central-directory sizes; the actual deflate stream still expands to 2 MiB.
+  for (let offset = 0; offset < zip.length - 46; offset++) {
+    const signature = zip.readUInt32LE(offset);
+    if (signature === 0x04034b50) zip.writeUInt32LE(1, offset + 22);
+    if (signature === 0x02014b50) zip.writeUInt32LE(1, offset + 24);
+  }
+  const form = new FormData();
+  form.set("file", new File([zip], "forged.zip"));
+  const response = await app.request("http://app/skills/import", { method: "POST", headers: { cookie: "okaychat_session=alice" }, body: form });
+  assert.equal(response.status, 400);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM skills").get()!.n, 0);
+});
+
+test("folded and literal YAML descriptions import as useful index text", () => {
+  const folded = parseSkillMd("---\nname: folded\ndescription: >-\n  First sentence.\n  Use when needed.\n---\nInstructions.");
+  assert.equal(folded.description, "First sentence. Use when needed.");
+  const literal = parseSkillMd("---\nname: literal\ndescription: |\n  First sentence.\n  Use when needed.\n---\nInstructions.");
+  assert.equal(literal.description, "First sentence.\nUse when needed.");
+});
+
+test("removing a source leaves installed skills editable and loadable", async () => {
+  const source = saveSource("alice", { url: "https://example.com/SKILL.md" });
+  const skill = saveSkill("alice", { name: "source-skill", description: D, body: "Instructions" }, "source", source.id);
+  assert.equal((await request("DELETE", `/sources/${source.id}`)).status, 200);
+  const response = await request("PUT", `/${skill.id}`, { name: "source-skill", description: D, body: "Edited" });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).sourceId, null);
+  await enable();
+  const loaded = await execute(turnSkills("alice", { temporary: false, canCallTools: true }).tools, "load_skill", { name: "source-skill" });
+  assert.equal(loaded.instructions, "Edited");
 });

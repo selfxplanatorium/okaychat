@@ -1,4 +1,5 @@
-import { unzipSync } from "fflate";
+import { Unzip, type UnzipDecoder, type AsyncFlateStreamHandler } from "fflate";
+import { inflateRawSync } from "node:zlib";
 import { tool, type ToolSet } from "ai";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -6,7 +7,10 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { Skill, SkillDetail, SkillFile, SkillOrigin, SkillPreferences, SkillSource, SkillSourceEntry, SkillSourceKind, SkillSourceListing } from "../shared/skills.js";
 import type { AppEnv } from "./auth.js";
-import { decrypt, encrypt, newId } from "./crypto.js";import { db, tx } from "./db.js";
+import { decrypt, encrypt, newId } from "./crypto.js";
+import { db, tx } from "./db.js";
+import { assertStorage } from "./quota.js";
+import { fetchSkillSource, skillSourceUrl } from "./skill-fetch.js";
 
 // Agent Skills (anthropic.dev/agent-skills) as per-account instruction packages: a SKILL.md with
 // `name` + `description` frontmatter and a Markdown body, plus optional reference files. The model
@@ -30,7 +34,6 @@ const MAX_MD_BYTES = 128_000;
 /** One download cap for source fetching (zips can hold many skills). */
 const MAX_FETCH_BYTES = 20 * 1024 * 1024;
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-const FETCH_TIMEOUT_MS = 30_000;
 const NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const FILE_RE = /^[A-Za-z0-9][\w ./@+()'-]*$/;
 const MASKED = "••••••";
@@ -54,12 +57,21 @@ export function parseSkillMd(text: string): SkillMd {
   const trimmed = text.trimStart();
   const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(trimmed);
   if (!match) invalid("This SKILL.md has no `---` frontmatter block.");
-  const fields: Record<string, string> = {};
-  for (const line of match![1]!.split(/\r?\n/)) {
-    // Plain `key: value` scalars only; nested YAML is not part of the skill spec.
-    const m = /^([\w-]+?)\s*:\s*(.*)$/.exec(line);
+  const fields: Record<string, string> = Object.create(null);
+  const lines = match![1]!.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    // Only scalar frontmatter fields are consumed; optional nested metadata is ignored.
+    const m = /^([\w-]+?)\s*:\s*(.*)$/.exec(lines[i]!);
     if (!m || !m[2]!.trim()) continue;
-    fields[m[1]!] = m[2]!.trim().replace(/^["'](.*)["']$/, "$1");
+    const value = m[2]!.trim();
+    if (/^[>|][-+]?$/.test(value)) {
+      const block: string[] = [];
+      while (i + 1 < lines.length && (/^\s+/.test(lines[i + 1]!) || !lines[i + 1]!.trim())) block.push(lines[++i]!.trim());
+      fields[m[1]!] = block.join(value.startsWith(">") ? " " : "\n").trim();
+    } else {
+      try { fields[m[1]!] = value.startsWith('"') ? JSON.parse(value) as string : value.replace(/^'(.*)'$/, "$1").replaceAll("''", "'"); }
+      catch { invalid("Invalid quoted frontmatter value."); }
+    }
   }
   if (!fields.name || !fields.description) invalid("This SKILL.md frontmatter needs `name` and `description`.");
   const body = trimmed.slice(match![0]!.length).trim();
@@ -182,9 +194,9 @@ interface SkillDraft {
   files?: Array<{ name: string; content: string }>;
 }
 
-export function saveSkill(userId: string, draft: SkillDraft, origin: SkillOrigin, sourceId?: string | null): SkillDetail {
+export function saveSkill(userId: string, draft: SkillDraft, origin: SkillOrigin, sourceId?: string | null, existingId?: string): SkillDetail {
   const { name, description, body } = validateSkill(draft.name, draft.description, draft.body);
-  const files = draft.files ?? [];
+  const files = (draft.files ?? []).map((f) => ({ ...f, name: validateSkillFileName(f.name) }));
   if (files.length > MAX_FILES) invalid(`A skill can hold up to ${MAX_FILES} files.`);
   const seen = new Set<string>();
   for (const file of files) {
@@ -194,16 +206,23 @@ export function saveSkill(userId: string, draft: SkillDraft, origin: SkillOrigin
   }
   const own = body.length + files.reduce((n, file) => n + file.content.length, 0);
   if (own > MAX_SKILL_CHARS) invalid(`Skills are limited to ${MAX_SKILL_CHARS.toLocaleString()} characters.`);
-  const exists = !!db.prepare("SELECT 1 FROM skills WHERE user_id = ? AND name = ?").get(userId, name);
+  const previous = existingId ? getSkill(userId, existingId) :
+    (db.prepare("SELECT id FROM skills WHERE user_id = ? AND name = ?").get(userId, name) as { id: string } | undefined);
+  const prev = previous ? getSkill(userId, previous.id) : undefined;
+  const exists = !!prev;
+  if (!prev && sourceId && !db.prepare("SELECT 1 FROM skill_sources WHERE user_id = ? AND id = ?").get(userId, sourceId)) invalid("Skill source not found", 404);
   const count = db.prepare("SELECT count(*) AS n FROM skills WHERE user_id = ?").get(userId) as { n: number };
   if (!exists && count.n >= MAX_SKILLS) {
     invalid(`You have the maximum of ${MAX_SKILLS} skills. Delete one first.`, 409);
   }
-  const released = exists ? (db.prepare("SELECT length(body) AS n FROM skills WHERE user_id = ? AND name = ?").get(userId, name) as { n: number }).n : 0;
+  if (files.some((file) => !file.content || file.content.length > MAX_FILE_CHARS)) invalid("Skill files must contain at most 100000 characters.");
+  const released = prev ? prev.body.length + prev.fileContents.reduce((n, f) => n + f.content.length, 0) : 0;
   if (totalChars(userId) - released + own > MAX_USER_CHARS) invalid("Skill storage is full. Delete or shorten existing skills.", 409);
+  const byteSize = (skill: SkillDraft) => Buffer.byteLength(skill.name + skill.description + skill.body) +
+    (skill.files ?? []).reduce((n, f) => n + Buffer.byteLength(f.name + f.content), 0);
+  assertStorage(userId, byteSize({ name, description, body, files }) - (prev ? byteSize({ ...prev, files: prev.fileContents }) : 0));
   const now = Date.now();
   const id = tx(() => {
-    const prev = exists ? db.prepare("SELECT id FROM skills WHERE user_id = ? AND name = ?").get(userId, name) as { id: string } : undefined;
     const rowId = prev?.id ?? newId("skl");
     if (prev) {
       // origin/sourceId survive updates so corrections never rewrite the provenance.
@@ -231,7 +250,7 @@ export function setSkillEnabled(userId: string, id: string, enabled: boolean): S
   return getSkill(userId, id);
 }
 
-/** Stable per-account system prompt section: only the index, never the full bodies (progressive disclosure). */
+/** Current-turn context section: only the index, never the full bodies (progressive disclosure). */
 export function skillIndexSection(userId: string, revision: number): string {
   const prefs = skillPreferences(userId);
   if (!prefs.enabled || prefs.revision !== revision) return "";
@@ -246,37 +265,13 @@ export function skillIndexSection(userId: string, revision: number): string {
 // Source fetching. Everything is bound-checked text download; nothing fetched is ever executed.
 // ---------------------------------------------------------------------------
 
-async function fetchBounded(url: string, token: string | null, signal?: AbortSignal): Promise<Response> {
-  const target = new URL(url);
-  if (target.protocol !== "https:" && target.protocol !== "http:") throw new Error("Skill source URLs must be HTTP or HTTPS.");
-  const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      headers: {
-        "User-Agent": "okaychat",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        // The GitHub REST API refuses omit-User-Agent clients and benefits from the pinned version.
-        ...(target.hostname === "api.github.com" ? { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" } : {}),
-      },
-      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-      redirect: "follow",
-    });
-  } catch (error) {
-    if (signal?.aborted) throw error;
-    throw new Error(timeout.aborted ? `Timed out fetching ${target.hostname}.` : `Could not fetch ${target.hostname}.`);
-  }
-  if (!res.ok) {
-    const hint = res.status === 401 || res.status === 403 ? " (token rejected?)" : res.status === 404 ? " (not found — check branch and subpath)" : "";
-    throw new Error(`Fetch failed: ${res.status} ${res.statusText}${hint}`);
-  }
-  return res;
-}
+const fetchBounded = fetchSkillSource;
 
 async function readBounded(res: Response, max = MAX_FETCH_BYTES): Promise<Uint8Array> {
   const declared = Number(res.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > max) throw new Error(`That download is ${(declared / 1024 / 1024).toFixed(0)} MB; the limit is ${(max / 1024 / 1024).toFixed(0)} MB.`);
-  const reader = res.body!.getReader();
+  if (Number.isFinite(declared) && declared > max) { await res.body?.cancel(); throw new Error(`That download is ${(declared / 1024 / 1024).toFixed(0)} MB; the limit is ${(max / 1024 / 1024).toFixed(0)} MB.`); }
+  if (!res.body) return new Uint8Array();
+  const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
   for (;;) {
@@ -304,11 +299,11 @@ interface GitHubRef {
 
 export function parseSourceUrl(url: string): { kind: SkillSourceKind; github: GitHubRef | null } {
   let parsed: URL;
-  try { parsed = new URL(url); } catch { invalid("That is not a valid URL."); }
+  try { parsed = skillSourceUrl(url); } catch (error) { invalid((error as Error).message); }
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") invalid("Skill source URLs must be HTTP or HTTPS.");
-  if (/(^|\.)github\.com$/.test(parsed.hostname)) {
+  if (parsed.hostname === "github.com" || parsed.hostname === "www.github.com") {
     const [owner, rawRepo, ...rest] = parsed.pathname.replace(/^\/+|\/+$/g, "").replace(/\.git$/, "").split("/").filter(Boolean);
-    if (!owner || !rawRepo) invalid("GitHub URLs look like https://github.com/owner/repo.");
+    if (!owner || !rawRepo || !/^[A-Za-z0-9_.-]+$/.test(owner) || !/^[A-Za-z0-9_.-]+$/.test(rawRepo) || owner === ".." || rawRepo === "..") invalid("GitHub URLs look like https://github.com/owner/repo.");
     let branch: string | null = null;
     let subpath = "";
     if (rest[0] === "tree" || rest[0] === "blob") {
@@ -324,14 +319,14 @@ export function parseSourceUrl(url: string): { kind: SkillSourceKind; github: Gi
 }
 
 const ghApi = (ref: GitHubRef, suffix: string) => `https://api.github.com/repos/${ref.owner}/${ref.repo}${suffix}`;
-const ghRaw = (ref: GitHubRef, branch: string, path: string) => `https://raw.githubusercontent.com/${ref.owner}/${ref.repo}/${branch}/${path}`;
+const ghRaw = (ref: GitHubRef, branch: string, path: string) => `https://raw.githubusercontent.com/${ref.owner}/${ref.repo}/${branch.split("/").map(encodeURIComponent).join("/")}/${path.split("/").map(encodeURIComponent).join("/")}`;
 
 /**
  * Skill folder files sit next to the SKILL.md; nested folders and other skills' files stay out.
  * A nested folder that holds its own SKILL.md is another skill, so its whole subtree is excluded.
  */
 export function folderPaths(paths: string[], mdPath: string, subpath: string): string[] {
-  const dir = mdPath.endsWith("/SKILL.md") ? mdPath.slice(0, -"SKILL.md".length) : "";
+  const dir = mdPath.slice(0, mdPath.lastIndexOf("/") + 1);
   const base = (path: string) => path.split("/").pop()!.toLowerCase();
   const nestedSkillDirs = new Set(
     paths.filter((path) => path !== mdPath && base(path) === "skill.md").map((path) => path.slice(0, path.lastIndexOf("/"))),
@@ -358,7 +353,7 @@ async function collectSkillFiles(readText: (path: string) => Promise<string | nu
   for (const path of paths) {
     if (files.length >= MAX_FILES) { skipped.push(`${path} (file limit)`); continue; }
     const text = await readText(path);
-    if (text === null) { skipped.push(`${path} (binary or too large)`); continue; }
+    if (text === null || text.length > MAX_FILE_CHARS) { skipped.push(`${path} (binary or too large)`); continue; }
     if (total + text.length > MAX_SKILL_CHARS) { skipped.push(`${path} (skill size limit)`); continue; }
     total += text.length;
     files.push({ name: path, content: text });
@@ -430,11 +425,61 @@ interface ZippedDraft extends SkillDraft {
   skipped?: string[];
 }
 
+// fflate's default synchronous decoder trusts ZIP size headers. zlib also limits actual output,
+// so a malicious archive cannot bypass expansion limits by lying about its uncompressed sizes.
+class BoundedSkillInflate implements UnzipDecoder {
+  static compression = 8;
+  ondata!: AsyncFlateStreamHandler;
+  private chunks: Uint8Array[] = [];
+  constructor(private readonly name: string) {}
+  push(chunk: Uint8Array, final: boolean) {
+    this.chunks.push(chunk);
+    if (!final) return;
+    let data: Uint8Array<ArrayBuffer>;
+    try { data = inflateRawSync(Buffer.concat(this.chunks), { maxOutputLength: /(^|\/)SKILL\.md$/i.test(this.name) ? MAX_MD_BYTES : MAX_FILE_CHARS * 4 }); }
+    catch { invalid("ZIP exceeds a file expansion limit or is corrupt."); }
+    this.chunks = [];
+    this.ondata(null, data, true);
+  }
+}
+
+function unpackSkillZip(bytes: Uint8Array, skipped: string[]): Record<string, Uint8Array> {
+  const entries: Record<string, Uint8Array> = Object.create(null);
+  let expanded = 0;
+  let declared = 0;
+  let count = 0;
+  const archive = new Unzip((file) => {
+    if (++count > 2000 || (declared += file.originalSize ?? 0) > MAX_FETCH_BYTES) invalid("ZIP exceeds the 20 MB expanded size or 2000 entry limit.");
+    if (file.name.endsWith("/")) return;
+    try { validateSkillFileName(file.name); } catch { skipped.push(`${file.name.slice(0, 160)} (invalid path)`); return; }
+    const max = /(^|\/)SKILL\.md$/i.test(file.name) ? MAX_MD_BYTES : MAX_FILE_CHARS * 4;
+    if ((file.originalSize ?? 0) > max) { skipped.push(`${file.name} (too large)`); return; }
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    file.ondata = (error, chunk, final) => {
+      if (error) invalid(error.message);
+      size += chunk.length;
+      expanded += chunk.length;
+      if (size > max || expanded > MAX_FETCH_BYTES) invalid("ZIP exceeds its expanded size limit.");
+      chunks.push(chunk);
+      if (final) entries[file.name] = Buffer.concat(chunks, size);
+    };
+    file.start();
+  });
+  archive.register(BoundedSkillInflate);
+  archive.push(bytes, true);
+  return entries;
+}
+
 async function draftsFromBytes(bytes: Uint8Array, filename: string): Promise<{ drafts: ZippedDraft[]; skipped: string[] }> {
   const skipped: string[] = [];
   if (/\.zip$/i.test(filename)) {
     let entries: Record<string, Uint8Array> = {};
-    try { entries = unzipSync(bytes); } catch { invalid("That .zip could not be unpacked."); }
+    try { entries = unpackSkillZip(bytes, skipped); }
+    catch (error) {
+      if (error instanceof HTTPException) throw error;
+      invalid("That .zip could not be unpacked.");
+    }
     const names = Object.keys(entries);
     const manifests = names.filter((name) => /(^|\/)SKILL\.md$/i.test(name) && entries[name]!.length <= MAX_MD_BYTES).slice(0, MAX_SOURCE_ENTRIES);
     if (!manifests.length) invalid("No SKILL.md found in this .zip.");
@@ -450,10 +495,10 @@ async function draftsFromBytes(bytes: Uint8Array, filename: string): Promise<{ d
         continue;
       }
       const dir = manifest.replace(/SKILL\.md$/i, "");
-      const paths = names.filter((name) => !name.endsWith("/") && name !== manifest && name.startsWith(dir) && !/(^|\/)SKILL\.md$/i.test(name.slice(dir.length)));
+      const paths = folderPaths(names, manifest, "");
       const { files, skipped: fileNotes } = await collectZipFiles(entries, paths, md);
       skipped.push(...fileNotes);
-      drafts.push({ ...md, files, path: manifest });
+      drafts.push({ ...md, files: files.map((f) => ({ ...f, name: f.name.slice(dir.length) })), path: manifest });
     }
     if (!drafts.length) invalid("This .zip has SKILL.md files, but none of them parse.");
     return { drafts, skipped };
@@ -541,6 +586,7 @@ export function saveSource(userId: string, input: unknown, id?: string): SkillSo
   let { name, url, branch, subpath, token } = parsed.data;
   const { kind, github } = parseSourceUrl(url.trim());
   url = url.trim();
+  if (token && token !== MASKED && new URL(url).protocol !== "https:") invalid("Tokens require an HTTPS skill source.");
   const branchFinal = kind === "github" ? ((branch ?? "") || github!.branch) || null : null;
   const subpathFinal = kind === "github" ? ((subpath ?? "") || github!.subpath) || null : null;
   if (kind === "github") {
@@ -554,10 +600,10 @@ export function saveSource(userId: string, input: unknown, id?: string): SkillSo
   const subpathStored = subpathFinal ? subpathFinal.replace(/^\/+|\/+$/g, "") : null;
   if (id) {
     if (!db.prepare("SELECT 1 FROM skill_sources WHERE user_id = ? AND id = ?").get(userId, id)) invalid("Skill source not found", 404);
-    const stored = db.prepare("SELECT token_enc FROM skill_sources WHERE id = ?").get(id) as { token_enc: string | null };
-    const keep = token === undefined || token === MASKED;
+    const stored = db.prepare("SELECT token_enc, url FROM skill_sources WHERE id = ? AND user_id = ?").get(id, userId) as { token_enc: string | null; url: string };
+    const keep = (token === undefined || token === MASKED) && new URL(stored.url).origin === new URL(url).origin;
     db.prepare("UPDATE skill_sources SET name = ?, kind = ?, url = ?, branch = ?, subpath = ?, token_enc = ? WHERE id = ? AND user_id = ?")
-      .run(name, kind, url, branchFinal, subpathStored, keep ? stored.token_enc : (token ? encrypt(token) : null), id, userId);
+      .run(name, kind, url, branchFinal, subpathStored, keep ? stored.token_enc : (token && token !== MASKED ? encrypt(token) : null), id, userId);
   } else {
     if (listSources(userId).length >= MAX_SOURCES) invalid(`You have the maximum of ${MAX_SOURCES} skill sources. Remove one first.`, 409);
     db.prepare("INSERT INTO skill_sources (id, user_id, name, kind, url, branch, subpath, token_enc, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -567,8 +613,11 @@ export function saveSource(userId: string, input: unknown, id?: string): SkillSo
 }
 
 export function deleteSource(userId: string, id: string): void {
-  const result = db.prepare("DELETE FROM skill_sources WHERE user_id = ? AND id = ?").run(userId, id);
-  if (!result.changes) invalid("Skill source not found", 404);
+  tx(() => {
+    const result = db.prepare("DELETE FROM skill_sources WHERE user_id = ? AND id = ?").run(userId, id);
+    if (!result.changes) invalid("Skill source not found", 404);
+    db.prepare("UPDATE skills SET source_id = NULL WHERE user_id = ? AND source_id = ?").run(userId, id);
+  });
 }
 
 /** Lists every installable skill of one stored source without installing anything. */
@@ -576,13 +625,13 @@ export async function listSkillsInSource(userId: string, source: SkillSource, si
   const row = findSource(userId, source.id);
   const token = tokenOf(row);
   try {
-    if (source.kind === "github") {
-      const listing = await githubListing(refOf(source), token, signal);
+    if (row.kind === "github") {
+      const listing = await githubListing(refOf(toSource(row)), token, signal);
       return { source, entries: listing.entries, errors: listing.errors };
     }
-    const res = await fetchBounded(source.url, token, signal);
+    const res = await fetchBounded(row.url, token, signal);
     const bytes = await readBounded(res);
-    const { drafts } = await draftsFromBytes(bytes, new URL(source.url).pathname);
+    const { drafts } = await draftsFromBytes(bytes, new URL(row.url).pathname);
     return { source, entries: drafts.map(({ name, description, path }) => ({ name, description, path })), errors: [] };
   } catch (error) {
     return { source, entries: [], errors: [(error as Error).message] };
@@ -593,7 +642,7 @@ export async function listSkillsInSource(userId: string, source: SkillSource, si
  * Fetches one skill folder from a stored source and upserts it under its SKILL.md name.
  * This is the shared path of the model's install_skill tool and the Skills page install button.
  */
-export async function installSkillFromSource(userId: string, sourceRef: string, entryName: string, signal?: AbortSignal): Promise<{ skill: SkillDetail; skipped: string[] }> {
+export async function installSkillFromSource(userId: string, sourceRef: string, entryName: string, signal?: AbortSignal, beforeSave?: () => void): Promise<{ skill: SkillDetail; skipped: string[] }> {
   const row = findSource(userId, sourceRef);
   const source = toSource(row);
   const token = tokenOf(row);
@@ -608,14 +657,18 @@ export async function installSkillFromSource(userId: string, sourceRef: string, 
     const res = await fetchBounded(ghRaw(gh, listing.branch, hit.path), token, signal);
     const md = parseTextOrThrow(decodeText(await readBounded(res, MAX_MD_BYTES)) ?? "", hit.path);
     const { files, skipped: notes } = await collectSkillFiles(
-      async (path) => decodeText(await readBounded(await fetchBounded(ghRaw(gh, listing.branch, path), token, signal), MAX_FILE_CHARS + 1)),
+      async (path) => {
+        try { return decodeText(await readBounded(await fetchBounded(ghRaw(gh, listing.branch, path), token, signal), MAX_FILE_CHARS * 4)); }
+        catch (error) { if (signal?.aborted) throw error; return null; }
+      },
       folderPaths(listing.tree, hit.path, ref.subpath),
       md,
     );
     skipped = notes;
-    draft = { ...md, files };
+    const dir = hit.path.slice(0, hit.path.lastIndexOf("/") + 1);
+    draft = { ...md, files: files.map((f) => ({ ...f, name: f.name.slice(dir.length) })) };
   } else {
-    const res = await fetchBounded(source.url, token, signal);
+    const res = await fetchBounded(row.url, token, signal);
     const { drafts, skipped: notes } = await draftsFromBytes(await readBounded(res), new URL(source.url).pathname);
     skipped = notes;
     draft = drafts.find((candidate) => candidate.name.toLowerCase() === entryName.toLowerCase())
@@ -623,6 +676,7 @@ export async function installSkillFromSource(userId: string, sourceRef: string, 
   }
   const existing = db.prepare("SELECT origin, source_id FROM skills WHERE user_id = ? AND lower(name) = lower(?)").get(userId, draft.name) as
     { origin: SkillOrigin; source_id: string | null } | undefined;
+  beforeSave?.();
   const skill = saveSkill(userId, draft, existing?.origin ?? "source", existing?.source_id ?? source.id);
   return { skill, skipped };
 }
@@ -632,7 +686,7 @@ export async function installSkillFromSource(userId: string, sourceRef: string, 
 // ---------------------------------------------------------------------------
 
 interface TurnSkills {
-  /** Stable system prompt text with the enabled skill index. */
+  /** Dynamic index injected near the latest user message, never into the system prefix. */
   context: string;
   tools: ToolSet;
   /** Read-only subset handed to delegates; empty unless skills are on. */
@@ -719,7 +773,7 @@ export function turnSkills(userId: string, opts: { temporary: boolean; canCallTo
       needsApproval: true,
       execute: async ({ source, skill }) => {
         canUse();
-        const { skill: installed, skipped } = await installSkillFromSource(userId, source, skill);
+        const { skill: installed, skipped } = await installSkillFromSource(userId, source, skill, undefined, canUse);
         return { id: installed.id, name: installed.name, description: installed.description, files: installed.files.map((file) => file.name), skipped };
       },
     }),
@@ -790,11 +844,10 @@ export const skillRoutes = new Hono<AppEnv>()
     if (!(file instanceof File)) return c.json({ error: "No file" }, 400);
     if (file.size > MAX_UPLOAD_BYTES) return c.json({ error: "File is larger than 10 MB" }, 413);
     const { drafts, skipped } = await draftsFromBytes(new Uint8Array(await file.arrayBuffer()), file.name);
-    if (drafts.length + listSkills(userId).length > MAX_SKILLS) invalid(`You have the maximum of ${MAX_SKILLS} skills. Delete one first.`, 409);
     const seen = new Set<string>();
-    const installed = drafts
+    const installed = tx(() => drafts
       .filter((draft) => { const key = draft.name.toLowerCase(); if (seen.has(key)) return false; seen.add(key); return true; })
-      .map((draft) => saveSkill(userId, draft, "manual"));
+      .map((draft) => saveSkill(userId, draft, "manual")));
     return c.json({ installed, skipped });
   })
   .get("/:id", (c) => c.json(getSkill(c.get("user").id, c.req.param("id"))))
@@ -805,7 +858,7 @@ export const skillRoutes = new Hono<AppEnv>()
     if (draft.name !== existing.name && db.prepare("SELECT 1 FROM skills WHERE user_id = ? AND name = ?").get(userId, draft.name)) {
       invalid("A skill with that name exists.", 409);
     }
-    saveSkill(userId, draft, existing.origin, existing.sourceId);
+    saveSkill(userId, draft, existing.origin, existing.sourceId, existing.id);
     return c.json(getSkill(userId, existing.id));
   })
   .patch("/:id", async (c) => {

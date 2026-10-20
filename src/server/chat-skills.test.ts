@@ -68,8 +68,10 @@ test("turnStream injects the enabled skill index and offers skill tools", async 
   saveSkill("alice", { name: "release-notes", description: "Formats release notes in house style.", body: "# Format\n\nKeep it terse." }, "manual");
   await run("skills-chat");
   const sent = system(requests[0]!);
-  assert.ok(sent.includes("# Skills"));
-  assert.ok(sent.includes("`release-notes`: Formats release notes in house style."));
+  assert.ok(!sent.includes("# Skills"));
+  const tail = JSON.stringify(requests[0]!.messages.filter((m) => m.role !== "system"));
+  assert.ok(tail.includes("# Skills"));
+  assert.ok(tail.includes("`release-notes`: Formats release notes in house style."));
   assert.ok(!sent.includes("Keep it terse"), "skill bodies stay out of the stable prefix until load_skill");
   for (const tool of ["load_skill", "read_skill_file", "search_skill_sources", "install_skill", "create_skill"]) {
     assert.ok(names(requests[0]!).includes(tool), tool);
@@ -118,5 +120,6 @@ test("an approved create_skill stores the drafted skill; a denied one does not",
   // The prompt index of the NEXT chat contains the new skill.
   const requests2 = provider(t, []);
   await run("next-chat");
-  assert.ok(system(requests2[0]!).includes("`chat-skill`: From this chat."));
+  assert.ok(JSON.stringify(requests2[0]!.messages.filter((m) => m.role !== "system")).includes("`chat-skill`: From this chat."));
+  assert.equal(system(requests2[0]!), system(requests[0]!), "installing a skill must not alter the system prefix");
 });

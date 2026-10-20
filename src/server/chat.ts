@@ -51,13 +51,10 @@ const chatBody = z.object({
   tools: z.record(z.string(), z.any()).optional(),
 });
 
-function systemPrompt(userPrompt: string, project: string, mcpInstructions: string[], artifacts: boolean, skills: string, clientSystem?: string, memory?: string): string {
+function systemPrompt(userPrompt: string, project: string, mcpInstructions: string[], artifacts: boolean, clientSystem?: string, memory?: string): string {
   // Order matters for caching: static text first, nothing that changes per request.
-  // Skills sit with the per-account static text: they change only when the user's skills change,
-  // which is rare enough that the occasional cache miss is fine.
   const parts = [BASE_SYSTEM, `Today's date: ${new Date().toISOString().slice(0, 10)}.`];
   if (artifacts) parts.push(ARTIFACT_INSTRUCTIONS);
-  if (skills) parts.push(skills);
   if (userPrompt.trim()) parts.push(`# User instructions\n${userPrompt.trim()}`);
   if (project) parts.push(project);
   if (mcpInstructions.length) parts.push(`# Tool server instructions\n${mcpInstructions.join("\n\n")}`);
@@ -157,12 +154,13 @@ export async function turnStream(opts: TurnOptions) {
       const converted = await convertToModelMessages(await adaptPdfParts(live, model), { tools, ignoreIncompleteToolCalls: true });
       // Retrieved facts change with the query. Keep them near the current request so a
       // different subset does not invalidate the stable system and conversation prefix.
-      if (memory.context) {
+      const currentContext = [memory.context, skills.context].filter(Boolean).join("\n\n");
+      if (currentContext) {
         const lastUserIndex = converted.findLastIndex((message) => message.role === "user");
-        converted.splice(lastUserIndex < 0 ? converted.length : lastUserIndex, 0, { role: "user", content: memory.context });
+        converted.splice(lastUserIndex < 0 ? converted.length : lastUserIndex, 0, { role: "user", content: currentContext });
       }
       const memoryInstructions = [temporary ? "This is an anonymous chat. It is not saved in okaychat history and must never create or change saved memories. Do not claim that this hides the conversation from the selected model provider." : "", memory.instructions].filter(Boolean).join("\n\n");
-      const { system, messages } = handle.markCache(systemPrompt(personalized ? settings.systemPrompt : "", temporary ? "" : projectContext(userId, thread.projectId), mcp.instructions, useArtifacts, skills.context, useGenerativeUI ? opts.clientSystem : undefined, memoryInstructions), [
+      const { system, messages } = handle.markCache(systemPrompt(personalized ? settings.systemPrompt : "", temporary ? "" : projectContext(userId, thread.projectId), mcp.instructions, useArtifacts, useGenerativeUI ? opts.clientSystem : undefined, memoryInstructions), [
         ...(summary ? summaryMessages(summary) : []),
         ...converted,
       ]);
