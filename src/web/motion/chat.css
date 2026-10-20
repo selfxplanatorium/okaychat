@@ -91,3 +91,95 @@
   transform-origin: left;
   animation: chat-bar-in var(--motion-slow) var(--ease-out-expo) both;
 }
+
+/*
+ * Anonymous chat ghost (GhostIcon.tsx). Entering crouches, leaps with a wobble,
+ * blinks, and puffs. Leaving drops from above and splats on landing with wide
+ * eyes while the tint drains. The resting "on" state floats.
+ */
+.ghost-icon .ghost-body,
+.ghost-icon .ghost-eyes,
+.ghost-icon .ghost-puffs circle {
+  transform-box: fill-box;
+}
+.ghost-icon .ghost-body {
+  transform-origin: 50% 100%;
+}
+.ghost-icon .ghost-eyes {
+  transform-origin: 50% 50%;
+}
+.ghost-icon .ghost-shape {
+  fill-opacity: 0;
+}
+.ghost-icon[data-state="on"] .ghost-shape {
+  fill-opacity: 0.22;
+}
+.ghost-icon[data-state="on"] .ghost-float {
+  animation: ghost-float 2.8s var(--ease-in-out-quart) infinite;
+}
+.ghost-icon[data-transition="enter"] .ghost-float {
+  animation-delay: 720ms;
+}
+.ghost-icon[data-transition="enter"] .ghost-body {
+  animation: ghost-leap 720ms var(--ease-out-quart) both;
+}
+.ghost-icon[data-transition="enter"] .ghost-shape {
+  animation: ghost-tint-in 720ms var(--ease-out-quart) both;
+}
+.ghost-icon[data-transition="enter"] .ghost-eyes {
+  animation: ghost-blink 720ms linear both;
+}
+.ghost-icon[data-transition="enter"] .ghost-puffs circle {
+  transform-origin: 50% 50%;
+  animation: ghost-puff 520ms var(--ease-out-expo) 80ms both;
+}
+.ghost-icon[data-transition="exit"] .ghost-body {
+  animation: ghost-land 560ms var(--ease-out-quart) both;
+}
+.ghost-icon[data-transition="exit"] .ghost-shape {
+  animation: ghost-tint-out 380ms var(--ease-in-quart) both;
+}
+.ghost-icon[data-transition="exit"] .ghost-eyes {
+  animation: ghost-eyes-pop 560ms var(--ease-out-quart) both;
+}
+
+@keyframes ghost-float {
+  50% { transform: translateY(-1px); }
+}
+@keyframes ghost-leap {
+  0% { transform: none; }
+  18% { transform: translateY(1px) scale(1.12, 0.84); }
+  45% { transform: translateY(-3.5px) scale(0.9, 1.12) rotate(-6deg); }
+  65% { transform: translateY(-1.5px) scale(1.04, 0.97) rotate(4deg); }
+  82% { transform: translateY(-0.5px) rotate(-2deg); }
+  100% { transform: none; }
+}
+@keyframes ghost-tint-in {
+  0%, 35% { fill-opacity: 0; }
+  100% { fill-opacity: 0.22; }
+}
+@keyframes ghost-blink {
+  0%, 42% { transform: none; }
+  50% { transform: scaleY(0.1); }
+  60%, 100% { transform: none; }
+}
+@keyframes ghost-puff {
+  0% { opacity: 0; transform: scale(0.2); }
+  30% { opacity: 0.9; }
+  100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(1); }
+}
+@keyframes ghost-land {
+  0% { transform: translateY(-3px) scale(0.94, 1.08); }
+  40% { transform: translateY(0.5px) scale(1.18, 0.8); }
+  68% { transform: translateY(-0.6px) scale(0.97, 1.04); }
+  100% { transform: none; }
+}
+@keyframes ghost-tint-out {
+  from { fill-opacity: 0.22; }
+  to { fill-opacity: 0; }
+}
+@keyframes ghost-eyes-pop {
+  0%, 30% { transform: none; }
+  45% { transform: scale(1.4); }
+  100% { transform: none; }
+}
