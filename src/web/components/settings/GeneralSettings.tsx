@@ -35,7 +35,7 @@ export function GeneralSettings() {
         <SettingsRow
           label="Default model"
           description="Used for new chats until you pick another in the composer."
-          control={<Select className="w-full md:w-80" value={settings.defaultModel ?? null} onValueChange={(v) => update({ defaultModel: v })} options={modelOptions} placeholder="First available" />}
+          control={<Select aria-label="Default model" className="w-full md:w-80" value={settings.defaultModel ?? ""} onValueChange={(v) => update({ defaultModel: v || null })} options={[{ value: "", label: "First available model" }, ...modelOptions]} />}
         />
         <SettingsRow
           label="Utility model"
@@ -43,10 +43,10 @@ export function GeneralSettings() {
           control={
             <Select
               className="w-full md:w-80"
-              value={settings.utilityModel ?? null}
-              onValueChange={(v) => update({ utilityModel: v })}
-              options={modelOptions}
-              placeholder="Same as chat model"
+              aria-label="Utility model"
+              value={settings.utilityModel ?? ""}
+              onValueChange={(v) => update({ utilityModel: v || null })}
+              options={[{ value: "", label: "Same as chat model" }, ...modelOptions]}
             />
           }
         />
@@ -112,10 +112,10 @@ export function GeneralSettings() {
               control={
                 <Select
                   className="w-full md:w-80"
-                  value={settings.subagentModel ?? null}
-                  onValueChange={(v) => update({ subagentModel: v })}
-                  options={models.filter((m) => m.toolCall).map((m) => ({ value: m.ref, label: modelLabel(m) }))}
-                  placeholder="Utility model"
+                  aria-label="Sub-agent model"
+                  value={settings.subagentModel ?? ""}
+                  onValueChange={(v) => update({ subagentModel: v || null })}
+                  options={[{ value: "", label: "Same as utility model" }, { value: "chat", label: "Same as chat model" }, ...models.filter((m) => m.toolCall).map((m) => ({ value: m.ref, label: modelLabel(m) }))]}
                 />
               }
             />

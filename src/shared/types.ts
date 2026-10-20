@@ -64,9 +64,9 @@ export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "
 export interface UserSettings {
   /** Synced appearance; absent until the first device migrates its local preferences. */
   appearance?: UserAppearance;
-  defaultModel?: string;
+  defaultModel?: string | null;
   /** Used for titles and compaction summaries. Falls back to the chat model. */
-  utilityModel?: string;
+  utilityModel?: string | null;
   favoriteModels: string[];
   reasoningEffort: Record<string, ReasoningEffort>;
   systemPrompt: string;
@@ -86,8 +86,8 @@ export interface UserSettings {
   subagents: boolean;
   /** run_code in the server's code sandbox. Offered only when the server has one configured. */
   codeExecution: boolean;
-  /** Default sub-agent model. The utility model and the chat model are also offered. */
-  subagentModel?: string;
+  /** A model ref, "chat" to follow the chat model, or null/absent to follow the utility model. */
+  subagentModel?: string | null;
 }
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {

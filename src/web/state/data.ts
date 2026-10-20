@@ -21,6 +21,7 @@ interface DataState {
   refreshMcp: () => Promise<void>;
   updateSettings: (patch: Partial<UserSettings>) => Promise<void>;
   selectModel: (ref: string) => void;
+  resetModel: () => void;
 }
 
 const SELECTED_KEY = "okaychat:selected-model";
@@ -33,15 +34,14 @@ export const useData = create<DataState>((set, get) => ({
   models: [],
   mcp: [],
   loaded: false,
-  selectedModel: localStorage.getItem(SELECTED_KEY),
+  // A previous chat's composer choice must not override the account default on reload.
+  selectedModel: null,
   projects: [],
   activeProject: localStorage.getItem(PROJECT_KEY),
   setActiveProject: (id) => {
     if (id) localStorage.setItem(PROJECT_KEY, id);
     else localStorage.removeItem(PROJECT_KEY);
-    set({ activeProject: id });
-    const model = get().projects.find((p) => p.id === id)?.defaultModel;
-    if (model) get().selectModel(model);
+    set({ activeProject: id, selectedModel: null });
   },
   refreshProjects: async () => {
     const projects = await api<Project[]>("/projects");
@@ -69,17 +69,26 @@ export const useData = create<DataState>((set, get) => ({
   updateSettings: async (patch) => {
     set({ settings: { ...get().settings!, ...patch } });
     set({ settings: await api<UserSettings>("/settings", { method: "PATCH", json: patch }) });
+    if (Object.hasOwn(patch, "defaultModel")) get().resetModel();
   },
   selectModel: (ref) => {
-    localStorage.setItem(SELECTED_KEY, ref);
     set({ selectedModel: ref });
+  },
+  resetModel: () => {
+    localStorage.removeItem(SELECTED_KEY);
+    set({ selectedModel: null });
   },
 }));
 
 /** The model the next message will use. */
 export function useActiveModel(): ModelInfo | undefined {
-  const models = useData((s) => s.models);
-  const selected = useData((s) => s.selectedModel);
-  const fallback = useData((s) => s.settings?.defaultModel);
-  return models.find((m) => m.ref === selected) ?? models.find((m) => m.ref === fallback) ?? models[0];
+  return useData(resolveActiveModel);
 }
+
+function resolveActiveModel({ models, selectedModel: selected, settings, projects, activeProject }: DataState): ModelInfo | undefined {
+  const fallback = settings?.defaultModel;
+  const projectModel = projects.find((p) => p.id === activeProject)?.defaultModel;
+  return models.find((m) => m.ref === selected) ?? models.find((m) => m.ref === projectModel) ?? models.find((m) => m.ref === fallback) ?? models[0];
+}
+
+export const getActiveModel = () => resolveActiveModel(useData.getState());

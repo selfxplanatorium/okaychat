@@ -13,7 +13,7 @@ import { ShareButton } from "@/components/share/ShareButton";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useAppearance } from "@/state/appearance";
-import { useData } from "@/state/data";
+import { getActiveModel, useData } from "@/state/data";
 import { chatPrivacyFor, useChatPrivacy, useChatPrivacyStore } from "@/state/chat-privacy";
 import { useThreadMeta, useThreadMetaStore } from "@/state/thread-meta";
 
@@ -111,7 +111,7 @@ export function ChatPrivacyMenu() {
         parent = id;
       }
       const text = messages.filter((m) => m.role === "user").flatMap((m) => m.parts).map((p) => (p.type === "text" ? p.text : "")).join("\n").slice(0, 4000);
-      const modelRef = useData.getState().selectedModel ?? useData.getState().settings?.defaultModel ?? undefined;
+      const modelRef = getActiveModel()?.ref;
       await api(`/threads/${thread.id}/title`, { method: "POST", json: { text, modelRef } }).catch(() => {});
       await aui.threads.reload();
       aui.threads.switchToThread(thread.id);

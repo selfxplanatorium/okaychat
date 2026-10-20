@@ -21,7 +21,7 @@ import type { ThreadSummary } from "@shared/types";
 import { api } from "@/lib/api";
 import { toolkit } from "@/components/chat/tool-ui";
 import { WidgetInstructions, widgets } from "@/components/genui/toolkit";
-import { useActiveModel, useData } from "@/state/data";
+import { getActiveModel, useActiveModel, useData } from "@/state/data";
 import { chatPrivacyFor, isAnonymousChat, useChatPrivacy, useChatPrivacyStore } from "@/state/chat-privacy";
 
 const CODE_EXTENSIONS =
@@ -208,9 +208,9 @@ const threadListAdapter: RemoteThreadListAdapter = {
           async load() {
             const { remoteId } = aui.threadListItem.getState();
             if (!remoteId || isAnonymousChat(remoteId)) return { messages: [] };
-            const rows = await api<Array<{ id: string; parent_id: string | null; format: string; content: unknown }>>(
-              `/threads/${remoteId}/messages`,
-            );
+            type Row = { id: string; parent_id: string | null; format: string; content: unknown };
+            const path = `/threads/${remoteId}/messages`;
+            const rows = await (takePrefetched<Row[]>(path) ?? api<Row[]>(path));
             return { messages: rows.map((row) => fmt.decode(row as Parameters<typeof fmt.decode>[0])) };
           },
           async append(item) {
@@ -315,6 +315,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const runtime = useRemoteThreadListRuntime({
     initialThreadId,
     onThreadIdChange: (id) => {
+      if (!id) useData.getState().resetModel();
       try {
         if (id && !isAnonymousChat(id)) sessionStorage.setItem(selectionKey, id);
         else sessionStorage.removeItem(selectionKey);

@@ -111,6 +111,7 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 
 - assistant-ui puts unknown message metadata keys under `metadata.custom`. Server-side code that reads raw AI SDK messages sees them at the top level. `metadataOf()` and `currentContextTokens()` handle both.
 - `useAuiState` selectors must return primitives or stable references, or React re-renders forever.
+- Composer model choices are in-memory overrides cleared for fresh chats. Never restore the legacy `okaychat:selected-model` local-storage key, which masked account defaults. Resolution is composer → active project → account default → first available model. Settings fallback menu items persist `null` to clear overrides (`undefined` disappears from JSON). See `docs/research/assistant-ui.md`.
 - The chat request body comes from `AssistantChatTransport`: thread id is `id`, model and effort are `config.modelName` / `config.reasoningEffort` (registered in `ModelContextBridge`).
 - OpenCode Go ids missing from models.dev inherit the wire format of a sibling in the same family (`qwen3.6-plus` uses Anthropic like `qwen3.8-max`).
 - Documents are artifacts with bytes: `content` is the HTML/JSON source and `data`/`size` the built file. `edit_document` with source edits rebuilds; with `ops` it edits the binary and clears the source so a rebuild cannot undo it. Imported attachments are only editable with `ops`.

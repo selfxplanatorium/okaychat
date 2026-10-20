@@ -28,3 +28,9 @@ export function updateSettings(userId: string, patch: Partial<UserSettings>): Us
 function validLimit(value: unknown, min: number): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= min && value <= 50;
 }
+
+/** Preferred delegate first; the utility and chat models remain available alternatives. */
+export function subagentModelRefs(settings: UserSettings, chatModel: string): string[] {
+  const preferred = settings.subagentModel === "chat" ? chatModel : settings.subagentModel;
+  return [...new Set([preferred, settings.utilityModel, chatModel].filter((ref): ref is string => !!ref))];
+}

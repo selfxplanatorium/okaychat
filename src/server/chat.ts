@@ -32,7 +32,7 @@ import { SearchBudget, searchesInCurrentTurn, agentStepsInCurrentTurn } from "./
 import { conversationMemory, temporaryMemory } from "./memory.js";
 import { adaptPdfParts } from "./pdf-parts.js";
 import { projectContext } from "./projects.js";
-import { getSettings } from "./settings.js";
+import { getSettings, subagentModelRefs } from "./settings.js";
 import { ensureThread, getThread, isTemporaryThread, setCompaction, updateThread } from "./threads.js";
 import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "./usage.js";
 
@@ -344,7 +344,7 @@ export const chatRoutes = new Hono<AppEnv>()
 /** The default sub-agent model first, then the utility and chat models. Only models that can call tools. */
 async function allowedSubagentModels(userId: string, settings: UserSettings, chatModel: string): Promise<ModelInfo[]> {
   const models = await listModels(userId);
-  const refs = [...new Set([settings.subagentModel, settings.utilityModel, chatModel].filter((r): r is string => !!r))];
+  const refs = subagentModelRefs(settings, chatModel);
   return refs.map((ref) => models.find((m) => m.ref === ref)).filter((m): m is ModelInfo => !!m?.toolCall);
 }
 

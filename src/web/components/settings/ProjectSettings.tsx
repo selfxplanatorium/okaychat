@@ -51,10 +51,9 @@ function ProjectForm({ initial, onDone }: { initial?: Project; onDone: () => voi
       />
       <Select
         aria-label="Default model"
-        value={defaultModel}
-        onValueChange={setDefaultModel}
-        placeholder="Default model: keep the current one"
-        options={models.map((m) => ({ value: m.ref, label: `${m.name} · ${m.providerId}` }))}
+        value={defaultModel ?? ""}
+        onValueChange={(value) => setDefaultModel(value || null)}
+        options={[{ value: "", label: "Use account default model" }, ...models.map((m) => ({ value: m.ref, label: `${m.name} · ${m.providerId}` }))]}
       />
       {error && <p className="text-error settings-error text-xs">{error}</p>}
       <div className="flex justify-end gap-2">
