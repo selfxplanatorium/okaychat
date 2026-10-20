@@ -50,4 +50,5 @@ No planned core items remain. New work can be tracked as a subsequent pass.
 - Stream replay is kept in server memory for 15 minutes after the last update. Reload recovery works; pending generations do not survive a server restart.
 
 - No public usage/limits API for OpenCode Go was found. Go windows show our own recorded spend, not the remaining quota.
+- App load is too slow. A reload shows "Loading okaychat…" and then "Loading your chats…" for a noticeable time, both in near-invisible text. Profile and cut the startup path (auth check, `/api/*` fan-out in `useData.load`, lazy chunks) before restyling the loaders. The two loaders should then become one consistent state.
 - Live chat, tools, and web search are confirmed working against OpenCode Go with the user's key. The earlier local key had expired, which is why the first end-to-end test failed.
