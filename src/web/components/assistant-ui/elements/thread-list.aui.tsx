@@ -70,8 +70,8 @@ export const ThreadListSearch = forwardRef<
         type="search"
         value={value}
         onChange={(event) => onValueChange(event.target.value)}
-        aria-label="Search threads"
-        placeholder="Search threads"
+        aria-label="Search chats"
+        placeholder="Search chats"
         className={cn("h-8 ps-8 text-sm", className)}
         {...props}
       />
@@ -185,7 +185,7 @@ export const useThreadListGroups = (searchQuery = "") => {
       .filter(
         ({ id }) =>
           !isAnonymousChat(itemsById.get(id)?.remoteId) &&
-          (!query || (itemsById.get(id)?.title || "New Chat")
+          (!query || (itemsById.get(id)?.title || "New chat")
             .toLowerCase()
             .includes(query)),
       )
@@ -307,7 +307,7 @@ export const ThreadListNew = forwardRef<
               data-slot="aui_thread-list-new-label"
               className={cn("whitespace-nowrap", labelClassName)}
             >
-              New Thread
+              New chat
             </span>
           </>
         )}
@@ -322,7 +322,7 @@ const ThreadListSkeleton: FC = () => {
   return (
     <div
       role="status"
-      aria-label="Loading threads"
+      aria-label="Loading chats"
       className="flex flex-col gap-0.5"
     >
       {Array.from({ length: 5 }, (_, i) => (
@@ -379,7 +379,7 @@ export const ThreadListItem: FC = () => {
               className="text-muted-foreground me-1.5 size-3.5 shrink-0 animate-spin"
             />
           )}
-          <ThreadListItemTitle fallback="New Chat" />
+          <ThreadListItemTitle fallback="New chat" />
           {isRunning && <span className="sr-only">Running</span>}
         </ThreadListItemPrimitive.Trigger>
       )}
@@ -483,7 +483,7 @@ const ThreadListItemRename: FC<{
       ref={inputRef}
       autoFocus
       data-slot="aui_thread-list-item-rename"
-      aria-label="Rename thread"
+      aria-label="Rename chat"
       value={value}
       className="h-7 min-w-0 flex-1 ps-2.5 pe-9 text-sm"
       onChange={(event) => setValue(event.target.value)}
