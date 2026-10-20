@@ -30,7 +30,7 @@ export const TooltipIconButton = forwardRef<
               size="icon"
               {...rest}
               className={cn(
-                "aui-button-icon size-6 p-1",
+                "aui-button-icon size-6 p-1 pointer-coarse:size-9 pointer-coarse:p-2",
                 className,
               )}
               ref={ref}

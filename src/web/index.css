@@ -18,6 +18,54 @@
   [role="button"]:not(:disabled) {
     cursor: pointer;
   }
+  /* App chrome, not a page: no grey tap flash, no pull-to-refresh or rubber band
+     dragging the whole shell, no double-tap zoom delay on controls. */
+  html {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+  body {
+    overscroll-behavior: none;
+  }
+  button,
+  a,
+  [role="button"],
+  [role="option"],
+  [role="menuitem"],
+  label {
+    touch-action: manipulation;
+  }
+  /* Long-pressing a control should press it, not select its label or open the link callout. */
+  button,
+  [role="button"],
+  [role="option"],
+  [role="menuitem"],
+  nav a {
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+}
+
+/* iOS zooms into any focused field under 16px. Unlayered so it beats text-sm on inputs. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"]),
+  textarea,
+  select {
+    font-size: max(1rem, 1em);
+  }
+}
+
+/* Safe areas for notches, rounded corners, and the home indicator (viewport-fit=cover). */
+@utility safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+@utility safe-x {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+@utility safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 /* Panels animate with the T3Code "panel animation duration" setting. */

@@ -50,6 +50,8 @@ The implementation should use the existing Node/SQLite stack, without a vector d
 
 ### Implemented API and limits
 
+When Use memory is off, the automatic-saving row is muted and explains how to enable it. Its disabled switch preserves the saved preference. Base UI switches expose `data-disabled` on their root; shared disabled styling uses that attribute so unavailable switches are dimmed and desaturated even when their saved value is on.
+
 `src/server/memory.ts` owns `/api/memory`, entry CRUD, preferences, preview/import, and JSON/text exports. The table encrypts content and keeps a content hash for duplicate detection.
 
 Threat model for memory encryption (`crypto.ts`, AES-256-GCM, one server-wide key derived from `OKAYCHAT_SECRET`):

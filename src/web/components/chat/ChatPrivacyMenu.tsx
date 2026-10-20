@@ -52,7 +52,7 @@ function ColorSchemeToggle() {
 }
 
 const ghostButtonClass = (active: boolean) => cn(
-  "surface-glass relative z-20 inline-flex size-8 items-center justify-center rounded-lg border transition-colors duration-(--motion-fast) ease-out-quart disabled:opacity-50",
+  "surface-glass relative z-20 inline-flex size-8 pointer-coarse:size-10 items-center justify-center rounded-lg border transition-colors duration-(--motion-fast) ease-out-quart disabled:opacity-50",
   active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
 );
 
@@ -141,7 +141,7 @@ export function ChatPrivacyMenu() {
             </TooltipTrigger>
             <TooltipContent side="bottom">{ghostLabel}</TooltipContent>
           </Tooltip>
-          <PopoverContent align="end" className="w-72 max-w-[calc(100vw-1rem)] p-4">
+          <PopoverContent align="end" className="w-72 max-w-[calc(100vw-1rem)] p-4 pointer-coarse:[&_button]:min-h-11">
             <h2 className="text-sm font-medium">Anonymous chat</h2>
             <p className="text-muted-foreground mt-1 text-xs">This chat is not saved. Save it to keep it in your history, or end it to discard it.</p>
             <div className="mt-4 flex flex-col gap-2">
@@ -153,7 +153,7 @@ export function ChatPrivacyMenu() {
         </Popover>
       )}
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger className="surface-glass text-muted-foreground hover:text-foreground relative z-20 inline-flex size-8 items-center justify-center rounded-lg border transition-colors duration-(--motion-fast)" aria-label="Chat options">
+        <PopoverTrigger className="surface-glass text-muted-foreground hover:text-foreground relative z-20 inline-flex size-8 pointer-coarse:size-10 items-center justify-center rounded-lg border transition-colors duration-(--motion-fast)" aria-label="Chat options">
           <MoreHorizontalIcon className="size-4" />
         </PopoverTrigger>
         <PopoverContent align="end" className="w-80 max-w-[calc(100vw-1rem)] p-4">
@@ -173,10 +173,10 @@ export function ChatPrivacyMenu() {
           </> : <>
             <div className="my-4 flex items-center justify-between gap-4">
               <div>
-                <label htmlFor="chat-memory" className="text-sm font-medium">Use memory for this chat</label>
-                <p className="text-muted-foreground mt-1 text-xs">{memoryEnabled === false ? "Memory is paused in your account settings." : "Allow saved memories and new memories in this chat."}</p>
+                <label htmlFor="chat-memory" className={cn("text-sm font-medium", memoryEnabled !== true && "text-muted-foreground")}>Use memory for this chat</label>
+                <p id="chat-memory-description" className="text-muted-foreground mt-1 text-xs">{memoryEnabled === false ? "Turn on Use memory in Memory settings to enable this control." : memoryEnabled !== true ? "Checking account memory settings…" : "Allow saved memories and new memories in this chat."}</p>
               </div>
-              <Switch id="chat-memory" checked={memoryEnabled === true && !meta?.memoryDisabled} disabled={busy || running || memoryEnabled !== true} onCheckedChange={async (enabled) => {
+              <Switch id="chat-memory" aria-describedby="chat-memory-description" checked={memoryEnabled === true && !meta?.memoryDisabled} disabled={busy || running || memoryEnabled !== true} onCheckedChange={async (enabled) => {
                 setBusy(true);
                 setError(null);
                 try {

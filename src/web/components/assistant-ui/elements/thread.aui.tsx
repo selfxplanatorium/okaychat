@@ -595,6 +595,9 @@ const ThreadSuggestionItem: FC = () => {
   );
 };
 
+// Touch devices open the keyboard on focus, which would cover half the screen on every chat switch.
+const finePointer = typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches;
+
 const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
   return (
     <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
@@ -608,7 +611,7 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
             placeholder="Send a message..."
             className="aui-composer-input caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base leading-6 outline-none"
             rows={1}
-            autoFocus={autoFocus}
+            autoFocus={autoFocus && finePointer}
             enterKeyHint="send"
             aria-label="Message input"
           />
@@ -650,7 +653,7 @@ const ComposerAction: FC = () => {
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="aui-composer-dictate text-muted-foreground hover:text-foreground size-7 rounded-full"
+                className="aui-composer-dictate text-muted-foreground hover:text-foreground size-7 pointer-coarse:size-9 rounded-full"
                 aria-label="Start voice input"
               >
                 <MicIcon className="aui-composer-dictate-icon size-4" />
@@ -665,7 +668,7 @@ const ComposerAction: FC = () => {
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="aui-composer-stop-dictation text-destructive size-7 rounded-full"
+                className="aui-composer-stop-dictation text-destructive size-7 pointer-coarse:size-9 rounded-full"
                 aria-label="Stop voice input"
               >
                 <SquareIcon className="aui-composer-stop-dictation-icon size-3.5 animate-pulse fill-current" />
@@ -675,14 +678,15 @@ const ComposerAction: FC = () => {
         </AuiIf>
         {/* One slot for both controls: they swap with a crossfade and a scale
             rather than the button cutting in place. */}
-        <span className="relative size-7 shrink-0">
+        <span className="relative size-7 pointer-coarse:size-9 shrink-0">
           <span
             inert={!showSend}
             className={cn(
               "absolute inset-0 transition-[opacity,scale]",
               showSend
                 ? "scale-100 opacity-100 duration-(--motion-base) ease-out-quart"
-                : "pointer-events-none scale-50 opacity-0 duration-(--motion-fast) ease-in-quart",
+                : // Held for a beat so the arrow's launch (icons.css) is seen before the stop control takes over.
+                  "pointer-events-none scale-50 opacity-0 delay-150 duration-(--motion-fast) ease-in-quart",
             )}
           >
             <ComposerPrimitive.Send asChild>

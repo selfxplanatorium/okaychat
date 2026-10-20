@@ -92,6 +92,7 @@ docs/                 Reusable documentation (see below)
 - `docs/research/account-profile.md`: profile photo validation, resizing, storage, and private serving.
 - `docs/research/step-limits.md`: independent agent/search limits and shared delegated-search budgets.
 - `docs/research/code-sandbox.md`: the `run_code` sandbox container, its safeguards, and the runner API.
+- `docs/research/mobile-pwa.md`: manifest, service worker, install requirements, safe areas, touch sizing, drawer gestures.
 
 Add a new file under `docs/research/` whenever you research an external API or library.
 

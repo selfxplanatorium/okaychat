@@ -138,14 +138,17 @@ export function GeneralSettings() {
         )}
         <SettingsRow
           label="Code execution"
+          className={!sandbox?.configured ? "text-muted-foreground" : undefined}
           description={
-            sandbox && !sandbox.configured
+            <span id="code-execution-description">{!sandbox
+              ? "Checking sandbox availability…"
+              : !sandbox.configured
               ? "Not set up on this server. An admin can add the sandbox container (see docker-compose.yml)."
               : sandbox && !sandbox.reachable
                 ? "The sandbox container is configured but not reachable right now."
-                : "Lets models run Python and Bash in a private sandbox for each chat, with files that persist between runs."
+                : "Lets models run Python and Bash in a private sandbox for each chat, with files that persist between runs."}</span>
           }
-          control={<Switch checked={settings.codeExecution && !!sandbox?.configured} disabled={!sandbox?.configured} onCheckedChange={(codeExecution) => update({ codeExecution })} aria-label="Code execution" />}
+          control={<Switch checked={settings.codeExecution && !!sandbox?.configured} disabled={!sandbox?.configured} onCheckedChange={(codeExecution) => update({ codeExecution })} aria-label="Code execution" aria-describedby="code-execution-description" />}
         />
         <SettingsRow
           label="Image generation"

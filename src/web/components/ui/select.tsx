@@ -14,6 +14,7 @@ export function Select<T extends string>({
   options,
   className,
   placeholder,
+  disabled = false,
   onOpenChange,
   "aria-label": ariaLabel,
 }: {
@@ -22,12 +23,14 @@ export function Select<T extends string>({
   options: Array<SelectOption<T>>;
   className?: string;
   placeholder?: string;
+  disabled?: boolean;
   onOpenChange?: (open: boolean) => void;
   "aria-label"?: string;
 }) {
   const current = options.find((o) => o.value === value);
   return (
     <SelectPrimitive.Root
+      disabled={disabled}
       value={value}
       onValueChange={(v) => v !== null && onValueChange(v as T)}
       onOpenChange={onOpenChange}
@@ -35,7 +38,7 @@ export function Select<T extends string>({
       <SelectPrimitive.Trigger
         aria-label={ariaLabel}
         className={cn(
-          "bg-muted/60 hover:bg-muted focus-visible:ring-ring/50 inline-flex h-8 w-full min-w-0 items-center justify-between gap-2 rounded-lg border px-2.5 text-sm transition-[color,background-color,border-color,box-shadow] duration-[var(--motion-fast)] ease-out-quart outline-none focus-visible:ring-2",
+          "bg-muted/60 enabled:hover:bg-muted focus-visible:ring-ring/50 inline-flex h-8 w-full min-w-0 items-center justify-between gap-2 rounded-lg border px-2.5 text-sm transition-[color,background-color,border-color,box-shadow] duration-[var(--motion-fast)] ease-out-quart outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50 data-disabled:cursor-not-allowed data-disabled:opacity-50",
           className,
         )}
       >
@@ -60,7 +63,7 @@ export function Select<T extends string>({
               <SelectPrimitive.Item
                 key={o.value}
                 value={o.value}
-                className="data-highlighted:depth-primary data-highlighted:text-primary-foreground flex cursor-default items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none transition-colors duration-[var(--motion-instant)] ease-out-quart"
+                className="data-highlighted:depth-primary data-highlighted:text-primary-foreground data-highlighted:[&_.text-muted-foreground]:text-primary-foreground flex cursor-default items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 pointer-coarse:py-2.5 text-sm outline-none select-none transition-colors duration-[var(--motion-instant)] ease-out-quart"
               >
                 <SelectPrimitive.ItemText>{o.label}</SelectPrimitive.ItemText>
                 <SelectPrimitive.ItemIndicator className="transition-[opacity,scale] duration-[var(--motion-base)] ease-spring data-[starting-style]:scale-0 data-[starting-style]:opacity-0">

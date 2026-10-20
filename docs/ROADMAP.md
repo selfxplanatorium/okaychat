@@ -35,6 +35,7 @@ Status as of 2026-10-20. Update this file when a feature ships or a plan changes
 | Generative UI | `render_spec` (declarative components from our themed catalog: cards, tables, metrics, bars, forms) and `show_widget` / `edit_widget` (HTML/SVG in a null-origin sandbox with render reports for repair), via `generative-frame` | Tools run in the browser. See `docs/research/generative-ui.md`. Toggle in Settings → General |
 | Image generation | `generate_image` through each user's own ChatGPT plan via the Codex CLI. Device-code login in Settings → General, credentials encrypted at rest, references for edits, images inline with download | See `docs/research/codex-images.md` |
 | Code execution | `run_code` runs Python and Bash in a separate `sandbox` container. One workspace per chat with its own uid, files persist between runs, attachments copied in by `file_id`, images inline and files downloadable. Per-run limits, no internet in compose, read-only root | See `docs/research/code-sandbox.md`. Toggle in Settings → General |
+| Mobile app | Installable PWA (manifest, maskable icons, offline shell), safe areas, touch-sized controls, swipe drawer, native-style settings rows | Install needs HTTPS. See `docs/research/mobile-pwa.md` |
 | Deploy | Dockerfile (Node 22 + Python venv with Scrapling, optional Chromium), Compose with SearXNG | `SCRAPLING_BROWSER=false` build arg for a smaller image |
 
 ## Pass 2: completed

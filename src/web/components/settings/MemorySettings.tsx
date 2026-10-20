@@ -133,7 +133,7 @@ function MemoryImport({ onImported, disabled }: { onImported: (message: string) 
           </div>
         </details>
         <fieldset disabled={busy || disabled} className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <Select aria-label="Memory import source" className="sm:w-48" value={source} onValueChange={(value) => { setSource(value); setPreview(null); }} options={[{ value: "claude", label: "From Claude" }, { value: "chatgpt", label: "From ChatGPT" }, { value: "okaychat", label: "From okaychat" }, { value: "manual", label: "Other text" }]} />
+          <Select disabled={busy || disabled} aria-label="Memory import source" className="sm:w-48" value={source} onValueChange={(value) => { setSource(value); setPreview(null); }} options={[{ value: "claude", label: "From Claude" }, { value: "chatgpt", label: "From ChatGPT" }, { value: "okaychat", label: "From okaychat" }, { value: "manual", label: "Other text" }]} />
           <input ref={fileInput} type="file" hidden accept=".txt,.md,.markdown,.json,text/plain,text/markdown,application/json" onChange={(e) => void readFile(e.target.files?.[0])} />
           <Button variant="outline" disabled={busy || disabled} onClick={() => fileInput.current?.click()}><UploadIcon /> Choose text file</Button>
         </fieldset>
@@ -218,7 +218,14 @@ export function MemorySettings() {
       {notice && <p className="text-muted-foreground text-sm" role="status">{notice}</p>}
       {snapshot && <SettingsSection title="Memory controls">
         <SettingsRow label="Use memory" description="Include saved facts in your chats. Turning this off pauses use and saving without deleting anything." control={<Switch aria-label="Use memory" checked={snapshot.preferences.enabled} disabled={busy} onCheckedChange={(enabled) => void preferences({ enabled })} />} />
-        <SettingsRow label="Save memories automatically" description="Let the assistant save lasting facts you share. When off, ask it to remember something and approve the change in chat." control={<Switch aria-label="Save memories automatically" checked={snapshot.preferences.autoSave} disabled={busy || !snapshot.preferences.enabled} onCheckedChange={(autoSave) => void preferences({ autoSave })} />} />
+        <SettingsRow
+          label="Save memories automatically"
+          className={!snapshot.preferences.enabled ? "text-muted-foreground" : undefined}
+          description={<span id="memory-auto-save-description">{snapshot.preferences.enabled
+            ? "Let the assistant save lasting facts you share. When off, ask it to remember something and approve the change in chat."
+            : "Turn on Use memory to enable automatic saving."}</span>}
+          control={<Switch aria-label="Save memories automatically" aria-describedby="memory-auto-save-description" checked={snapshot.preferences.autoSave} disabled={busy || !snapshot.preferences.enabled} onCheckedChange={(autoSave) => void preferences({ autoSave })} />}
+        />
         <p className="text-muted-foreground px-4 py-3 text-xs">Memories belong to your account. When used, they are sent to your selected model provider. Automatic saving requires a model with tool support and is selective. Deleting a chat does not delete its saved memories.</p>
       </SettingsSection>}
       {snapshot && <SettingsSection title={`Saved memories (${snapshot.entries.length})`} description={snapshot.preferences.enabled ? "Review and correct what the assistant remembers." : "Memory is paused. You can still manage and import saved facts."} action={editing !== "new" && <Button size="sm" variant="outline" disabled={busy} onClick={() => { setEditing("new"); setDeleting(null); }}><PlusIcon /> Add memory</Button>}>

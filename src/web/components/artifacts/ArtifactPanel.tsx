@@ -191,7 +191,7 @@ function ArtifactPanelBody({
       data-open={revealed}
       style={{ "--artifact-width": `${width}px` } as React.CSSProperties}
       className={cn(
-        "shell-artifact bg-background relative flex h-full shrink-0 flex-col overflow-hidden max-md:fixed max-md:inset-0 max-md:z-40",
+        "shell-artifact bg-background relative flex h-full shrink-0 flex-col overflow-hidden max-md:safe-top max-md:safe-bottom max-md:fixed max-md:inset-0 max-md:z-40",
         revealed ? "md:w-(--artifact-width)" : "md:w-0",
         "max-md:w-full",
         !revealed && "pointer-events-none",

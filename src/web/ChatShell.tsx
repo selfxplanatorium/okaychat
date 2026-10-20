@@ -6,6 +6,7 @@ import { AppLoading } from "@/components/AppLoading";
 import { ArtifactPanel } from "@/components/artifacts/ArtifactPanel";
 import { ChatView } from "@/components/chat/ChatView";
 import { Sidebar } from "@/components/layout/Sidebar";
+import { useDrawerSwipe } from "@/components/layout/use-drawer-swipe";
 import { Onboarding } from "@/components/Onboarding";
 import { ChatPrivacyMenu } from "@/components/chat/ChatPrivacyMenu";
 import { ThemeEditorHost } from "@/components/settings/theme/ThemeEditorHost";
@@ -29,7 +30,7 @@ function ChatHeader({ sidebarOpen, onToggle }: { sidebarOpen: boolean; onToggle:
         type="button"
         onClick={onToggle}
         aria-label="Open sidebar"
-        className="surface-glass text-muted-foreground hover:text-foreground relative z-20 rounded-lg border p-1.5 transition-colors duration-(--motion-fast) ease-out-quart"
+        className="surface-glass text-muted-foreground hover:text-foreground relative z-20 rounded-lg border p-1.5 pointer-coarse:p-2.5 transition-colors duration-(--motion-fast) ease-out-quart"
       >
         <PanelLeftIcon className="size-4" />
       </button>
@@ -41,7 +42,7 @@ function ChatHeader({ sidebarOpen, onToggle }: { sidebarOpen: boolean; onToggle:
           useChatPrivacyStore.getState().set(aui.threadListItem.getState().id, { temporary: false, personalized: true });
           navigate("/");
         }}
-        className="surface-glass text-muted-foreground hover:text-foreground relative z-20 rounded-lg border p-1.5 transition-colors duration-(--motion-fast) ease-out-quart"
+        className="surface-glass text-muted-foreground hover:text-foreground relative z-20 rounded-lg border p-1.5 pointer-coarse:p-2.5 transition-colors duration-(--motion-fast) ease-out-quart"
       >
         <SquarePenIcon className="size-4" />
       </button>
@@ -79,6 +80,7 @@ export function Shell({ userId }: { userId: string }) {
   useEffect(() => {
     closeOnMobile();
   }, [location, closeOnMobile]);
+  useDrawerSwipe(sidebarOpen, setSidebarOpen, loaded && !inSettings);
 
   const reload = useCallback(() => {
     setLoadError(null);
@@ -117,7 +119,7 @@ export function Shell({ userId }: { userId: string }) {
 
   return (
     <RuntimeProvider>
-      <div className="animate-fade-in depth-canvas flex h-full">
+      <div className="animate-fade-in depth-canvas safe-top safe-x flex h-full">
         <ThreadSwitchWatcher onSwitch={closeOnMobile} />
         {/* Settings has its own navigation rail. sidebarOpen is kept here, so the sidebar returns in the same state. */}
         {!inSettings && <Sidebar open={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} />}
@@ -151,7 +153,7 @@ export function Shell({ userId }: { userId: string }) {
               {["scheduled", "library", "plugins", "projects"].map((page) => (
                 <Route key={page} path={`/${page}`}>
                   <div className={`flex h-12 shrink-0 items-center px-3 ${sidebarOpen ? "md:hidden" : ""}`}>
-                    <button type="button" aria-label="Open sidebar" onClick={() => setSidebarOpen(true)} className="text-muted-foreground hover:bg-accent rounded-lg p-2"><PanelLeftIcon className="size-4" /></button>
+                    <button type="button" aria-label="Open sidebar" onClick={() => setSidebarOpen(true)} className="text-muted-foreground hover:bg-accent rounded-lg p-2 pointer-coarse:p-3"><PanelLeftIcon className="size-4" /></button>
                   </div>
                   <main className="min-h-0 flex-1 overflow-y-auto">
                     <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">Loading…</p>}><NavigationPage page={page} /></Suspense>
@@ -159,6 +161,8 @@ export function Shell({ userId }: { userId: string }) {
                 </Route>
               ))}
               <Route>
+                {/* Phones have no header bar, so messages scrolling under the floating buttons blur out instead of colliding with them. */}
+                <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 z-10 h-20 bg-background/75 backdrop-blur-md [mask-image:linear-gradient(to_bottom,black_55%,transparent)] md:hidden" />
                 <ChatHeader sidebarOpen={sidebarOpen} onToggle={() => setSidebarOpen(true)} />
                 <ChatPrivacyMenu />
                 <ChatView />

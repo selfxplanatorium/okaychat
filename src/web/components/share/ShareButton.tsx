@@ -35,12 +35,12 @@ export function ShareButton() {
   return (
     <Popover>
       <PopoverTrigger
-        className="surface-glass text-muted-foreground hover:text-foreground animate-fade-in relative z-20 rounded-lg border p-1.5 transition-colors duration-(--motion-fast) ease-out-quart"
+        className="surface-glass text-muted-foreground hover:text-foreground animate-fade-in relative z-20 rounded-lg border p-1.5 pointer-coarse:p-2.5 transition-colors duration-(--motion-fast) ease-out-quart"
         aria-label="Share chat"
       >
         <Share2Icon className="size-4" />
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 p-3">
+      <PopoverContent align="end" className="w-80 max-w-[calc(100vw-1rem)] p-3">
         <p className="mb-1 text-sm font-medium">Share this chat</p>
         <p className="text-muted-foreground mb-3 text-xs">Anyone with the link can read the chat, including later messages. Reasoning, tool inputs, and costs stay private.</p>
         {token ? (

@@ -71,24 +71,25 @@ export function ModelPicker() {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
-        className="group hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 max-w-56 min-w-0 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart"
+        className="group hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 pointer-coarse:h-9 max-w-56 min-w-0 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart"
         aria-label="Choose model"
       >
         <TextSwap value={active?.name ?? "Choose model"} className="truncate" />
         <ChevronDownIcon className="size-3 shrink-0 transition-transform duration-(--motion-base) ease-out-expo group-aria-expanded:rotate-180" />
       </PopoverTrigger>
-      <PopoverContent side="top" className="flex max-h-[min(32rem,70vh)] w-[min(26rem,92vw)] flex-col p-0">
+      <PopoverContent side="top" className="flex max-h-[min(32rem,70dvh)] w-[min(26rem,calc(100vw-1rem))] flex-col p-0">
         <div className="flex items-center gap-2 border-b px-3 py-2">
           <SearchIcon className="text-muted-foreground size-4" />
           <input
-            autoFocus
+            // Touch: focusing opens the keyboard over the list people came to scroll.
+            autoFocus={window.matchMedia("(pointer: fine)").matches}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search models"
-            className="placeholder:text-muted-foreground h-7 flex-1 bg-transparent text-sm outline-none"
+            className="placeholder:text-muted-foreground h-7 pointer-coarse:h-9 min-w-0 flex-1 bg-transparent text-sm outline-none"
           />
         </div>
-        <div className="flex-1 overflow-y-auto p-1">
+        <div className="flex-1 overflow-y-auto overscroll-contain p-1">
           {groups.map((group) => (
             <div key={group.id} className="mb-1">
               <div className="text-muted-foreground flex items-center gap-2 px-2 pt-2 pb-1 text-xs font-medium">
@@ -111,7 +112,7 @@ export function ModelPicker() {
                       setOpen(false);
                     }
                   }}
-                  className="group hover:bg-accent focus-visible:bg-accent flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 outline-none transition-colors duration-(--motion-fast) ease-out-quart"
+                  className="group hover:bg-accent focus-visible:bg-accent flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 pointer-coarse:py-2.5 active:bg-accent outline-none transition-colors duration-(--motion-fast) ease-out-quart"
                 >
                   <CheckIcon className={cn("size-3.5 shrink-0 transition-opacity duration-(--motion-fast) ease-out-quart", m.ref === active?.ref ? "opacity-100" : "opacity-0")} />
                   <div className="min-w-0 flex-1">
@@ -132,8 +133,8 @@ export function ModelPicker() {
                       void toggleFavorite(m.ref);
                     }}
                     className={cn(
-                      "text-muted-foreground hover:text-foreground rounded p-1 opacity-0 transition-[opacity,color] duration-(--motion-fast) ease-out-quart group-hover:opacity-100",
-                      favorites.includes(m.ref) && "text-warning opacity-100",
+                      "text-muted-foreground hover:text-foreground rounded p-1 pointer-coarse:p-2.5 opacity-0 pointer-coarse:opacity-60 transition-[opacity,color] duration-(--motion-fast) ease-out-quart group-hover:opacity-100",
+                      favorites.includes(m.ref) && "text-warning opacity-100 pointer-coarse:opacity-100",
                     )}
                   >
                     <StarIcon className={cn("size-3.5", favorites.includes(m.ref) && "fill-current")} />
@@ -168,7 +169,7 @@ export function EffortPicker() {
   const current = efforts[active.ref];
   return (
     <Menu>
-      <MenuTrigger className="hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart">
+      <MenuTrigger className="hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 shrink-0 pointer-coarse:h-9 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart">
         <BrainIcon className="size-3.5" />
         <TextSwap value={current ? EFFORT_LABELS[current] : "Default"} />
       </MenuTrigger>

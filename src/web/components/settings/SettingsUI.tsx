@@ -8,11 +8,11 @@ export function SettingsPage({ title, description, children }: { title: string; 
   // reads top to bottom instead of appearing all at once.
   let group = 0;
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-6 py-8">
-      <header className="stagger animate-rise-in" style={{ "--i": 0 } as CSSProperties}>
-        <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-4 pt-8 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-6">
+      {(title || description) && <header className="stagger animate-rise-in" style={{ "--i": 0 } as CSSProperties}>
+        {title && <h1 className="text-xl font-semibold tracking-tight">{title}</h1>}
         {description && <p className="text-muted-foreground mt-1 text-sm">{description}</p>}
-      </header>
+      </header>}
       {Children.map(children, (child) =>
         isValidElement(child) ? (
           <div className="stagger animate-rise-in" style={{ "--i": ++group } as CSSProperties}>
@@ -57,8 +57,9 @@ export function SettingsRow({
   className?: string;
 }) {
   return (
-    <div className={cn("flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between", className)}>
-      <div className="min-w-0">
+    <div className={cn("flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-4 py-3 sm:flex-nowrap", className)}>
+      {/* Short controls (switches, small buttons) share the label's line like a native list row; wide ones wrap below it. */}
+      <div className="min-w-0 flex-[1_1_12rem]">
         <div className="flex items-center gap-1.5 text-sm font-medium">
           {label}
           {reset && (
@@ -69,7 +70,7 @@ export function SettingsRow({
         </div>
         {description && <div className="text-muted-foreground text-xs">{description}</div>}
       </div>
-      <div className="flex shrink-0 items-center gap-2">{control}</div>
+      <div className="flex max-w-full shrink-0 items-center gap-2">{control}</div>
     </div>
   );
 }

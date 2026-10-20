@@ -346,7 +346,8 @@ export const ThreadListItem: FC = () => {
   return (
     <ThreadListItemPrimitive.Root
       data-slot="aui_thread-list-item"
-      className="group hover:bg-sidebar-row-hover focus-visible:bg-sidebar-row-hover data-active:depth-row-active has-focus-visible:bg-sidebar-row-hover has-data-[state=open]:bg-sidebar-row-hover relative flex h-8 items-center rounded-lg transition-[background-color,box-shadow] duration-(--motion-fast) ease-out-quart focus-visible:outline-none"
+      data-glide
+      className="group hover:bg-sidebar-row-hover focus-visible:bg-sidebar-row-hover data-active:depth-row-active has-focus-visible:bg-sidebar-row-hover has-data-[state=open]:bg-sidebar-row-hover active:bg-sidebar-row-hover relative flex h-8 pointer-coarse:h-11 items-center rounded-lg transition-[background-color,box-shadow] duration-(--motion-fast) ease-out-quart focus-visible:outline-none"
     >
       {isRenaming ? (
         <ThreadListItemRename
@@ -359,7 +360,7 @@ export const ThreadListItem: FC = () => {
         <ThreadListItemPrimitive.Trigger
           ref={triggerRef}
           data-slot="aui_thread-list-item-trigger"
-          className="focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center rounded-md px-2.5 text-start text-sm outline-none group-hover:pe-9 group-has-focus-visible:pe-9 group-has-data-[state=open]:pe-9 group-data-active:pe-9 focus-visible:ring-1"
+          className="focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center rounded-md px-2.5 text-start text-sm outline-none group-hover:pe-9 group-has-focus-visible:pe-9 group-has-data-[state=open]:pe-9 group-data-active:pe-9 pointer-coarse:pe-11 focus-visible:ring-1"
         >
           {isRunning && (
             <Loader2Icon
@@ -500,7 +501,7 @@ const ThreadListItemMore: FC<{ onRename: () => void }> = ({ onRename }) => {
           variant="ghost"
           size="icon"
           data-slot="aui_thread-list-item-more"
-          className="data-[state=open]:bg-accent absolute end-1.5 top-1/2 size-6 -translate-y-1/2 p-0 opacity-0 transition-[opacity,color,background-color] duration-(--motion-fast) ease-out-quart group-hover:opacity-100 group-has-focus-visible:opacity-100 group-data-active:opacity-100 data-[state=open]:opacity-100"
+          className="data-[state=open]:bg-accent absolute end-1.5 top-1/2 size-6 -translate-y-1/2 p-0 opacity-0 transition-[opacity,color,background-color] duration-(--motion-fast) ease-out-quart pointer-coarse:end-0.5 pointer-coarse:size-10 pointer-coarse:opacity-60 group-hover:opacity-100 group-has-focus-visible:opacity-100 group-data-active:opacity-100 data-[state=open]:opacity-100"
         >
           <MoreHorizontalIcon className="size-3.5" />
           <span className="sr-only">More options</span>

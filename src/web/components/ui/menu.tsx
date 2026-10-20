@@ -37,7 +37,7 @@ function MenuItem({ className, ...props }: MenuPrimitive.Item.Props) {
   return (
     <MenuPrimitive.Item
       className={cn(
-        "data-highlighted:depth-primary data-highlighted:text-primary-foreground flex cursor-default items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none transition-colors duration-[var(--motion-instant)] ease-out-quart data-disabled:opacity-50 [&_svg]:size-4",
+        "data-highlighted:depth-primary data-highlighted:text-primary-foreground flex cursor-default items-center gap-2 rounded-lg px-2.5 py-1.5 pointer-coarse:py-2.5 text-sm outline-none select-none transition-colors duration-[var(--motion-instant)] ease-out-quart data-disabled:opacity-50 [&_svg]:size-4",
         className,
       )}
       {...props}

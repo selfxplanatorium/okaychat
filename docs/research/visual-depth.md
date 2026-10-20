@@ -38,3 +38,11 @@ Settings cards (`SettingsUI` sections, theme library cards, color scheme tiles) 
 - The composer background is the card color at glass opacity + 30%, capped at 100%. The sidebar uses the sidebar color at glass opacity + 25%. Both still follow the Glass opacity setting.
 - The light default accent (`#62691b`) is darker than the icon's lime because it must keep white text readable. The gradient brightens its top edge rather than changing the palette.
 - Motion tokens stay in `src/web/motion/`. `chat-message-in` now adds a small scale and a 3 px blur to the rise.
+
+## Disabled controls
+
+Base UI switches expose `data-disabled` on the root rather than a native `disabled` attribute. The shared switch dims and desaturates that state. Select triggers support both native `disabled` (including disabled fieldsets) and `data-disabled`; pass `disabled` to the shared `Select` to disable its root and popup interactions together. Prerequisite-dependent settings also mute their labels and explain the prerequisite in text associated with the control. Native artifact-card buttons dim while unavailable.
+
+Highlighted select items use `text-primary-foreground` for both the main label and nested muted text, such as a model provider. Muted text must not keep the normal surface color over the accent gradient.
+
+Sidebar navigation shortcuts, including New chat, use the same quiet hover/selected row surface (`bg-sidebar-row-hover`), without accent elevation. Accent controls remain reserved for actions within the page.
