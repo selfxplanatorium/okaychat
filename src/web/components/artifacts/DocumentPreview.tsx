@@ -27,6 +27,9 @@ export function DocumentPreview({ kind, fileUrl, previewUrl, title, className }:
   return <SheetPreviewGrid url={previewUrl} title={title} className={className} />;
 }
 
+// Also used by the Library for uploaded Word files, which have no sheet-preview endpoint.
+export { DocxPreview };
+
 function DocxPreview({ url, title, className }: { url: string; title: string; className?: string }) {
   const container = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);

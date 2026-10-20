@@ -328,6 +328,42 @@ export interface SharedThread {
   messages: Array<{ id: string; role: "user" | "assistant"; parts: SharedPart[] }>;
 }
 
+/** Library entries grouped by what the browser can do with them. */
+export type LibraryKind = "image" | "document" | "pdf" | "spreadsheet" | "code" | "other";
+/** How the item entered the library: attached by the user or produced by the agent. */
+export type LibrarySource = "uploaded" | "generated";
+export type LibrarySort = "newest" | "oldest" | "name" | "size";
+
+export interface LibraryItem {
+  /** Stable across sources: the row id, or `artifact:<threadId>/<artifactId>` for artifacts. */
+  id: string;
+  name: string;
+  kind: LibraryKind;
+  mime: string;
+  /** Bytes; 0 when unknown (generated images get their real size from disk). */
+  size: number;
+  createdAt: number;
+  source: LibrarySource;
+  threadId: string | null;
+  threadTitle: string | null;
+  projectId: string | null;
+  /** Inline preview URL (images, PDFs, spreadsheets); null for text-only artifacts. */
+  previewUrl: string | null;
+  /** Bytes URL, when the item is a file. */
+  downloadUrl: string | null;
+  /** Set for artifacts so the web page can fetch their versions for the preview. */
+  artifactId?: string;
+  artifactKind?: ArtifactKind;
+  /** True when DELETE /api/library/:id supports this item. */
+  deletable: boolean;
+}
+
+export interface LibraryPage {
+  items: LibraryItem[];
+  /** Cursor for the next page; null at the end. */
+  nextCursor: string | null;
+}
+
 export interface AdminUser {
   id: string;
   email: string;
