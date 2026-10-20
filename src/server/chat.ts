@@ -32,6 +32,7 @@ import { SearchBudget, searchesInCurrentTurn, agentStepsInCurrentTurn } from "./
 import { conversationMemory, temporaryMemory } from "./memory.js";
 import { adaptPdfParts } from "./pdf-parts.js";
 import { projectContext } from "./projects.js";
+import { turnSkills } from "./skills.js";
 import { getSettings, subagentModelRefs } from "./settings.js";
 import { ensureThread, getThread, isTemporaryThread, setCompaction, updateThread } from "./threads.js";
 import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "./usage.js";
@@ -50,10 +51,13 @@ const chatBody = z.object({
   tools: z.record(z.string(), z.any()).optional(),
 });
 
-function systemPrompt(userPrompt: string, project: string, mcpInstructions: string[], artifacts: boolean, clientSystem?: string, memory?: string): string {
+function systemPrompt(userPrompt: string, project: string, mcpInstructions: string[], artifacts: boolean, skills: string, clientSystem?: string, memory?: string): string {
   // Order matters for caching: static text first, nothing that changes per request.
+  // Skills sit with the per-account static text: they change only when the user's skills change,
+  // which is rare enough that the occasional cache miss is fine.
   const parts = [BASE_SYSTEM, `Today's date: ${new Date().toISOString().slice(0, 10)}.`];
   if (artifacts) parts.push(ARTIFACT_INSTRUCTIONS);
+  if (skills) parts.push(skills);
   if (userPrompt.trim()) parts.push(`# User instructions\n${userPrompt.trim()}`);
   if (project) parts.push(project);
   if (mcpInstructions.length) parts.push(`# Tool server instructions\n${mcpInstructions.join("\n\n")}`);
@@ -119,9 +123,12 @@ export async function turnStream(opts: TurnOptions) {
       const memory = temporary
         ? personalized ? temporaryMemory(userId, query) : { context: "", instructions: undefined, tools: {} }
         : conversationMemory(userId, threadId, query);
+      // Sub-agents get the read-only pair (load/read) but never source search, install, or create.
+      const skills = turnSkills(user.id, { temporary, canCallTools: model.toolCall });
       // Built-in tools first, then MCP tools in sorted order, so the tool block is identical across turns.
       const readOnlyTools = {
         ...builtInWeb,
+        ...skills.subTools,
         // Sub-agents run unattended, so they get no tool that waits for approval.
         ...Object.fromEntries(Object.entries(mcp.tools).filter(([, t]) => !t.needsApproval)),
       };
@@ -137,6 +144,7 @@ export async function turnStream(opts: TurnOptions) {
       const tools: ToolSet = {
         ...builtInWeb,
         ...(model.toolCall ? memory.tools : {}),
+        ...(skills.tools),
         ...subagents,
         ...(useArtifacts ? artifactTools(threadId, user.id, { shots, canViewImages: model.inputModalities.includes("image") }) : {}),
         ...(model.toolCall && !temporary && codexConnected(user.id) ? imageTools(user.id, threadId, signal) : {}),
@@ -154,7 +162,7 @@ export async function turnStream(opts: TurnOptions) {
         converted.splice(lastUserIndex < 0 ? converted.length : lastUserIndex, 0, { role: "user", content: memory.context });
       }
       const memoryInstructions = [temporary ? "This is an anonymous chat. It is not saved in okaychat history and must never create or change saved memories. Do not claim that this hides the conversation from the selected model provider." : "", memory.instructions].filter(Boolean).join("\n\n");
-      const { system, messages } = handle.markCache(systemPrompt(personalized ? settings.systemPrompt : "", temporary ? "" : projectContext(userId, thread.projectId), mcp.instructions, useArtifacts, useGenerativeUI ? opts.clientSystem : undefined, memoryInstructions), [
+      const { system, messages } = handle.markCache(systemPrompt(personalized ? settings.systemPrompt : "", temporary ? "" : projectContext(userId, thread.projectId), mcp.instructions, useArtifacts, skills.context, useGenerativeUI ? opts.clientSystem : undefined, memoryInstructions), [
         ...(summary ? summaryMessages(summary) : []),
         ...converted,
       ]);

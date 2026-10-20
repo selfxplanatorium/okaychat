@@ -3,6 +3,7 @@ import { LibraryIcon } from "lucide-react";
 import { McpSettings } from "@/components/settings/McpSettings";
 import { ProjectSettings } from "@/components/settings/ProjectSettings";
 import { ScheduleSettings } from "@/components/settings/ScheduleSettings";
+import { SkillsSettings } from "@/components/settings/SkillsSettings";
 import { SettingsPage } from "@/components/settings/SettingsUI";
 import { cn } from "@/lib/utils";
 
@@ -29,12 +30,7 @@ function PluginsPage() {
         </div>
       </div>
       <div role="tabpanel" id={`plugin-panel-${tab}`} aria-labelledby={`plugin-tab-${tab}`} tabIndex={0}>
-        {tab === "mcp" ? <McpSettings embedded /> : (
-          <div className="mx-auto max-w-3xl px-6 py-10">
-            <h2 className="text-base font-medium">Skills are coming soon</h2>
-            <p className="text-muted-foreground mt-2 max-w-md text-sm">This is where you’ll add and manage reusable instructions for your chats.</p>
-          </div>
-        )}
+        {tab === "mcp" ? <McpSettings embedded /> : <SkillsSettings embedded />}
       </div>
     </div>
   );

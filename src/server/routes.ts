@@ -17,6 +17,7 @@ import { getProject, projectRoutes } from "./projects.js";
 import { scheduleRoutes } from "./schedules.js";
 import { searchRoutes } from "./search.js";
 import { shareRoutes } from "./shares.js";
+import { skillRoutes } from "./skills.js";
 import { deleteThreadImages, imageRoutes } from "./tools/image.js";
 import { deleteSandboxWorkspace, sandboxRoutes } from "./tools/sandbox.js";
 import { callbackUrl, disconnectServer, serverInfo, testServer } from "./mcp/manager.js";
@@ -177,6 +178,7 @@ const api = new Hono<AppEnv>()
   .route("/", sandboxRoutes)
   .route("/", scheduleRoutes)
   .route("/", projectRoutes)
+  .route("/skills", skillRoutes)
   .route("/", searchRoutes)
   .route("/", shareRoutes)
   .route("/", adminRoutes);

@@ -39,6 +39,7 @@ src/server/
   appearance.ts       Validated per-user appearance API (preferences + custom themes inside user_settings)
   account.ts          Account display name and private PNG/JPEG/WebP profile pictures (SQLite BLOBs)
   memory.ts           Encrypted account/project memories, model tools, reviewed import and portable export
+  skills.ts           Agent Skills: per-account SKILL.md packages, sources (GitHub/raw), model tools, approval
   projects.ts         Projects: instructions, pinned files, system prompt section
   admin.ts            Admin API: users, sign-up switch, server-wide provider keys
   shares.ts           Public read-only links (/api/public/shares, no auth)
@@ -89,6 +90,7 @@ docs/                 Reusable documentation (see below)
 - `docs/research/generative-ui.md`: `generative-frame` widgets and spec mode, browser-executed tools.
 - `docs/research/documents.md`: PDF/DOCX/XLSX tools, the HTML subset, in-place editing, Chromium lifecycle.
 - `docs/research/memory.md`: official Claude/ChatGPT memory research, okaychat memory controls, and transfer formats.
+- `docs/research/skills.md`: the Agent Skills format, sources, tools, approval flow, and caching.
 - `docs/research/account-profile.md`: profile photo validation, resizing, storage, and private serving.
 - `docs/research/step-limits.md`: independent agent/search limits and shared delegated-search budgets.
 - `docs/research/code-sandbox.md`: the `run_code` sandbox container, its safeguards, and the runner API.
@@ -122,7 +124,10 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 - DuckDuckGo HTML endpoints return 202 (bot wall) from many servers and Bing serves junk to scrapers. Search goes SearXNG, then Brave HTML, then DuckDuckGo lite.
 - Context fill uses the last step's input + output tokens, not the turn total.
 - Depth (highlights, tinted shadows, accent gradients) comes from `depth-*` utilities in `theme/depth.css`, derived from semantic tokens with `color-mix`. Use them instead of `shadow-*`/`bg-primary` on primitives, and never hardcode colors there or theme switches break. See `docs/research/visual-depth.md`.
-- Sidebar shortcuts are configurable per account (`sidebarItems` in General settings). Search is a global spotlight dialog (Ctrl/Cmd+K), independent of the project filter; selecting a result clears that filter. `/scheduled`, `/projects`, `/library`, and `/plugins` retain the chat sidebar and lazy-load `NavigationPage`; Library and Skills are placeholders. See `docs/research/assistant-ui.md`.
+- Sidebar shortcuts are configurable per account (`sidebarItems` in General settings). Search is a global spotlight dialog (Ctrl/Cmd+K), independent of the project filter; selecting a result clears that filter. `/scheduled`, `/projects`, `/library`, and `/plugins` retain the chat sidebar and lazy-load `NavigationPage`; Library is still a placeholder, Plugins holds MCP servers and Skills. See `docs/research/assistant-ui.md`.
+- Skills are Agent Skills (SKILL.md + optional files), stored per account. The model sees only the enabled-skills index in the stable system prefix; `load_skill`/`read_skill_file` fetch bodies on demand. `install_skill`/`create_skill` always require approval, exist only for non-anonymous chats with the preference on, and never reach delegates — `turnSkills()` returns a read-only `subTools` pair for them. Every skill-tool execution re-checks the captured preference revision, so switching skills off revokes tools mid-run. Normal skill CRUD does not bump the revision; tools read live tables. Skill sources are fetched server-side with 30 s/20 MB bounds and their content is stored as text — never executed. See `docs/research/skills.md`.
+- Hono matches routes in registration order: static paths (e.g. `/skills/sources`) must be registered before parameterized ones (`/skills/:id`) or they are shadowed.
+- A `never`-returning helper only drives control-flow narrowing as a function *declaration* (or an arrow without defaulted params). `const invalid = (msg, status = 400): never => …` silently fails narrowing under `noUncheckedIndexedAccess`; `skills.ts` declares it as a function for this reason.
 - Icon motion is global: `motion/icons.ts` (installed in `main.tsx`) sets `data-icon-motion="hover"|"press"` on lucide icons inside the control being hovered or focused (after a 1 s settle delay) or clicked (immediately), and clears it when the animations finish. Gestures live in `motion/icons.css`, keyed by lucide's `lucide-<name>` class and child order; unknown icons get a generic lift and pop. Spinners are skipped; opt a subtree out with `data-icon-motion-off`. Sidebar selection uses `GlideHighlight` (rows opt in with `data-glide`).
 - Tool calls collapse into a "N tool calls" group by default. Tools whose card must stay visible get a `"tool-call:<name>": []` entry in `messageGroupBy` (`thread.aui.tsx`).
 - Artifact frames have an opaque origin (no `allow-same-origin`), so `localStorage` throws. `frame.ts` injects in-memory storage before any artifact code runs.
@@ -149,7 +154,7 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 | --- | --- |
 | `npm run dev` | Server (tsx watch, 127.0.0.1:8787) + Vite (tailnet IP:5173, proxies `/api`) |
 | `npm run typecheck` | Both tsconfigs |
-| `npm test` | Node tests (appearance, account pictures, independent tool limits, memory isolation/imports, sandbox client, and streamed-chat integration) |
+| `npm test` | Node tests (appearance, account pictures, independent tool limits, memory isolation/imports, skills validation/gating, sandbox client, and streamed-chat integration) |
 | `npm run build` / `npm start` | Production build and server |
 
 **Dev servers always run on the tailnet.** The user wants every dev server reachable over Tailscale. Vite binds to `tailscale ip -4` (override with `OKAYCHAT_DEV_HOST`) and allows `*.ts.net` hosts. Share the MagicDNS URL (`http://<host>.<tailnet>.ts.net:5173`), not localhost. Do not bind to `0.0.0.0`.
