@@ -1,7 +1,7 @@
 import { getExternalStoreMessages, useAui, useAuiState } from "@assistant-ui/react";
 import type { UIMessage } from "ai";
 import type { ThreadSummary } from "@shared/types";
-import { MonitorIcon, MoonIcon, MoreHorizontalIcon, SunIcon } from "lucide-react";
+import { MonitorIcon, MoonIcon, MoreHorizontalIcon, PuzzleIcon, SunIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -56,6 +56,14 @@ const ghostButtonClass = (active: boolean) => cn(
   active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
 );
 
+/** Sent as a user message; the drafted skill only lands after create_skill is approved. */
+const CREATE_SKILL_PROMPT =
+  "Turn this chat into a reusable skill I can use in future chats. Draft it yourself from what we covered: " +
+  "a name (lowercase kebab-case, max 64 characters), a one-sentence description (what the skill does and when to use it), " +
+  "and the full SKILL.md instructions in Markdown — the steps, conventions, and context from this chat that a future " +
+  "conversation would need. Include reusable reference material or templates as extra files where they help. " +
+  "Call create_skill with the draft so I can approve it.";
+
 /** Chat-level choices belong to the header; the composer is reserved for writing and model controls. */
 export function ChatPrivacyMenu() {
   const aui = useAui();
@@ -68,6 +76,7 @@ export function ChatPrivacyMenu() {
   const [ghostOpen, setGhostOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [memoryEnabled, setMemoryEnabled] = useState<boolean | null>(null);
+  const [skillsEnabled, setSkillsEnabled] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
@@ -76,6 +85,13 @@ export function ChatPrivacyMenu() {
     window.addEventListener("focus", load);
     window.addEventListener("okaychat:memory", load);
     return () => { active = false; window.removeEventListener("focus", load); window.removeEventListener("okaychat:memory", load); };
+  }, []);
+  useEffect(() => {
+    let active = true;
+    const load = () => void api<{ enabled: boolean }>("/skills/prefs").then((p) => { if (active) setSkillsEnabled(p.enabled); }).catch(() => { if (active) setSkillsEnabled(false); });
+    load();
+    window.addEventListener("focus", load);
+    return () => { active = false; window.removeEventListener("focus", load); };
   }, []);
 
   const changeChat = async (temporary: boolean) => {
@@ -188,6 +204,25 @@ export function ChatPrivacyMenu() {
               }} />
             </div>
             <Link href="/settings/memory" onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground mb-4 block text-xs underline underline-offset-4">Memory settings</Link>
+            {skillsEnabled && (
+              <button
+                type="button"
+                disabled={busy || running}
+                onClick={async () => {
+                  setBusy(true);
+                  setError(null);
+                  try {
+                    await aui.thread.append(CREATE_SKILL_PROMPT);
+                    setOpen(false);
+                  } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not start the draft. Try again."); }
+                  finally { setBusy(false); }
+                }}
+                className="hover:bg-accent mb-4 -mx-2 flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors duration-(--motion-fast) disabled:opacity-50"
+              >
+                <PuzzleIcon className="size-4 shrink-0" />
+                Create skill from this chat
+              </button>
+            )}
           </>}
           <ColorSchemeToggle />
           {error && <p role="alert" className="text-destructive mt-3 text-xs">{error}</p>}

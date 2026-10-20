@@ -264,6 +264,46 @@ const migrations: string[] = [
     UNIQUE (user_id, thread_id, path)
   );
   `,
+  // Agent Skills: per-account SKILL.md packages plus the remote sources they were installed from.
+  `
+  CREATE TABLE skill_preferences (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    revision INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE skill_sources (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('github', 'raw')),
+    url TEXT NOT NULL,
+    branch TEXT,
+    subpath TEXT,
+    token_enc TEXT,
+    created_at INTEGER NOT NULL,
+    UNIQUE (user_id, name)
+  );
+  CREATE TABLE skills (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    body TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    origin TEXT NOT NULL DEFAULT 'manual',
+    source_id TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE (user_id, name)
+  );
+  CREATE INDEX skills_user ON skills(user_id, name);
+  CREATE TABLE skill_files (
+    skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    content TEXT NOT NULL,
+    PRIMARY KEY (skill_id, name)
+  );
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
