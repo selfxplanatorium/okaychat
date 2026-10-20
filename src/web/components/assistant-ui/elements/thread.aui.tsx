@@ -287,13 +287,14 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
     >
       <ThreadPrimitive.Viewport
         turnAnchor="top"
+        topAnchorMessageClamp={{ tallerThan: "13em", visibleHeight: "9em" }}
         data-slot="aui_thread-viewport"
         className="relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth"
       >
         <div
           className={cn(
-            "mx-auto flex w-full max-w-(--thread-max-width) flex-1 flex-col px-4 pt-4",
-            isEmpty && "justify-center",
+            "mx-auto flex w-full max-w-(--thread-max-width) flex-1 flex-col px-4",
+            isEmpty ? "pt-[3em] md:justify-center md:pt-4" : "pt-[3em]",
           )}
         >
           <AuiIf condition={isNewChatView}>
@@ -323,7 +324,7 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
 
           <ThreadPrimitive.ViewportFooter
             className={cn(
-              "aui-thread-viewport-footer flex flex-col gap-4 overflow-visible pb-4 md:pb-6",
+              "aui-thread-viewport-footer flex flex-col gap-4 overflow-visible pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-6",
               !isEmpty &&
                 "sticky bottom-0 mt-auto rounded-t-(--composer-radius)",
             )}
@@ -1001,7 +1002,10 @@ const UserMessage: FC = () => {
     <MessagePrimitive.Root
       data-slot="aui_user-message-root"
       className={cn(
-        "grid auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 [contain-intrinsic-size:auto_200px] [content-visibility:auto] [&:where(>*)]:col-start-2",
+        // Inset the measured anchor without changing message spacing. The
+        // reserve then stops short turns 3em below the viewport's top edge.
+        // The viewport's tall-message clamp includes this same 3em inset.
+        "-mt-[3em] grid auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 pt-[3em] [contain-intrinsic-size:auto_200px] [content-visibility:auto] [&:where(>*)]:col-start-2",
         // Sent messages come up from the composer they left.
         entering && "chat-message-in",
       )}

@@ -183,3 +183,19 @@
   45% { transform: scale(1.4); }
   100% { transform: none; }
 }
+
+/*
+ * The welcome line writes itself in word by word: each word rises out of a
+ * blur, so a fresh chat opens with one deliberate beat instead of a block fade.
+ */
+@keyframes chat-word-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.4em);
+    filter: blur(6px);
+  }
+}
+.chat-word-in {
+  animation: chat-word-in 620ms var(--ease-out-expo) both;
+  animation-delay: calc(min(var(--i, 0), 10) * 55ms);
+}

@@ -315,6 +315,8 @@ The composer choice is an in-memory override for the current conversation. Do no
 Settings menus contain explicit fallback items with the empty-string UI value: First available model, Same as chat model, Same as utility model, and Use account default model. Their callbacks persist JSON `null` to clear an override; `undefined` would disappear in JSON and leave the old value stored. Project switches clear composer overrides, including when leaving a project with its own default. Schedule models remain explicit because scheduled jobs need a concrete model.
 
 The sub-agent menu also has a separate Same as chat model option, persisted as the reserved `subagentModel: "chat"` value (model refs contain a provider/model separator). It makes the chat model the preferred delegate even when a separate utility model is configured. Following the utility model uses null and inherits its normal chat-model fallback. `subagentModelRefs()` resolves this choice before filtering for tool-capable models.
+
+
 ## Sidebar navigation and search
 
 The sidebar's New chat, Scheduled, Library, Plugins, and Projects shortcuts share one quiet row treatment. Search lives in the header (Ctrl/Cmd+K also opens it) and uses a focus-trapped spotlight dialog with arrow-key selection, title matches, and debounced full-text message matches. Search spans all projects; choosing a result clears the active project filter before switching threads. Recent/title results use the existing `/threads` endpoint's 500-thread limit; message matches use `/search` independently.
@@ -323,3 +325,8 @@ Scheduled (`/scheduled`) and Projects (`/projects`) reuse their settings managem
 
 General settings stores `sidebarItems` per account through the validated settings API. Missing or invalid legacy values show all shortcuts; an empty array hides all five. Search, the account menu, settings, and the chat/project history filter remain accessible. Visibility controls shortcuts, not route access or tool availability.
 
+## Turn scroll inset
+
+`thread.aui.tsx` keeps `turnAnchor="top"`, but user message roots have `3em` of top padding and a matching negative top margin. This moves the measured anchor above the bubble without changing spacing between messages. The built-in reserve consequently stops short turns with the bubble `3em` below the scroll viewport's top (48 px at the default font size), including when manually scrolling to the end. Nonempty threads use the same initial top padding. Long assistant replies still scroll to their natural end.
+
+The viewport's tall-message clamp uses `13em` / `9em`: the original `10em` / `6em` plus the same inset. Keep these values aligned with the root padding. Do not add an offset only to `scrollTo`: it would leave the unwanted extra scroll range available to wheel, touch, and the scroll-to-bottom button. Verified with the actual Thread component and a local streaming runtime at desktop and mobile widths.
