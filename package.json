@@ -10,7 +10,7 @@
     "dev": "concurrently -k -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
     "dev:server": "HOST=127.0.0.1 tsx watch --env-file-if-exists=.env src/server/index.ts",
     "dev:web": "vite --host ${OKAYCHAT_DEV_HOST:-$(tailscale ip -4 2>/dev/null || echo 127.0.0.1)}",
-    "build": "vite build && tsc -p tsconfig.server.json",
+    "build": "vite build && node scripts/compress-web.mjs && tsc -p tsconfig.server.json",
     "start": "node dist/server/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.server.json",
     "test": "node --test --import tsx 'src/**/*.test.ts'"

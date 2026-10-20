@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { HTTPException } from "hono/http-exception";
 import { authRoutes } from "./auth.js";
+import { warmCatalog } from "./catalog/providers.js";
 import { env } from "./env.js";
 import { notePublicOrigin } from "./mcp/manager.js";
 import { api, mcpOAuthCallback } from "./routes.js";
@@ -35,9 +36,25 @@ app.route("/api", api);
 const webDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../web");
 if (existsSync(webDir)) {
   const root = path.relative(process.cwd(), webDir);
-  app.use("/*", serveStatic({ root }));
-  app.get("*", serveStatic({ root, path: "index.html" }));
+  app.use(
+    "/*",
+    serveStatic({
+      root,
+      // Built by scripts/compress-web.mjs, so no request spends CPU on compression.
+      precompressed: true,
+      onFound: (filePath, c) => {
+        // Hashed file names change with their content, so browsers never need to ask again.
+        if (filePath.includes("/assets/")) c.header("Cache-Control", "public, max-age=31536000, immutable");
+        // The service worker and manifest must revalidate, or installed apps keep an old shell after a deploy.
+        else if (/\/(sw\.js|index\.html|manifest\.webmanifest)(\.(br|gz))?$/.test(filePath)) c.header("Cache-Control", "no-cache");
+      },
+    }),
+  );
+  app.get("*", serveStatic({ root, path: "index.html", precompressed: true, onFound: (_path, c) => void c.header("Cache-Control", "no-cache") }));
 }
+
+// The first page load after a restart must not wait for the 6 MB catalog or the OpenCode Go model list.
+void warmCatalog().catch(() => {});
 
 serve({ fetch: app.fetch, port: env.port, hostname: env.host }, (info) => {
   console.log(`okaychat listening on http://${env.host}:${info.port}`);

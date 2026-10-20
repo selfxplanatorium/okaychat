@@ -16,16 +16,28 @@ interface ThreadMetaState {
   refresh: (threadId: string) => Promise<void>;
 }
 
+// Every useThreadMeta instance (one per compaction marker) refreshes when a thread mounts, spread over a few
+// commits. Calls within one frame share a request that starts after all of them, so it is never older than a call.
+const batched = new Map<string, Promise<void>>();
+
 export const useThreadMetaStore = create<ThreadMetaState>((set) => ({
   byId: {},
-  refresh: async (threadId) => {
-    if (isAnonymousChat(threadId)) return;
-    try {
-      const t = await api<{ compaction: CompactionState | null; usage: UsageRow; memoryDisabled: boolean }>(`/threads/${threadId}`);
-      set((s) => ({ byId: { ...s.byId, [threadId]: { compaction: t.compaction, usage: t.usage, memoryDisabled: t.memoryDisabled } } }));
-    } catch {
-      // Thread not created yet.
+  refresh: (threadId) => {
+    if (isAnonymousChat(threadId)) return Promise.resolve();
+    let pending = batched.get(threadId);
+    if (!pending) {
+      pending = new Promise<void>((resolve) => setTimeout(resolve, 16)).then(async () => {
+        batched.delete(threadId);
+        try {
+          const t = await api<{ compaction: CompactionState | null; usage: UsageRow; memoryDisabled: boolean }>(`/threads/${threadId}`);
+          set((s) => ({ byId: { ...s.byId, [threadId]: { compaction: t.compaction, usage: t.usage, memoryDisabled: t.memoryDisabled } } }));
+        } catch {
+          // Thread not created yet.
+        }
+      });
+      batched.set(threadId, pending);
     }
+    return pending;
   },
 }));
 

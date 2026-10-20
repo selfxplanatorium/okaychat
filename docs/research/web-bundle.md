@@ -19,6 +19,42 @@ false` keeps the groups bounded; `strictExecutionOrder: true` preserves module
 initialization across these boundaries. These options were checked against the
 installed Rolldown type declarations, not Rollup's deprecated manualChunks API.
 
+## Startup path
+
+Measured against a production build on 2026-10-20. Before, startup ran as a chain:
+session check, appearance, shell chunk, then a 300 ms React Suspense hold, then
+account data, then the chat list, then the restored chat's messages.
+
+Now `/auth/status` returning a user starts everything at once (`App.tsx`):
+`Shell.preload()`, `prefetch("/appearance")`, and `preloadData()` (account data,
+chat list, and the messages of the chat `RuntimeProvider` will restore). Consumers
+take the prefetched promise once through `takePrefetched` / `takePreloadedData`. Prefetches
+expire after 10 s, so a screen that mounts later never shows old data.
+
+- `lib/preloadable.tsx` wraps lazy routes. React.lazy suspends on first render even
+  when the chunk has arrived, and React then holds the fallback up to 300 ms
+  (`FALLBACK_THROTTLE_MS`). A preloaded component renders directly. Settings and the
+  navigation pages preload when the chat is idle.
+- `AppLoading` (`components/AppLoading.tsx`) is the only startup state. Its label
+  fades in after 700 ms, so normal loads show only the themed background.
+- `thread-meta.ts` coalesces refreshes within one frame. Each compaction marker
+  calls `useThreadMeta`, which used to send one `GET /threads/:id` per message.
+
+Production serving: `scripts/compress-web.mjs` writes `.br`/`.gz` copies at build
+time and `serveStatic({ precompressed: true })` sends them (7.15 MB to 2.66 MB).
+`/assets/*` is `immutable` for a year. `index.html`, `sw.js`, and the manifest are
+`no-cache`.
+
+Server: `warmCatalog()` loads models.dev and the OpenCode Go list at boot. Both
+caches serve stale data and refresh behind the request instead of blocking it.
+Before, a reload more than 15 minutes after the last one waited about 0.5 s for
+opencode.ai, and every 6 hours it waited for the 6 MB models.dev catalog.
+
+Warm reload into a restored 18-message chat, same machine: all data arrived by
+155 ms, the shell mounted at 240 ms, and messages rendered by about 500 ms. Before,
+the chat list alone finished at 595 ms. Most of the remainder is rendering
+(the message list is one 170 ms task).
+
 ## Measurements
 
 Before: one main JavaScript chunk of 1,865,597 bytes (about 571 KB gzip), plus a

@@ -106,13 +106,20 @@ export function deleteConnection(scope: ConnectionScope, providerId: string) {
 const isCustom = (id: string) => id.startsWith("custom-");
 const isLocal = (url?: string) => !!url && /\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|host\.docker\.internal)/.test(url);
 
+// Checking every model of every provider is the slow part of listing providers. It only changes with the catalog.
+const supported = new WeakMap<object, RawProvider[]>();
+function supportedProviders(catalog: Record<string, RawProvider>): RawProvider[] {
+  let list = supported.get(catalog);
+  if (!list) supported.set(catalog, (list = Object.values(catalog).filter(isSupportedProvider)));
+  return list;
+}
+
 /** Providers as a user sees them (own plus shared), or with `null` as the admin sees the shared set. */
 export async function listProviders(scope: ConnectionScope): Promise<ProviderInfo[]> {
   const catalog = await getCatalog();
   const connections = scope === null ? readScope(null) : readConnections(scope);
   const out: ProviderInfo[] = [];
-  for (const provider of Object.values(catalog)) {
-    if (!isSupportedProvider(provider)) continue;
+  for (const provider of supportedProviders(catalog)) {
     const conn = connections.get(provider.id);
     out.push({
       id: provider.id,
@@ -151,22 +158,45 @@ export async function listProviders(scope: ConnectionScope): Promise<ProviderInf
 const liveCache = new Map<string, { ids: string[]; at: number }>();
 const LIVE_TTL_MS = 15 * 60 * 1000;
 
+const liveInflight = new Map<string, Promise<string[] | null>>();
+
+function fetchLive(url: string, apiKey?: string): Promise<string[] | null> {
+  let pending = liveInflight.get(url);
+  if (!pending) {
+    pending = (async () => {
+      const hit = liveCache.get(url);
+      try {
+        const res = await fetch(url, {
+          headers: { "User-Agent": USER_AGENT, ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
+          signal: AbortSignal.timeout(8_000),
+        });
+        if (!res.ok) return hit?.ids ?? null;
+        const body = (await res.json()) as { data?: Array<{ id: string }> };
+        const ids = (body.data ?? []).map((m) => m.id);
+        liveCache.set(url, { ids, at: Date.now() });
+        return ids;
+      } catch {
+        return hit?.ids ?? null;
+      } finally {
+        liveInflight.delete(url);
+      }
+    })();
+    liveInflight.set(url, pending);
+  }
+  return pending;
+}
+
 async function fetchLiveIds(url: string, apiKey?: string): Promise<string[] | null> {
   const hit = liveCache.get(url);
-  if (hit && Date.now() - hit.at < LIVE_TTL_MS) return hit.ids;
-  try {
-    const res = await fetch(url, {
-      headers: { "User-Agent": USER_AGENT, ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
-      signal: AbortSignal.timeout(8_000),
-    });
-    if (!res.ok) return hit?.ids ?? null;
-    const body = (await res.json()) as { data?: Array<{ id: string }> };
-    const ids = (body.data ?? []).map((m) => m.id);
-    liveCache.set(url, { ids, at: Date.now() });
-    return ids;
-  } catch {
-    return hit?.ids ?? null;
-  }
+  if (!hit) return fetchLive(url, apiKey);
+  // A known list answers at once. An expired one is refreshed behind the request instead of delaying it.
+  if (Date.now() - hit.at >= LIVE_TTL_MS) void fetchLive(url, apiKey);
+  return hit.ids;
+}
+
+/** Loads the catalog and the OpenCode Go list at boot, so the first page load after a restart does not fetch them. */
+export async function warmCatalog() {
+  await Promise.all([getCatalog(), fetchLiveIds(GO_MODELS_URL)]);
 }
 
 async function modelsForProvider(provider: RawProvider, conn: Connection): Promise<ModelInfo[]> {

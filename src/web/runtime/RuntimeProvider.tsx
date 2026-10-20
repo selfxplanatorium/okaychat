@@ -18,10 +18,10 @@ import { generateId, lastAssistantMessageIsCompleteWithApprovalResponses, lastAs
 import { createAssistantStream } from "assistant-stream";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { ThreadSummary } from "@shared/types";
-import { api } from "@/lib/api";
+import { api, takePrefetched } from "@/lib/api";
 import { toolkit } from "@/components/chat/tool-ui";
 import { WidgetInstructions, widgets } from "@/components/genui/toolkit";
-import { getActiveModel, useActiveModel, useData } from "@/state/data";
+import { getActiveModel, selectedThreadKey, threadsPath, useActiveModel, useData } from "@/state/data";
 import { chatPrivacyFor, isAnonymousChat, useChatPrivacy, useChatPrivacyStore } from "@/state/chat-privacy";
 
 const CODE_EXTENSIONS =
@@ -142,8 +142,8 @@ const voiceAdapters = {
 
 const threadListAdapter: RemoteThreadListAdapter = {
   async list() {
-    const project = useData.getState().activeProject;
-    const threads = await api<ThreadSummary[]>(project ? `/threads?project=${encodeURIComponent(project)}` : "/threads");
+    const path = threadsPath(useData.getState().activeProject);
+    const threads = await (takePrefetched<ThreadSummary[]>(path) ?? api<ThreadSummary[]>(path));
     return {
       threads: threads.map((t) => ({
         remoteId: t.id,
@@ -190,7 +190,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
       .map((p) => (p.type === "text" ? p.text : ""))
       .join("\n")
       .slice(0, 4000);
-    const modelRef = useData.getState().selectedModel ?? useData.getState().settings?.defaultModel ?? undefined;
+    const modelRef = getActiveModel()?.ref;
     return createAssistantStream(async (controller) => {
       const { title } = await api<{ title: string }>(`/threads/${remoteId}/title`, { method: "POST", json: { text, modelRef } });
       controller.appendText(title);
@@ -303,7 +303,7 @@ function useThreadTransport() {
 export function RuntimeProvider({ children }: { children: ReactNode }) {
   // Keep selection per tab and account. A reload must mount the saved thread before automatic resume runs.
   const userId = useData((s) => s.me?.id);
-  const selectionKey = `okaychat:thread:${userId}`;
+  const selectionKey = selectedThreadKey(userId);
   const [initialThreadId] = useState(() => {
     try {
       const saved = sessionStorage.getItem(selectionKey);

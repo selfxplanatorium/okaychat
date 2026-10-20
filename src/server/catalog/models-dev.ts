@@ -59,17 +59,7 @@ const OPENAI_COMPATIBLE_BASES: Record<string, string> = {
 let memory: { data: Catalog; fetchedAt: number } | null = null;
 let inflight: Promise<Catalog> | null = null;
 
-async function load(): Promise<Catalog> {
-  if (memory && Date.now() - memory.fetchedAt < TTL_MS) return memory.data;
-  if (!memory) {
-    try {
-      const cached = JSON.parse(await readFile(CACHE_FILE, "utf8")) as { data: Catalog; fetchedAt: number };
-      memory = cached;
-      if (Date.now() - cached.fetchedAt < TTL_MS) return cached.data;
-    } catch {
-      // No disk cache yet.
-    }
-  }
+function refresh(): Promise<Catalog> {
   inflight ??= (async () => {
     try {
       const res = await fetch(SOURCE, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15_000) });
@@ -87,6 +77,20 @@ async function load(): Promise<Catalog> {
     }
   })();
   return inflight;
+}
+
+async function load(): Promise<Catalog> {
+  if (!memory) {
+    try {
+      memory = JSON.parse(await readFile(CACHE_FILE, "utf8")) as { data: Catalog; fetchedAt: number };
+    } catch {
+      // No disk cache yet.
+    }
+  }
+  if (!memory) return refresh();
+  // Requests never wait on models.dev once a copy exists; an expired one is refreshed behind them.
+  if (Date.now() - memory.fetchedAt >= TTL_MS) void refresh().catch(() => {});
+  return memory.data;
 }
 
 export async function getCatalog(): Promise<Catalog> {

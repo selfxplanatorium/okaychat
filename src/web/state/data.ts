@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { McpServerInfo, Me, ModelInfo, Project, ProviderInfo, UserSettings } from "@shared/types";
-import { api } from "@/lib/api";
+import { api, prefetch } from "@/lib/api";
 
 interface DataState {
   me: Me | null;
@@ -92,3 +92,34 @@ function resolveActiveModel({ models, selectedModel: selected, settings, project
 }
 
 export const getActiveModel = () => resolveActiveModel(useData.getState());
+
+export const selectedThreadKey = (userId: string | undefined) => `okaychat:thread:${userId}`;
+export const threadsPath = (project: string | null) => (project ? `/threads?project=${encodeURIComponent(project)}` : "/threads");
+
+let preloaded: { userId: string; promise?: Promise<void> } | undefined;
+
+/** Starts the shell's data requests as soon as the session is known, alongside the shell chunk and appearance. */
+export function preloadData(userId: string) {
+  // Once per signed-in user: a later status check for the same session must not refetch under a mounted shell.
+  if (preloaded?.userId === userId) return;
+  const promise = useData.getState().load();
+  promise.catch(() => {});
+  prefetch(threadsPath(useData.getState().activeProject));
+  // RuntimeProvider restores this tab's selected chat; its messages are needed for the first paint.
+  try {
+    const saved = sessionStorage.getItem(selectedThreadKey(userId));
+    // Same test as isAnonymousChat, which lives with assistant-ui code this entry module must not import.
+    if (saved && !saved.startsWith("tmp_")) prefetch(`/threads/${saved}/messages`);
+  } catch {
+    // Session storage may be disabled.
+  }
+  preloaded = { userId, promise };
+}
+
+/** The preloaded request for this user, handed out once so a retry fetches again. */
+export function takePreloadedData(userId: string): Promise<void> | undefined {
+  if (preloaded?.userId !== userId) return undefined;
+  const { promise } = preloaded;
+  preloaded.promise = undefined;
+  return promise;
+}

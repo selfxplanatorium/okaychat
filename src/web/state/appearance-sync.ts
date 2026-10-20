@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { create } from "zustand";
 import { appearanceSchema, type UserAppearance } from "@shared/appearance";
-import { api } from "@/lib/api";
+import { api, takePrefetched } from "@/lib/api";
 import { subscribeToCustomThemes } from "@/theme/palette";
 import { appearanceSnapshot, DEFAULT_APPEARANCE, restoreAppearance, useAppearance } from "./appearance";
 
@@ -84,7 +84,7 @@ export function useSyncAppearance(userId: string | undefined): boolean {
       if (busy || !alive) return;
       busy = true;
       try {
-        const remote = await api<UserAppearance | null>("/appearance");
+        const remote = await (takePrefetched<UserAppearance | null>("/appearance") ?? api<UserAppearance | null>("/appearance"));
         if (!alive) return;
         const initial = remote ?? await api<UserAppearance>("/appearance", { method: "PUT", json: value });
         if (!alive) return;

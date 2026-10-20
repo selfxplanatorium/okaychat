@@ -1,7 +1,8 @@
 import { PanelLeftIcon, SquarePenIcon } from "lucide-react";
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Route, Switch, useLocation } from "wouter";
 import { useAui, useAuiState } from "@assistant-ui/react";
+import { AppLoading } from "@/components/AppLoading";
 import { ArtifactPanel } from "@/components/artifacts/ArtifactPanel";
 import { ChatView } from "@/components/chat/ChatView";
 import { Sidebar } from "@/components/layout/Sidebar";
@@ -10,13 +11,13 @@ import { ChatPrivacyMenu } from "@/components/chat/ChatPrivacyMenu";
 import { ThemeEditorHost } from "@/components/settings/theme/ThemeEditorHost";
 import { RuntimeProvider } from "@/runtime/RuntimeProvider";
 import { preloadable } from "@/lib/preloadable";
-import { useData } from "@/state/data";
+import { takePreloadedData, useData } from "@/state/data";
 import { loadInstalledFonts } from "@/state/fonts";
 import { useChatPrivacyStore } from "@/state/chat-privacy";
 
 // Settings (theme editor, font discovery, VS Code import) are not needed to chat.
 const NavigationPage = preloadable(() => import("@/components/layout/NavigationPage").then((m) => m.NavigationPage));
-const SettingsLayout = lazy(() => import("@/components/settings/SettingsLayout").then((m) => ({ default: m.SettingsLayout })));
+const SettingsLayout = preloadable(() => import("@/components/settings/SettingsLayout").then((m) => m.SettingsLayout));
 
 function ChatHeader({ sidebarOpen, onToggle }: { sidebarOpen: boolean; onToggle: () => void }) {
   const aui = useAui();
@@ -60,7 +61,7 @@ function ThreadSwitchWatcher({ onSwitch }: { onSwitch: () => void }) {
   return null;
 }
 
-export function Shell() {
+export function Shell({ userId }: { userId: string }) {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const load = useData((s) => s.load);
@@ -81,11 +82,26 @@ export function Shell() {
 
   const reload = useCallback(() => {
     setLoadError(null);
-    void load().then(() => setLoaded(true)).catch(() => setLoadError("Could not load your chats and settings."));
+    void (takePreloadedData(userId) ?? load()).then(() => setLoaded(true)).catch(() => setLoadError("Could not load your chats and settings."));
     // Uploaded fonts apply on every page, so they load with the shell. A failure here must not block the app.
     void loadInstalledFonts();
-  }, [load]);
+  }, [load, userId]);
   useEffect(reload, [reload]);
+
+  // Fetch the other routes once the chat is idle, so the first visit renders without a wait.
+  useEffect(() => {
+    if (!loaded) return;
+    const preload = () => {
+      void SettingsLayout.preload().catch(() => {});
+      void NavigationPage.preload().catch(() => {});
+    };
+    if (!("requestIdleCallback" in window)) {
+      const timer = setTimeout(preload, 2000);
+      return () => clearTimeout(timer);
+    }
+    const handle = requestIdleCallback(preload, { timeout: 5000 });
+    return () => cancelIdleCallback(handle);
+  }, [loaded]);
 
   if (loadError)
     return (
@@ -96,12 +112,7 @@ export function Shell() {
         </button>
       </div>
     );
-  if (!loaded)
-    return (
-      <div role="status" className="text-muted-foreground animate-fade-in grid h-full place-items-center text-sm">
-        Loading your chats…
-      </div>
-    );
+  if (!loaded) return <AppLoading />;
   if (!connected && !inSettings) return <Onboarding />;
 
   return (

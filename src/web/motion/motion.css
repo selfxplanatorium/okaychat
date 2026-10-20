@@ -89,6 +89,12 @@
   animation-delay: calc(min(var(--i, 0), 12) * var(--motion-stagger));
 }
 
+/* Startup: a fast load shows only the themed background. The label appears
+   only if loading is slow enough to need an explanation. */
+.app-loading {
+  animation: fade-in var(--motion-base) var(--ease-out-quart) 700ms both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

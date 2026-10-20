@@ -43,6 +43,8 @@ Status as of 2026-10-20. Update this file when a feature ships or a plan changes
 - Per-user appearance sync, including custom theme libraries, with first-device migration and offline edit recovery.
 - Code-split authenticated chat, public shares, and settings. Separate cacheable React, assistant-ui, AI SDK, Markdown, UI primitives, and widget chunks. Sign-in startup JavaScript is about 573 KB (184 KB gzip), down from 1.87 MB (571 KB gzip); the largest individual chunk is about 326 KB. See `docs/research/web-bundle.md`.
 
+- Startup path: the session check starts the shell chunk, appearance, account data, chat list, and restored chat messages in parallel. Lazy routes skip React's 300 ms Suspense hold once preloaded. One startup loader, invisible unless loading passes 700 ms. Compressed, immutable static assets. Catalog and OpenCode Go model list are warmed at boot and refreshed without blocking requests. Warm reload to a restored chat dropped from about 600 ms (chat list only) to about 300 ms (messages included). See `docs/research/web-bundle.md`.
+
 No planned core items remain. New work can be tracked as a subsequent pass.
 
 ## Known gaps
@@ -50,5 +52,4 @@ No planned core items remain. New work can be tracked as a subsequent pass.
 - Stream replay is kept in server memory for 15 minutes after the last update. Reload recovery works; pending generations do not survive a server restart.
 
 - No public usage/limits API for OpenCode Go was found. Go windows show our own recorded spend, not the remaining quota.
-- App load is too slow. A reload shows "Loading okaychat…" and then "Loading your chats…" for a noticeable time, both in near-invisible text. Profile and cut the startup path (auth check, `/api/*` fan-out in `useData.load`, lazy chunks) before restyling the loaders. The two loaders should then become one consistent state.
 - Live chat, tools, and web search are confirmed working against OpenCode Go with the user's key. The earlier local key had expired, which is why the first end-to-end test failed.
