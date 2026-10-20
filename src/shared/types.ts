@@ -61,7 +61,12 @@ export interface ProviderConnectionInput {
 
 export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
+export const SIDEBAR_ITEMS = ["newChat", "scheduled", "library", "plugins", "projects"] as const;
+export type SidebarItem = (typeof SIDEBAR_ITEMS)[number];
+
 export interface UserSettings {
+  /** Visible sidebar shortcuts; omitted for older accounts to show all. */
+  sidebarItems?: SidebarItem[];
   /** Synced appearance; absent until the first device migrates its local preferences. */
   appearance?: UserAppearance;
   defaultModel?: string | null;

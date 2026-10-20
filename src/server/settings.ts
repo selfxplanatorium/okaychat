@@ -1,4 +1,4 @@
-import { DEFAULT_USER_SETTINGS, type UserSettings } from "../shared/types.js";
+import { DEFAULT_USER_SETTINGS, SIDEBAR_ITEMS, type UserSettings } from "../shared/types.js";
 import { HTTPException } from "hono/http-exception";
 import { db } from "./db.js";
 
@@ -9,6 +9,7 @@ export function getSettings(userId: string): UserSettings {
   for (const [key, min] of [["maxSteps", 1], ["maxSearches", 0]] as const) {
     if (!validLimit(settings[key], min)) settings[key] = DEFAULT_USER_SETTINGS[key];
   }
+  if (settings.sidebarItems !== undefined && !validSidebarItems(settings.sidebarItems)) delete settings.sidebarItems;
   return settings;
 }
 
@@ -17,6 +18,9 @@ export function updateSettings(userId: string, patch: Partial<UserSettings>): Us
     if (Object.hasOwn(patch, key) && !validLimit(patch[key], min)) {
       throw new HTTPException(400, { message: `${key} must be an integer between ${min} and 50` });
     }
+  }
+  if (Object.hasOwn(patch, "sidebarItems") && !validSidebarItems(patch.sidebarItems)) {
+    throw new HTTPException(400, { message: "sidebarItems must contain unique sidebar shortcut names" });
   }
   const next = { ...getSettings(userId), ...patch };
   db.prepare(
@@ -33,4 +37,8 @@ function validLimit(value: unknown, min: number): value is number {
 export function subagentModelRefs(settings: UserSettings, chatModel: string): string[] {
   const preferred = settings.subagentModel === "chat" ? chatModel : settings.subagentModel;
   return [...new Set([preferred, settings.utilityModel, chatModel].filter((ref): ref is string => !!ref))];
+}
+
+function validSidebarItems(value: unknown): boolean {
+  return Array.isArray(value) && value.every((item) => SIDEBAR_ITEMS.includes(item)) && new Set(value).size === value.length;
 }

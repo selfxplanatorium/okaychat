@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { DEFAULT_USER_SETTINGS } from "@shared/types";
+import { DEFAULT_USER_SETTINGS, SIDEBAR_ITEMS } from "@shared/types";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -7,6 +7,8 @@ import { api } from "@/lib/api";
 import { useData } from "@/state/data";
 import { CodexConnect } from "./CodexConnect";
 import { SettingsPage, SettingsRow, SettingsSection, SettingsSlider } from "./SettingsUI";
+
+const SIDEBAR_LABELS = { newChat: "New chat", scheduled: "Scheduled", library: "Library", plugins: "Plugins", projects: "Projects" };
 
 export function GeneralSettings() {
   const settings = useData((s) => s.settings);
@@ -31,6 +33,19 @@ export function GeneralSettings() {
 
   return (
     <SettingsPage title="General">
+      <SettingsSection title="Sidebar" description="Choose the shortcuts shown above your chats. Search and settings are always available.">
+        {SIDEBAR_ITEMS.map((item) => (
+          <SettingsRow
+            key={item}
+            label={SIDEBAR_LABELS[item]}
+            control={<Switch aria-label={`Show ${SIDEBAR_LABELS[item]} in sidebar`} checked={(settings.sidebarItems ?? SIDEBAR_ITEMS).includes(item)} onCheckedChange={(checked) => {
+              const visible = settings.sidebarItems ?? SIDEBAR_ITEMS;
+              void update({ sidebarItems: SIDEBAR_ITEMS.filter((id) => id === item ? checked : visible.includes(id)) });
+            }} />}
+          />
+        ))}
+      </SettingsSection>
+
       <SettingsSection title="Models">
         <SettingsRow
           label="Default model"

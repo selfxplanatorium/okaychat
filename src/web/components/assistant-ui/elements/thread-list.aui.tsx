@@ -33,24 +33,13 @@ import {
   type CSSProperties,
   type FC,
 } from "react";
-import { MessageSearchResults } from "@/components/layout/MessageSearchResults";
 import { isAnonymousChat, useChatPrivacyStore } from "@/state/chat-privacy";
 
-export const ThreadList: FC = () => {
-  const [search, setSearch] = useState("");
-  const hasThreads = useAuiState((s) => s.threads.threadIds.length > 0);
-
-  return (
-    <ThreadListRoot>
-      <ThreadListNew />
-      {hasThreads && (
-        <ThreadListSearch value={search} onValueChange={setSearch} />
-      )}
-      <ThreadListItems searchQuery={hasThreads ? search : ""} />
-      {hasThreads && <MessageSearchResults query={search} />}
-    </ThreadListRoot>
-  );
-};
+export const ThreadList: FC = () => (
+  <ThreadListRoot>
+    <ThreadListItems />
+  </ThreadListRoot>
+);
 
 export const ThreadListSearch = forwardRef<
   HTMLInputElement,

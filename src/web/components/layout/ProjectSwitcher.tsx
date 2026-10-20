@@ -42,7 +42,7 @@ export function ProjectSwitcher() {
             <FolderIcon /> <span className="truncate">{p.name}</span> {p.id === active && <CheckIcon className="ms-auto" />}
           </MenuItem>
         ))}
-        <MenuItem onClick={() => navigate("/settings/projects")} {...row(projects.length + 1)}>
+        <MenuItem onClick={() => navigate("/projects")} {...row(projects.length + 1)}>
           <SettingsIcon /> {projects.length ? "Manage projects" : "Create a project"}
         </MenuItem>
       </MenuContent>

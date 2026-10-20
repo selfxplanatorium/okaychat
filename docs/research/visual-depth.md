@@ -18,7 +18,7 @@ The app follows the brand icon: surfaces lit from above, a one-pixel inner highl
 | Utility | Applied to |
 | --- | --- |
 | `depth-canvas` | Shell root (`ChatShell.tsx`). The thread root is transparent so the glow shows through |
-| `depth-primary` | `Button` default variant, checked `Switch` track, highlighted menu and select items, new-thread button, send/stop |
+| `depth-primary` | `Button` default variant, checked `Switch` track, highlighted menu and select items, send/stop |
 | `depth-float` | Menus, popovers, selects, the auth card |
 | `depth-sidebar` | Desktop sidebar panel and settings nav (`md:` only; on the phone they keep the overlay and the top bar) |
 | `depth-row-active` | Selected thread row and the sliding settings-nav pill: raised card plus an accent bar on the leading edge |

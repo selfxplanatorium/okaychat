@@ -9,11 +9,13 @@ import { Onboarding } from "@/components/Onboarding";
 import { ChatPrivacyMenu } from "@/components/chat/ChatPrivacyMenu";
 import { ThemeEditorHost } from "@/components/settings/theme/ThemeEditorHost";
 import { RuntimeProvider } from "@/runtime/RuntimeProvider";
+import { preloadable } from "@/lib/preloadable";
 import { useData } from "@/state/data";
 import { loadInstalledFonts } from "@/state/fonts";
 import { useChatPrivacyStore } from "@/state/chat-privacy";
 
 // Settings (theme editor, font discovery, VS Code import) are not needed to chat.
+const NavigationPage = preloadable(() => import("@/components/layout/NavigationPage").then((m) => m.NavigationPage));
 const SettingsLayout = lazy(() => import("@/components/settings/SettingsLayout").then((m) => ({ default: m.SettingsLayout })));
 
 function ChatHeader({ sidebarOpen, onToggle }: { sidebarOpen: boolean; onToggle: () => void }) {
@@ -66,7 +68,8 @@ export function Shell() {
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
   const [location] = useLocation();
   const inSettings = location.startsWith("/settings");
-  const route = inSettings ? "settings" : "chat";
+  const inNavigation = ["/scheduled", "/library", "/plugins", "/projects"].includes(location);
+  const route = inSettings ? "settings" : inNavigation ? location : "chat";
 
   // Mobile drawer is an overlay: close it after navigation so the page underneath is visible.
   const closeOnMobile = useCallback(() => {
@@ -134,6 +137,16 @@ export function Shell() {
                   </Suspense>
                 )}
               </Route>
+              {["scheduled", "library", "plugins", "projects"].map((page) => (
+                <Route key={page} path={`/${page}`}>
+                  <div className={`flex h-12 shrink-0 items-center px-3 ${sidebarOpen ? "md:hidden" : ""}`}>
+                    <button type="button" aria-label="Open sidebar" onClick={() => setSidebarOpen(true)} className="text-muted-foreground hover:bg-accent rounded-lg p-2"><PanelLeftIcon className="size-4" /></button>
+                  </div>
+                  <main className="min-h-0 flex-1 overflow-y-auto">
+                    <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">Loading…</p>}><NavigationPage page={page} /></Suspense>
+                  </main>
+                </Route>
+              ))}
               <Route>
                 <ChatHeader sidebarOpen={sidebarOpen} onToggle={() => setSidebarOpen(true)} />
                 <ChatPrivacyMenu />
@@ -141,7 +154,7 @@ export function Shell() {
               </Route>
             </Switch>
           </div>
-          {!inSettings && <ArtifactPanel />}
+          {!inSettings && !inNavigation && <ArtifactPanel />}
         </div>
       </div>
       <ThemeEditorHost />

@@ -237,7 +237,7 @@ function ServerRow({ server, index }: { server: ServerView; index: number }) {
   );
 }
 
-export function McpSettings() {
+export function McpSettings({ embedded = false }: { embedded?: boolean }) {
   const servers = useData((s) => s.mcp);
   const refresh = useData((s) => s.refreshMcp);
   const [adding, setAdding] = useState(false);
@@ -256,7 +256,7 @@ export function McpSettings() {
 
   return (
     <SettingsPage
-      title="MCP servers"
+      title={embedded ? "" : "MCP servers"}
       description="Connect Model Context Protocol servers to give models tools. Connections open on first use, time out per call, reconnect once on failure, and close when idle."
     >
       <SettingsSection

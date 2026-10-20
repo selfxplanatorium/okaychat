@@ -120,3 +120,43 @@
   transform: scale(0.985);
   transition-duration: var(--motion-instant);
 }
+
+/*
+ * Sliding selection card (GlideHighlight.tsx). Moving between rows decelerates
+ * hard, so a long jump down the list still lands crisply; appearing springs in
+ * place. Rows keep their hover background but draw no selected surface of their
+ * own while a host owns the card.
+ */
+.glide-host {
+  position: relative;
+}
+.glide-host [data-glide] {
+  position: relative;
+}
+.glide-host [data-glide]:is([data-active], [aria-current="page"]) {
+  background-color: transparent;
+  box-shadow: none;
+}
+.glide-host [data-glide]:is([data-active], [aria-current="page"])::before {
+  content: none;
+}
+.glide-card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: var(--radius-lg);
+  pointer-events: none;
+  transition:
+    opacity var(--motion-fast) var(--ease-out-quart),
+    scale var(--motion-base) var(--ease-spring);
+}
+.glide-card[data-motion="slide"] {
+  transition:
+    transform var(--motion-slow) var(--ease-out-expo),
+    opacity var(--motion-fast) var(--ease-out-quart),
+    scale var(--motion-base) var(--ease-spring);
+}
+.glide-card[data-state="hidden"] {
+  opacity: 0;
+  scale: 0.96;
+}

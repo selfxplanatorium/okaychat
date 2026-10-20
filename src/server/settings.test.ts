@@ -74,3 +74,25 @@ test("invalid persisted limits recover to defaults before model execution", () =
   assert.equal(getSettings("alice").maxSteps, 20);
   assert.equal(getSettings("alice").maxSearches, 5);
 });
+
+
+test("sidebar visibility persists per account, including hiding every shortcut", async () => {
+  assert.equal(getSettings("alice").sidebarItems, undefined);
+  updateSettings("alice", { sidebarItems: ["newChat", "projects"] });
+  assert.deepEqual(getSettings("alice").sidebarItems, ["newChat", "projects"]);
+  assert.equal(getSettings("bob").sidebarItems, undefined);
+  updateSettings("alice", { maxSearches: 2 });
+  assert.deepEqual(getSettings("alice").sidebarItems, ["newChat", "projects"]);
+  updateSettings("alice", { sidebarItems: [] });
+  assert.deepEqual(getSettings("alice").sidebarItems, []);
+  for (const sidebarItems of [null, "projects", ["unknown"], ["projects", "projects"], [1]]) {
+    const res = await app.request("http://app/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sidebarItems }) });
+    assert.equal(res.status, 400);
+  }
+  assert.deepEqual(getSettings("alice").sidebarItems, []);
+});
+
+test("invalid legacy sidebar visibility falls back to all shortcuts", () => {
+  db.prepare("INSERT INTO user_settings VALUES (?, ?)").run("alice", JSON.stringify({ sidebarItems: ["unknown"] }));
+  assert.equal(getSettings("alice").sidebarItems, undefined);
+});
