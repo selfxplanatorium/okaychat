@@ -113,6 +113,24 @@ export const toolkit = defineToolkit({
       <ToolShell icon={<BookOpenIcon className="size-4" />} running={status?.type === "running"} label={`Read artifact ${(args as { id?: string })?.id ?? ""}`} />
     ),
   },
+  create_document: {
+    type: "backend",
+    render: ({ args, result, status }) => <ArtifactCard args={args} result={result} status={status} action="create" />,
+  },
+  edit_document: {
+    type: "backend",
+    render: ({ args, result, status }) => <ArtifactCard args={args} result={result} status={status} action="update" />,
+  },
+  import_document: {
+    type: "backend",
+    render: ({ args, result, status }) => <ArtifactCard args={args} result={result} status={status} action="create" />,
+  },
+  read_document: {
+    type: "backend",
+    render: ({ args, status }) => (
+      <ToolShell icon={<BookOpenIcon className="size-4" />} running={status?.type === "running"} label={`Read document ${(args as { id?: string })?.id ?? ""}`} />
+    ),
+  },
   delegate_task: {
     type: "backend",
     render: ({ args, result, status }) => <SubagentCard args={args} result={result} running={status?.type === "running"} />,

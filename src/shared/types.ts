@@ -200,7 +200,12 @@ export interface Me {
   role: "admin" | "user";
 }
 
-export type ArtifactKind = "html" | "react" | "svg" | "markdown" | "code";
+export type TextArtifactKind = "html" | "react" | "svg" | "markdown" | "code";
+/** Files the server builds from a text source and serves as bytes. */
+export type DocumentArtifactKind = "pdf" | "docx" | "xlsx";
+export type ArtifactKind = TextArtifactKind | DocumentArtifactKind;
+
+export const DOCUMENT_KINDS: readonly DocumentArtifactKind[] = ["pdf", "docx", "xlsx"];
 
 export interface ArtifactVersion {
   id: string;
@@ -209,8 +214,39 @@ export interface ArtifactVersion {
   kind: ArtifactKind;
   /** Language of `code` artifacts. */
   language: string | null;
+  /**
+   * Text artifacts: the content. Documents: the source they are built from (HTML for pdf/docx,
+   * workbook JSON for xlsx). Empty for an imported file, which is edited in place instead.
+   */
   content: string;
+  /** Bytes of the built document; 0 for text artifacts. */
+  size: number;
   createdAt: number;
+}
+
+/** A cell as the web grid renders it. Mirrors the shape `previewXlsx` builds. */
+export interface SheetPreviewCell {
+  /** Display text */
+  t: string;
+  b?: boolean;
+  i?: boolean;
+  u?: boolean;
+  color?: string;
+  bg?: string;
+  size?: number;
+  align?: "left" | "center" | "right";
+  wrap?: boolean;
+  border?: boolean;
+}
+
+export interface SheetPreview {
+  name: string;
+  /** Column widths in characters. */
+  columns: number[];
+  rows: Array<{ height?: number; cells: Array<SheetPreviewCell | null> }>;
+  merges: Array<{ top: number; left: number; bottom: number; right: number }>;
+  frozen?: { rows: number; cols: number };
+  truncated: boolean;
 }
 
 /** What the artifact tools return to the model and the UI. Content stays out to save tokens. */
@@ -219,6 +255,8 @@ export interface ArtifactToolResult {
   version: number;
   title: string;
   kind: ArtifactKind;
+  /** Bytes of the built document; 0 for text artifacts. */
+  size: number;
 }
 
 /** `daily`: at a local time on chosen weekdays (0 = Sunday). `interval`: every N minutes from the last run. */

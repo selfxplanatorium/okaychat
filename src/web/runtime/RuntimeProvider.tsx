@@ -42,7 +42,8 @@ const readDataUrl = (file: File) =>
  * Word files are always converted to text on the server.
  */
 class DocumentAttachmentAdapter implements AttachmentAdapter {
-  accept = "application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  accept =
+    "application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
   async add({ file }: { file: File }) {
     return {
@@ -59,20 +60,32 @@ class DocumentAttachmentAdapter implements AttachmentAdapter {
   async send(attachment: Parameters<AttachmentAdapter["send"]>[0], options?: { signal?: AbortSignal }) {
     const isPdf = attachment.file.type === "application/pdf" || attachment.name.toLowerCase().endsWith(".pdf");
     if (isPdf && attachment.file.size <= NATIVE_PDF_BYTES) {
+      // The bytes stay with us too, so the model can import and restructure the PDF later.
+      const form = new FormData();
+      form.append("file", attachment.file);
+      const stored = await api<{ fileId: string | null }>("/files/store", {
+        method: "POST",
+        body: form,
+        signal: options?.signal,
+      }).catch(() => ({ fileId: null }));
       return {
         ...attachment,
         status: { type: "complete" as const },
-        content: [{ type: "file" as const, data: await readDataUrl(attachment.file), mimeType: "application/pdf", filename: attachment.name }],
+        content: [
+          { type: "file" as const, data: await readDataUrl(attachment.file), mimeType: "application/pdf", filename: attachment.name },
+          ...(stored.fileId ? [{ type: "text" as const, text: `<attachment name="${attachment.name.replaceAll('"', "'")}" file_id="${stored.fileId}"></attachment>` }] : []),
+        ],
       };
     }
     const form = new FormData();
     form.append("file", attachment.file);
-    const { text, pages } = await api<{ text: string; pages?: number }>("/files/extract", {
+    const { text, pages, fileId } = await api<{ text: string; pages?: number; fileId?: string }>("/files/extract", {
       method: "POST",
       body: form,
       signal: options?.signal,
     });
-    const meta = pages ? ` pages="${pages}"` : "";
+    // file_id lets the model import the original bytes as an editable document artifact.
+    const meta = `${pages ? ` pages="${pages}"` : ""}${fileId ? ` file_id="${fileId}"` : ""}`;
     return {
       ...attachment,
       status: { type: "complete" as const },

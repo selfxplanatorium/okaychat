@@ -1,6 +1,7 @@
-import { AppWindowIcon, CodeIcon, FileTextIcon, ImageIcon, WrenchIcon } from "lucide-react";
+import { AppWindowIcon, CodeIcon, FileSpreadsheetIcon, FileTextIcon, ImageIcon, WrenchIcon } from "lucide-react";
 import { useEffect, useState, type CSSProperties } from "react";
 import type { ArtifactVersion, SharedPart, SharedThread } from "@shared/types";
+import { DocumentPreview } from "@/components/artifacts/DocumentPreview";
 import { FRAME_SANDBOX, frameDocument } from "@/components/artifacts/frame";
 import { Brand } from "@/components/layout/Brand";
 import { SimpleMarkdown } from "@/components/ui/simple-markdown";
@@ -13,14 +14,34 @@ function SharedArtifact({ token, part }: { token: string; part: Extract<SharedPa
       .then((versions) => setArtifact(versions.find((v) => v.version === part.version) ?? versions.at(-1) ?? null))
       .catch(() => {});
   }, [token, part.id, part.version]);
-  const Icon = part.kind === "code" ? CodeIcon : part.kind === "markdown" ? FileTextIcon : part.kind === "svg" ? ImageIcon : AppWindowIcon;
+  const Icon =
+    part.kind === "code"
+      ? CodeIcon
+      : part.kind === "markdown" || part.kind === "docx" || part.kind === "pdf"
+        ? FileTextIcon
+        : part.kind === "xlsx"
+          ? FileSpreadsheetIcon
+          : part.kind === "svg"
+            ? ImageIcon
+            : AppWindowIcon;
   const doc = artifact && frameDocument(artifact.kind, artifact.content);
+  const isDocument = part.kind === "pdf" || part.kind === "docx" || part.kind === "xlsx";
+  const base = `/api/public/shares/${token}/artifacts/${encodeURIComponent(part.id)}`;
   return (
     <div className="my-3 overflow-hidden rounded-xl border">
       <div className="bg-muted/40 flex items-center gap-2 border-b px-3 py-2 text-sm font-medium">
         <Icon className="size-4" /> {part.title}
       </div>
-      {!artifact ? null : doc ? (
+      {!artifact ? null : isDocument ? (
+        <div className="h-[32rem]">
+          <DocumentPreview
+            kind={part.kind as "pdf" | "docx" | "xlsx"}
+            fileUrl={`${base}/file?version=${artifact.version}`}
+            previewUrl={`${base}/preview?version=${artifact.version}`}
+            title={artifact.title}
+          />
+        </div>
+      ) : doc ? (
         <iframe title={artifact.title} sandbox={FRAME_SANDBOX} srcDoc={doc} className="h-[28rem] w-full border-0 bg-white" />
       ) : artifact.kind === "markdown" ? (
         <SimpleMarkdown className="max-h-[28rem] overflow-auto px-4 py-3">{artifact.content}</SimpleMarkdown>

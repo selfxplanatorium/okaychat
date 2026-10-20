@@ -1,13 +1,24 @@
-import { AppWindowIcon, CodeIcon, FileTextIcon, ImageIcon, Loader2Icon, TriangleAlertIcon } from "lucide-react";
+import { AppWindowIcon, CodeIcon, FileSpreadsheetIcon, FileTextIcon, ImageIcon, Loader2Icon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
 import type { ArtifactKind, ArtifactToolResult } from "@shared/types";
 import { cn } from "@/lib/utils";
 import { useArtifactPanel } from "@/state/artifacts";
 import { useCurrentThreadId } from "@/state/thread-meta";
 
-const ICONS: Record<ArtifactKind, typeof CodeIcon> = { html: AppWindowIcon, react: AppWindowIcon, svg: ImageIcon, markdown: FileTextIcon, code: CodeIcon };
+const ICONS: Record<ArtifactKind, typeof CodeIcon> = {
+  html: AppWindowIcon,
+  react: AppWindowIcon,
+  svg: ImageIcon,
+  markdown: FileTextIcon,
+  code: CodeIcon,
+  pdf: FileTextIcon,
+  docx: FileTextIcon,
+  xlsx: FileSpreadsheetIcon,
+};
 
-type Args = { id?: string; title?: string; kind?: ArtifactKind; content?: string; edits?: unknown[] };
+const isDocument = (kind: ArtifactKind | undefined) => kind === "pdf" || kind === "docx" || kind === "xlsx";
+
+type Args = { id?: string; title?: string; kind?: ArtifactKind; content?: string; edits?: unknown[]; docx_ops?: unknown[]; xlsx_ops?: unknown[]; pdf_ops?: unknown[] };
 
 /** Inline card for create_artifact / update_artifact calls. Opens the side panel. */
 export function ArtifactCard({ args, result, status, action }: { args: unknown; result: unknown; status: { type: string } | undefined; action: "create" | "update" }) {
@@ -30,17 +41,24 @@ export function ArtifactCard({ args, result, status, action }: { args: unknown; 
     }
   }, [running, r?.id, threadId, show]);
 
+  const ops = a.docx_ops ?? a.xlsx_ops ?? a.pdf_ops;
   const detail = running
-    ? a.content
-      ? `${a.content.split("\n").length} lines`
-      : a.edits?.length
-        ? `${a.edits.length} edit${a.edits.length === 1 ? "" : "s"}`
-        : "…"
+    ? isDocument(a.kind)
+      ? "Building the file…"
+      : a.content
+        ? `${a.content.split("\n").length} lines`
+        : a.edits?.length
+          ? `${a.edits.length} edit${a.edits.length === 1 ? "" : "s"}`
+          : ops?.length
+            ? `${ops.length} edit${ops.length === 1 ? "" : "s"}`
+            : "…"
     : failed
       ? typeof result === "string"
         ? result
         : "Failed"
-      : `${action === "create" ? "Created" : "Updated"} · v${r?.version}`;
+      : isDocument(r?.kind)
+        ? `${r!.kind.toUpperCase()} · ${Math.max(1, Math.round((r!.size ?? 0) / 1024))} KB · ${action === "create" ? "created" : "updated"}`
+        : `${action === "create" ? "Created" : "Updated"} · v${r?.version}`;
 
   return (
     <button

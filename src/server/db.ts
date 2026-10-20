@@ -203,6 +203,22 @@ const migrations: string[] = [
     UNIQUE (user_id, family)
   );
   `,
+  // Document artifacts keep their source text in `content` and the built file in `data`, so an edit can
+  // rebuild the file instead of patching a binary. `uploads` holds an attached file until the model
+  // imports it as an artifact.
+  `
+  ALTER TABLE artifacts ADD COLUMN data BLOB;
+  ALTER TABLE artifacts ADD COLUMN size INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE uploads (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    data BLOB NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX uploads_user ON uploads(user_id, created_at DESC);
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

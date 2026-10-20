@@ -1,6 +1,6 @@
-import { CheckIcon, CodeIcon, CopyIcon, DownloadIcon, EyeIcon, Loader2Icon, RotateCwIcon, XIcon } from "lucide-react";
+import { CheckIcon, CodeIcon, CopyIcon, DownloadIcon, EyeIcon, FileSpreadsheetIcon, FileTextIcon, Loader2Icon, RotateCwIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import type { ArtifactVersion } from "@shared/types";
+import type { ArtifactVersion, DocumentArtifactKind } from "@shared/types";
 import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
 import { SimpleMarkdown } from "@/components/ui/simple-markdown";
 import { Select } from "@/components/ui/select";
@@ -9,6 +9,7 @@ import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useArtifactPanel } from "@/state/artifacts";
 import { useCurrentThreadId } from "@/state/thread-meta";
+import { DocumentPreview } from "./DocumentPreview";
 import { artifactFilename, FRAME_SANDBOX, frameDocument } from "./frame";
 
 const WIDTH_KEY = "okaychat:artifact-width";
@@ -45,6 +46,16 @@ function download(name: string, content: string, type: string) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+async function downloadFile(name: string, url: string) {
+  const blob = await fetch(url).then((r) => r.blob());
+  const href = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement("a"), { href, download: name });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(href), 1000);
+}
+
+const isDocument = (kind: ArtifactVersion["kind"]): kind is DocumentArtifactKind => kind === "pdf" || kind === "docx" || kind === "xlsx";
 
 function ResizeHandle({ onResize }: { onResize: (width: number) => void }) {
   const onPointerDown = (e: ReactPointerEvent) => {
@@ -166,9 +177,14 @@ function ArtifactPanelBody({
   };
 
   const current = versions?.find((v) => v.version === selected) ?? versions?.at(-1);
+  const docKind = current && isDocument(current.kind) ? current.kind : null;
   const doc = current ? frameDocument(current.kind, current.content) : null;
+  const hasCode = !!current && (!docKind || !!current.content);
   const hasPreview = current?.kind !== "code";
-  const showCode = view === "code" || !hasPreview;
+  const showCode = !hasPreview || (view === "code" && hasCode);
+  const base = current && threadId ? `/api/threads/${threadId}/artifacts/${encodeURIComponent(id)}` : "";
+  const fileUrl = current ? `${base}/file?version=${current.version}` : "";
+  const previewUrl = current ? `${base}/preview?version=${current.version}` : "";
 
   return (
     <aside
@@ -187,7 +203,13 @@ function ArtifactPanelBody({
         <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium">{current?.title ?? id}</p>
-            {current && <p className="text-muted-foreground text-xs">{current.kind === "code" ? (current.language ?? "code") : current.kind}</p>}
+            {current && (
+              <p className="text-muted-foreground flex items-center gap-1 text-xs">
+                {docKind ? docKind === "xlsx" ? <FileSpreadsheetIcon className="size-3" /> : <FileTextIcon className="size-3" /> : null}
+                {current.kind === "code" ? (current.language ?? "code") : current.kind}
+                {current.size ? ` · ${Math.max(1, Math.round(current.size / 1024))} KB` : ""}
+              </p>
+            )}
           </div>
           {versions && versions.length > 1 && (
             <Select
@@ -198,7 +220,7 @@ function ArtifactPanelBody({
               options={versions.map((v) => ({ value: String(v.version), label: `v${v.version}` })).reverse()}
             />
           )}
-          {hasPreview && (
+          {hasPreview && hasCode && (
             <div className="bg-muted flex rounded-lg p-0.5">
               {(["preview", "code"] as const).map((v) => (
                 <button
@@ -217,18 +239,23 @@ function ArtifactPanelBody({
               ))}
             </div>
           )}
-          {doc && view === "preview" && (
+          {(doc || docKind === "docx") && view === "preview" && (
             <TooltipIconButton tooltip="Reload" onClick={() => setReloadKey((k) => k + 1)}>
               <RotateCwIcon />
             </TooltipIconButton>
           )}
-          <TooltipIconButton tooltip={isCopied ? "Copied" : "Copy"} disabled={!current} onClick={() => current && copyToClipboard(current.content)}>
+          <TooltipIconButton tooltip={isCopied ? "Copied" : "Copy"} disabled={!hasCode} onClick={() => current && hasCode && copyToClipboard(current.content)}>
             {isCopied ? <CheckIcon /> : <CopyIcon />}
           </TooltipIconButton>
           <TooltipIconButton
             tooltip="Download"
             disabled={!current}
-            onClick={() => current && download(artifactFilename(current.title, current.kind, current.language), current.content, current.kind === "html" ? "text/html" : current.kind === "svg" ? "image/svg+xml" : "text/plain")}
+            onClick={() => {
+              if (!current) return;
+              const name = artifactFilename(current.title, current.kind, current.language);
+              if (docKind) void downloadFile(name, fileUrl);
+              else download(name, current.content, current.kind === "html" ? "text/html" : current.kind === "svg" ? "image/svg+xml" : "text/plain");
+            }}
           >
             <DownloadIcon />
           </TooltipIconButton>
@@ -245,6 +272,14 @@ function ArtifactPanelBody({
             </div>
           ) : showCode ? (
             <pre className="h-full overflow-auto p-4 font-mono text-xs leading-relaxed">{current.content}</pre>
+          ) : docKind ? (
+            <DocumentPreview
+              key={`${current.version}-${reloadKey}`}
+              kind={docKind}
+              fileUrl={fileUrl}
+              previewUrl={previewUrl}
+              title={current.title}
+            />
           ) : doc ? (
             <iframe key={`${current.version}-${reloadKey}`} title={current.title} sandbox={FRAME_SANDBOX} srcDoc={doc} className="h-full w-full border-0 bg-white" />
           ) : (

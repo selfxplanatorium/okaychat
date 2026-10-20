@@ -3,8 +3,9 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import type { UIMessage } from "ai";
 import { Hono } from "hono";
-import type { ArtifactToolResult, SharedPart, SharedThread } from "../shared/types.js";
-import { artifactVersions } from "./artifacts.js";
+import type { ArtifactToolResult, DocumentArtifactKind, SharedPart, SharedThread } from "../shared/types.js";
+import { artifactData, artifactVersions, DOCUMENT_MIME, documentFilename } from "./artifacts.js";
+import { previewXlsx } from "./documents/xlsx.js";
 import type { AppEnv } from "./auth.js";
 import { randomToken } from "./crypto.js";
 import { db } from "./db.js";
@@ -26,6 +27,8 @@ const byToken = (token: string) => db.prepare("SELECT * FROM shares WHERE token 
 
 const toolName = (part: { type: string; toolName?: string }) => part.toolName ?? part.type.replace(/^tool-/, "");
 
+const ARTIFACT_TOOLS = new Set(["create_artifact", "update_artifact", "create_document", "edit_document", "import_document"]);
+
 function sharedParts(message: UIMessage, token: string): SharedPart[] {
   const out: SharedPart[] = [];
   for (const raw of message.parts) {
@@ -37,7 +40,7 @@ function sharedParts(message: UIMessage, token: string): SharedPart[] {
       const output = part.state === "output-available" ? part.output : undefined;
       if (name === "generate_image" && (output as { id?: string })?.id) {
         out.push({ type: "image", url: `/api/public/shares/${token}/images/${(output as { id: string }).id}` });
-      } else if ((name === "create_artifact" || name === "update_artifact") && (output as ArtifactToolResult)?.id) {
+      } else if (ARTIFACT_TOOLS.has(name) && (output as ArtifactToolResult)?.id) {
         const a = output as ArtifactToolResult;
         out.push({ type: "artifact", id: a.id, title: a.title, kind: a.kind, version: a.version });
       } else out.push({ type: "tool", name });
@@ -87,6 +90,35 @@ export const publicShareRoutes = new Hono()
     if (!share) return c.json({ error: "Not found" }, 404);
     const versions = artifactVersions(share.thread_id, c.req.param("id"));
     return versions.length ? c.json(versions) : c.json({ error: "Not found" }, 404);
+  })
+  .get("/:token/artifacts/:id/file", (c) => {
+    const share = byToken(c.req.param("token"));
+    if (!share) return c.json({ error: "Not found" }, 404);
+    const id = c.req.param("id");
+    const version = c.req.query("version") ? Number(c.req.query("version")) : undefined;
+    const data = artifactData(share.thread_id, id, version);
+    const versions = artifactVersions(share.thread_id, id);
+    const chosen = version === undefined ? versions.at(-1) : versions.find((v) => v.version === version);
+    if (!data || !chosen) return c.json({ error: "Not found" }, 404);
+    const kind = chosen.kind as DocumentArtifactKind;
+    return new Response(data as unknown as BodyInit, {
+      headers: {
+        "Content-Type": DOCUMENT_MIME[kind],
+        "Content-Disposition": `inline; filename="${documentFilename(chosen.title, kind)}"`,
+        "Cache-Control": "public, max-age=60",
+      },
+    });
+  })
+  .get("/:token/artifacts/:id/preview", async (c) => {
+    const share = byToken(c.req.param("token"));
+    if (!share) return c.json({ error: "Not found" }, 404);
+    const id = c.req.param("id");
+    const version = c.req.query("version") ? Number(c.req.query("version")) : undefined;
+    const data = artifactData(share.thread_id, id, version);
+    const artifact = artifactVersions(share.thread_id, id).at(-1);
+    if (!data || !artifact) return c.json({ error: "Not found" }, 404);
+    if (artifact.kind !== "xlsx") return c.json({ error: "Preview is only available for spreadsheets" }, 400);
+    return c.json(await previewXlsx(data));
   })
   .get("/:token/images/:id", (c) => {
     const share = byToken(c.req.param("token"));

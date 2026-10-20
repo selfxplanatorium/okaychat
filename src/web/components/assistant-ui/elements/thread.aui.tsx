@@ -117,6 +117,9 @@ const messageGroupBy = groupPartByType({
   // Artifact cards stay visible so they can be clicked and auto-open the panel.
   "tool-call:create_artifact": [],
   "tool-call:update_artifact": [],
+  "tool-call:create_document": [],
+  "tool-call:edit_document": [],
+  "tool-call:import_document": [],
   "tool-call:show_widget": [],
   "tool-call:edit_widget": [],
   "tool-call:render_spec": [],

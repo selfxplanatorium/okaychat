@@ -112,7 +112,7 @@ export async function turnStream(opts: TurnOptions) {
       const tools = {
         ...(model.toolCall && settings.webTools ? webTools() : {}),
         ...subagents,
-        ...(useArtifacts ? artifactTools(threadId) : {}),
+        ...(useArtifacts ? artifactTools(threadId, user.id) : {}),
         ...(model.toolCall && codexConnected(user.id) ? imageTools(user.id, threadId, signal) : {}),
         ...(useGenerativeUI ? frontendTools(opts.clientTools!) : {}),
         ...mcp.tools,
