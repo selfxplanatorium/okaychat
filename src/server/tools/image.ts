@@ -197,7 +197,7 @@ export const imageRoutes = new Hono<AppEnv>()
     const row = db.prepare("SELECT id FROM images WHERE id = ? AND user_id = ?").get(c.req.param("id"), user.id) as { id: string } | undefined;
     if (!row) return c.json({ error: "Not found" }, 404);
     const stream = Readable.toWeb(createReadStream(imagePath(user.id, row.id))) as ReadableStream;
-    return new Response(stream, { headers: { "Content-Type": "image/png", "Cache-Control": "private, max-age=31536000, immutable" } });
+    return new Response(stream, { headers: { "Content-Type": "image/png", "Cache-Control": "private, no-store" } });
   })
   .get("/codex", async (c) => {
     const userId = c.get("user").id;

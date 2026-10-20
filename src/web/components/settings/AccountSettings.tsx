@@ -18,7 +18,7 @@ function StorageSection() {
   return (
     <SettingsSection
       title="Storage"
-      description="Attachments, artifact and document versions, generated images, saved sandbox outputs, uploaded fonts, and your profile picture. The limit is set by the server admin."
+      description="Your attachments, generated files, skills, memories, project files, fonts, and profile picture. The server admin sets the limit."
     >
       <StorageMeter storage={storage} className="px-4 py-3" />
     </SettingsSection>

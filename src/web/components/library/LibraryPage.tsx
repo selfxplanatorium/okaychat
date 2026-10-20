@@ -49,7 +49,7 @@ const formatSize = (bytes: number) => {
 const formatDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { dateStyle: "medium" });
 
 async function downloadUrl(name: string, url: string) {
-  const blob = await fetch(url, { credentials: "same-origin" }).then((r) => r.blob());
+  const blob = await fetch(url, { credentials: "same-origin" }).then((r) => { if (!r.ok) throw new Error("Could not download the file."); return r.blob(); });
   const href = URL.createObjectURL(blob);
   Object.assign(document.createElement("a"), { href, download: name }).click();
   setTimeout(() => URL.revokeObjectURL(href), 1000);
@@ -65,8 +65,9 @@ function downloadText(name: string, content: string, mime: string) {
 function ItemActions({ item, onDeleted }: { item: LibraryItem; onDeleted: () => void }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const download = async () => {
-    if (item.downloadUrl) return void downloadUrl(item.name, item.downloadUrl);
+    if (item.downloadUrl) return downloadUrl(item.name, item.downloadUrl);
     // Text artifacts have no bytes endpoint; their latest version's content is the file.
     const versions = await api<ArtifactVersion[]>(`/threads/${encodeURIComponent(item.threadId!)}/artifacts/${encodeURIComponent(item.artifactId!)}`);
     const v = versions.at(-1);
@@ -80,15 +81,19 @@ function ItemActions({ item, onDeleted }: { item: LibraryItem; onDeleted: () => 
     setBusy(true);
     try {
       await api(`/library/${item.id.split(":")[0]}/${encodeURIComponent(item.id.slice(item.id.indexOf(":") + 1))}`, { method: "DELETE" });
+      void useData.getState().refreshStorage().catch(() => {});
       onDeleted();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not delete file.");
     } finally {
       setBusy(false);
     }
   };
   return (
     <>
+      {error && <p role="alert" className="text-destructive text-xs">{error}</p>}
       {(item.downloadUrl || item.artifactId) && (
-        <Button variant="outline" size="sm" onClick={() => void download()}>
+        <Button variant="outline" size="sm" onClick={() => void download().catch((e: Error) => setError(e.message))}>
           <DownloadIcon /> Download
         </Button>
       )}
@@ -117,6 +122,7 @@ function OpenChatButton({ threadId }: { threadId: string }) {
       variant="outline"
       size="sm"
       onClick={async () => {
+        useData.getState().setActiveProject(null);
         await aui.threads.reload();
         navigate("/");
         aui.threads.switchToThread(threadId);
@@ -176,6 +182,10 @@ function ItemPreviewBody({ item }: { item: LibraryItem }) {
     );
   }
   if (item.artifactId) return <ArtifactPreview item={item} />;
+  if (item.kind === "spreadsheet" && item.previewUrl && item.downloadUrl) {
+    return <DocumentPreview kind="xlsx" fileUrl={item.downloadUrl} previewUrl={item.previewUrl} title={item.name} />;
+  }
+  if (item.previewUrl && item.kind !== "pdf") return <TextFilePreview url={item.previewUrl} />;
   if (item.previewUrl) {
     // Uploaded PDFs use the browser's own viewer; uploaded images are covered above.
     return <iframe title={item.name} src={item.previewUrl} className="h-full w-full border-0 bg-white" />;
@@ -188,6 +198,20 @@ function ItemPreviewBody({ item }: { item: LibraryItem }) {
       <p>No inline preview. Download the file to view it.</p>
     </div>
   );
+}
+
+function TextFilePreview({ url }: { url: string }) {
+  const [text, setText] = useState("Loading…");
+  useEffect(() => {
+    let active = true;
+    fetch(url).then(async (r) => {
+      if (!r.ok) throw new Error("Could not preview this file.");
+      const body = await r.json() as { text: string; truncated?: boolean };
+      if (active) setText(body.text + (body.truncated ? "\n[Preview truncated]" : ""));
+    }).catch((e: Error) => { if (active) setText(e.message); });
+    return () => { active = false; };
+  }, [url]);
+  return <pre className="h-full overflow-auto whitespace-pre-wrap p-4 font-mono text-xs">{text}</pre>;
 }
 
 function ItemPreviewDialog({ item, onClose, onDeleted }: { item: LibraryItem | null; onClose: () => void; onDeleted: () => void }) {
@@ -274,6 +298,7 @@ export function LibraryPage() {
   const [items, setItems] = useState<LibraryItem[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<LibraryItem | null>(null);
   const sentinel = useRef<HTMLDivElement>(null);
   const requestId = useRef(0);
@@ -298,11 +323,14 @@ export function LibraryPage() {
       // Only the newest request may write: a filter change while one is in flight must not mix pages.
       const id = ++requestId.current;
       setLoading(true);
+      setError(null);
       try {
         const page = await api<LibraryPage>(`/library?${params}${nextCursor ? `&cursor=${encodeURIComponent(nextCursor)}` : ""}`);
         if (id !== requestId.current) return;
         setItems((prev) => (nextCursor && prev ? [...prev, ...page.items] : page.items));
         setCursor(page.nextCursor);
+      } catch (cause) {
+        if (id === requestId.current) { setItems((prev) => prev ?? []); setError(cause instanceof Error ? cause.message : "Could not load files."); }
       } finally {
         if (id === requestId.current) setLoading(false);
       }
@@ -333,6 +361,7 @@ export function LibraryPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 pt-6 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-6">
+      {error && <p role="alert" className="text-destructive text-sm">{error}</p>}
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Library</h1>

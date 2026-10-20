@@ -1,76 +1,61 @@
 # Library
 
-The Library (`/library`) lists every file the agent received or produced for the current account:
-uploaded attachments, generated images (`generate_image`), and the latest version of each artifact
-(documents and text artifacts). Only the current user's items appear; anonymous (`tmp_`) chats create
-no stored data, so nothing from them can show up.
+`/library` shows durable files belonging to the signed-in account. `GET /api/library` unions the
+existing stores; there is no duplicate catalog table.
 
-## What is catalogued
+| Source | Store | Size | Association |
+| --- | --- | --- | --- |
+| Attachments (images, documents, text/code and arbitrary binary files) | `uploads.data` | Original bytes | Explicit thread for materialized inline attachments; otherwise the latest owning chat mentioning `file_id`; pinned originals also link through `project_files.upload_id` |
+| Generated images | PNGs on disk + `images` | Stored `images.size` (legacy sizes backfilled at startup) | Owning thread and project |
+| Artifact/document | Latest `artifacts` version, selected explicitly by maximum version | UTF-8 source + built bytes | Owning thread and project |
+| `run_code` outputs | `sandbox_files.data` | Durable copied bytes | Owning thread and project |
+| Skills | `skills` + `skill_files` | Stored UTF-8 instructions, metadata and references | Account; conversation-created skills are generated, manual/source skills are uploaded |
 
-There is no dedicated library table. `GET /api/library` (`src/server/library.ts`) is a UNION over the
-existing stores, each with its own quirks:
+All queries restrict ownership, including thread joins and file routes. Anonymous chats produce no
+Library entries. Explicitly saving one into normal history stores its inline attachments at that point.
 
-| Source | Table | Name | Size | Thread / project |
-| --- | --- | --- | --- | --- |
-| Generated image | `images` | The prompt (truncated in the UI by CSS) | Stat'ed from disk per page (not stored in the table) | Own `thread_id` |
-| Upload | `uploads` | Original filename | `length(data)` | Recovered from the message text: the most recent chat whose stored JSON content mentions the upload id (uploads carry no thread column). `LIKE '%' || u.id || '%'` — the id is unique, and the JSON-escaped `file_id="..."` form never appears literally |
-| Artifact (latest version) | `artifacts` | Title | `size` for documents, `length(content)` for text artifacts | Via the owning thread (artifacts have no `user_id`; the join enforces isolation) |
+## Attachment lifetime
 
-Kinds are computed in SQL per source and normalized to `image`, `pdf`, `document` (Word),
-`spreadsheet`, `code` (all text artifacts), and `other` (uploads that are none of the above, such as
-CSV or text files).
+Every accepted non-anonymous attachment is stored independently of sandbox configuration. Images keep
+their existing data URL parts, with an additional attachment header carrying the stored `file_id`.
+Native PDFs, extracted documents, text/code and the binary fallback also retain original bytes;
+storage failures block sending instead of being swallowed. Unsupported binary formats are made
+available to tools by `file_id` rather than decoded as text.
 
-Not in the library, on purpose:
+Uploads are persistent until Library or account deletion. There is no seven-day pruning, and deleting
+a chat or project does not remove its uploaded originals. Temporary extraction remains non-persistent.
+A transactional migration materializes existing base64 inline attachments up to the 25 MiB upload
+limit without rewriting chat content, preserving provider prompt prefixes. It runs once, so deleted
+files cannot reappear at restart. Identical message replays likewise cannot restore deleted copies.
 
-- **`run_code` outputs.** Sandbox files live only in the sandbox container and are served through
-  `/api/sandbox/:threadId/files`; nothing about them is stored in SQLite, so there is nothing durable
-  to list. See `docs/research/code-sandbox.md`.
-- **Uploaded images.** `SimpleImageAttachmentAdapter` sends them as data URLs; they never reach the
-  server as bytes.
-- **Old uploads.** `uploads` is a 7-day import cache (`files.ts` prunes it), so attached PDFs/DOCX
-  files drop out of the library when the model can no longer import them.
+## Filtering and pagination
 
-## Query and pagination
+Kinds: `image`, `pdf`, `document`, `spreadsheet`, `code`, `other`. Filters: `kind`, `source`
+(`uploaded`/`generated`), `thread`, `project`, literal name search `q`, inclusive timestamps `from`/`to`.
+Sorts: `newest`, `oldest`, `name`, `size`. Page size defaults to 50 and is capped at 100.
 
-`listLibrary` builds the UNION as a subquery and applies filters outside it: `kind`, `source`
-(`uploaded`/`generated`), `thread`, `project`, `q` (name search with `%`/`_`/`\` escaped, `ESCAPE '\'`),
-`from`/`to` (ms, inclusive), `sort` (`newest`, `oldest`, `name`, `size`), and `limit` (default 50, max 100).
+Keyset cursors are base64url JSON `{ v, key }`. Name comparisons use NOCASE for both ordering and tie
+breaking; unique keys break equal values. Sizes are available before sorting, including generated
+images. Artifact source kind is retained separately from the Library category so HTML/SVG/Markdown
+previews use the correct renderer. Malformed cursors return an empty page.
 
-Pagination is keyset: the cursor is base64url JSON `{ v, key }` where `v` is the last row's sort value
-(created_at, name, or size) and `key` the unique row key, so ties and equal names cannot skip or
-repeat rows. A malformed or stale cursor reads as "no more pages" instead of erroring. The image
-sizes for a page are filled in by `fs.stat` after the rows are fetched — never inside the query.
+## Downloads, previews and deletion
 
-## Serving and deletion
+- `GET /api/uploads/:id/file` serves owned originals. Raster images and PDFs can be inline; SVG and
+  other active content download. Every upload receives `nosniff`, a sandbox CSP, and `private, no-store`.
+- Durable sandbox outputs use `/api/sandbox/:threadId/stored?path=...`. Downloads remain attachments;
+  `preview=1` permits only PDF/raster inline viewing with the same security headers. Scratch proxy URLs
+  are only a fallback when copying failed or exceeded the 50 MiB cap/quota.
+- `/api/library/{upload|sandbox}/:id/preview` returns bounded JSON text or spreadsheet preview data.
+  React renders text literally; HTML is never executed. DOCX uses the shared client renderer. Artifact
+  previews retain their existing sandboxed frame/document renderers.
+- Skills have `/api/library/skill/:id/preview` (instructions and reference index) and `/file` (a ZIP
+  containing SKILL.md plus references). These resolve account ownership before reading any files.
+- Generated PNGs and artifact documents use their existing owner-checked routes.
+- `DELETE /api/library/{upload|image|sandbox|skill}/:id` deletes owned data and frees quota. Skill deletion
+  includes its references. Artifact versions remain part of chat history and are removed with the chat.
 
-- Uploads had no serving endpoint; `GET /api/uploads/:id/file` (`files.ts`) serves the bytes to the
-  owner. Images and PDFs go `inline` (the browser's own viewers); everything else downloads with
-  `Content-Disposition: attachment` plus a `sandbox` CSP, so a model-crafted HTML upload cannot run
-  script on the app origin.
-- Images use the existing `/api/images/:id`; documents use the existing artifact
-  `/threads/:id/artifacts/:aid/file` (+ `/preview` for spreadsheets), both already auth-checked.
-- `DELETE /api/library/image/:id` and `DELETE /api/library/upload/:id` delete the row (and, for
-  images, the file on disk), scoped by `user_id`. **Artifacts are not deletable from the library:**
-  they belong to the chat history, and removing a version would break the messages referencing it.
-
-## Web
-
-`src/web/components/library/LibraryPage.tsx` replaces the placeholder in `NavigationPage`. It loads
-lazily with the navigation chunk (`preloadable()`), keeps the grid/list choice in
-`localStorage["okaychat:library-view"]`, and renders:
-
-- **Grid**: image thumbnails (`<img>`, lazy) or kind icons; **list**: name, type, size, chat, date.
-  Sizing uses `pointer-coarse:` variants per `docs/research/mobile-pwa.md`.
-- **Filter bar**: kind chips, source select, project select (from the `useData` store), debounced
-  name search, sort select.
-- **Preview dialog**: images inline; PDFs in the browser viewer; DOCX through the shared
-  `DocxPreview`; artifact documents through `DocumentPreview` and text artifacts through
-  `frameDocument`/`SimpleMarkdown`, exactly like the chat's artifact panel. Actions: download (bytes
-  or, for text artifacts, the latest version's content), open the source chat (reload thread list →
-  navigate → `switchToThread`, same as ScheduleSettings), and a two-step delete for deletable items.
-- **Loading/empty states** with skeletons, infinite scroll via IntersectionObserver plus a real
-  "Load more" button, and a request-id guard so a filter change cannot mix pages from an in-flight
-  response.
-
-Depth comes from `depth-primary`, `depth-canvas`-style token shadows
-(`shadow-[var(--depth-highlight),var(--shadow-raised)]`), and theme tokens only — no hardcoded colors.
+The lazy navigation page provides grid/list layouts, filters, debounced search, infinite pagination
+with a Load more button, previews, download/open-chat actions, and confirmed deletion. Failed requests
+show errors. Deletion refreshes storage usage. Tests exercise ownership of listings, previews, downloads
+and deletes, latest-version selection, name/size pagination, persistence, and quota reclamation.

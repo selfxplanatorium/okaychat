@@ -1,36 +1,62 @@
 # Storage quota
 
-Built 2026-10-20. Every byte a user owns counts against one per-user limit; the server rejects writes that would pass it.
+Each account has one limit: `OKAYCHAT_STORAGE_LIMIT` bytes (default 1 GiB), overridden by nullable
+`users.storage_limit` through the admin API/UI. `GET /api/storage` returns `{ used, limit, defaultLimit }`.
 
-## What counts
+## Accounting
 
-`storageUsedSql` in `src/server/quota.ts` sums, per user:
+`src/server/quota.ts` computes usage from the owning account's rows:
 
-- `uploads.data` (attachments kept for import)
-- artifacts: `length(CAST(content AS BLOB)) + size` — the source text plus the built file, for **every version**
-- `user_fonts.data`, `user_avatars.data`, `memories.content_enc`, `project_files.content`
-- `sandbox_files.data` (run_code outputs copied out of the sandbox, see `code-sandbox.md`)
-- `images.size` (generated PNGs live on disk, not in SQLite; the column records their size)
+- Persistent original attachment bytes in `uploads`, including images, text/code, binary files, and project attachments.
+- Every artifact version: UTF-8 source bytes plus built document bytes.
+- Generated images (`images.size`, backed by PNGs on disk); pre-quota images are stat'ed at startup to backfill their size.
+- Durable `sandbox_files.data`; scratch workspaces are outside account storage.
+- Uploaded fonts, account avatar, encrypted memory bytes, and extracted project-file text.
+- Skill names, descriptions, instructions, reference paths and reference contents, counted as UTF-8 bytes across `skills` and `skill_files`.
 
-Not counted: config-sized rows such as provider keys, MCP tokens, codex auth, and settings.
+Settings, provider/MCP credentials, skill-source credentials and other small configuration rows do not
+count. Message text and its existing inline file representation are not separately charged: the owned
+original attachment is charged once. Existing inline attachments are materialized by a one-time
+migration without rewriting messages. Existing files are grandfathered even if migration puts an
+account over quota; subsequent growth is refused.
 
-## Limits and enforcement
+## Enforcement and deletion
 
-- Default limit: `OKAYCHAT_STORAGE_LIMIT` bytes (default 1 GiB, see `.env.example`).
-- Per-user override: nullable `users.storage_limit` column, set by an admin in Admin settings (entered as MB/GB; empty resets to the default).
-- `assertStorage(userId, incoming)` throws `QuotaError` when `used + incoming > limit`.
-- HTTP write paths (`/files/store`, `/files/extract`, `/fonts`, `/account/avatar`) answer **413** with a JSON `{ error }` the UI shows.
-- Tools (artifacts and documents via `saveVersion`, `generate_image`, run_code output import) throw and the model sees the quota message as the tool error. `run_code` is best effort: files that cannot be stored keep a direct sandbox URL and the result carries a `storageWarning`.
+`assertStorage(userId, incoming)` throws `QuotaError`, an HTTP 413 exception, for positive net growth
+that would exceed the limit. Replacement avatars, sandbox outputs and skills subtract their old
+stored bytes; shrinking or equal-size replacements remain possible after an admin lowers a limit.
+New artifact versions retain their predecessors and therefore charge the entire new version.
+Checks and SQLite writes have no intervening asynchronous work. Multi-skill imports and message
+attachment materialization use transactions; nested helpers use SQLite savepoints.
 
-Versioning note: artifact versions accumulate by design, so every version's bytes count — an edit does not free the old version's space.
+Enforcement covers upload storage/extraction, project original bytes plus extracted text, memory
+writes/imports, avatars, fonts, artifact/document versions, generated images, and every skill creation,
+edit, source install or import. Attachment adapters propagate failures, including native PDF, image,
+text and binary storage failures; they cannot silently continue with only a browser copy.
 
-## UI
+Library deletion immediately releases the deleted upload, generated image, sandbox output, or skill
+package's charged bytes (including skill references). Deleting an original project attachment leaves
+its separately charged pinned text intact. Project/chat deletion does not remove persistent uploaded
+originals; those last until Library deletion or account deletion. Chat deletion cascades artifact and
+sandbox-output rows and removes its generated images. Account deletion cascades all owned SQLite
+files and removes the generated-image directory.
 
-- `GET /api/storage` returns `{ used, limit, defaultLimit }`.
-- Account settings shows a bar and numbers (`StorageMeter`).
-- The chat shell shows a dismissible warning notice from 90% (`StorageNotice`), dismissed per browser session; at 100% it becomes an error notice and reopens.
-- Admin settings lists each user's usage and limit and can set or reset the per-user limit.
+`run_code` copies each returned output up to 50 MiB before returning a durable URL. Files exceeding
+that cap, failing to copy, or exceeding quota have a `storageWarning` and only a scratch download URL;
+they are not durable and disappear with the workspace. Quota rejection preserves the previous durable
+copy when an attempted replacement cannot fit.
 
-## Tests
+Anonymous attachment extraction/storage (`temporary=1`) bypasses persistence and quota. `tmp_` chats
+cannot create stored files or run persistent tools. Explicitly saving an anonymous chat to normal
+history materializes its inline attachments, enforces quota, and keeps the original message parts.
 
-`src/server/quota.test.ts` covers the sum across all counted tables, the `/api/storage` reply, 413 enforcement on uploads/fonts/avatars, the artifact tool error, and the admin set/reset path.
+## UI and checks
+
+The account page shows a storage meter; the chat notice warns at 90% and reports full storage at
+100%. Dismissal is scoped to the account and browser session. Usage refreshes after API mutations,
+chat completion, page focus, and account-page entry; the initial storage request starts with the
+shell's other startup requests. Admins see usage and can set/reset per-user limits.
+
+Tests cover ownership, UTF-8 accounting, every principal write path, replacement deltas, failed-import
+rollback, anonymous non-persistence, durable outputs, legacy migration/restart behavior, and Library
+deletion freeing capacity for another write.

@@ -48,7 +48,7 @@ const upload = (id: string, user: string, name: string, mime: string) =>
 const image = (id: string, user: string, threadId: string | null, prompt: string) => {
   mkdirSync(path.join(dataDir, "images", user), { recursive: true });
   writeFileSync(imagePath(user, id), Buffer.alloc(42));
-  db.prepare("INSERT INTO images (id, user_id, thread_id, prompt, width, height, created_at) VALUES (?, ?, ?, ?, 8, 8, ?)").run(id, user, threadId, prompt, Date.now());
+  db.prepare("INSERT INTO images (id, user_id, thread_id, prompt, width, height, size, created_at) VALUES (?, ?, ?, ?, 8, 8, 42, ?)").run(id, user, threadId, prompt, Date.now());
 };
 
 const artifact = (threadId: string, id: string, version: number, title: string, kind: string, content: string, data?: Buffer) =>
@@ -77,7 +77,7 @@ test("it lists uploads, generated images, and the latest artifact version, for t
   upload("upl_other", "bob", "secret.pdf", "application/pdf");
   image("img_a", "alice", "t1", "A red cube");
   image("img_bob", "bob", "t9", "Bob art");
-  artifact("t1", "site", 1, "Site", "html", "<h1>Hi</h1>");
+  artifact("t1", "site", 1, "Old site", "html", "<h1>Hi</h1>");
   artifact("t1", "site", 2, "Site", "html", "<h1>Hi v2</h1>");
   artifact("t9", "bob-doc", 1, "Bob doc", "code", "print(1)");
 
@@ -85,6 +85,8 @@ test("it lists uploads, generated images, and the latest artifact version, for t
   assert.deepEqual(names(page), ["Site", "A red cube", "report.pdf"]);
   const site = page.items[0]!;
   assert.equal(site.kind, "code");
+  assert.equal(site.artifactKind, "html");
+  assert.equal(site.size, Buffer.byteLength("<h1>Hi v2</h1>"));
   assert.equal(site.source, "generated");
   assert.equal(site.threadTitle, "Atlas chat");
   assert.equal(site.projectId, "p1");
@@ -161,4 +163,15 @@ test("deleting an image or upload is scoped to the owner", async () => {
   assert.equal((await request("/library/upload/upl_a", "alice", "DELETE")).status, 200);
   assert.equal((await request("/library/upload/upl_a", "alice", "DELETE")).status, 404);
   assert.equal((db.prepare("SELECT COUNT(*) AS n FROM uploads").get() as { n: number }).n, 0);
+});
+
+test("case-insensitive name pagination does not skip case-only ties and size sorting uses stored image bytes", async () => {
+  upload("upl_a", "alice", "Alpha.txt", "text/plain");
+  upload("upl_b", "alice", "alpha.txt", "text/plain");
+  image("img_large", "alice", "t1", "large image");
+  const first = await get("/library?sort=name&limit=1");
+  const second = await get(`/library?sort=name&limit=1&cursor=${first.nextCursor}`);
+  assert.equal(first.items[0]!.id, "upload:upl_a");
+  assert.equal(second.items[0]!.id, "upload:upl_b");
+  assert.equal((await get("/library?sort=size&limit=1")).items[0]!.id, "image:img_large");
 });

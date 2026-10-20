@@ -3,7 +3,7 @@ import { tool, type ToolSet } from "ai";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AppEnv } from "../auth.js";
-import { sha256 } from "../crypto.js";
+import { newId, sha256 } from "../crypto.js";
 import { db } from "../db.js";
 import { env } from "../env.js";
 import { assertStorage, QuotaError } from "../quota.js";
@@ -20,6 +20,8 @@ const RUNNER_MAX_FILE = 50 * 1024 * 1024;
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 const TYPES: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   ".pdf": "application/pdf", ".csv": "text/csv", ".txt": "text/plain", ".md": "text/markdown", ".json": "application/json",
 };
 
@@ -42,13 +44,13 @@ interface RunnerResult {
   stderr: string;
   stopped: string | null;
   durationMs: number;
-  files: Array<{ path: string; size: number; storedUrl?: string }>;
+  files: Array<{ path: string; size: number; storedUrl?: string; fileId?: string }>;
   deleted: string[];
 }
 
 export interface RunCodeResult extends Omit<RunnerResult, "files"> {
   language: "python" | "bash";
-  files: Array<{ path: string; size: number; url: string; image: boolean }>;
+  files: Array<{ path: string; size: number; url: string; image: boolean; fileId?: string }>;
   inputs: string[];
   /** Set when produced files could not all be saved to the user's storage. */
   storageWarning?: string;
@@ -78,7 +80,8 @@ async function call(route: string, init: RequestInit = {}, timeoutMs = 30_000, s
 async function copyInputs(userId: string, ws: string, fileIds: string[]): Promise<string[]> {
   const names: string[] = [];
   for (const id of fileIds) {
-    const row = db.prepare("SELECT name, data FROM uploads WHERE id = ? AND user_id = ?").get(id, userId) as { name: string; data: Uint8Array } | undefined;
+    const row = (db.prepare("SELECT name, data FROM uploads WHERE id = ? AND user_id = ?").get(id, userId) ??
+      db.prepare("SELECT path AS name, data FROM sandbox_files WHERE id = ? AND user_id = ?").get(id, userId)) as { name: string; data: Uint8Array } | undefined;
     if (!row) throw new Error(`Unknown file_id \`${id}\`. Use the file_id from an <attachment> header.`);
     const name = path.basename(row.name).replace(/[^\w.() -]+/g, "_").replace(/^[.\s]+/, "") || id;
     await call(`/workspaces/${ws}/files?path=${encodeURIComponent(name)}`, { method: "PUT", body: Buffer.from(row.data) }, 60_000);
@@ -101,19 +104,33 @@ async function storeOutputs(userId: string, threadId: string, ws: string, files:
     }
     try {
       const res = await call(`/workspaces/${ws}/files?path=${encodeURIComponent(file.path)}`, {}, 60_000);
-      const data = Buffer.from(await res.arrayBuffer());
-      assertStorage(userId, data.byteLength);
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      const reader = res.body!.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > RUNNER_MAX_FILE) { await reader.cancel(); throw new Error("Output exceeds 50 MB"); }
+        chunks.push(value);
+      }
+      const data = Buffer.concat(chunks, size);
+      const previous = db.prepare("SELECT length(data) AS size FROM sandbox_files WHERE user_id = ? AND thread_id = ? AND path = ?")
+        .get(userId, threadId, file.path) as { size: number } | undefined;
+      assertStorage(userId, data.byteLength - (previous?.size ?? 0));
       const ext = path.extname(file.path).toLowerCase();
-      db.prepare(
+      const stored = db.prepare(
         `INSERT INTO sandbox_files (id, user_id, thread_id, path, mime, data, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (user_id, thread_id, path) DO UPDATE SET mime = excluded.mime, data = excluded.data, size = excluded.size, created_at = excluded.created_at`,
-      ).run(`${ws}-${file.path}`, userId, threadId, file.path, TYPES[ext] ?? "application/octet-stream", data, data.byteLength, Date.now());
-      // The version parameter keeps a later run that rewrites the file from changing earlier cards' cache.
+         ON CONFLICT (user_id, thread_id, path) DO UPDATE SET mime = excluded.mime, data = excluded.data, size = excluded.size, created_at = excluded.created_at RETURNING id`,
+      ).get(newId("sbf"), userId, threadId, file.path, TYPES[ext] ?? "application/octet-stream", data, data.byteLength, Date.now()) as { id: string };
+      file.fileId = stored.id;
+      file.size = data.byteLength;
+      // Bust previously cached versions when a later run replaces this path.
       file.storedUrl = `/api/sandbox/${encodeURIComponent(threadId)}/stored?path=${encodeURIComponent(file.path)}&v=${Date.now().toString(36)}`;
     } catch (error) {
       if (error instanceof QuotaError) {
         warning = `Sandbox: ${error.message}`;
-        break;
+        continue;
       }
       warning ??= `Some files could not be saved to chat storage and only live in the sandbox until it is wiped.`;
     }
@@ -122,8 +139,11 @@ async function storeOutputs(userId: string, threadId: string, ws: string, files:
 }
 
 export async function runCode(opts: { userId: string; threadId: string; language: "python" | "bash"; code: string; timeoutS?: number; inputFiles?: string[]; signal?: AbortSignal }): Promise<RunCodeResult> {
+  opts.signal?.throwIfAborted();
+  if (opts.threadId.startsWith("tmp_") || !getThread(opts.userId, opts.threadId)) throw new Error("Chat not found");
   const ws = workspaceId(opts.userId, opts.threadId);
   const inputs = await copyInputs(opts.userId, ws, opts.inputFiles ?? []);
+  opts.signal?.throwIfAborted();
   const timeout = Math.min(opts.timeoutS ?? 60, MAX_TIMEOUT_S);
   // Stop in the chat kills the run's processes. Without this the run would continue until its timeout.
   const cancel = () => void call(`/workspaces/${ws}/cancel`, { method: "POST" }).catch(() => {});
@@ -165,7 +185,7 @@ export function sandboxTools(userId: string, threadId: string, signal?: AbortSig
         language: z.enum(["python", "bash"]),
         code: z.string().min(1).max(200_000).describe("The full program or script"),
         timeout_seconds: z.number().int().min(1).max(MAX_TIMEOUT_S).optional().describe("Wall-clock limit. Default 60"),
-        input_files: z.array(z.string()).max(20).optional().describe("file_id values of attachments to copy into the working directory first"),
+        input_files: z.array(z.string()).max(20).optional().describe("file_id values of attachments or fileId values of earlier saved outputs to copy into the working directory first (using safe basenames), even after scratch space expires"),
       }),
       execute: ({ language, code, timeout_seconds, input_files }) =>
         runCode({ userId, threadId, language, code, timeoutS: timeout_seconds, inputFiles: input_files, signal }),
@@ -177,7 +197,7 @@ export function sandboxTools(userId: string, threadId: string, signal?: AbortSig
           ...(output.stopped ? { stopped: output.stopped } : {}),
           stdout: output.stdout,
           stderr: output.stderr,
-          files: output.files.map((f) => ({ path: f.path, size: f.size })),
+          files: output.files.map((f) => ({ path: f.path, size: f.size, ...(f.fileId ? { fileId: f.fileId } : {}) })),
           ...(output.deleted.length ? { deleted: output.deleted } : {}),
           ...(output.inputs.length ? { inputs: output.inputs } : {}),
           ...(output.storageWarning ? { storageWarning: output.storageWarning } : {}),
@@ -189,12 +209,12 @@ export function sandboxTools(userId: string, threadId: string, signal?: AbortSig
 
 /** Model-written files are untrusted. Opening one directly must never run script on our origin (an SVG
  * could). <img> ignores both headers, so inline previews still work. */
-const downloadHeaders = (name: string, mime: string) => ({
+const downloadHeaders = (name: string, mime: string, preview = false) => ({
   "Content-Type": mime,
-  "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+  "Content-Disposition": `${preview && (mime === "application/pdf" || /^image\/(png|jpeg|gif|webp)$/.test(mime)) ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(name)}`,
   "Content-Security-Policy": "default-src 'none'; sandbox",
   "X-Content-Type-Options": "nosniff",
-  "Cache-Control": "private, max-age=300",
+  "Cache-Control": "private, no-store",
 });
 
 export const sandboxRoutes = new Hono<AppEnv>()
@@ -229,5 +249,5 @@ export const sandboxRoutes = new Hono<AppEnv>()
       .prepare("SELECT path, mime, data FROM sandbox_files WHERE user_id = ? AND thread_id = ? AND path = ?")
       .get(user.id, threadId, file) as { path: string; mime: string; data: Uint8Array } | undefined;
     if (!row) return c.json({ error: "Not found" }, 404);
-    return new Response(new Uint8Array(row.data), { headers: downloadHeaders(path.basename(row.path), row.mime) });
+    return new Response(new Uint8Array(row.data), { headers: downloadHeaders(path.basename(row.path), row.mime, c.req.query("preview") === "1") });
   });

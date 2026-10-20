@@ -7,6 +7,7 @@ import type { MemoryEntry } from "../shared/memory.js";
 import type { AppEnv } from "./auth.js";
 import { decrypt, encrypt, newId, sha256 } from "./crypto.js";
 import { db, tx } from "./db.js";
+import { assertStorage } from "./quota.js";
 import { getThread } from "./threads.js";
 
 const MAX_ENTRIES = 500;
@@ -66,9 +67,11 @@ export function saveMemory(userId: string, input: { content: string; scope?: str
   if (total > MAX_TOTAL) invalid("Memory is full. Delete or shorten existing memories.", 409);
   const now = Date.now();
   const entry: MemoryEntry = { id: id ?? newId("mem"), content, scope: scope || null, source: existing?.source ?? source, createdAt: existing?.created_at ?? now, updatedAt: now };
+  const encrypted = encrypt(content);
+  assertStorage(userId, Buffer.byteLength(encrypted) - Buffer.byteLength(existing?.content_enc ?? ""));
   db.prepare(`INSERT INTO memories (id, user_id, scope, content_enc, content_hash, source, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET content_enc = excluded.content_enc, content_hash = excluded.content_hash, updated_at = excluded.updated_at`)
-    .run(entry.id, userId, scope, encrypt(content), hash, entry.source, entry.createdAt, now);
+    .run(entry.id, userId, scope, encrypted, hash, entry.source, entry.createdAt, now);
   return { entry, duplicate: false };
 }
 

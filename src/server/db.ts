@@ -1,5 +1,7 @@
 import path from "node:path";
+import { statSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+import { storeInlineAttachments } from "./attachment-storage.js";
 import { env } from "./env.js";
 
 export const db = new DatabaseSync(path.join(env.dataDir, "okaychat.db"));
@@ -10,7 +12,7 @@ const MESSAGE_TEXT = (row: string) =>
   `coalesce((SELECT group_concat(json_extract(p.value, '$.text'), ' ') FROM json_each(${row}.content, '$.parts') p WHERE json_extract(p.value, '$.type') = 'text'), '')`;
 
 // Append-only. Each entry runs once, in order, tracked by user_version.
-const migrations: string[] = [
+const migrations: Array<string | (() => void)> = [
   `
   CREATE TABLE users (
     id TEXT PRIMARY KEY,
@@ -304,13 +306,30 @@ const migrations: string[] = [
     PRIMARY KEY (skill_id, name)
   );
   `,
+  `
+  ALTER TABLE uploads ADD COLUMN thread_id TEXT REFERENCES threads(id) ON DELETE SET NULL;
+  ALTER TABLE project_files ADD COLUMN upload_id TEXT REFERENCES uploads(id) ON DELETE SET NULL;
+  CREATE INDEX project_files_upload ON project_files(upload_id);
+  CREATE INDEX sandbox_files_user ON sandbox_files(user_id, created_at);
+  `,
+  // Materialize legacy inline files once, in the same transaction as this migration version.
+  () => {
+    for (const row of db.prepare(`SELECT m.content, m.thread_id, t.user_id FROM messages m
+      JOIN threads t ON t.id = m.thread_id WHERE m.content LIKE '%data:%'`).iterate() as Iterable<{ content: string; thread_id: string; user_id: string }>) {
+      let content: unknown;
+      try { content = JSON.parse(row.content); } catch { continue; }
+      storeInlineAttachments(db, row.user_id, row.thread_id, content);
+    }
+  },
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
 for (let i = current; i < migrations.length; i++) {
   db.exec("BEGIN");
   try {
-    db.exec(migrations[i]!);
+    const migration = migrations[i]!;
+    if (typeof migration === "string") db.exec(migration);
+    else migration();
     db.exec(`PRAGMA user_version = ${i + 1}`);
     db.exec("COMMIT");
   } catch (error) {
@@ -319,14 +338,25 @@ for (let i = current; i < migrations.length; i++) {
   }
 }
 
+// Legacy generated images predate size accounting. Backfill once; missing files own zero bytes.
+for (const row of db.prepare("SELECT id, user_id FROM images WHERE size = 0").all() as Array<{ id: string; user_id: string }>) {
+  try {
+    const size = statSync(path.join(env.dataDir, "images", row.user_id, `${row.id}.png`)).size;
+    db.prepare("UPDATE images SET size = ? WHERE id = ? AND user_id = ?").run(size, row.id, row.user_id);
+  } catch { /* A missing legacy file has no bytes to count. */ }
+}
+
+let transactionId = 0;
 export function tx<T>(fn: () => T): T {
-  db.exec("BEGIN");
+  const name = `tx_${++transactionId}`;
+  db.exec(`SAVEPOINT ${name}`);
   try {
     const result = fn();
-    db.exec("COMMIT");
+    db.exec(`RELEASE ${name}`);
     return result;
   } catch (error) {
-    db.exec("ROLLBACK");
+    db.exec(`ROLLBACK TO ${name}`);
+    db.exec(`RELEASE ${name}`);
     throw error;
   }
 }

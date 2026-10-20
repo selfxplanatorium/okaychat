@@ -1,3 +1,4 @@
+import { bodyLimit } from "hono/body-limit";
 import { Hono } from "hono";
 import type { InstalledFont } from "../shared/types.js";
 import type { AppEnv } from "./auth.js";
@@ -39,7 +40,7 @@ function listFonts(userId: string): InstalledFont[] {
 
 export const fontRoutes = new Hono<AppEnv>()
   .get("/fonts", (c) => c.json(listFonts(c.get("user").id)))
-  .post("/fonts", async (c) => {
+  .post("/fonts", bodyLimit({ maxSize: MAX_FONT_BYTES + 64 * 1024 }), async (c) => {
     const userId = c.get("user").id;
     const file = (await c.req.formData()).get("file");
     if (!(file instanceof File)) return c.json({ error: "No file" }, 400);

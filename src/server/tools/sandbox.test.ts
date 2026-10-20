@@ -73,7 +73,7 @@ test("run_code authenticates, copies the owner's uploads, and hides download URL
   assert.equal(stored?.size, 21);
   const modelView = await tool.toModelOutput!({ toolCallId: "1", input: {}, output });
   assert.doesNotMatch(JSON.stringify(modelView), /api\/sandbox/);
-  assert.deepEqual((modelView as { value: { files: unknown } }).value.files, [{ path: "out/plot.png", size: 10 }]);
+  assert.deepEqual((modelView as { value: { files: unknown } }).value.files, [{ path: "out/plot.png", size: 21, fileId: output.files[0].fileId }]);
 });
 
 test("another user's file_id is rejected before anything reaches the sandbox", async () => {
@@ -125,4 +125,30 @@ test("outputs that would pass the storage quota keep their sandbox URL and warn 
   const modelView = await tool.toModelOutput!({ toolCallId: "3", input: {}, output });
   assert.match(JSON.stringify(modelView), /quota/i);
   db.prepare("UPDATE users SET storage_limit = NULL WHERE id = 'alice'").run();
+});
+
+test("rewriting an output at quota replaces its bytes without charging for both copies", async () => {
+  db.prepare("UPDATE users SET storage_limit = 21 WHERE id = 'alice'").run();
+  const tool = sandboxTools("alice", "thr_alice").run_code!;
+  for (let i = 0; i < 2; i++) {
+    const output = await tool.execute!({ language: "python", code: "print(1)" }, { toolCallId: String(i), messages: [] });
+    assert.equal(output.storageWarning, undefined);
+    assert.match(output.files[0]!.url, /\/stored\?/);
+  }
+  assert.equal(db.prepare("SELECT count(*) AS n FROM sandbox_files").get()!.n, 1);
+  db.prepare("UPDATE users SET storage_limit = NULL WHERE id = 'alice'").run();
+});
+
+test("saved outputs can be restored by fileId after scratch expiry, without crossing accounts", async () => {
+  const tool = sandboxTools("alice", "thr_alice").run_code!;
+  const first = await tool.execute!({ language: "python", code: "print(1)" }, { toolCallId: "first", messages: [] });
+  const id = first.files[0]!.fileId;
+  assert.ok(id);
+  calls.length = 0;
+  await tool.execute!({ language: "python", code: "print(2)", input_files: [id] }, { toolCallId: "second", messages: [] });
+  assert.match(calls[0]!.url, /files\?path=plot.png$/);
+  assert.equal(calls[0]!.body.toString(), "<svg onload=alert(1)>");
+  ensureThread("bob", "thr_bob");
+  const other = sandboxTools("bob", "thr_bob").run_code!;
+  await assert.rejects(async () => other.execute!({ language: "python", code: "print(1)", input_files: [id] }, { toolCallId: "other", messages: [] }), /Unknown file_id/);
 });

@@ -1,16 +1,15 @@
-import { rm, stat } from "node:fs/promises";
+import { rm } from "node:fs/promises";
+import { zipSync, strToU8 } from "fflate";
 import { Hono } from "hono";
 import type { ArtifactKind, LibraryItem, LibraryKind, LibraryPage, LibrarySort } from "../shared/types.js";
 import type { AppEnv } from "./auth.js";
 import { db } from "./db.js";
+import { previewXlsx } from "./documents/xlsx.js";
+import { getSkill, deleteSkill } from "./skills.js";
 import { imagePath } from "./tools/image.js";
 
-// One listing for everything the agent received or produced for the current user: uploads (a 7-day
-// import cache, see files.ts), generated images, and the latest version of each artifact. Artifacts
-// carry no user_id, so they are reached through their thread; uploads carry no thread, so the chat is
-// recovered from the <attachment> headers stored in message text. run_code files live only in the
-// sandbox container and are not catalogued here. Artifacts are not deletable from the library: they
-// belong to the chat history, and deleting a version would break the messages that reference it.
+// Stored attachments and outputs belong to the account. Sandbox workspaces are disposable.
+// Artifact ownership is always resolved through the owning thread.
 
 const PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 100;
@@ -49,26 +48,42 @@ interface RawRow {
   threadId: string | null;
   threadTitle: string | null;
   projectId: string | null;
+  artifactKind: ArtifactKind | null;
 }
 
 const SOURCES = `
-  SELECT 'image:' || i.id AS key, i.prompt AS name, 'image' AS kind, 'image/png' AS mime, 0 AS size, i.created_at,
-         'generated' AS source, i.thread_id AS threadId, t.title AS threadTitle, t.project_id AS projectId
-  FROM images i LEFT JOIN threads t ON t.id = i.thread_id
+  SELECT 'image:' || i.id AS key, i.prompt AS name, 'image' AS kind, 'image/png' AS mime, i.size AS size, i.created_at,
+         'generated' AS source, i.thread_id AS threadId, t.title AS threadTitle, t.project_id AS projectId, NULL AS artifactKind
+  FROM images i LEFT JOIN threads t ON t.id = i.thread_id AND t.user_id = i.user_id
   WHERE i.user_id = @userId
   UNION ALL
   SELECT 'upload:' || u.id AS key, u.name AS name, ${UPLOAD_KIND} AS kind, u.mime AS mime, length(u.data) AS size, u.created_at,
-         'uploaded' AS source, ut.id AS threadId, ut.title AS threadTitle, ut.project_id AS projectId
-  FROM uploads u LEFT JOIN threads ut ON ut.id = ${UPLOAD_THREAD}
+         'uploaded' AS source, ut.id AS threadId, ut.title AS threadTitle, coalesce(ut.project_id, (SELECT pf.project_id FROM project_files pf JOIN projects p ON p.id = pf.project_id
+           WHERE pf.upload_id = u.id AND p.user_id = u.user_id LIMIT 1)) AS projectId, NULL AS artifactKind
+  FROM uploads u LEFT JOIN threads ut ON ut.id = coalesce(u.thread_id, ${UPLOAD_THREAD}) AND ut.user_id = u.user_id
   WHERE u.user_id = @userId
   UNION ALL
-  -- The latest version of each artifact (SQLite picks the bare columns from the MAX row).
+  -- Select by version explicitly; bare columns in GROUP BY pick arbitrary versions.
   SELECT 'artifact:' || a.thread_id || '/' || a.id AS key, a.title AS name, ${ARTIFACT_KIND} AS kind, ${ARTIFACT_MIME} AS mime,
-         CASE WHEN a.size > 0 THEN a.size ELSE length(a.content) END AS size, a.created_at,
-         'generated' AS source, t.id AS threadId, t.title AS threadTitle, t.project_id AS projectId
+         length(CAST(a.content AS BLOB)) + a.size AS size, a.created_at,
+         'generated' AS source, t.id AS threadId, t.title AS threadTitle, t.project_id AS projectId, a.kind AS artifactKind
   FROM artifacts a JOIN threads t ON t.id = a.thread_id
   WHERE t.user_id = @userId
-  GROUP BY a.thread_id, a.id`;
+    AND a.version = (SELECT max(v.version) FROM artifacts v WHERE v.thread_id = a.thread_id AND v.id = a.id)
+  UNION ALL
+  SELECT 'sandbox:' || s.id AS key, s.path AS name,
+         ${UPLOAD_KIND.replaceAll("u.mime", "s.mime").replaceAll("u.name", "s.path")} AS kind, s.mime AS mime,
+         length(s.data) AS size, s.created_at, 'generated' AS source,
+         t.id AS threadId, t.title AS threadTitle, t.project_id AS projectId, NULL AS artifactKind
+  FROM sandbox_files s JOIN threads t ON t.id = s.thread_id AND t.user_id = s.user_id
+  WHERE s.user_id = @userId
+  UNION ALL
+  SELECT 'skill:' || sk.id AS key, sk.name || '.zip' AS name, 'other' AS kind, 'application/zip' AS mime,
+         length(CAST(sk.name || sk.description || sk.body AS BLOB)) +
+           coalesce((SELECT sum(length(CAST(f.name || f.content AS BLOB))) FROM skill_files f WHERE f.skill_id = sk.id), 0) AS size,
+         sk.updated_at AS created_at, CASE sk.origin WHEN 'conversation' THEN 'generated' ELSE 'uploaded' END AS source,
+         NULL AS threadId, NULL AS threadTitle, NULL AS projectId, NULL AS artifactKind
+  FROM skills sk WHERE sk.user_id = @userId`;
 
 interface Cursor {
   v: number | string;
@@ -79,7 +94,7 @@ interface Cursor {
 const CURSOR_WHERE: Record<LibrarySort, [string, string]> = {
   newest: ["created_at < @v", "(created_at = @v AND key < @key)"],
   oldest: ["created_at > @v", "(created_at = @v AND key > @key)"],
-  name: ["name > @v COLLATE NOCASE", "(name = @v AND key > @key)"],
+  name: ["name > @v COLLATE NOCASE", "(name = @v COLLATE NOCASE AND key > @key)"],
   size: ["size < @v", "(size = @v AND key > @key)"],
 };
 
@@ -115,15 +130,20 @@ async function toItems(userId: string, rows: RawRow[]): Promise<LibraryItem[]> {
       projectId: r.projectId,
       deletable: false,
     };
-    if (prefix === "image") {
-      // Generated images live on disk and their size was not stored; stat each page's files only.
-      const size = (await stat(imagePath(userId, id)).catch(() => null))?.size ?? r.size;
-      items.push({ ...base, size, previewUrl: `/api/images/${id}`, downloadUrl: `/api/images/${id}`, deletable: true });
-    } else if (prefix === "upload") {
-      const fileUrl = `/api/uploads/${encodeURIComponent(id)}/file`;
+    if (prefix === "skill") {
+      const url = `/api/library/skill/${encodeURIComponent(id)}`;
+      items.push({ ...base, previewUrl: `${url}/preview`, downloadUrl: `${url}/file`, deletable: true });
+    } else if (prefix === "image") {
+      items.push({ ...base, previewUrl: `/api/images/${id}`, downloadUrl: `/api/images/${id}`, deletable: true });
+    } else if (prefix === "upload" || prefix === "sandbox") {
+      const fileUrl = prefix === "upload" ? `/api/uploads/${encodeURIComponent(id)}/file` :
+        `/api/sandbox/${encodeURIComponent(r.threadId!)}/stored?path=${encodeURIComponent(r.name)}`;
       // Only images and PDFs render in the browser's own viewers; docx/xlsx preview client-side anyway.
       const inline = base.mime.startsWith("image/") || base.mime === "application/pdf";
-      items.push({ ...base, previewUrl: inline ? fileUrl : null, downloadUrl: fileUrl, deletable: true });
+      const text = base.mime.startsWith("text/") || /\.(txt|md|csv|json|py|sh|js|ts|html|svg)$/i.test(r.name);
+      const previewUrl = inline ? `${fileUrl}${fileUrl.includes("?") ? "&" : "?"}preview=1` :
+        r.kind === "spreadsheet" || text ? `/api/library/${prefix}/${encodeURIComponent(id)}/preview` : null;
+      items.push({ ...base, previewUrl, downloadUrl: fileUrl, deletable: true });
     } else {
       const [thread, artifactId] = id.split("/");
       if (!thread || !artifactId) continue;
@@ -135,7 +155,7 @@ async function toItems(userId: string, rows: RawRow[]): Promise<LibraryItem[]> {
         downloadUrl: documentKind ? `${apiBase}/file` : null,
         artifactId,
         // Everything the SQL did not map to a document kind is a text artifact kind ("code").
-        artifactKind: documentKind ?? (r.kind as ArtifactKind),
+        artifactKind: documentKind ?? r.artifactKind!,
         deletable: false,
       });
     }
@@ -159,7 +179,7 @@ interface ListOptions {
 /** One page of raw rows plus the cursor for the next one. Cursor is the last row's sort key and unique key. */
 function listRows(userId: string, opts: ListOptions): { rows: RawRow[]; nextCursor: string | null } {
   const sort = opts.sort ?? "newest";
-  const limit = Math.min(Math.max(opts.limit ?? PAGE_SIZE, 1), MAX_PAGE_SIZE);
+  const limit = Math.min(Math.max(Math.floor(opts.limit ?? PAGE_SIZE), 1), MAX_PAGE_SIZE);
   const where = ["1 = 1"];
   const named: Record<string, string | number | null> = { userId };
   if (opts.kind) where.push("kind = @kind"), (named.kind = opts.kind);
@@ -190,7 +210,7 @@ function listRows(userId: string, opts: ListOptions): { rows: RawRow[]; nextCurs
 
   const rows = db
     .prepare(
-      `SELECT key, name, kind, mime, size, created_at, source, threadId, threadTitle, projectId FROM (${SOURCES})
+      `SELECT key, name, kind, mime, size, created_at, source, threadId, threadTitle, projectId, artifactKind FROM (${SOURCES})
        WHERE ${where.join(" AND ")} ORDER BY ${ORDER_BY[sort]} LIMIT ${limit + 1}`,
     )
     .all(named) as unknown as RawRow[];
@@ -206,7 +226,7 @@ export async function listLibrary(userId: string, opts: ListOptions): Promise<Li
   return { items: await toItems(userId, rows), nextCursor };
 }
 
-export async function deleteLibraryItem(userId: string, prefix: "image" | "upload", id: string): Promise<boolean> {
+export async function deleteLibraryItem(userId: string, prefix: "image" | "upload" | "sandbox" | "skill", id: string): Promise<boolean> {
   if (prefix === "image") {
     const row = db.prepare("SELECT id FROM images WHERE id = ? AND user_id = ?").get(id, userId) as { id: string } | undefined;
     if (!row) return false;
@@ -214,11 +234,18 @@ export async function deleteLibraryItem(userId: string, prefix: "image" | "uploa
     await rm(imagePath(userId, id), { force: true });
     return true;
   }
+  if (prefix === "skill") { deleteSkill(userId, id); return true; }
+  if (prefix === "sandbox") {
+    return !!db.prepare("DELETE FROM sandbox_files WHERE id = ? AND user_id = ?").run(id, userId).changes;
+  }
   const row = db.prepare("SELECT id FROM uploads WHERE id = ? AND user_id = ?").get(id, userId) as { id: string } | undefined;
   if (!row) return false;
   db.prepare("DELETE FROM uploads WHERE id = ? AND user_id = ?").run(id, userId);
   return true;
 }
+
+const skillMarkdown = (s: { name: string; description: string; body: string }) =>
+  `---\nname: ${s.name}\ndescription: ${JSON.stringify(s.description)}\n---\n\n${s.body}\n`;
 
 export const libraryRoutes = new Hono<AppEnv>()
   .get("/library", async (c) => {
@@ -239,6 +266,37 @@ export const libraryRoutes = new Hono<AppEnv>()
       }),
     );
   })
+  .get("/library/skill/:id/file", (c) => {
+    const skill = getSkill(c.get("user").id, c.req.param("id"));
+    const files = Object.fromEntries(skill.fileContents.map((f) => [f.name, strToU8(f.content)]));
+    const data = zipSync({ ...files, "SKILL.md": strToU8(skillMarkdown(skill)) });
+    return new Response(data, { headers: {
+      "Content-Type": "application/zip", "Content-Disposition": `attachment; filename="${skill.name}.zip"`,
+      "Content-Security-Policy": "default-src 'none'; sandbox", "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store",
+    } });
+  })
+  .get("/library/:source/:id/preview", async (c) => {
+    c.header("Cache-Control", "private, no-store");
+    if (c.req.param("source") === "skill") {
+      const skill = getSkill(c.get("user").id, c.req.param("id"));
+      return c.json({ text: skillMarkdown(skill) + (skill.files.length ? `\nReference files:\n${skill.files.map((f) => f.name).join("\n")}` : "") });
+    }
+    const table = c.req.param("source") === "upload" ? "uploads" : c.req.param("source") === "sandbox" ? "sandbox_files" : null;
+    if (!table) return c.json({ error: "Not found" }, 404);
+    const row = db.prepare(`SELECT ${table === "uploads" ? "name" : "path"} AS name, mime, data FROM ${table} WHERE id = ? AND user_id = ?`)
+      .get(c.req.param("id"), c.get("user").id) as { name: string; mime: string; data: Uint8Array } | undefined;
+    if (!row) return c.json({ error: "Not found" }, 404);
+    c.header("Cache-Control", "private, no-store");
+    if (/\.(xlsx|xlsm)$/i.test(row.name) || row.mime.includes("officedocument.spreadsheetml")) return c.json(await previewXlsx(row.data));
+    // Text is rendered by React, never interpreted as an HTML document. Bound previews separately.
+    return c.json({ text: new TextDecoder().decode(row.data.subarray(0, 200_000)), truncated: row.data.length > 200_000 });
+  })
+  .delete("/library/skill/:id", async (c) => {
+    await deleteLibraryItem(c.get("user").id, "skill", c.req.param("id"));
+    return c.json({ ok: true });
+  })
+  .delete("/library/sandbox/:id", async (c) =>
+    (await deleteLibraryItem(c.get("user").id, "sandbox", c.req.param("id"))) ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404))
   .delete("/library/image/:id", async (c) =>
     (await deleteLibraryItem(c.get("user").id, "image", c.req.param("id"))) ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404))
   .delete("/library/upload/:id", async (c) => {

@@ -1,10 +1,12 @@
+import { bodyLimit } from "hono/body-limit";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { Project, ProjectFile } from "../shared/types.js";
 import type { AppEnv } from "./auth.js";
 import { newId } from "./crypto.js";
-import { db } from "./db.js";
-import { extract, MAX_BYTES } from "./files.js";
+import { assertStorage } from "./quota.js";
+import { db, tx } from "./db.js";
+import { extract, MAX_BYTES, storeUpload } from "./files.js";
 
 // A project groups threads and gives them shared instructions, pinned files, and a default model.
 // Instructions and files go into the system prompt, which stays identical across the project's turns and caches.
@@ -99,15 +101,16 @@ export const projectRoutes = new Hono<AppEnv>()
     db.prepare("DELETE FROM projects WHERE id = ? AND user_id = ?").run(c.req.param("id"), c.get("user").id);
     return c.json({ ok: true });
   })
-  .post("/projects/:id/files", async (c) => {
+  .post("/projects/:id/files", bodyLimit({ maxSize: MAX_BYTES + 64 * 1024 }), async (c) => {
     const project = getProject(c.get("user").id, c.req.param("id"));
     if (!project) return c.json({ error: "Not found" }, 404);
     const file = (await c.req.formData()).get("file");
     if (!(file instanceof File)) return c.json({ error: "No file" }, 400);
     if (file.size > MAX_BYTES) return c.json({ error: "File is larger than 25 MB" }, 413);
+    const bytes = new Uint8Array(await file.arrayBuffer());
     let text: string;
     try {
-      text = (await extract(file.name, file.type, new Uint8Array(await file.arrayBuffer()))).text;
+      text = (await extract(file.name, file.type, bytes)).text;
     } catch (error) {
       return c.json({ error: `Could not read ${file.name}: ${(error as Error).message}` }, 422);
     }
@@ -115,7 +118,13 @@ export const projectRoutes = new Hono<AppEnv>()
     if (used + text.length > MAX_PROJECT_CHARS) {
       return c.json({ error: `Project files are limited to ${MAX_PROJECT_CHARS.toLocaleString()} characters. This file has ${text.length.toLocaleString()}, ${(MAX_PROJECT_CHARS - used).toLocaleString()} are left.` }, 413);
     }
-    db.prepare("INSERT INTO project_files (id, project_id, name, content, created_at) VALUES (?, ?, ?, ?, ?)").run(newId("pf"), project.id, file.name, text, Date.now());
+    tx(() => {
+      const userId = c.get("user").id;
+      assertStorage(userId, bytes.byteLength + Buffer.byteLength(text));
+      const uploadId = storeUpload(userId, file.name, file.type, bytes);
+      db.prepare("INSERT INTO project_files (id, project_id, name, content, created_at, upload_id) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(newId("pf"), project.id, file.name, text, Date.now(), uploadId);
+    });
     return c.json(getProject(c.get("user").id, project.id));
   })
   .delete("/projects/:id/files/:fileId", (c) => {

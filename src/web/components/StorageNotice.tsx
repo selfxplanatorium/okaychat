@@ -1,5 +1,5 @@
 import { TriangleAlertIcon, XIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useData } from "@/state/data";
 import { storagePercent } from "./StorageMeter";
 
@@ -9,9 +9,17 @@ const DISMISS_KEY = "okaychat:storage-notice-dismissed";
 
 export function StorageNotice() {
   const storage = useData((s) => s.storage);
+  useEffect(() => {
+    const refresh = () => { void useData.getState().refreshStorage().catch(() => {}); };
+    window.addEventListener("okaychat:storage-changed", refresh);
+    window.addEventListener("focus", refresh);
+    return () => { window.removeEventListener("okaychat:storage-changed", refresh); window.removeEventListener("focus", refresh); };
+  }, []);
+  const userId = useData((s) => s.me?.id);
+  const dismissKey = `${DISMISS_KEY}:${userId ?? ""}`;
   const [dismissed, setDismissed] = useState(() => {
     try {
-      return sessionStorage.getItem(DISMISS_KEY);
+      return sessionStorage.getItem(dismissKey);
     } catch {
       return null;
     }
@@ -23,7 +31,7 @@ export function StorageNotice() {
 
   const dismiss = () => {
     try {
-      sessionStorage.setItem(DISMISS_KEY, full ? "full" : "near");
+      sessionStorage.setItem(dismissKey, full ? "full" : "near");
     } catch {
       // Session storage may be disabled; the notice then just stays.
     }

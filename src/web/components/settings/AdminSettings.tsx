@@ -87,7 +87,7 @@ function Users({ defaultLimit }: { defaultLimit: number | null }) {
   const editLimit = (u: AdminUser) => {
     const text = prompt(
       `Storage limit for ${u.email} — e.g. "2 GB" or "500 MB" (a bare number means MB). Leave empty to reset to the server default.`,
-      u.storageLimit !== null ? formatBytes(u.storageLimit) : "",
+      u.storageLimit !== null ? `${u.storageLimit} B` : "",
     );
     if (text === null) return;
     const parsed = parseLimit(text);

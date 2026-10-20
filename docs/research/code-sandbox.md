@@ -31,17 +31,17 @@ Not covered: kernel or container escapes (same blast radius as any container), a
 
 The sandbox is scratch space, never the source of truth:
 
-- Every workspace is wiped ~30 minutes after its last run (`SANDBOX_IDLE_MINUTES`, default 30; a run touches the workspace's mtime). The sweep runs in a background thread and kills the workspace's uid processes. The container also wipes every workspace when the runner starts.
+- Every workspace is wiped ~30 minutes after its last run (`SANDBOX_IDLE_MINUTES`, default 30; a completed run touches the workspace's mtime; expiry is rechecked under its lock). The sweep runs in a background thread and kills the workspace's uid processes. The container also wipes every workspace when the runner starts.
 - Right after each run, the app downloads the files the run produced and stores them in SQLite (`sandbox_files` table), counted against the user's storage quota (see below). Download URLs in the tool result point at `/api/sandbox/:threadId/stored`, which serves the stored copy with the same untrusted-content headers. Files over the runner's 50 MB download cap keep a direct sandbox URL and die with the workspace; the tool result then carries a `storageWarning` for the model.
-- Rewriting a file in a later run replaces its stored copy instead of piling up versions. Deleting the chat deletes the stored copies (foreign-key cascade).
+- Rewriting a file in a later run replaces its stored copy instead of piling up versions, charging only net byte growth. The Library lists, previews, downloads and deletes these copies. Deleting the chat deletes the stored copies (foreign-key cascade).
 
 ## Behavior
 
 - Each call is a new process: variables do not persist, files do — until the workspace is wiped (see Retention). Background processes end with the call.
 - Output keeps the first 48 KB and last 16 KB of each stream. Timeout default 60 s, max 300 s. Up to 4 runs at once; a run waits up to 30 s for a slot.
 - Stop in the chat calls `/cancel`, which kills the workspace's processes.
-- Attachments: with a sandbox configured, every non-anonymous attachment is stored (`/files/store`) and its header carries `file_id`; `input_files` copies it into the workspace. Text and code files were browser-only before.
-- Created or changed files come back with app download URLs (`/api/sandbox/:threadId/files?path=`). `toModelOutput` strips the URLs. Images render inline in the card.
+- Attachments: every non-anonymous attachment is stored regardless of sandbox configuration (`/files/store`) and its header carries `file_id`; `input_files` copies it into the workspace. Saved outputs also return a `fileId` accepted by `input_files`, so a later run can restore their durable bytes after scratch expiry (using a safe basename). Images retain their original data URL message parts as well.
+- Created or changed files come back with app download URLs (`/api/sandbox/:threadId/stored?path=` (scratch proxy fallback: `/files?path=`)). `toModelOutput` strips the URLs. Images render inline in the card.
 - Not offered to anonymous chats or sub-agents. Settings → General toggles it per user; it shows only when the server has `OKAYCHAT_SANDBOX_URL` and a 32+ character token.
 
 ## Runner API

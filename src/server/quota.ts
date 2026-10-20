@@ -1,3 +1,4 @@
+import { HTTPException } from "hono/http-exception";
 import { db } from "./db.js";
 import { env } from "./env.js";
 
@@ -6,12 +7,12 @@ import { env } from "./env.js";
 // against one limit, so the database volume cannot fill up invisibly. Enforced on every write path:
 // HTTP routes answer 413, tools throw and the model sees the message.
 
-export class QuotaError extends Error {
+export class QuotaError extends HTTPException {
   constructor(
     readonly used: number,
     readonly limit: number,
   ) {
-    super(quotaMessage(used, limit));
+    super(413, { message: quotaMessage(used, limit) });
   }
 }
 
@@ -35,6 +36,10 @@ export function storageUsedSql(user: string): string {
     UNION ALL SELECT COALESCE(SUM(length(CAST(content_enc AS BLOB))), 0) FROM memories WHERE user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(length(CAST(content AS BLOB))), 0) FROM project_files
       WHERE project_id IN (SELECT id FROM projects WHERE user_id = ${user})
+    UNION ALL SELECT COALESCE(SUM(length(CAST(name AS BLOB)) + length(CAST(description AS BLOB)) + length(CAST(body AS BLOB))), 0)
+      FROM skills WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(length(CAST(f.name AS BLOB)) + length(CAST(f.content AS BLOB))), 0)
+      FROM skill_files f JOIN skills s ON s.id = f.skill_id WHERE s.user_id = ${user}
   )), 0)`;
 }
 
@@ -52,6 +57,6 @@ export function userStorageLimit(userId: string): number {
 export function assertStorage(userId: string, incoming: number): { used: number; limit: number } {
   const limit = userStorageLimit(userId);
   const used = storageUsed(userId);
-  if (used + incoming > limit) throw new QuotaError(used, limit);
+  if (incoming > 0 && used + incoming > limit) throw new QuotaError(used, limit);
   return { used, limit };
 }

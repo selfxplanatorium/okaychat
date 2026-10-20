@@ -1,3 +1,6 @@
+import { rm } from "node:fs/promises";
+import path from "node:path";
+import { env } from "./env.js";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AdminUser } from "../shared/types.js";
@@ -76,10 +79,12 @@ export const adminRoutes = new Hono<AppEnv>()
     }
     return c.json({ ok: true });
   })
-  .delete("/admin/users/:id", (c) => {
+  .delete("/admin/users/:id", async (c) => {
     const id = c.req.param("id");
     if (id === c.get("user").id) return c.json({ error: "You cannot delete your own account here." }, 400);
+    if (!db.prepare("SELECT 1 FROM users WHERE id = ?").get(id)) return c.json({ error: "Not found" }, 404);
     db.prepare("DELETE FROM users WHERE id = ?").run(id);
+    await rm(path.join(env.dataDir, "images", id), { recursive: true, force: true });
     return c.json({ ok: true });
   })
   .get("/admin/settings", (c) => c.json({ allowSignup: signupAllowed() }))

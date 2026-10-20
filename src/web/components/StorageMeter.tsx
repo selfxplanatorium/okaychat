@@ -2,7 +2,7 @@ import type { StorageInfo } from "@shared/types";
 import { formatBytes } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-export const storagePercent = (s: StorageInfo) => Math.min(100, Math.round((s.used / Math.max(1, s.limit)) * 100));
+export const storagePercent = (s: StorageInfo) => Math.min(100, Math.floor((s.used / Math.max(1, s.limit)) * 100));
 
 /** Usage bar with the used and limit numbers. Colors come from semantic tokens, never hardcoded. */
 export function StorageMeter({ storage, className }: { storage: StorageInfo; className?: string }) {

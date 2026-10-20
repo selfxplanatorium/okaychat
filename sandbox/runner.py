@@ -31,7 +31,6 @@ MEMORY_MB = int(os.environ.get("SANDBOX_MEMORY_MB", "2048"))
 WORKSPACE_MB = int(os.environ.get("SANDBOX_WORKSPACE_MB", "1024"))
 MAX_PROCS = int(os.environ.get("SANDBOX_MAX_PROCS", "64"))
 CONCURRENCY = int(os.environ.get("SANDBOX_CONCURRENCY", "4"))
-TTL_DAYS = float(os.environ.get("SANDBOX_TTL_DAYS", "14"))
 # Scratch space only: a workspace idle past this grace period is wiped completely. The app copies
 # produced files into its own storage right after each run, so nothing of value is lost.
 IDLE_MINUTES = float(os.environ.get("SANDBOX_IDLE_MINUTES", "30"))
@@ -327,6 +326,7 @@ def run(ws: str, language: str, code: str, timeout: int) -> dict:
             for r in readers:
                 r.join(timeout=5)
             clean_shared_tmp(uid)
+            os.utime(path)  # Idle retention starts when a run finishes, even after long runs.
             after = snapshot(path)
             changed = [
                 {"path": rel, "size": size}
@@ -399,11 +399,14 @@ def list_files(ws: str) -> dict:
         return {"files": files[:MAX_LISTED], "total": len(files), "bytes": workspace_bytes(path)}
 
 
-def delete_workspace(ws: str) -> None:
+def delete_workspace(ws: str, idle_before: float | None = None) -> None:
     path = ws_path(ws)
     with ws_lock(ws):
         try:
-            uid = os.stat(path).st_uid
+            info = os.stat(path)
+            if idle_before is not None and info.st_mtime >= idle_before:
+                return
+            uid = info.st_uid
         except FileNotFoundError:
             return
         kill_uid(uid)
@@ -411,18 +414,6 @@ def delete_workspace(ws: str) -> None:
         shutil.rmtree(path, ignore_errors=True)
         with uid_lock:
             used_uids.discard(uid)
-
-
-def expire_loop() -> None:
-    while True:
-        cutoff = time.time() - TTL_DAYS * 86400
-        for name in os.listdir(ROOT):
-            try:
-                if WS_RE.match(name) and os.stat(os.path.join(ROOT, name)).st_mtime < cutoff:
-                    delete_workspace(name)
-            except OSError:
-                pass
-        time.sleep(3600)
 
 
 def idle_loop() -> None:
@@ -441,7 +432,7 @@ def idle_loop() -> None:
         for name in names:
             try:
                 if WS_RE.match(name) and os.stat(os.path.join(ROOT, name)).st_mtime < cutoff:
-                    delete_workspace(name)
+                    delete_workspace(name, idle_before=cutoff)
             except OSError:
                 pass
         # Sweep at least four times within one grace period, but never busier than every 15 s.
@@ -538,7 +529,6 @@ def main() -> None:
                 used_uids.add(os.stat(os.path.join(ROOT, name)).st_uid)
         except OSError:
             pass
-    threading.Thread(target=expire_loop, daemon=True).start()
     threading.Thread(target=idle_loop, daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 

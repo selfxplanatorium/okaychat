@@ -78,7 +78,8 @@ export const accountRoutes = new Hono<AppEnv>()
     if (!image) return c.json({ error: "Choose a valid PNG, JPEG, or WebP image up to 16 megapixels." }, 422);
     const userId = c.get("user").id;
     try {
-      assertStorage(userId, data.byteLength);
+      const previousBytes = (db.prepare("SELECT length(data) AS n FROM user_avatars WHERE user_id = ?").get(userId) as { n: number } | undefined)?.n ?? 0;
+      assertStorage(userId, data.byteLength - previousBytes);
     } catch (error) {
       if (error instanceof QuotaError) return c.json({ error: error.message }, 413);
       throw error;

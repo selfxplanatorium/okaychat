@@ -19,6 +19,7 @@ export async function api<T>(path: string, init?: RequestInit & { json?: unknown
     window.dispatchEvent(new Event("okaychat:unauthorized"));
   }
   const body = res.headers.get("content-type")?.includes("json") ? await res.json() : await res.text();
+  if (typeof window !== "undefined" && init?.method && init.method !== "GET" && !path.startsWith("/auth")) window.dispatchEvent(new Event("okaychat:storage-changed"));
   if (!res.ok) throw new ApiError((body as { error?: string })?.error ?? res.statusText, res.status);
   return body as T;
 }

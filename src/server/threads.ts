@@ -1,7 +1,9 @@
 import type { UIMessage } from "ai";
 import { HTTPException } from "hono/http-exception";
 import type { CompactionState, ThreadSummary } from "../shared/types.js";
-import { db } from "./db.js";
+import { assertStorage } from "./quota.js";
+import { storeInlineAttachments } from "./attachment-storage.js";
+import { db, tx } from "./db.js";
 
 /** Anonymous conversations exist only in browser memory; their ids must never become stored threads. */
 export const isTemporaryThread = (id: string): boolean => id.startsWith("tmp_");
@@ -97,13 +99,17 @@ export function listMessages(userId: string, threadId: string): MessageRow[] {
 }
 
 export function appendMessage(userId: string, threadId: string, row: MessageRow) {
-  ensureThread(userId, threadId);
-  // Upsert: assistant messages are re-sent when a stream finishes or a tool result lands.
-  db.prepare(
-    `INSERT INTO messages (id, thread_id, parent_id, format, content, created_at) VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT (thread_id, id) DO UPDATE SET parent_id = excluded.parent_id, format = excluded.format, content = excluded.content`,
-  ).run(row.id, threadId, row.parent_id, row.format, JSON.stringify(row.content), Date.now());
-  db.prepare("UPDATE threads SET updated_at = ? WHERE id = ?").run(Date.now(), threadId);
+  tx(() => {
+    ensureThread(userId, threadId);
+    const previous = db.prepare("SELECT content FROM messages WHERE thread_id = ? AND id = ?").get(threadId, row.id) as { content: string } | undefined;
+    if (previous?.content !== JSON.stringify(row.content)) storeInlineAttachments(db, userId, threadId, row.content, (bytes) => { assertStorage(userId, bytes); });
+    // Upsert: assistant messages are re-sent when a stream finishes or a tool result lands.
+    db.prepare(
+      `INSERT INTO messages (id, thread_id, parent_id, format, content, created_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (thread_id, id) DO UPDATE SET parent_id = excluded.parent_id, format = excluded.format, content = excluded.content`,
+    ).run(row.id, threadId, row.parent_id, row.format, JSON.stringify(row.content), Date.now());
+    db.prepare("UPDATE threads SET updated_at = ? WHERE id = ?").run(Date.now(), threadId);
+  });
 }
 
 /** The branch the user last extended: newest message and its ancestors, oldest first. */
