@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { McpServerInfo, Me, ModelInfo, Project, ProviderInfo, UserSettings } from "@shared/types";
+import type { McpServerInfo, Me, ModelInfo, Project, ProviderInfo, StorageInfo, UserSettings } from "@shared/types";
 import { api, prefetch } from "@/lib/api";
 
 interface DataState {
@@ -16,9 +16,12 @@ interface DataState {
   activeProject: string | null;
   setActiveProject: (id: string | null) => void;
   refreshProjects: () => Promise<void>;
+  /** How much of the storage quota the account has used. Refreshed by the screens that show it. */
+  storage: StorageInfo | null;
   load: () => Promise<void>;
   refreshProviders: () => Promise<void>;
   refreshMcp: () => Promise<void>;
+  refreshStorage: () => Promise<void>;
   updateSettings: (patch: Partial<UserSettings>) => Promise<void>;
   selectModel: (ref: string) => void;
   resetModel: () => void;
@@ -34,6 +37,7 @@ export const useData = create<DataState>((set, get) => ({
   models: [],
   mcp: [],
   loaded: false,
+  storage: null,
   // A previous chat's composer choice must not override the account default on reload.
   selectedModel: null,
   projects: [],
@@ -50,22 +54,24 @@ export const useData = create<DataState>((set, get) => ({
     set({ projects, ...(active && !projects.some((p) => p.id === active) ? { activeProject: null } : {}) });
   },
   load: async () => {
-    const [me, settings, providers, models, mcp, projects] = await Promise.all([
+    const [me, settings, providers, models, mcp, projects, storage] = await Promise.all([
       api<Me>("/me"),
       api<UserSettings>("/settings"),
       api<ProviderInfo[]>("/providers"),
       api<ModelInfo[]>("/models"),
       api<McpServerInfo[]>("/mcp"),
       api<Project[]>("/projects"),
+      api<StorageInfo>("/storage"),
     ]);
     const active = get().activeProject;
-    set({ me, settings, providers, models, mcp, projects, loaded: true, ...(active && !projects.some((p) => p.id === active) ? { activeProject: null } : {}) });
+    set({ me, settings, providers, models, mcp, projects, storage, loaded: true, ...(active && !projects.some((p) => p.id === active) ? { activeProject: null } : {}) });
   },
   refreshProviders: async () => {
     const [providers, models] = await Promise.all([api<ProviderInfo[]>("/providers"), api<ModelInfo[]>("/models")]);
     set({ providers, models });
   },
   refreshMcp: async () => set({ mcp: await api<McpServerInfo[]>("/mcp") }),
+  refreshStorage: async () => set({ storage: await api<StorageInfo>("/storage") }),
   updateSettings: async (patch) => {
     set({ settings: { ...get().settings!, ...patch } });
     set({ settings: await api<UserSettings>("/settings", { method: "PATCH", json: patch }) });

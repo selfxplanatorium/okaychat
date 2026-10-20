@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { AppEnv } from "./auth.js";
 import { accountProfile } from "./auth.js";
 import { db } from "./db.js";
+import { assertStorage, QuotaError } from "./quota.js";
 
 export const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 const MAX_IMAGE_PIXELS = 16_777_216;
@@ -76,6 +77,12 @@ export const accountRoutes = new Hono<AppEnv>()
     const image = avatarImage(data);
     if (!image) return c.json({ error: "Choose a valid PNG, JPEG, or WebP image up to 16 megapixels." }, 422);
     const userId = c.get("user").id;
+    try {
+      assertStorage(userId, data.byteLength);
+    } catch (error) {
+      if (error instanceof QuotaError) return c.json({ error: error.message }, 413);
+      throw error;
+    }
     const previous = db.prepare("SELECT updated_at FROM user_avatars WHERE user_id = ?").get(userId) as { updated_at: number } | undefined;
     const version = Math.max(Date.now(), (previous?.updated_at ?? 0) + 1);
     db.prepare(`INSERT INTO user_avatars (user_id, mime, data, updated_at) VALUES (?, ?, ?, ?)

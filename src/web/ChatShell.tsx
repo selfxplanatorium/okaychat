@@ -9,6 +9,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { useDrawerSwipe } from "@/components/layout/use-drawer-swipe";
 import { Onboarding } from "@/components/Onboarding";
 import { ChatPrivacyMenu } from "@/components/chat/ChatPrivacyMenu";
+import { StorageNotice } from "@/components/StorageNotice";
 import { ThemeEditorHost } from "@/components/settings/theme/ThemeEditorHost";
 import { RuntimeProvider } from "@/runtime/RuntimeProvider";
 import { preloadable } from "@/lib/preloadable";
@@ -165,6 +166,7 @@ export function Shell({ userId }: { userId: string }) {
                 <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 z-10 h-20 bg-background/75 backdrop-blur-md [mask-image:linear-gradient(to_bottom,black_55%,transparent)] md:hidden" />
                 <ChatHeader sidebarOpen={sidebarOpen} onToggle={() => setSidebarOpen(true)} />
                 <ChatPrivacyMenu />
+                <StorageNotice />
                 <ChatView />
               </Route>
             </Switch>

@@ -246,6 +246,24 @@ const migrations: string[] = [
   CREATE INDEX memories_user ON memories(user_id, scope, created_at);
   ALTER TABLE threads ADD COLUMN memory_disabled INTEGER NOT NULL DEFAULT 0;
   `,
+  // Per-user storage quota: an optional per-user byte limit (null = server default). Generated images
+  // were the only user files not counted in a table, so they get a size column. sandbox_files keeps
+  // run_code outputs after the sandbox container wipes its workspaces (docs/research/code-sandbox.md).
+  `
+  ALTER TABLE users ADD COLUMN storage_limit INTEGER;
+  ALTER TABLE images ADD COLUMN size INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE sandbox_files (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    path TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    data BLOB NOT NULL,
+    size INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE (user_id, thread_id, path)
+  );
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

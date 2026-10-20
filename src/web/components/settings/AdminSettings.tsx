@@ -1,11 +1,11 @@
-import { KeyRoundIcon, Loader2Icon, PlusIcon, TrashIcon } from "lucide-react";
+import { HardDriveIcon, KeyRoundIcon, Loader2Icon, PlusIcon, TrashIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
-import type { AdminUser, ProviderInfo } from "@shared/types";
+import type { AdminUser, ProviderInfo, StorageInfo } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { api, formatCost } from "@/lib/api";
+import { api, formatBytes, formatCost } from "@/lib/api";
 import { useData } from "@/state/data";
 import { ProviderLists, ProviderScopeProvider } from "./ProvidersSettings";
 import { SettingsPage, SettingsRow, SettingsSection } from "./SettingsUI";
@@ -51,7 +51,18 @@ function NewUserForm({ onDone }: { onDone: () => void }) {
   );
 }
 
-function Users() {
+/** "2 GB", "500 MB", "1.5GB", a bare number in MB → bytes; "" resets to the default. */
+function parseLimit(text: string): number | null | undefined {
+  const t = text.trim().toUpperCase().replace(/\s+/g, "");
+  if (!t) return null;
+  const match = t.match(/^([\d.]+)(B|KB|MB|GB|TB)?$/);
+  if (!match) return undefined;
+  const multiplier = { B: 1, KB: 1024, MB: 1024 ** 2, GB: 1024 ** 3, TB: 1024 ** 4 }[match[2] ?? "MB"]!;
+  const bytes = Math.round(Number(match[1]) * multiplier);
+  return Number.isFinite(bytes) && bytes > 0 ? bytes : undefined;
+}
+
+function Users({ defaultLimit }: { defaultLimit: number | null }) {
   const me = useData((s) => s.me);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [adding, setAdding] = useState(false);
@@ -69,6 +80,22 @@ function Users() {
     } catch (e) {
       setError((e as Error).message);
     }
+  };
+
+  const limitLabel = (u: AdminUser) =>
+    u.storageLimit !== null ? formatBytes(u.storageLimit) : defaultLimit !== null ? `default ${formatBytes(defaultLimit)}` : "default";
+  const editLimit = (u: AdminUser) => {
+    const text = prompt(
+      `Storage limit for ${u.email} — e.g. "2 GB" or "500 MB" (a bare number means MB). Leave empty to reset to the server default.`,
+      u.storageLimit !== null ? formatBytes(u.storageLimit) : "",
+    );
+    if (text === null) return;
+    const parsed = parseLimit(text);
+    if (parsed === undefined) {
+      setError(`Could not read that limit for ${u.name}. Use a size like "2 GB".`);
+      return;
+    }
+    void act(() => api(`/admin/users/${u.id}`, { method: "PATCH", json: { storageLimit: parsed } }));
   };
 
   return (
@@ -98,7 +125,7 @@ function Users() {
               {u.name} {u.id === me?.id && <span className="text-muted-foreground font-normal">(you)</span>}
             </p>
             <p className="text-muted-foreground truncate text-xs">
-              {u.email} · {u.threads} chats · {formatCost(u.cost30d)} in 30 days
+              {u.email} · {u.threads} chats · {formatBytes(u.storageUsed)} of {limitLabel(u)} stored · {formatCost(u.cost30d)} in 30 days
             </p>
           </div>
           <Select
@@ -111,6 +138,9 @@ function Users() {
               { value: "admin", label: "Admin" },
             ]}
           />
+          <Button size="icon-sm" variant="ghost" aria-label={`Storage limit of ${u.name}`} onClick={() => editLimit(u)}>
+            <HardDriveIcon />
+          </Button>
           <Button
             size="icon-sm"
             variant="ghost"
@@ -140,6 +170,7 @@ function Users() {
 export function AdminSettings() {
   const [allowSignup, setAllowSignup] = useState<boolean | null>(null);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [defaultLimit, setDefaultLimit] = useState<number | null>(null);
   const refreshUserProviders = useData((s) => s.refreshProviders);
   const refreshProviders = useCallback(async () => {
     setProviders(await api<ProviderInfo[]>("/admin/providers"));
@@ -150,6 +181,8 @@ export function AdminSettings() {
   useEffect(() => {
     void api<{ allowSignup: boolean }>("/admin/settings").then((s) => setAllowSignup(s.allowSignup));
     void api<ProviderInfo[]>("/admin/providers").then(setProviders);
+    // The signed-in admin's /storage reply carries the server-wide default.
+    void api<StorageInfo>("/storage").then((s) => setDefaultLimit(s.defaultLimit));
   }, []);
 
   return (
@@ -169,7 +202,7 @@ export function AdminSettings() {
           }
         />
       </SettingsSection>
-      <Users />
+      <Users defaultLimit={defaultLimit} />
       <h2 className="mt-2 text-sm font-medium">Server-wide providers</h2>
       <p className="text-muted-foreground -mt-2 text-xs">Every user can use these keys. A user's own key for the same provider takes precedence. Usage is still tracked per user.</p>
       <ProviderScopeProvider base="/admin/providers" providers={providers} refresh={refreshProviders}>

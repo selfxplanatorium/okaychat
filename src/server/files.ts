@@ -5,6 +5,7 @@ import type { AppEnv } from "./auth.js";
 import { newId } from "./crypto.js";
 import { db } from "./db.js";
 import { readXlsx } from "./documents/xlsx.js";
+import { assertStorage, QuotaError } from "./quota.js";
 import { sandboxConfigured } from "./tools/sandbox.js";
 
 export const MAX_BYTES = 25 * 1024 * 1024;
@@ -40,6 +41,7 @@ export async function extract(name: string, type: string, data: Uint8Array): Pro
 
 /** Stores the bytes so `import_document` can copy them into an artifact. Older uploads are dropped. */
 function storeUpload(userId: string, name: string, mime: string, data: Uint8Array): string {
+  assertStorage(userId, data.byteLength);
   db.prepare("DELETE FROM uploads WHERE created_at < ?").run(Date.now() - 7 * 86_400_000);
   const id = newId("upl");
   db.prepare("INSERT INTO uploads (id, user_id, name, mime, data, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(
@@ -62,7 +64,12 @@ export const fileRoutes = new Hono<AppEnv>()
     if (!(file instanceof File)) return c.json({ error: "No file" }, 400);
     if (file.size > MAX_BYTES) return c.json({ error: "File is larger than 25 MB" }, 413);
     if (c.req.query("temporary") === "1" || !importable(file.name)) return c.json({ fileId: null });
-    return c.json({ fileId: storeUpload(c.get("user").id, file.name, file.type, new Uint8Array(await file.arrayBuffer())) });
+    try {
+      return c.json({ fileId: storeUpload(c.get("user").id, file.name, file.type, new Uint8Array(await file.arrayBuffer())) });
+    } catch (error) {
+      if (error instanceof QuotaError) return c.json({ error: error.message }, 413);
+      throw error;
+    }
   })
   .post("/files/extract", async (c) => {
   const form = await c.req.formData();
@@ -81,6 +88,7 @@ export const fileRoutes = new Hono<AppEnv>()
       truncated,
     });
   } catch (error) {
+    if (error instanceof QuotaError) return c.json({ error: error.message }, 413);
     return c.json({ error: `Could not read ${file.name}: ${(error as Error).message}` }, 422);
   }
 });

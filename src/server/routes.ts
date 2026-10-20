@@ -19,9 +19,11 @@ import { searchRoutes } from "./search.js";
 import { shareRoutes } from "./shares.js";
 import { deleteThreadImages, imageRoutes } from "./tools/image.js";
 import { deleteSandboxWorkspace, sandboxRoutes } from "./tools/sandbox.js";
+import { env } from "./env.js";
 import { callbackUrl, disconnectServer, serverInfo, testServer } from "./mcp/manager.js";
 import { pendingByState, StoredOAuthProvider } from "./mcp/oauth.js";
 import * as mcpStore from "./mcp/store.js";
+import { storageUsed, userStorageLimit } from "./quota.js";
 import { getSettings, updateSettings } from "./settings.js";
 import { appendMessage, deleteThread, ensureThread, getThread, listMessages, listThreads, updateThread } from "./threads.js";
 import { goWindows, threadUsage, usageSummary } from "./usage.js";
@@ -123,6 +125,12 @@ const api = new Hono<AppEnv>()
     const groupBy = (c.req.query("groupBy") ?? "day") as "day" | "model" | "provider" | "kind";
     const since = Date.now() - days * 86_400_000;
     return c.json({ rows: usageSummary(c.get("user").id, groupBy, since), go: goWindows(c.get("user").id) });
+  })
+
+  // Storage
+  .get("/storage", (c) => {
+    const userId = c.get("user").id;
+    return c.json({ used: storageUsed(userId), limit: userStorageLimit(userId), defaultLimit: env.storageLimit });
   })
 
   // MCP servers

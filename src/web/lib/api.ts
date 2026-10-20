@@ -28,6 +28,15 @@ export const formatTokens = (n: number) =>
 
 export const formatCost = (n: number) => (n === 0 ? "$0" : n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
 
+export const formatBytes = (n: number) =>
+  n >= 1024 ** 3
+    ? `${(n / 1024 ** 3).toFixed(n >= 10 * 1024 ** 3 ? 0 : 1)} GB`
+    : n >= 1024 ** 2
+      ? `${(n / 1024 ** 2).toFixed(n >= 100 * 1024 ** 2 ? 0 : 1)} MB`
+      : n >= 1024
+        ? `${(n / 1024).toFixed(1)} KB`
+        : `${n} B`;
+
 const prefetched = new Map<string, { promise: Promise<unknown>; at: number }>();
 // A prefetch serves the screen that is mounting now. An older one could show stale data.
 const PREFETCH_TTL_MS = 10_000;

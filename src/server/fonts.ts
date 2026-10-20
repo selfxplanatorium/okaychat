@@ -3,6 +3,7 @@ import type { InstalledFont } from "../shared/types.js";
 import type { AppEnv } from "./auth.js";
 import { newId } from "./crypto.js";
 import { db } from "./db.js";
+import { assertStorage, QuotaError } from "./quota.js";
 
 // Fonts a user uploads. Files live in SQLite so they travel with the account and the one volume.
 export const MAX_FONT_BYTES = 15 * 1024 * 1024;
@@ -50,6 +51,12 @@ export const fontRoutes = new Hono<AppEnv>()
     if (family === "") return c.json({ error: "Name the font file, not just its extension" }, 400);
     if (db.prepare("SELECT 1 FROM user_fonts WHERE user_id = ? AND family = ?").get(userId, family)) {
       return c.json({ error: `A font named ${family} is already installed` }, 409);
+    }
+    try {
+      assertStorage(userId, data.byteLength);
+    } catch (error) {
+      if (error instanceof QuotaError) return c.json({ error: error.message }, 413);
+      throw error;
     }
     const id = newId("fnt");
     db.prepare("INSERT INTO user_fonts (id, user_id, family, filename, mime, data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(

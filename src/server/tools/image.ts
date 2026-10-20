@@ -11,6 +11,7 @@ import { CODEX_COMMAND, codexEnv, codexVersion, disconnect, isConnected, loginSt
 import { newId } from "../crypto.js";
 import { db } from "../db.js";
 import { env } from "../env.js";
+import { assertStorage } from "../quota.js";
 
 // Image generation through the user's own ChatGPT plan, by running `codex exec` as a relay that only calls
 // Codex's built-in image tool. Flags follow the codex-imagegen recipe: no user config, no shell, read-only
@@ -149,13 +150,21 @@ export async function generateImage(opts: { userId: string; threadId: string; pr
   // PNG IHDR: width and height are big-endian at bytes 16 and 20.
   const width = buf.readUInt32BE(16);
   const height = buf.readUInt32BE(20);
-  db.prepare("INSERT INTO images (id, user_id, thread_id, prompt, width, height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+  try {
+    assertStorage(opts.userId, buf.length);
+  } catch (error) {
+    // The model sees the quota message; never keep a file the record does not.
+    await rm(imagePath(opts.userId, source), { force: true });
+    throw error;
+  }
+  db.prepare("INSERT INTO images (id, user_id, thread_id, prompt, width, height, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
     source,
     opts.userId,
     opts.threadId,
     opts.prompt,
     width,
     height,
+    buf.length,
     Date.now(),
   );
   return { id: source, url: `/api/images/${source}`, width, height };

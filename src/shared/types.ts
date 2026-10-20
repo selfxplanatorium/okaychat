@@ -337,4 +337,16 @@ export interface AdminUser {
   threads: number;
   /** Spend in the last 30 days, from recorded usage. */
   cost30d: number;
+  /** Bytes the user currently stores, over every counted kind. */
+  storageUsed: number;
+  /** Per-user byte limit. null means the server default (see /api/storage). */
+  storageLimit: number | null;
+}
+
+/** The signed-in user's storage usage against their limit. */
+export interface StorageInfo {
+  used: number;
+  limit: number;
+  /** The server-wide default limit, for UIs that show what null means. */
+  defaultLimit: number;
 }

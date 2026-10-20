@@ -5,6 +5,7 @@ import { requireAdmin, signupAllowed, type AppEnv } from "./auth.js";
 import { deleteConnection, listProviders, saveConnection } from "./catalog/providers.js";
 import { hashPassword, newId } from "./crypto.js";
 import { db } from "./db.js";
+import { storageUsedSql } from "./quota.js";
 
 const userInput = z.object({
   email: z.string().trim().email(),
@@ -17,6 +18,8 @@ const userPatch = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   role: z.enum(["admin", "user"]).optional(),
   password: z.string().min(8).max(200).optional(),
+  // Bytes. null removes the override, so the user falls back to the server default.
+  storageLimit: z.number().int().min(1024 * 1024).max(1024 ** 4).nullable().optional(),
 });
 
 const providerInput = z.object({
@@ -33,7 +36,8 @@ export const adminRoutes = new Hono<AppEnv>()
   .get("/admin/users", (c) => {
     const rows = db
       .prepare(
-        `SELECT u.id, u.email, u.name, u.role, u.created_at AS createdAt,
+        `SELECT u.id, u.email, u.name, u.role, u.created_at AS createdAt, u.storage_limit AS storageLimit,
+           ${storageUsedSql("u.id")} AS storageUsed,
            (SELECT COUNT(*) FROM threads t WHERE t.user_id = u.id) AS threads,
            (SELECT COALESCE(SUM(cost), 0) FROM usage g WHERE g.user_id = u.id AND g.created_at > ?) AS cost30d
          FROM users u ORDER BY u.created_at`,
@@ -64,6 +68,7 @@ export const adminRoutes = new Hono<AppEnv>()
     if (body.data.role === "user" && target.role === "admin" && adminCount() === 1) return c.json({ error: "Keep at least one admin." }, 400);
     if (body.data.name) db.prepare("UPDATE users SET name = ? WHERE id = ?").run(body.data.name, id);
     if (body.data.role) db.prepare("UPDATE users SET role = ? WHERE id = ?").run(body.data.role, id);
+    if (body.data.storageLimit !== undefined) db.prepare("UPDATE users SET storage_limit = ? WHERE id = ?").run(body.data.storageLimit, id);
     if (body.data.password) {
       db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(await hashPassword(body.data.password), id);
       // A reset signs the user out everywhere.

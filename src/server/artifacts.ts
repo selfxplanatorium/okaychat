@@ -10,6 +10,7 @@ import { editPdf, pdfOp, readPdf } from "./documents/pdf.js";
 import { htmlToPdf, pageFurniture, printDocument, rendererAvailable } from "./documents/render.js";
 import { screenshotArtifact, type VisualShot } from "./documents/visual.js";
 import { createXlsx, editXlsx, previewXlsx, readXlsx, workbookSpec, xlsxOp } from "./documents/xlsx.js";
+import { assertStorage } from "./quota.js";
 import { MAX_SHOTS_PER_TURN } from "./tools/screenshots.js";
 import { getThread } from "./threads.js";
 
@@ -92,6 +93,11 @@ function saveVersion(
 ): ArtifactToolResult {
   const prev = latestArtifact(threadId, a.id);
   const version = (prev?.version ?? 0) + 1;
+  const bytes = (a.data?.byteLength ?? 0) + Buffer.byteLength(a.content, "utf8");
+  // Every version keeps its bytes, so the whole new version counts. The owner comes from the thread;
+  // the tools run for its user, including server-side schedule runs.
+  const owner = db.prepare("SELECT user_id FROM threads WHERE id = ?").get(threadId) as { user_id: string } | undefined;
+  if (owner) assertStorage(owner.user_id, bytes);
   db.prepare("INSERT INTO artifacts (thread_id, id, version, title, kind, language, content, data, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
     threadId,
     a.id,

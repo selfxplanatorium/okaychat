@@ -1,14 +1,29 @@
 import { CameraIcon, LoaderCircleIcon } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Me } from "@shared/types";
 import { AccountAvatar } from "@/components/ui/account-avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { StorageMeter } from "@/components/StorageMeter";
 import { api } from "@/lib/api";
 import { useData } from "@/state/data";
 import { SettingsPage, SettingsRow, SettingsSection } from "./SettingsUI";
 
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+
+/** Account storage usage against the limit, as a section under the profile details. */
+function StorageSection() {
+  const storage = useData((s) => s.storage);
+  if (!storage) return null;
+  return (
+    <SettingsSection
+      title="Storage"
+      description="Attachments, artifact and document versions, generated images, saved sandbox outputs, uploaded fonts, and your profile picture. The limit is set by the server admin."
+    >
+      <StorageMeter storage={storage} className="px-4 py-3" />
+    </SettingsSection>
+  );
+}
 
 /** Decode before upload, reduce oversized photos, and discard embedded photo metadata. */
 async function profilePhoto(file: File): Promise<Blob> {
@@ -43,6 +58,11 @@ export function AccountSettings() {
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
+  const refreshStorage = useData((s) => s.refreshStorage);
+  useEffect(() => {
+    // Quota numbers go stale after uploads in other tabs; the account page always shows fresh ones.
+    void refreshStorage();
+  }, [refreshStorage]);
   if (!me) return null;
 
   const saveProfile = async (action: "photo" | "remove" | "name", run: () => Promise<Me>, message: string) => {
@@ -119,6 +139,7 @@ export function AccountSettings() {
         </form>
         <SettingsRow label="Email address" control={<span className="text-muted-foreground max-w-full break-all text-sm">{me.email}</span>} />
       </SettingsSection>
+      <StorageSection />
       <div aria-live="polite" aria-atomic="true" className="min-h-5 text-sm">
         {error ? <p role="alert" className="text-destructive">{error}</p> : <p className="text-muted-foreground">{status}</p>}
       </div>

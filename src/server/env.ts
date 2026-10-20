@@ -6,6 +6,8 @@ if (secret.length < 32) {
   throw new Error("OKAYCHAT_SECRET must be set to at least 32 characters (openssl rand -base64 32)");
 }
 
+const storageLimit = Number(process.env.OKAYCHAT_STORAGE_LIMIT ?? "");
+
 const dataDir = path.resolve(process.env.OKAYCHAT_DATA_DIR ?? "./data");
 mkdirSync(dataDir, { recursive: true });
 
@@ -21,6 +23,8 @@ export const env = {
   // Code sandbox container (sandbox/). run_code is offered only when both are set.
   sandboxUrl: (process.env.OKAYCHAT_SANDBOX_URL ?? "").replace(/\/+$/, ""),
   sandboxToken: process.env.OKAYCHAT_SANDBOX_TOKEN ?? "",
+  // Per-user storage quota in bytes. An admin can override it per user in the users table.
+  storageLimit: Number.isFinite(storageLimit) && storageLimit > 0 ? storageLimit : 1_073_741_824,
   version: "0.1.0",
 };
 
