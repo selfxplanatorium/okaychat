@@ -28,6 +28,15 @@
   transition-timing-function: var(--ease-in-quart);
 }
 
+/*
+ * Route content fades in. No fill: an animation that keeps opacity applied
+ * (`forwards`/`both`) makes the wrapper a backdrop root, and backdrop-filter
+ * on the floating glass buttons inside then has nothing to blur.
+ */
+.shell-route-in {
+  animation: rise-in var(--motion-base) var(--ease-out-expo);
+}
+
 /* The floating chat header waits for the sidebar to mostly collapse first. */
 @keyframes shell-header-in {
   from {
@@ -35,9 +44,14 @@
     transform: translateX(-10px);
   }
 }
+/*
+ * `backwards` holds the closed state during the delay but releases the
+ * animation at the end, so the glass buttons are not trapped in a backdrop
+ * root (see above).
+ */
 .shell-chat-header {
   animation: shell-header-in var(--motion-base) var(--ease-out-expo)
-    calc(var(--panel-animation-duration, 240ms) * 0.6) both;
+    calc(var(--panel-animation-duration, 240ms) * 0.6) backwards;
 }
 
 /*

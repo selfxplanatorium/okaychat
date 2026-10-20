@@ -45,10 +45,10 @@ export function ChatPrivacyMenu() {
   };
 
   return (
-    <div className="shell-chat-actions absolute top-2 right-2 z-20 flex items-center gap-1">
+    <div className="shell-chat-actions absolute top-2 right-2 flex items-center gap-1">
       {!privacy.temporary && <ShareButton />}
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger className="surface-glass text-muted-foreground hover:text-foreground inline-flex h-8 items-center gap-2 rounded-lg border px-2 transition-colors duration-(--motion-fast)" aria-label={privacy.temporary ? "Anonymous chat options" : "Chat options"}>
+        <PopoverTrigger className="surface-glass text-muted-foreground hover:text-foreground relative z-20 inline-flex h-8 items-center gap-2 rounded-lg border px-2 transition-colors duration-(--motion-fast)" aria-label={privacy.temporary ? "Anonymous chat options" : "Chat options"}>
           {privacy.temporary ? <><VenetianMaskIcon className="size-4" /><span className="text-xs font-medium">Anonymous</span></> : <MoreHorizontalIcon className="size-4" />}
         </PopoverTrigger>
         <PopoverContent align="end" className="w-80 max-w-[calc(100vw-1rem)] p-4">

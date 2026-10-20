@@ -21,12 +21,12 @@ function ChatHeader({ sidebarOpen, onToggle }: { sidebarOpen: boolean; onToggle:
   const [, navigate] = useLocation();
   if (sidebarOpen) return null;
   return (
-    <div className="shell-chat-header absolute top-2 left-2 z-20 flex gap-1">
+    <div className="shell-chat-header absolute top-2 left-2 flex gap-1">
       <button
         type="button"
         onClick={onToggle}
         aria-label="Open sidebar"
-        className="surface-glass text-muted-foreground hover:text-foreground rounded-lg border p-1.5 transition-colors duration-(--motion-fast) ease-out-quart"
+        className="surface-glass text-muted-foreground hover:text-foreground relative z-20 rounded-lg border p-1.5 transition-colors duration-(--motion-fast) ease-out-quart"
       >
         <PanelLeftIcon className="size-4" />
       </button>
@@ -38,7 +38,7 @@ function ChatHeader({ sidebarOpen, onToggle }: { sidebarOpen: boolean; onToggle:
           useChatPrivacyStore.getState().set(aui.threadListItem.getState().id, { temporary: false, personalized: true });
           navigate("/");
         }}
-        className="surface-glass text-muted-foreground hover:text-foreground rounded-lg border p-1.5 transition-colors duration-(--motion-fast) ease-out-quart"
+        className="surface-glass text-muted-foreground hover:text-foreground relative z-20 rounded-lg border p-1.5 transition-colors duration-(--motion-fast) ease-out-quart"
       >
         <SquarePenIcon className="size-4" />
       </button>
@@ -93,7 +93,7 @@ export function Shell() {
         />
         <div className="relative flex min-w-0 flex-1">
           {/* Keyed by the top-level route: chat and settings crossfade, sections inside settings do not. */}
-          <div key={route} className="animate-rise-in relative flex min-w-0 flex-1 flex-col">
+          <div key={route} className="shell-route-in relative flex min-w-0 flex-1 flex-col">
             <Switch>
               <Route path="/settings/:section">
                 {(p) => (

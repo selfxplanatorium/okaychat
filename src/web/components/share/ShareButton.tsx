@@ -35,7 +35,7 @@ export function ShareButton() {
   return (
     <Popover>
       <PopoverTrigger
-        className="surface-glass text-muted-foreground hover:text-foreground animate-fade-in rounded-lg border p-1.5 transition-colors duration-(--motion-fast) ease-out-quart"
+        className="surface-glass text-muted-foreground hover:text-foreground animate-fade-in relative z-20 rounded-lg border p-1.5 transition-colors duration-(--motion-fast) ease-out-quart"
         aria-label="Share chat"
       >
         <Share2Icon className="size-4" />

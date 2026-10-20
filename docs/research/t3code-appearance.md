@@ -42,6 +42,12 @@ Card behavior:
 
 Notes on the `Contrast` and `Glass opacity` rows: each has a reset button that appears only when the value differs from the default.
 
+Glass implementation notes:
+
+- `surface-glass` reads `--glass-opacity` / `--glass-blur`; `glassOpacity = 100` also sets `--glass-blur: 0px`.
+- A `backdrop-filter` element cannot see through an ancestor stacking context that paints above the content. Keep `z-*` on the glass element itself (the floating chat header and chat actions do), not on a wrapper around it.
+- Ancestor opacity animations must not retain their final value (`both` / `forwards`); a retained animation keeps the ancestor a backdrop root and disables the blur for descendants. Use `backwards` when the element needs to stay hidden during a delay.
+
 ## Section: Motion
 
 | Code | Searchable title | Control | Range | Default | Description text | Applies |
