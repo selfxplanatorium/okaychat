@@ -8,6 +8,10 @@ import "@fontsource/ubuntu";
 import "@fontsource/ubuntu-mono";
 import "./fonts/bundled.css";
 import "./index.css";
+import { installIconMotion } from "./motion/icons";
+
+installIconMotion();
+
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

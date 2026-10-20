@@ -15,6 +15,7 @@
 @import "./shell.css";
 @import "./settings.css";
 @import "./chat.css";
+@import "./icons.css";
 
 @theme {
   /* Easing. Tailwind exposes these as ease-out-quart, ease-spring, ... */

@@ -1,0 +1,722 @@
+/*
+ * Icon gestures, played by icons.ts. Each icon acts out what it means: the trash
+ * lid lifts, the gear turns one tooth, the send arrow launches and comes back.
+ * Hover is a small hint of the action; press is the action itself, bigger and
+ * springier. Every gesture ends exactly at rest, so removing the attribute after
+ * the last frame never jumps.
+ *
+ * Coordinates are lucide's 24-unit grid: children use the view box as their
+ * transform box, so `translate(2px)` is two grid units at any icon size, and
+ * origins are grid points. Children are addressed by lucide's element order.
+ * Keyframes use `transform`; Tailwind's scale/rotate utilities use the separate
+ * properties, so an icon that is also mid-swap composes instead of fighting.
+ */
+
+:root {
+  --icon-hover: 560ms;
+  --icon-press: 640ms;
+}
+
+svg.lucide[data-icon-motion] {
+  overflow: visible;
+}
+svg.lucide[data-icon-motion] > * {
+  transform-box: view-box;
+  transform-origin: 12px 12px;
+}
+
+/* Generic gestures for icons without their own: a lift, and a squash-and-pop. */
+:where(svg.lucide)[data-icon-motion="hover"] {
+  animation: icon-lift var(--icon-hover) var(--ease-out-quart);
+}
+:where(svg.lucide)[data-icon-motion="press"] {
+  animation: icon-pop var(--icon-press) var(--ease-out-quart);
+}
+@keyframes icon-lift {
+  35% { transform: translateY(-1.5px) scale(1.08); }
+  70% { transform: translateY(0.3px) scale(0.98); }
+}
+@keyframes icon-pop {
+  20% { transform: scale(0.78); }
+  55% { transform: scale(1.14); }
+  80% { transform: scale(0.97); }
+}
+
+/* Shared building blocks. */
+@keyframes icon-draw {
+  from { stroke-dashoffset: var(--len); }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes icon-shake {
+  15% { transform: translateX(-1.5px) rotate(-6deg); }
+  35% { transform: translateX(1.5px) rotate(5deg); }
+  55% { transform: translateX(-1px) rotate(-3deg); }
+  75% { transform: translateX(0.5px) rotate(1deg); }
+}
+@keyframes icon-dot-pop {
+  40% { transform: scale(1.7); }
+  70% { transform: scale(0.9); }
+}
+
+/* ---------- Edit and create ---------- */
+
+/* Plus turns a quarter (it looks the same at 90deg), press turns half and pops. */
+.lucide-plus[data-icon-motion="hover"],
+.lucide-x[data-icon-motion="hover"] {
+  animation: icon-turn-quarter 480ms var(--ease-out-expo);
+}
+.lucide-plus[data-icon-motion="press"] {
+  animation: icon-plus-press var(--icon-press) var(--ease-spring);
+}
+.lucide-x[data-icon-motion="press"] {
+  animation: icon-pop 420ms var(--ease-out-quart);
+}
+@keyframes icon-turn-quarter {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(90deg); }
+}
+@keyframes icon-plus-press {
+  0% { transform: rotate(0deg) scale(1); }
+  25% { transform: rotate(45deg) scale(0.75); }
+  100% { transform: rotate(180deg) scale(1); }
+}
+
+/* Pens scribble: the nib wanders in a short zigzag; a press digs in. */
+.lucide-pencil[data-icon-motion],
+.lucide-square-pen[data-icon-motion],
+.lucide-pen-line[data-icon-motion] {
+  animation: none;
+}
+.lucide-pencil[data-icon-motion="hover"] > *,
+.lucide-square-pen[data-icon-motion="hover"] > :nth-child(2),
+.lucide-pen-line[data-icon-motion="hover"] > :nth-child(2) {
+  transform-origin: 3px 21px;
+  animation: icon-scribble var(--icon-hover) var(--ease-in-out-quart);
+}
+.lucide-pencil[data-icon-motion="press"] > *,
+.lucide-square-pen[data-icon-motion="press"] > :nth-child(2),
+.lucide-pen-line[data-icon-motion="press"] > :nth-child(2) {
+  transform-origin: 3px 21px;
+  animation: icon-pen-dig var(--icon-press) var(--ease-spring);
+}
+.lucide-pen-line[data-icon-motion] > :nth-child(1) {
+  --len: 9;
+  stroke-dasharray: var(--len);
+  animation: icon-draw 420ms var(--ease-out-quart) 120ms backwards;
+}
+@keyframes icon-scribble {
+  20% { transform: translate(-1px, 1px) rotate(-8deg); }
+  45% { transform: translate(1.2px, -0.4px) rotate(4deg); }
+  70% { transform: translate(-0.6px, 0.8px) rotate(-4deg); }
+}
+@keyframes icon-pen-dig {
+  20% { transform: translate(-1.5px, 1.5px) rotate(-14deg) scale(0.92); }
+}
+
+/* Copy separates its two sheets on hover; a press deals a fresh sheet off the back one. */
+.lucide-copy[data-icon-motion] {
+  animation: none;
+}
+.lucide-copy[data-icon-motion="hover"] > rect {
+  animation: icon-copy-front var(--icon-hover) var(--ease-out-quart);
+}
+.lucide-copy[data-icon-motion="hover"] > path {
+  animation: icon-copy-back var(--icon-hover) var(--ease-out-quart);
+}
+.lucide-copy[data-icon-motion="press"] > rect {
+  animation: icon-copy-deal var(--icon-press) var(--ease-out-expo);
+}
+@keyframes icon-copy-front {
+  40% { transform: translate(1.5px, 1.5px); }
+}
+@keyframes icon-copy-back {
+  40% { transform: translate(-1px, -1px); }
+}
+@keyframes icon-copy-deal {
+  0% { transform: translate(-6px, -6px); opacity: 0.2; }
+  60% { transform: translate(0.6px, 0.6px); opacity: 1; }
+}
+
+/* Checks draw themselves. */
+.lucide-check[data-icon-motion],
+.lucide-circle-check[data-icon-motion] {
+  animation: none;
+}
+.lucide-check[data-icon-motion] > path,
+.lucide-circle-check[data-icon-motion] > path {
+  --len: 24;
+  stroke-dasharray: var(--len);
+  animation: icon-draw 460ms var(--ease-out-quart);
+}
+.lucide-check[data-icon-motion="press"],
+.lucide-circle-check[data-icon-motion="press"] {
+  animation: icon-pop 520ms var(--ease-out-quart);
+}
+
+/* The trash lid lifts at its left edge; a press slams it and shakes the can. */
+.lucide-trash[data-icon-motion] {
+  animation: none;
+}
+.lucide-trash[data-icon-motion] > :nth-child(n + 4) {
+  transform-origin: 21px 6px;
+}
+.lucide-trash[data-icon-motion="hover"] > :nth-child(n + 4) {
+  animation: icon-lid-lift var(--icon-hover) var(--ease-out-quart);
+}
+.lucide-trash[data-icon-motion="press"] > :nth-child(n + 4) {
+  animation: icon-lid-slam var(--icon-press) var(--ease-out-quart);
+}
+.lucide-trash[data-icon-motion="press"] > :nth-child(-n + 3) {
+  transform-origin: 12px 22px;
+  animation: icon-can-thud var(--icon-press) var(--ease-out-quart);
+}
+@keyframes icon-lid-lift {
+  40% { transform: translateY(-2px) rotate(14deg); }
+  75% { transform: translateY(-0.5px) rotate(4deg); }
+}
+@keyframes icon-lid-slam {
+  25% { transform: translateY(-3.5px) rotate(22deg); }
+  50% { transform: translateY(0.5px) rotate(-2deg); }
+  70% { transform: translateY(-0.4px) rotate(1deg); }
+}
+@keyframes icon-can-thud {
+  0%, 45% { transform: none; }
+  55% { transform: scale(1.06, 0.92); }
+  75% { transform: scale(0.98, 1.03); }
+}
+
+/* Archive: the lid lifts off the box. */
+.lucide-archive[data-icon-motion] {
+  animation: none;
+}
+.lucide-archive[data-icon-motion="hover"] > :nth-child(1) {
+  animation: icon-archive-lid var(--icon-hover) var(--ease-out-quart);
+}
+.lucide-archive[data-icon-motion="press"] > :nth-child(1) {
+  animation: icon-lid-slam-flat var(--icon-press) var(--ease-out-quart);
+}
+@keyframes icon-archive-lid {
+  40% { transform: translateY(-2px) rotate(-5deg); }
+}
+@keyframes icon-lid-slam-flat {
+  25% { transform: translateY(-3.5px); }
+  50% { transform: translateY(0.6px) scale(1.04, 0.9); }
+}
+
+/* ---------- Direction ---------- */
+
+.lucide-chevron-down[data-icon-motion="hover"] { animation: icon-nudge-down var(--icon-hover) var(--ease-out-quart); }
+.lucide-chevron-up[data-icon-motion="hover"] { animation: icon-nudge-up var(--icon-hover) var(--ease-out-quart); }
+.lucide-chevron-right[data-icon-motion="hover"] { animation: icon-nudge-right var(--icon-hover) var(--ease-out-quart); }
+.lucide-chevron-left[data-icon-motion="hover"],
+.lucide-arrow-left[data-icon-motion="hover"] { animation: icon-nudge-left var(--icon-hover) var(--ease-out-quart); }
+.lucide-chevron-down[data-icon-motion="press"] { animation: icon-nudge-down 420ms var(--ease-spring); }
+.lucide-chevron-up[data-icon-motion="press"] { animation: icon-nudge-up 420ms var(--ease-spring); }
+.lucide-chevron-right[data-icon-motion="press"] { animation: icon-nudge-right 420ms var(--ease-spring); }
+.lucide-chevron-left[data-icon-motion="press"],
+.lucide-arrow-left[data-icon-motion="press"] { animation: icon-dash-left var(--icon-press) var(--ease-out-expo); }
+@keyframes icon-nudge-down { 35% { transform: translateY(2.5px); } 65% { transform: translateY(-0.5px); } }
+@keyframes icon-nudge-up { 35% { transform: translateY(-2.5px); } 65% { transform: translateY(0.5px); } }
+@keyframes icon-nudge-right { 35% { transform: translateX(2.5px); } 65% { transform: translateX(-0.5px); } }
+@keyframes icon-nudge-left { 35% { transform: translateX(-2.5px); } 65% { transform: translateX(0.5px); } }
+@keyframes icon-dash-left {
+  40% { transform: translateX(-7px); opacity: 0; }
+  41% { transform: translateX(6px); opacity: 0; }
+}
+
+/* Up/down chevrons part on hover and click shut on press. */
+.lucide-chevrons-up-down[data-icon-motion] { animation: none; }
+.lucide-chevrons-up-down[data-icon-motion="hover"] > :nth-child(1) { animation: icon-nudge-down 480ms var(--ease-out-quart); }
+.lucide-chevrons-up-down[data-icon-motion="hover"] > :nth-child(2) { animation: icon-nudge-up 480ms var(--ease-out-quart); }
+.lucide-chevrons-up-down[data-icon-motion="press"] > :nth-child(1) { animation: icon-nudge-up 420ms var(--ease-spring); }
+.lucide-chevrons-up-down[data-icon-motion="press"] > :nth-child(2) { animation: icon-nudge-down 420ms var(--ease-spring); }
+
+/*
+ * Send. Hover bobs the arrow; pressing launches it out of the top of the button
+ * and a fresh one rises from below, so sending reads as the message leaving.
+ * The icon box clips the flight to the button.
+ */
+.lucide-arrow-up[data-icon-motion="hover"] { animation: icon-nudge-up var(--icon-hover) var(--ease-out-quart); }
+.lucide-arrow-down[data-icon-motion="hover"] { animation: icon-nudge-down var(--icon-hover) var(--ease-out-quart); }
+.lucide-arrow-up[data-icon-motion="press"],
+.lucide-arrow-down[data-icon-motion="press"] {
+  /* The box stays still and clips; only the strokes travel. */
+  animation: none;
+  clip-path: inset(-1px);
+}
+.lucide-arrow-up[data-icon-motion="press"] > * { animation: icon-launch-up 560ms var(--ease-out-expo); }
+.lucide-arrow-down[data-icon-motion="press"] > * { animation: icon-launch-down 560ms var(--ease-out-expo); }
+@keyframes icon-launch-up {
+  0% { transform: none; animation-timing-function: var(--ease-in-quart); }
+  8% { transform: translateY(2px) scaleY(0.9); animation-timing-function: var(--ease-in-quart); }
+  28% { transform: translateY(-22px) scaleY(1.15); }
+  29% { transform: translateY(20px); }
+  100% { transform: none; }
+}
+@keyframes icon-launch-down {
+  0% { transform: none; animation-timing-function: var(--ease-in-quart); }
+  8% { transform: translateY(-2px) scaleY(0.9); animation-timing-function: var(--ease-in-quart); }
+  28% { transform: translateY(22px) scaleY(1.15); }
+  29% { transform: translateY(-20px); }
+  100% { transform: none; }
+}
+
+/* Download drops the arrow into the tray; upload lifts it out. */
+.lucide-download[data-icon-motion],
+.lucide-upload[data-icon-motion],
+.lucide-log-out[data-icon-motion],
+.lucide-external-link[data-icon-motion] {
+  animation: none;
+}
+.lucide-download[data-icon-motion="hover"] > :is(:nth-child(1), :nth-child(3)) {
+  animation: icon-nudge-down var(--icon-hover) var(--ease-out-quart);
+}
+.lucide-upload[data-icon-motion="hover"] > :is(:nth-child(1), :nth-child(2)) {
+  animation: icon-nudge-up var(--icon-hover) var(--ease-out-quart);
+}
+.lucide-download[data-icon-motion="press"] > :is(:nth-child(1), :nth-child(3)) {
+  animation: icon-drop-through var(--icon-press) var(--ease-out-expo);
+}
+.lucide-upload[data-icon-motion="press"] > :is(:nth-child(1), :nth-child(2)) {
+  animation: icon-lift-through var(--icon-press) var(--ease-out-expo);
+}
+.lucide-download[data-icon-motion="press"] > :nth-child(2),
+.lucide-upload[data-icon-motion="press"] > :nth-child(3) {
+  transform-origin: 12px 21px;
+  animation: icon-tray-catch var(--icon-press) var(--ease-out-quart);
+}
+@keyframes icon-drop-through {
+  0% { animation-timing-function: var(--ease-in-quart); }
+  35% { transform: translateY(6px); opacity: 0; }
+  36% { transform: translateY(-8px); opacity: 0; }
+}
+@keyframes icon-lift-through {
+  0% { animation-timing-function: var(--ease-in-quart); }
+  35% { transform: translateY(-8px); opacity: 0; }
+  36% { transform: translateY(6px); opacity: 0; }
+}
+@keyframes icon-tray-catch {
+  0%, 30% { transform: none; }
+  42% { transform: scale(1.08, 0.82); }
+  65% { transform: scale(0.98, 1.04); }
+}
+
+/* Leaving: the arrow slides out of the door. */
+.lucide-log-out[data-icon-motion="hover"] > :nth-child(-n + 2) {
+  animation: icon-nudge-right var(--icon-hover) var(--ease-out-quart);
+}
+.lucide-log-out[data-icon-motion="press"] > :nth-child(-n + 2) {
+  animation: icon-exit-right var(--icon-press) var(--ease-out-expo);
+}
+@keyframes icon-exit-right {
+  0% { animation-timing-function: var(--ease-in-quart); }
+  35% { transform: translateX(6px); opacity: 0; }
+  36% { transform: translateX(-5px); opacity: 0; }
+}
+
+/* External link: the arrow points the way, then leaves through the corner. */
+.lucide-external-link[data-icon-motion="hover"] > :nth-child(-n + 2) {
+  animation: icon-nudge-out var(--icon-hover) var(--ease-out-quart);
+}
+.lucide-external-link[data-icon-motion="press"] > :nth-child(-n + 2) {
+  animation: icon-exit-corner var(--icon-press) var(--ease-out-expo);
+}
+@keyframes icon-nudge-out {
+  35% { transform: translate(2px, -2px); }
+  65% { transform: translate(-0.4px, 0.4px); }
+}
+@keyframes icon-exit-corner {
+  0% { animation-timing-function: var(--ease-in-quart); }
+  35% { transform: translate(6px, -6px); opacity: 0; }
+  36% { transform: translate(-5px, 5px); opacity: 0; }
+}
+
+/* ---------- Turning things ---------- */
+
+/* The gear has six teeth, so one sixth of a turn lands on itself. */
+.lucide-settings[data-icon-motion="hover"] {
+  animation: icon-gear-tooth 700ms var(--ease-out-expo);
+}
+.lucide-settings[data-icon-motion="press"] {
+  animation: icon-gear-spin 820ms var(--ease-out-expo);
+}
+@keyframes icon-gear-tooth {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(60deg); }
+}
+@keyframes icon-gear-spin {
+  0% { transform: rotate(0deg) scale(1); }
+  20% { transform: rotate(-12deg) scale(0.9); }
+  100% { transform: rotate(180deg) scale(1); }
+}
+
+/* Refresh is two-fold symmetric; the single-arrow rotations make a full turn. */
+.lucide-refresh-cw[data-icon-motion="hover"] { animation: icon-turn-half 640ms var(--ease-out-expo); }
+.lucide-refresh-cw[data-icon-motion="press"] { animation: icon-turn-full 760ms var(--ease-out-expo); }
+.lucide-rotate-cw[data-icon-motion] { animation: icon-turn-full 700ms var(--ease-out-expo); }
+.lucide-rotate-ccw[data-icon-motion] { animation: icon-turn-full-back 700ms var(--ease-out-expo); }
+@keyframes icon-turn-half { from { transform: rotate(0deg); } to { transform: rotate(180deg); } }
+@keyframes icon-turn-full { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes icon-turn-full-back { from { transform: rotate(0deg); } to { transform: rotate(-360deg); } }
+
+/* Wrench and key twist like the tools they are. */
+.lucide-wrench[data-icon-motion="hover"] { animation: icon-twist var(--icon-hover) var(--ease-out-quart); }
+.lucide-wrench[data-icon-motion="press"] { animation: icon-twist-hard var(--icon-press) var(--ease-out-quart); }
+.lucide-key-round[data-icon-motion] { transform-origin: 65% 35%; }
+.lucide-key-round[data-icon-motion="hover"] { animation: icon-twist var(--icon-hover) var(--ease-out-quart); }
+.lucide-key-round[data-icon-motion="press"] { animation: icon-key-turn var(--icon-press) var(--ease-out-quart); }
+@keyframes icon-twist {
+  30% { transform: rotate(-22deg); }
+  60% { transform: rotate(10deg); }
+  82% { transform: rotate(-3deg); }
+}
+@keyframes icon-twist-hard {
+  25% { transform: rotate(-40deg) scale(0.92); }
+  55% { transform: rotate(16deg); }
+  80% { transform: rotate(-5deg); }
+}
+@keyframes icon-key-turn {
+  20% { transform: translate(-1px, 1px) scale(0.92); }
+  50% { transform: rotate(-90deg); }
+  70% { transform: rotate(-90deg); }
+}
+
+/* Sun: the rays turn one ray-step and the core breathes. Moon: it rocks. */
+.lucide-sun[data-icon-motion] { animation: none; }
+.lucide-sun[data-icon-motion="hover"] > :not(:first-child) { animation: icon-rays 700ms var(--ease-out-expo); }
+.lucide-sun[data-icon-motion="hover"] > :first-child { animation: icon-core 700ms var(--ease-out-quart); }
+.lucide-sun[data-icon-motion="press"] > :not(:first-child) { animation: icon-rays-burst var(--icon-press) var(--ease-out-quart); }
+.lucide-sun[data-icon-motion="press"] > :first-child { animation: icon-core var(--icon-press) var(--ease-spring); }
+@keyframes icon-rays { from { transform: rotate(0deg); } to { transform: rotate(45deg); } }
+@keyframes icon-rays-burst {
+  0% { transform: rotate(0deg) scale(1); }
+  35% { transform: rotate(45deg) scale(1.25); }
+  100% { transform: rotate(90deg) scale(1); }
+}
+@keyframes icon-core { 35% { transform: scale(0.8); } 70% { transform: scale(1.08); } }
+.lucide-moon[data-icon-motion="hover"] { animation: icon-rock 700ms var(--ease-out-quart); }
+.lucide-moon[data-icon-motion="press"] { animation: icon-turn-full-back 760ms var(--ease-out-expo); }
+@keyframes icon-rock {
+  25% { transform: rotate(-18deg); }
+  55% { transform: rotate(10deg); }
+  80% { transform: rotate(-4deg); }
+}
+
+/* Globe: the meridian sweeps across, as if the globe turned. */
+.lucide-globe[data-icon-motion] { animation: none; }
+.lucide-globe[data-icon-motion="hover"] > :nth-child(2) { animation: icon-meridian 760ms var(--ease-in-out-quart); }
+.lucide-globe[data-icon-motion="press"] > :nth-child(2) { animation: icon-meridian 420ms var(--ease-in-out-quart) 2; }
+.lucide-globe[data-icon-motion="press"] > :first-child { animation: icon-core var(--icon-press) var(--ease-spring); }
+@keyframes icon-meridian {
+  50% { transform: scaleX(-1); }
+}
+
+/* ---------- Seeing and thinking ---------- */
+
+/* Search scans side to side; a press zooms in. */
+.lucide-search[data-icon-motion="hover"] { animation: icon-scan var(--icon-hover) var(--ease-in-out-quart); }
+.lucide-search[data-icon-motion="press"] { animation: icon-zoom var(--icon-press) var(--ease-out-quart); }
+@keyframes icon-scan {
+  25% { transform: translate(-1.5px, -0.5px) rotate(-10deg); }
+  60% { transform: translate(1.5px, -0.5px) rotate(8deg); }
+}
+@keyframes icon-zoom {
+  30% { transform: scale(1.28); }
+  60% { transform: scale(0.94); }
+}
+
+/* The eye blinks and glances; a press dilates the pupil. */
+.lucide-eye[data-icon-motion] { animation: none; }
+.lucide-eye[data-icon-motion="hover"] > * { animation: icon-blink var(--icon-hover) var(--ease-in-out-quart); }
+.lucide-eye[data-icon-motion="hover"] > circle { animation: icon-blink var(--icon-hover) var(--ease-in-out-quart), icon-glance var(--icon-hover) var(--ease-in-out-quart); }
+.lucide-eye[data-icon-motion="press"] > circle { transform-box: fill-box; transform-origin: center; animation: icon-dot-pop var(--icon-press) var(--ease-out-quart); }
+@keyframes icon-blink { 30% { scale: 1 1; } 42% { scale: 1 0.1; } 54% { scale: 1 1; } }
+@keyframes icon-glance { 15% { transform: translateX(-2px); } 70% { transform: translateX(2px); } }
+
+/* The brain thinks in two beats; a press squishes it. */
+.lucide-brain[data-icon-motion="hover"] { animation: icon-heartbeat 680ms var(--ease-out-quart); }
+.lucide-brain[data-icon-motion="press"] { animation: icon-squish var(--icon-press) var(--ease-out-quart); }
+@keyframes icon-heartbeat {
+  15% { transform: scale(1.1); }
+  30% { transform: scale(0.98); }
+  45% { transform: scale(1.07); }
+  70% { transform: scale(1); }
+}
+@keyframes icon-squish {
+  20% { transform: scale(1.18, 0.82); }
+  45% { transform: scale(0.9, 1.1); }
+  70% { transform: scale(1.04, 0.97); }
+}
+
+/* Bot: the antenna wiggles and it blinks; a press makes it hop. */
+.lucide-bot[data-icon-motion] { animation: none; }
+.lucide-bot[data-icon-motion] > :nth-child(1) { transform-origin: 12px 8px; animation: icon-antenna var(--icon-hover) var(--ease-out-quart); }
+.lucide-bot[data-icon-motion] > :is(:nth-child(5), :nth-child(6)) { transform-origin: 12px 14px; animation: icon-blink var(--icon-hover) var(--ease-in-out-quart); }
+.lucide-bot[data-icon-motion="press"] { animation: icon-hop var(--icon-press) var(--ease-out-quart); }
+@keyframes icon-antenna { 25% { transform: rotate(-22deg); } 55% { transform: rotate(14deg); } 80% { transform: rotate(-5deg); } }
+@keyframes icon-hop {
+  15% { transform: translateY(0.5px) scale(1.1, 0.88); }
+  40% { transform: translateY(-3px) scale(0.94, 1.08); }
+  65% { transform: translateY(0.4px) scale(1.06, 0.95); }
+}
+
+/* Camera: the lens focuses; a press fires the shutter. */
+.lucide-camera[data-icon-motion] { animation: none; }
+.lucide-camera[data-icon-motion="hover"] > circle { transform-box: fill-box; transform-origin: center; animation: icon-focus var(--icon-hover) var(--ease-out-quart); }
+.lucide-camera[data-icon-motion="press"] { animation: icon-shutter 420ms var(--ease-out-quart); }
+.lucide-camera[data-icon-motion="press"] > circle { transform-box: fill-box; transform-origin: center; animation: icon-focus 420ms var(--ease-spring); }
+@keyframes icon-focus { 35% { transform: scale(0.55); } 70% { transform: scale(1.12); } }
+@keyframes icon-shutter { 20% { transform: scale(0.88); opacity: 0.55; } }
+
+/* Image: the sun rises over the hill. */
+.lucide-image[data-icon-motion] { animation: none; }
+.lucide-image[data-icon-motion] > circle { transform-box: fill-box; transform-origin: center; }
+.lucide-image[data-icon-motion="hover"] > circle { animation: icon-sunrise var(--icon-hover) var(--ease-out-quart); }
+.lucide-image[data-icon-motion="press"] > circle { animation: icon-dot-pop var(--icon-press) var(--ease-out-quart); }
+.lucide-image[data-icon-motion="press"] > path { animation: icon-nudge-right 480ms var(--ease-out-quart); }
+@keyframes icon-sunrise { 40% { transform: translate(0.5px, -1.8px) scale(1.25); } }
+
+/* ---------- People and conversation ---------- */
+
+.lucide-user-round[data-icon-motion] { animation: none; }
+.lucide-user-round[data-icon-motion="hover"] > circle { animation: icon-nod var(--icon-hover) var(--ease-out-quart); }
+.lucide-user-round[data-icon-motion="press"] > circle { animation: icon-nod var(--icon-press) var(--ease-spring); }
+.lucide-user-round[data-icon-motion="press"] > path { transform-origin: 12px 21px; animation: icon-tray-catch var(--icon-press) var(--ease-out-quart); }
+@keyframes icon-nod { 30% { transform: translateY(-2px); } 60% { transform: translateY(0.5px); } }
+
+.lucide-message-square[data-icon-motion] { transform-origin: 15% 90%; }
+.lucide-message-square[data-icon-motion="hover"] { animation: icon-speak var(--icon-hover) var(--ease-out-quart); }
+.lucide-message-square[data-icon-motion="press"] { animation: icon-pop var(--icon-press) var(--ease-out-quart); }
+@keyframes icon-speak {
+  30% { transform: translateY(-1px) rotate(-8deg) scale(1.06); }
+  60% { transform: rotate(3deg); }
+}
+
+/* Thumbs give a quick thumbs-up (or down) and spring back. */
+.lucide-thumbs-up[data-icon-motion] { transform-origin: 20% 85%; }
+.lucide-thumbs-down[data-icon-motion] { transform-origin: 80% 15%; }
+.lucide-thumbs-up[data-icon-motion="hover"] { animation: icon-thumb var(--icon-hover) var(--ease-out-quart); }
+.lucide-thumbs-down[data-icon-motion="hover"] { animation: icon-thumb var(--icon-hover) var(--ease-out-quart); }
+.lucide-thumbs-up[data-icon-motion="press"] { animation: icon-thumb-press var(--icon-press) var(--ease-out-quart); }
+.lucide-thumbs-down[data-icon-motion="press"] { animation: icon-thumb-press var(--icon-press) var(--ease-out-quart); }
+@keyframes icon-thumb { 35% { transform: rotate(-16deg); } 70% { transform: rotate(4deg); } }
+@keyframes icon-thumb-press {
+  20% { transform: rotate(-24deg) scale(1.25); }
+  50% { transform: rotate(8deg) scale(0.95); }
+  75% { transform: rotate(-3deg); }
+}
+
+/* Share: the nodes light up along the graph; a press sends them all at once. */
+.lucide-share-2[data-icon-motion] { animation: none; }
+.lucide-share-2[data-icon-motion] > circle { transform-box: fill-box; transform-origin: center; }
+.lucide-share-2[data-icon-motion="hover"] > circle { animation: icon-node-pop 420ms var(--ease-out-quart) backwards; }
+.lucide-share-2[data-icon-motion="hover"] > :nth-child(2) { animation-delay: 0ms; }
+.lucide-share-2[data-icon-motion="hover"] > :nth-child(1) { animation-delay: 110ms; }
+.lucide-share-2[data-icon-motion="hover"] > :nth-child(3) { animation-delay: 110ms; }
+.lucide-share-2[data-icon-motion="press"] > circle { animation: icon-node-pop var(--icon-press) var(--ease-spring); }
+@keyframes icon-node-pop { 40% { transform: scale(1.35); } 70% { transform: scale(0.94); } }
+
+/* Ellipsis: the dots do a wave; a press gathers them. */
+.lucide-ellipsis[data-icon-motion] { animation: none; }
+.lucide-ellipsis[data-icon-motion="hover"] > circle { animation: icon-wave 420ms var(--ease-out-quart) backwards; }
+.lucide-ellipsis[data-icon-motion="hover"] > :nth-child(1) { animation-delay: 70ms; }
+.lucide-ellipsis[data-icon-motion="hover"] > :nth-child(2) { animation-delay: 140ms; }
+.lucide-ellipsis[data-icon-motion="press"] > :nth-child(2) { animation: icon-gather-left 460ms var(--ease-spring); }
+.lucide-ellipsis[data-icon-motion="press"] > :nth-child(3) { animation: icon-gather-right 460ms var(--ease-spring); }
+@keyframes icon-wave { 40% { transform: translateY(-3px); } }
+@keyframes icon-gather-left { 30% { transform: translateX(-6px); } }
+@keyframes icon-gather-right { 30% { transform: translateX(6px); } }
+
+/* ---------- Places and things ---------- */
+
+/* Folders tip open from their bottom-left corner. */
+.lucide-folder[data-icon-motion] { transform-origin: 10% 85%; }
+.lucide-folder[data-icon-motion="hover"] { animation: icon-tip var(--icon-hover) var(--ease-out-quart); }
+.lucide-folder[data-icon-motion="press"] { animation: icon-squish var(--icon-press) var(--ease-out-quart); }
+@keyframes icon-tip { 35% { transform: rotate(-9deg) translateY(-0.5px); } 70% { transform: rotate(2deg); } }
+
+/* Library: the leaning book leans further, and the row hops in turn. */
+.lucide-library[data-icon-motion] { animation: none; }
+.lucide-library[data-icon-motion] > :nth-child(1) { transform-origin: 20px 20px; }
+.lucide-library[data-icon-motion="hover"] > :nth-child(1) { animation: icon-lean var(--icon-hover) var(--ease-out-quart); }
+.lucide-library[data-icon-motion="press"] > * { animation: icon-nudge-up 420ms var(--ease-out-quart) backwards; }
+.lucide-library[data-icon-motion="press"] > :nth-child(4) { animation-delay: 0ms; }
+.lucide-library[data-icon-motion="press"] > :nth-child(3) { animation-delay: 60ms; }
+.lucide-library[data-icon-motion="press"] > :nth-child(2) { animation-delay: 120ms; }
+.lucide-library[data-icon-motion="press"] > :nth-child(1) { animation-delay: 180ms; }
+@keyframes icon-lean { 35% { transform: rotate(-14deg); } 70% { transform: rotate(3deg); } }
+
+/* Calendar clock: the hand sweeps a full hour. */
+.lucide-calendar-clock[data-icon-motion] { animation: none; }
+.lucide-calendar-clock[data-icon-motion] > :nth-child(1) { transform-origin: 16px 16px; }
+.lucide-calendar-clock[data-icon-motion="hover"] > :nth-child(1) { animation: icon-turn-full 760ms var(--ease-in-out-quart); }
+.lucide-calendar-clock[data-icon-motion="press"] > :nth-child(1) { animation: icon-turn-full 380ms linear 2; }
+.lucide-calendar-clock[data-icon-motion="press"] > :not(:nth-child(1)) { animation: icon-shake 520ms var(--ease-out-quart); }
+
+/* Puzzle: the piece wiggles into place. Blocks: the loose block floats off and snaps back. */
+.lucide-puzzle[data-icon-motion="hover"] { animation: icon-rock var(--icon-hover) var(--ease-out-quart); }
+.lucide-puzzle[data-icon-motion="press"] { animation: icon-snap var(--icon-press) var(--ease-out-quart); }
+@keyframes icon-snap {
+  25% { transform: translate(1.5px, -1.5px) rotate(14deg) scale(0.9); }
+  55% { transform: translate(-0.3px, 0.3px) rotate(-3deg) scale(1.04); }
+}
+.lucide-blocks[data-icon-motion] { animation: none; }
+.lucide-blocks[data-icon-motion="hover"] > rect { animation: icon-float-off var(--icon-hover) var(--ease-out-quart); }
+.lucide-blocks[data-icon-motion="press"] > rect { animation: icon-block-drop var(--icon-press) var(--ease-out-quart); }
+.lucide-blocks[data-icon-motion="press"] > path { transform-origin: 12px 22px; animation: icon-can-thud var(--icon-press) var(--ease-out-quart); }
+@keyframes icon-float-off { 40% { transform: translate(1.5px, -1.5px) rotate(8deg); } }
+@keyframes icon-block-drop {
+  0% { transform: translate(3px, -4px) rotate(12deg); opacity: 0.4; animation-timing-function: var(--ease-in-quart); }
+  45% { transform: none; opacity: 1; }
+  60% { transform: translate(0, 0.5px) scale(1.06, 0.9); }
+}
+
+/* Layers fan out; a press stacks them down. */
+.lucide-layers[data-icon-motion] { animation: none; }
+.lucide-layers[data-icon-motion="hover"] > :nth-child(1) { animation: icon-nudge-up var(--icon-hover) var(--ease-out-quart); }
+.lucide-layers[data-icon-motion="hover"] > :nth-child(3) { animation: icon-nudge-down var(--icon-hover) var(--ease-out-quart); }
+.lucide-layers[data-icon-motion="press"] > :nth-child(1) { animation: icon-stack 520ms var(--ease-out-quart); }
+.lucide-layers[data-icon-motion="press"] > :nth-child(2) { animation: icon-stack-half 520ms var(--ease-out-quart); }
+@keyframes icon-stack { 30% { transform: translateY(4px); } 60% { transform: translateY(-1px); } }
+@keyframes icon-stack-half { 30% { transform: translateY(2px); } 60% { transform: translateY(-0.5px); } }
+
+/* Star: one fifth of a turn lands on itself. */
+.lucide-star[data-icon-motion="hover"] { animation: icon-star 620ms var(--ease-out-expo); }
+.lucide-star[data-icon-motion="press"] { animation: icon-star-press 700ms var(--ease-out-quart); }
+@keyframes icon-star {
+  0% { transform: rotate(0deg) scale(1); }
+  40% { transform: rotate(50deg) scale(1.15); }
+  100% { transform: rotate(72deg) scale(1); }
+}
+@keyframes icon-star-press {
+  0% { transform: rotate(0deg) scale(1); }
+  30% { transform: rotate(60deg) scale(1.4); }
+  100% { transform: rotate(144deg) scale(1); }
+}
+
+/* Shield braces for impact. */
+.lucide-shield[data-icon-motion="hover"] { animation: icon-heartbeat 620ms var(--ease-out-quart); }
+.lucide-shield[data-icon-motion="press"] { animation: icon-squish var(--icon-press) var(--ease-out-quart); }
+
+/* ---------- Tools and controls ---------- */
+
+/* Sliders: each knob slides along its track. */
+.lucide-sliders-horizontal[data-icon-motion] { animation: none; }
+.lucide-sliders-horizontal[data-icon-motion="hover"] > :nth-child(3) { animation: icon-slide-left var(--icon-hover) var(--ease-in-out-quart); }
+.lucide-sliders-horizontal[data-icon-motion="hover"] > :nth-child(8) { animation: icon-slide-right var(--icon-hover) var(--ease-in-out-quart) 60ms backwards; }
+.lucide-sliders-horizontal[data-icon-motion="hover"] > :nth-child(4) { animation: icon-slide-left var(--icon-hover) var(--ease-in-out-quart) 120ms backwards; }
+.lucide-sliders-horizontal[data-icon-motion="press"] > :is(:nth-child(3), :nth-child(4)) { animation: icon-slide-right var(--icon-press) var(--ease-spring); }
+.lucide-sliders-horizontal[data-icon-motion="press"] > :nth-child(8) { animation: icon-slide-left var(--icon-press) var(--ease-spring); }
+@keyframes icon-slide-left { 45% { transform: translateX(-3.5px); } }
+@keyframes icon-slide-right { 45% { transform: translateX(3.5px); } }
+
+/* Palette: the paint dots pop one after another. Paintbrush: one stroke. */
+.lucide-palette[data-icon-motion] > circle { transform-box: fill-box; transform-origin: center; }
+.lucide-palette[data-icon-motion="hover"] { animation: none; }
+.lucide-palette[data-icon-motion="hover"] > circle { animation: icon-dot-pop 380ms var(--ease-out-quart) backwards; }
+.lucide-palette[data-icon-motion] > :nth-child(3) { animation-delay: 0ms; }
+.lucide-palette[data-icon-motion] > :nth-child(4) { animation-delay: 70ms; }
+.lucide-palette[data-icon-motion] > :nth-child(1) { animation-delay: 140ms; }
+.lucide-palette[data-icon-motion] > :nth-child(2) { animation-delay: 210ms; }
+.lucide-palette[data-icon-motion="press"] { animation: icon-rock var(--icon-press) var(--ease-out-quart); }
+.lucide-palette[data-icon-motion="press"] > circle { animation: icon-dot-pop 380ms var(--ease-out-quart) backwards; }
+.lucide-paintbrush[data-icon-motion] { transform-origin: 85% 15%; }
+.lucide-paintbrush[data-icon-motion="hover"] { animation: icon-stroke var(--icon-hover) var(--ease-in-out-quart); }
+.lucide-paintbrush[data-icon-motion="press"] { animation: icon-stroke 420ms var(--ease-in-out-quart) 2 alternate; }
+@keyframes icon-stroke { 40% { transform: rotate(16deg); } 75% { transform: rotate(-5deg); } }
+
+/* Code: the brackets breathe apart. */
+.lucide-code[data-icon-motion] { animation: none; }
+.lucide-code[data-icon-motion="hover"] > :nth-child(1) { animation: icon-nudge-right var(--icon-hover) var(--ease-out-quart); }
+.lucide-code[data-icon-motion="hover"] > :nth-child(2) { animation: icon-nudge-left var(--icon-hover) var(--ease-out-quart); }
+.lucide-code[data-icon-motion="press"] > :nth-child(1) { animation: icon-nudge-left 420ms var(--ease-spring); }
+.lucide-code[data-icon-motion="press"] > :nth-child(2) { animation: icon-nudge-right 420ms var(--ease-spring); }
+
+/* Terminal: the prompt steps forward and the cursor blinks. */
+.lucide-square-terminal[data-icon-motion] { animation: none; }
+.lucide-square-terminal[data-icon-motion] > :nth-child(1) { animation: icon-nudge-right var(--icon-hover) var(--ease-out-quart); }
+.lucide-square-terminal[data-icon-motion] > :nth-child(2) { animation: icon-caret var(--icon-hover) steps(1, end); }
+@keyframes icon-caret { 0%, 50% { opacity: 0; } 25%, 75% { opacity: 1; } }
+
+/* Link: the two halves pull apart, a press clicks them together. */
+.lucide-link-2[data-icon-motion] { animation: none; }
+.lucide-link-2[data-icon-motion="hover"] > :nth-child(1) { animation: icon-nudge-left var(--icon-hover) var(--ease-out-quart); }
+.lucide-link-2[data-icon-motion="hover"] > :nth-child(2) { animation: icon-nudge-right var(--icon-hover) var(--ease-out-quart); }
+.lucide-link-2[data-icon-motion="hover"] > :nth-child(3) { animation: icon-stretch var(--icon-hover) var(--ease-out-quart); }
+.lucide-link-2[data-icon-motion="press"] > :nth-child(1) { animation: icon-nudge-right 420ms var(--ease-spring); }
+.lucide-link-2[data-icon-motion="press"] > :nth-child(2) { animation: icon-nudge-left 420ms var(--ease-spring); }
+@keyframes icon-stretch { 35% { transform: scaleX(1.4); } }
+
+/* Panel: the divider slides as if the panel were folding. */
+.lucide-panel-left[data-icon-motion] { animation: none; }
+.lucide-panel-left[data-icon-motion="hover"] > path { animation: icon-nudge-left var(--icon-hover) var(--ease-out-quart); }
+.lucide-panel-left[data-icon-motion="press"] > path { animation: icon-fold 520ms var(--ease-out-expo); }
+@keyframes icon-fold { 30% { transform: translateX(-5px); opacity: 0; } 31% { transform: translateX(3px); opacity: 0; } }
+
+/* Shrink: the four corners pull in. */
+.lucide-shrink[data-icon-motion] { animation: none; }
+.lucide-shrink[data-icon-motion] > :nth-child(1) { --dx: -1.5px; --dy: -1.5px; }
+.lucide-shrink[data-icon-motion] > :nth-child(2) { --dx: 1.5px; --dy: -1.5px; }
+.lucide-shrink[data-icon-motion] > :nth-child(3) { --dx: -1.5px; --dy: 1.5px; }
+.lucide-shrink[data-icon-motion] > :nth-child(4) { --dx: 1.5px; --dy: 1.5px; }
+.lucide-shrink[data-icon-motion="hover"] > * { animation: icon-converge var(--icon-hover) var(--ease-out-quart); }
+.lucide-shrink[data-icon-motion="press"] > * { animation: icon-converge 420ms var(--ease-spring); }
+@keyframes icon-converge { 40% { transform: translate(var(--dx), var(--dy)); } }
+
+/* Files: the text lines write themselves in. */
+.lucide-file-text[data-icon-motion],
+.lucide-file-spreadsheet[data-icon-motion] { animation: none; }
+.lucide-file-text[data-icon-motion] > :nth-child(n + 2),
+.lucide-file-spreadsheet[data-icon-motion] > :nth-child(n + 2) {
+  --len: 9;
+  stroke-dasharray: var(--len);
+  animation: icon-draw 300ms var(--ease-out-quart) backwards;
+}
+:is(.lucide-file-text, .lucide-file-spreadsheet)[data-icon-motion] > :nth-child(3) { animation-delay: 90ms; }
+:is(.lucide-file-text, .lucide-file-spreadsheet)[data-icon-motion] > :nth-child(4) { animation-delay: 180ms; }
+:is(.lucide-file-text, .lucide-file-spreadsheet)[data-icon-motion] > :nth-child(5) { animation-delay: 270ms; }
+:is(.lucide-file-text, .lucide-file-spreadsheet)[data-icon-motion="press"] > :first-child { animation: icon-nod 420ms var(--ease-out-quart); }
+
+/* Wrap text: the return arrow swings back to the start of the line. */
+.lucide-wrap-text[data-icon-motion] { animation: none; }
+.lucide-wrap-text[data-icon-motion] > :nth-child(1) { animation: icon-nudge-left var(--icon-hover) var(--ease-out-quart); }
+.lucide-wrap-text[data-icon-motion] > :nth-child(4) { transform-origin: 3px 5px; animation: icon-stretch-back var(--icon-hover) var(--ease-out-quart); }
+@keyframes icon-stretch-back { 35% { transform: scaleX(0.7); } }
+
+/* Mic: it wobbles as if picking up a voice. */
+.lucide-mic[data-icon-motion="hover"] { animation: icon-rock var(--icon-hover) var(--ease-out-quart); }
+
+/* Media controls. */
+.lucide-play[data-icon-motion="hover"] { animation: icon-nudge-right var(--icon-hover) var(--ease-out-quart); }
+.lucide-pause[data-icon-motion] { animation: none; }
+.lucide-pause[data-icon-motion] > rect { transform-origin: 12px 12px; }
+.lucide-pause[data-icon-motion] > :nth-child(1) { animation: icon-bar var(--icon-hover) var(--ease-out-quart); }
+.lucide-pause[data-icon-motion] > :nth-child(2) { animation: icon-bar var(--icon-hover) var(--ease-out-quart) 90ms backwards; }
+@keyframes icon-bar { 35% { transform: scaleY(0.65); } }
+
+/* Stop: the square turns a quarter, which lands on itself. */
+.lucide-square[data-icon-motion="hover"] { animation: icon-turn-quarter 520ms var(--ease-out-expo); }
+
+/* Pointer: it taps. */
+.lucide-mouse-pointer-2[data-icon-motion] { transform-origin: 20% 20%; }
+.lucide-mouse-pointer-2[data-icon-motion] { animation: icon-tap var(--icon-hover) var(--ease-out-quart); }
+@keyframes icon-tap { 30% { transform: translate(-1px, -1px); } 50% { transform: scale(0.82); } }
+
+/* Charts: the bars grow from the baseline in sequence. */
+.lucide-chart-column[data-icon-motion] { animation: none; }
+.lucide-chart-column[data-icon-motion] > :nth-child(n + 2) { transform-origin: 12px 17px; animation: icon-grow 420ms var(--ease-out-expo) backwards; }
+.lucide-chart-column[data-icon-motion] > :nth-child(4) { animation-delay: 0ms; }
+.lucide-chart-column[data-icon-motion] > :nth-child(3) { animation-delay: 80ms; }
+.lucide-chart-column[data-icon-motion] > :nth-child(2) { animation-delay: 160ms; }
+@keyframes icon-grow { from { transform: scaleY(0); } }
+
+/* Warnings shake. */
+.lucide-triangle-alert[data-icon-motion],
+.lucide-circle-alert[data-icon-motion],
+.lucide-image-off[data-icon-motion] {
+  animation: icon-shake 520ms var(--ease-out-quart);
+}
+
+/* Book: it closes a little and opens again. Window: it pops forward. */
+.lucide-book-open[data-icon-motion="hover"] { animation: icon-book var(--icon-hover) var(--ease-in-out-quart); }
+@keyframes icon-book { 45% { transform: scaleX(0.72); } }

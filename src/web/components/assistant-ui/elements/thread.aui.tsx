@@ -691,7 +691,8 @@ const ComposerAction: FC = () => {
                 type="button"
                 variant="default"
                 size="icon"
-                className="aui-composer-send size-7 rounded-[0.6rem]"
+                // Empty composer: the button sits back, then springs forward once there is something to send.
+                className="aui-composer-send size-7 pointer-coarse:size-9 rounded-[0.6rem] pointer-coarse:rounded-xl disabled:scale-[0.86] disabled:saturate-[0.4]"
                 aria-label="Send message"
               >
                 <ArrowUpIcon className="aui-composer-send-icon size-4" />
@@ -712,7 +713,7 @@ const ComposerAction: FC = () => {
                 type="button"
                 variant="default"
                 size="icon"
-                className="aui-composer-cancel size-7 rounded-[0.6rem]"
+                className="aui-composer-cancel size-7 pointer-coarse:size-9 rounded-[0.6rem] pointer-coarse:rounded-xl"
                 aria-label={isSending ? "Cancel sending" : "Stop generating"}
               >
                 <SquareIcon className="aui-composer-cancel-icon size-3.5 fill-current" />
