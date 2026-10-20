@@ -24,16 +24,19 @@ export const ANIMATION_DURATION = 200;
 
 const ReasoningPreviewContext = createContext(false);
 
-const reasoningVariants = cva("aui-reasoning-root mb-4 w-full", {
+// Ghost is the chat default: a row that reads like a tool call, with no box
+// around it. Boxed variants keep their bottom margin; ghost sits flush with
+// the tool rows around it.
+const reasoningVariants = cva("aui-reasoning-root w-full", {
   variants: {
     variant: {
-      outline: "rounded-lg border px-3 py-2",
+      outline: "mb-4 rounded-lg border px-3 py-2",
       ghost: "",
-      muted: "bg-muted/50 rounded-lg px-3 py-2",
+      muted: "mb-4 bg-muted/50 rounded-lg px-3 py-2",
     },
   },
   defaultVariants: {
-    variant: "outline",
+    variant: "ghost",
   },
 });
 
@@ -76,6 +79,9 @@ const ReasoningRoot = forwardRef<
   },
   ref,
 ) {
+  // Resolved here, not only in cva: the data attribute drives the ghost-only
+  // child styles, and it must be set when the caller passes no variant.
+  const resolvedVariant = variant ?? "ghost";
   const [initialOpen] = useState(defaultOpen);
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
 
@@ -111,12 +117,12 @@ const ReasoningRoot = forwardRef<
     <Collapsible
       ref={ref}
       data-slot="reasoning-root"
-      data-variant={variant}
+      data-variant={resolvedVariant}
       open={isOpen}
       onOpenChange={handleOpenChange}
       className={cn(
         "group/reasoning-root",
-        reasoningVariants({ variant, className }),
+        reasoningVariants({ variant: resolvedVariant, className }),
       )}
       style={
         {
@@ -185,7 +191,7 @@ function ReasoningTrigger({
     <CollapsibleTrigger
       data-slot="reasoning-trigger"
       className={cn(
-        "aui-reasoning-trigger group/trigger text-muted-foreground hover:text-foreground flex max-w-[75%] origin-left items-center gap-2 py-1.5 text-sm transition-[color,scale] duration-(--motion-fast) ease-out-quart active:scale-[0.98]",
+        "aui-reasoning-trigger group/trigger text-muted-foreground hover:text-foreground flex w-fit max-w-full origin-left items-center gap-2 py-1.5 text-sm transition-[color,scale] duration-(--motion-fast) ease-out-quart active:scale-[0.98]",
         className,
       )}
       {...props}
@@ -229,6 +235,8 @@ function ReasoningContent({
       data-slot="reasoning-content"
       className={cn(
         "aui-reasoning-content text-muted-foreground group/collapsible-content relative text-sm outline-none",
+        // Ghost: a left rule under the brain icon marks the expanded text as belonging to its row.
+        "group-data-[variant=ghost]/reasoning-root:ms-2 group-data-[variant=ghost]/reasoning-root:border-s group-data-[variant=ghost]/reasoning-root:border-border",
         collapsePanel,
         "data-closed:pointer-events-none",
         className,
@@ -300,7 +308,7 @@ function ReasoningText({
       ref={scrollRef}
       data-slot="reasoning-text"
       className={cn(
-        "aui-reasoning-text relative z-0 max-h-64 overflow-y-auto ps-6 pt-2 pb-2 leading-relaxed text-pretty",
+        "aui-reasoning-text relative z-0 max-h-64 overflow-y-auto ps-6 pt-2 pb-2 leading-relaxed text-pretty group-data-[variant=ghost]/reasoning-root:ps-3",
         "transform-gpu transition-[transform,opacity] ease-[cubic-bezier(0.32,0.72,0,1)]",
         "motion-reduce:animate-none",
         "group-data-open/collapsible-content:animate-in",
