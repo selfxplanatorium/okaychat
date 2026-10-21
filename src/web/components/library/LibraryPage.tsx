@@ -176,7 +176,7 @@ function ArtifactPreview({ item }: { item: LibraryItem }) {
 function ItemPreviewBody({ item }: { item: LibraryItem }) {
   if (item.kind === "image" && item.previewUrl) {
     return (
-      <div className="grid h-full place-items-center bg-muted/30 p-4">
+      <div className="flex h-full items-center justify-center bg-muted/30 p-2 sm:p-4">
         <img src={item.previewUrl} alt={item.name} className="max-h-full max-w-full rounded-lg object-contain shadow-[var(--depth-highlight),var(--shadow-raised)]" />
       </div>
     );
@@ -217,21 +217,24 @@ function TextFilePreview({ url }: { url: string }) {
 function ItemPreviewDialog({ item, onClose, onDeleted }: { item: LibraryItem | null; onClose: () => void; onDeleted: () => void }) {
   return (
     <Dialog open={!!item} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="h-[85dvh] grid-rows-[auto_minmax(0,1fr)] gap-0 p-0 sm:max-w-3xl">
+      <DialogContent className="h-[85dvh] grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] gap-0 p-0 sm:max-w-3xl">
         {item && (
           <>
-            <div className="flex shrink-0 items-center gap-3 border-b px-4 py-3 pr-12">
-              <div className="min-w-0 flex-1">
+            {/* Phones stack the actions under the title so neither squeezes the other. */}
+            <div className="flex shrink-0 flex-col gap-2 border-b px-4 py-3 sm:flex-row sm:items-center sm:gap-3 sm:pr-12">
+              <div className="min-w-0 pr-8 sm:flex-1 sm:pr-0">
                 <DialogTitle className="truncate text-sm font-medium">{item.name}</DialogTitle>
-                <p className="text-muted-foreground text-xs">
+                <p className="text-muted-foreground truncate text-xs">
                   {KIND_LABELS[item.kind]} · {formatSize(item.size)} · {formatDate(item.createdAt)}
                   {item.threadTitle ? ` · ${item.threadTitle}` : ""}
                 </p>
               </div>
-              <ItemActions item={item} onDeleted={() => {
-                onDeleted();
-                onClose();
-              }} />
+              <div className="flex flex-wrap items-center gap-2">
+                <ItemActions item={item} onDeleted={() => {
+                  onDeleted();
+                  onClose();
+                }} />
+              </div>
             </div>
             <div className="min-h-0 flex-1 overflow-hidden">
               <ItemPreviewBody item={item} />
