@@ -120,7 +120,9 @@ export function Shell({ userId }: { userId: string }) {
 
   return (
     <RuntimeProvider>
-      <div className="animate-fade-in depth-canvas safe-top safe-x flex h-full">
+      {/* No fill mode: a held opacity animation makes this a backdrop root, which leaves the sticky
+          composer's blur misplaced while the thread scrolls on mobile Chrome. */}
+      <div className="animate-[fade-in_var(--motion-base)_var(--ease-out-quart)] depth-canvas safe-top safe-x flex h-full">
         <ThreadSwitchWatcher onSwitch={closeOnMobile} />
         {/* Settings has its own navigation rail. sidebarOpen is kept here, so the sidebar returns in the same state. */}
         {!inSettings && <Sidebar open={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} />}
