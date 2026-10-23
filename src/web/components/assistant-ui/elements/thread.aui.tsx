@@ -42,6 +42,7 @@ import {
   type ImageMessagePartComponent,
   type TextMessagePartComponent,
   type ToolCallMessagePartComponent,
+  useAui,
   useAuiState,
 } from "@assistant-ui/react";
 import {
@@ -53,7 +54,7 @@ import {
   DownloadIcon,
   MicIcon,
   MoreHorizontalIcon,
-  PencilIcon,
+  SquarePenIcon,
   PhoneIcon,
   RefreshCwIcon,
   SquareIcon,
@@ -67,6 +68,7 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ComponentType,
@@ -133,6 +135,7 @@ const messageGroupBy = groupPartByType({
 });
 
 type ThreadGroupKey =
+  | "group-work"
   | "group-chainOfThought"
   | "group-reasoning"
   | "group-tool"
@@ -155,6 +158,73 @@ const taskAwareGroupBy = (
     ? TASK_GROUP_PATH
     : path;
 };
+
+type GroupablePart = Parameters<typeof messageGroupBy>[0];
+type GroupBy = typeof taskAwareGroupBy;
+
+/**
+ * Which result a card shows. Within one reply only the last card per key stays
+ * visible; earlier calls with the same key were drafts. Tools without a key
+ * (searches, reads, screenshots, sub-agents) are work, not results.
+ */
+const resultKey = (part: GroupablePart): string | undefined => {
+  if (part.type !== "tool-call" || part.status.type === "incomplete") return undefined;
+  const args = (part.args ?? {}) as { id?: unknown; title?: unknown };
+  switch (part.toolName) {
+    case "create_artifact":
+    case "update_artifact":
+    case "create_document":
+    case "edit_document":
+    case "import_document": {
+      if (typeof part.result !== "object" || part.result === null) return undefined;
+      const id = (part.result as { id?: unknown }).id ?? args.id;
+      return `artifact:${String(id)}`;
+    }
+    case "show_widget":
+    case "edit_widget":
+      return `widget:${String(args.title ?? "")}`;
+    case "render_spec":
+      return "spec";
+    case "run_code": {
+      // Only a run that wrote files is a result; the server keeps the last one's files.
+      const files = (part.result as { files?: unknown[] } | undefined)?.files;
+      return files?.length ? "run_code" : undefined;
+    }
+    case "generate_image":
+      return `image:${part.toolCallId}`;
+    default:
+      return undefined;
+  }
+};
+
+/**
+ * Folds a finished reply's work into one collapsed group: reasoning, tool
+ * calls, text written between calls, and superseded drafts. What stays is the
+ * outcome: the last card per result and the text after the last tool call.
+ */
+function foldWork(base: GroupBy, parts: readonly GroupablePart[]): GroupBy {
+  const lastTool = parts.findLastIndex((p) => p.type === "tool-call");
+  if (lastTool < 0) return base;
+  const keep = new Set<GroupablePart>();
+  const seen = new Set<string>();
+  for (const part of parts.slice(lastTool + 1)) keep.add(part);
+  // A reply that ends on a tool call still keeps its last text.
+  if (!parts.some((p, i) => i > lastTool && p.type === "text")) {
+    const lastText = parts.findLast((p) => p.type === "text");
+    if (lastText) keep.add(lastText);
+  }
+  for (let i = lastTool; i >= 0; i--) {
+    const key = resultKey(parts[i]!);
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      keep.add(parts[i]!);
+    }
+  }
+  return (part, context) => {
+    const path = base(part, context);
+    return keep.has(part) ? path : ["group-work", ...path];
+  };
+}
 
 export type ThreadProps = {
   components?: ThreadComponents | undefined;
@@ -787,6 +857,14 @@ const StreamingIndicator: FC<{ waiting: boolean }> = ({ waiting }) => {
   );
 };
 
+const workLabel = (
+  parts: readonly GroupablePart[],
+  indices: readonly number[],
+) => {
+  const steps = indices.filter((i) => parts[i]?.type === "tool-call").length;
+  return steps ? `Worked in ${steps} ${steps === 1 ? "step" : "steps"}` : "Show work";
+};
+
 const AssistantMessage: FC = () => {
   const {
     ToolFallback: ToolFallbackComponent = ToolFallback,
@@ -795,7 +873,14 @@ const AssistantMessage: FC = () => {
     TaskGroup: TaskGroupComponent,
     MessageMeta,
   } = useContext(ThreadComponentsContext);
-  const groupBy = TaskGroupComponent ? taskAwareGroupBy : messageGroupBy;
+  const baseGroupBy = TaskGroupComponent ? taskAwareGroupBy : messageGroupBy;
+  const parts = useAuiState((s) => s.message.parts);
+  // Live replies show every step; a finished one shows only its outcome.
+  const finished = useAuiState((s) => s.message.status?.type === "complete");
+  const groupBy = useMemo(
+    () => (finished ? foldWork(baseGroupBy, parts) : baseGroupBy),
+    [finished, baseGroupBy, parts],
+  );
   const entering = useContext(MessageEnteringContext);
   const waitingForFirstToken = useAuiState((s) => {
     if (s.message.status?.type !== "running") return false;
@@ -823,6 +908,16 @@ const AssistantMessage: FC = () => {
         <MessagePrimitive.GroupedParts groupBy={groupBy} indicator="never">
           {({ part, children }) => {
             switch (part.type) {
+              case "group-work":
+                return (
+                  <ToolGroupRoot variant="ghost">
+                    <ToolGroupTrigger
+                      count={part.indices.length}
+                      label={workLabel(parts, part.indices)}
+                    />
+                    <ToolGroupContent>{children}</ToolGroupContent>
+                  </ToolGroupRoot>
+                );
               case "group-chainOfThought":
                 return <div data-slot="aui_chain-of-thought">{children}</div>;
               case "group-task":
