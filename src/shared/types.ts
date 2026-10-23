@@ -93,6 +93,8 @@ export interface UserSettings {
   codeExecution: boolean;
   /** A model ref, "chat" to follow the chat model, or null/absent to follow the utility model. */
   subagentModel?: string | null;
+  /** Image generation services switched off and image models chosen per service. */
+  imageServices?: ImageServiceSettings;
 }
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {

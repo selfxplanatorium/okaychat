@@ -7,7 +7,7 @@ import { api } from "@/lib/api";
 type CodexStatus = { version: string | null; connected: boolean; login: { url?: string; code?: string; error?: string } | null };
 
 /** Connects the user's ChatGPT account through `codex login --device-auth` on the server. */
-export function CodexConnect() {
+export function CodexConnect({ onChange }: { onChange?: () => void }) {
   const [status, setStatus] = useState<CodexStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -17,6 +17,10 @@ export function CodexConnect() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+  const connected = status?.connected;
+  useEffect(() => {
+    if (connected !== undefined) onChange?.();
+  }, [connected, onChange]);
 
   // Poll while a device login is waiting for the user to approve it.
   const waiting = !!status?.login?.code && !status.login.error && !status.connected;

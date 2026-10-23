@@ -5,7 +5,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { useData } from "@/state/data";
-import { CodexConnect } from "./CodexConnect";
+import { ImageServicesSettings } from "./ImageServicesSettings";
 import { SettingsPage, SettingsRow, SettingsSection, SettingsSlider } from "./SettingsUI";
 
 const SIDEBAR_LABELS = { newChat: "New chat", scheduled: "Scheduled", library: "Library", plugins: "Plugins", projects: "Projects" };
@@ -150,12 +150,9 @@ export function GeneralSettings() {
           }
           control={<Switch checked={settings.codeExecution && !!sandbox?.configured} disabled={!sandbox?.configured} onCheckedChange={(codeExecution) => update({ codeExecution })} aria-label="Code execution" aria-describedby="code-execution-description" />}
         />
-        <SettingsRow
-          label="Image generation"
-          description="Create and edit images with your own ChatGPT plan through the Codex CLI. Sign in once with a one-time code."
-          control={<CodexConnect />}
-        />
       </SettingsSection>
+
+      <ImageServicesSettings />
 
       <SettingsSection title="Custom instructions" description="Added to the system prompt of every chat. Changing it resets the prompt cache once.">
         <div className="p-3">

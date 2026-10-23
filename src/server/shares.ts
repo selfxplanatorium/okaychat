@@ -123,8 +123,8 @@ export const publicShareRoutes = new Hono()
   .get("/:token/images/:id", (c) => {
     const share = byToken(c.req.param("token"));
     // The image must have been generated in the shared thread, not just by the same user.
-    const image = share && (db.prepare("SELECT id FROM images WHERE id = ? AND user_id = ? AND thread_id = ?").get(c.req.param("id"), share.user_id, share.thread_id) as { id: string } | undefined);
+    const image = share && (db.prepare("SELECT id, mime FROM images WHERE id = ? AND user_id = ? AND thread_id = ?").get(c.req.param("id"), share.user_id, share.thread_id) as { id: string; mime: string } | undefined);
     if (!share || !image) return c.json({ error: "Not found" }, 404);
     const stream = Readable.toWeb(createReadStream(path.join(env.dataDir, "images", share.user_id, `${image.id}.png`))) as ReadableStream;
-    return new Response(stream, { headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=3600" } });
+    return new Response(stream, { headers: { "Content-Type": image.mime, "Cache-Control": "public, max-age=3600" } });
   });

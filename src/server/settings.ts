@@ -1,3 +1,4 @@
+import { imageServiceDef } from "../shared/image-services.js";
 import { DEFAULT_USER_SETTINGS, SIDEBAR_ITEMS, type UserSettings } from "../shared/types.js";
 import { HTTPException } from "hono/http-exception";
 import { db } from "./db.js";
@@ -10,6 +11,7 @@ export function getSettings(userId: string): UserSettings {
     if (!validLimit(settings[key], min)) settings[key] = DEFAULT_USER_SETTINGS[key];
   }
   if (settings.sidebarItems !== undefined && !validSidebarItems(settings.sidebarItems)) delete settings.sidebarItems;
+  if (settings.imageServices !== undefined && !validImageServices(settings.imageServices)) delete settings.imageServices;
   return settings;
 }
 
@@ -21,6 +23,9 @@ export function updateSettings(userId: string, patch: Partial<UserSettings>): Us
   }
   if (Object.hasOwn(patch, "sidebarItems") && !validSidebarItems(patch.sidebarItems)) {
     throw new HTTPException(400, { message: "sidebarItems must contain unique sidebar shortcut names" });
+  }
+  if (Object.hasOwn(patch, "imageServices") && !validImageServices(patch.imageServices)) {
+    throw new HTTPException(400, { message: "imageServices must map known image services to { enabled, model }" });
   }
   const next = { ...getSettings(userId), ...patch };
   db.prepare(
@@ -41,4 +46,15 @@ export function subagentModelRefs(settings: UserSettings, chatModel: string): st
 
 function validSidebarItems(value: unknown): boolean {
   return Array.isArray(value) && value.every((item) => SIDEBAR_ITEMS.includes(item)) && new Set(value).size === value.length;
+}
+
+function validImageServices(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  return Object.entries(value).every(([id, entry]) => {
+    if (!imageServiceDef(id) || !entry || typeof entry !== "object") return false;
+    const { enabled, model, ...rest } = entry as { enabled?: unknown; model?: unknown };
+    return Object.keys(rest).length === 0
+      && (enabled === undefined || typeof enabled === "boolean")
+      && (model === undefined || (typeof model === "string" && model.length > 0 && model.length <= 200));
+  });
 }

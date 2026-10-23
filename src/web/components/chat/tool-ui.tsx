@@ -219,7 +219,7 @@ function RunCodeCard({ args, result, running }: { args: unknown; result: unknown
 
 function GeneratedImage({ args, result, running }: { args: unknown; result: unknown; running: boolean }) {
   const prompt = (args as { prompt?: string })?.prompt ?? "";
-  const image = result as { id?: string; url?: string; width?: number; height?: number } | string | undefined;
+  const image = result as { id?: string; url?: string; mime?: string; width?: number; height?: number } | string | undefined;
   if (running || !image) {
     return (
       <div className="bg-muted/40 my-2 flex aspect-square w-full max-w-sm flex-col items-center justify-center gap-2 rounded-xl border p-4 text-center">
@@ -245,7 +245,7 @@ function GeneratedImage({ args, result, running }: { args: unknown; result: unkn
       </a>
       <a
         href={image.url}
-        download={`${image.id}.png`}
+        download={`${image.id}.${image.mime?.split("/")[1]?.replace("jpeg", "jpg") ?? "png"}`}
         aria-label="Download image"
         className="surface-glass text-muted-foreground hover:text-foreground absolute top-2 right-2 rounded-lg border p-1.5 opacity-0 transition-opacity duration-(--motion-fast) ease-out-quart group-hover/img:opacity-100"
       >

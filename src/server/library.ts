@@ -52,7 +52,7 @@ interface RawRow {
 }
 
 const SOURCES = `
-  SELECT 'image:' || i.id AS key, i.prompt AS name, 'image' AS kind, 'image/png' AS mime, i.size AS size, i.created_at,
+  SELECT 'image:' || i.id AS key, i.prompt AS name, 'image' AS kind, i.mime AS mime, i.size AS size, i.created_at,
          'generated' AS source, i.thread_id AS threadId, t.title AS threadTitle, t.project_id AS projectId, NULL AS artifactKind
   FROM images i LEFT JOIN threads t ON t.id = i.thread_id AND t.user_id = i.user_id
   WHERE i.user_id = @userId
