@@ -15,8 +15,9 @@ Verified with Chromium's `Page.getInstallabilityErrors` (none) and an offline re
 ## Mobile conventions
 
 - Safe areas: `safe-top`, `safe-x`, `safe-bottom` utilities in `index.css`. The shell root pads top and sides. Fixed overlays (drawer, artifact panel) pad themselves. The composer footer uses `max(1rem, env(safe-area-inset-bottom))`.
+- The mobile scroll viewport fills the chat and uses a 5rem alpha gradient mask starting 1rem below the top, like the sidebar fade, with no header blur or opaque overlay. Initial content padding and the user-message anchor inset are both 6rem on mobile (desktop keeps 3em). The anchor uses matching negative margin and padding to preserve message spacing while stopping sent messages below the fade; content padding alone does not affect assistant-ui's turn anchoring.
 - Touch sizing uses the `pointer-coarse:` variant, not breakpoints, so a touch laptop gets it and a narrow desktop window does not. Header buttons are 40 px, composer controls 36 px, list rows 44 px.
-- Hover-revealed controls (thread row menu, model favorite star) stay visible at reduced opacity on touch.
+- Hover-revealed controls (model favorite star) stay visible at reduced opacity on touch. Sidebar rows have no hover button on touch; their menu opens with a long press.
 - Inputs are at least 16 px on touch devices, or iOS zooms on focus. The rule is unlayered in `index.css` so it beats `text-sm`.
 - The composer and model search do not autofocus on touch, so the keyboard does not cover the screen on every chat switch.
 - Empty chat on phones: the welcome line centers in the free space and the composer sits at the bottom, in thumb reach.

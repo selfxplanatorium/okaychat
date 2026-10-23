@@ -1,5 +1,5 @@
 import { DownloadIcon, FileCodeIcon, FileSpreadsheetIcon, FileTextIcon, ImageIcon, LayoutGridIcon, ListIcon, Loader2Icon, MessageCircleIcon, PaperclipIcon, SearchIcon, TrashIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { useLocation } from "wouter";
 import { useAui } from "@assistant-ui/react";
 import type { ArtifactVersion, LibraryItem, LibraryKind, LibraryPage, LibrarySort } from "@shared/types";
@@ -11,9 +11,12 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { SimpleMarkdown } from "@/components/ui/simple-markdown";
 import { Skeleton } from "@/components/ui/skeleton";
+import { BulkDeleteDialog, FloatingSelectionBar, SelectionCheck, SelectModeToggle, useSelection, useSelectionKeys } from "@/components/ui/selection";
 import { api } from "@/lib/api";
+import { batchError, runBatch } from "@/lib/selection";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
+import { ArchivedChats } from "./ArchivedChats";
 
 // The Library lists everything the agent received or produced for this account: uploads, generated
 // images, and the latest version of every artifact. Server-side filtering and cursor pagination do
@@ -61,18 +64,24 @@ function downloadText(name: string, content: string, mime: string) {
   setTimeout(() => URL.revokeObjectURL(href), 1000);
 }
 
+const downloadable = (item: LibraryItem) => Boolean(item.downloadUrl || item.artifactId);
+
+async function downloadItem(item: LibraryItem) {
+  if (item.downloadUrl) return downloadUrl(item.name, item.downloadUrl);
+  // Text artifacts have no bytes endpoint; their latest version's content is the file.
+  const versions = await api<ArtifactVersion[]>(`/threads/${encodeURIComponent(item.threadId!)}/artifacts/${encodeURIComponent(item.artifactId!)}`);
+  const v = versions.at(-1);
+  if (v) downloadText(artifactFilename(v.title, v.kind, v.language), v.content, v.kind === "html" ? "text/html" : v.kind === "svg" ? "image/svg+xml" : "text/plain");
+}
+
+const deleteItem = (item: LibraryItem) =>
+  api(`/library/${item.id.split(":")[0]}/${encodeURIComponent(item.id.slice(item.id.indexOf(":") + 1))}`, { method: "DELETE" });
+
 /** Item actions: download bytes or source, jump to the chat that produced the item, delete. */
 function ItemActions({ item, onDeleted }: { item: LibraryItem; onDeleted: () => void }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const download = async () => {
-    if (item.downloadUrl) return downloadUrl(item.name, item.downloadUrl);
-    // Text artifacts have no bytes endpoint; their latest version's content is the file.
-    const versions = await api<ArtifactVersion[]>(`/threads/${encodeURIComponent(item.threadId!)}/artifacts/${encodeURIComponent(item.artifactId!)}`);
-    const v = versions.at(-1);
-    if (v) downloadText(artifactFilename(v.title, v.kind, v.language), v.content, v.kind === "html" ? "text/html" : v.kind === "svg" ? "image/svg+xml" : "text/plain");
-  };
   const remove = async () => {
     if (!confirming) {
       setConfirming(true);
@@ -80,7 +89,7 @@ function ItemActions({ item, onDeleted }: { item: LibraryItem; onDeleted: () => 
     }
     setBusy(true);
     try {
-      await api(`/library/${item.id.split(":")[0]}/${encodeURIComponent(item.id.slice(item.id.indexOf(":") + 1))}`, { method: "DELETE" });
+      await deleteItem(item);
       void useData.getState().refreshStorage().catch(() => {});
       onDeleted();
     } catch (cause) {
@@ -92,8 +101,8 @@ function ItemActions({ item, onDeleted }: { item: LibraryItem; onDeleted: () => 
   return (
     <>
       {error && <p role="alert" className="text-destructive text-xs">{error}</p>}
-      {(item.downloadUrl || item.artifactId) && (
-        <Button variant="outline" size="sm" onClick={() => void download().catch((e: Error) => setError(e.message))}>
+      {downloadable(item) && (
+        <Button variant="outline" size="sm" onClick={() => void downloadItem(item).catch((e: Error) => setError(e.message))}>
           <DownloadIcon /> Download
         </Button>
       )}
@@ -246,14 +255,32 @@ function ItemPreviewDialog({ item, onClose, onDeleted }: { item: LibraryItem | n
   );
 }
 
-function GridCard({ item, onOpen }: { item: LibraryItem; onOpen: () => void }) {
+/** In selection mode a card or row is a checkbox; Shift extends the range from the last one clicked. */
+type ItemSelection = { selected: boolean; onToggle: (range: boolean) => void };
+
+const pressProps = (selection: ItemSelection | undefined, onOpen: () => void) =>
+  selection
+    ? {
+        role: "checkbox" as const,
+        "aria-checked": selection.selected,
+        // Without this Shift+click would also select the text between the two clicks.
+        onMouseDown: (event: ReactMouseEvent) => event.shiftKey && event.preventDefault(),
+        onClick: (event: ReactMouseEvent) => selection.onToggle(event.shiftKey),
+      }
+    : { onClick: onOpen };
+
+function GridCard({ item, onOpen, selection }: { item: LibraryItem; onOpen: () => void; selection?: ItemSelection }) {
   const Icon = KIND_ICONS[item.kind];
   return (
     <button
       type="button"
-      onClick={onOpen}
-      className="bg-card hover:bg-accent/40 group flex flex-col overflow-hidden rounded-xl text-left shadow-[var(--depth-highlight),var(--shadow-raised)] transition-colors duration-(--motion-fast) ease-out-quart"
+      {...pressProps(selection, onOpen)}
+      className={cn(
+        "bg-card hover:bg-accent/40 group relative flex flex-col overflow-hidden rounded-xl text-left shadow-[var(--depth-highlight),var(--shadow-raised)] ring-0 ring-primary transition-[background-color,box-shadow] duration-(--motion-fast) ease-out-quart outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        selection?.selected && "bg-primary/5 ring-2 focus-visible:ring-primary",
+      )}
     >
+      {selection && <SelectionCheck checked={selection.selected} className="absolute top-2 left-2 z-10 size-5 shadow-[var(--shadow-raised)]" />}
       <div className="bg-muted/30 grid aspect-[4/3] place-items-center overflow-hidden">
         {item.kind === "image" && item.previewUrl ? (
           <img src={item.previewUrl} alt="" loading="lazy" className="size-full object-cover" />
@@ -271,14 +298,18 @@ function GridCard({ item, onOpen }: { item: LibraryItem; onOpen: () => void }) {
   );
 }
 
-function ListRow({ item, onOpen }: { item: LibraryItem; onOpen: () => void }) {
+function ListRow({ item, onOpen, selection }: { item: LibraryItem; onOpen: () => void; selection?: ItemSelection }) {
   const Icon = KIND_ICONS[item.kind];
   return (
     <button
       type="button"
-      onClick={onOpen}
-      className="hover:bg-accent/40 flex w-full items-center gap-3 px-3 py-2 text-left transition-colors duration-(--motion-fast) ease-out-quart pointer-coarse:px-4 pointer-coarse:py-3"
+      {...pressProps(selection, onOpen)}
+      className={cn(
+        "hover:bg-accent/40 flex w-full items-center gap-3 px-3 py-2 text-left transition-colors duration-(--motion-fast) ease-out-quart first:rounded-t-xl last:rounded-b-xl outline-none focus-visible:bg-accent/40 pointer-coarse:px-4 pointer-coarse:py-3",
+        selection?.selected && "bg-primary/10 hover:bg-primary/15",
+      )}
     >
+      {selection && <SelectionCheck checked={selection.selected} />}
       <Icon className="text-muted-foreground size-4 shrink-0" />
       <span className="min-w-0 flex-1 truncate text-sm">{item.name}</span>
       <span className="text-muted-foreground hidden w-28 shrink-0 truncate text-xs sm:block">{KIND_LABELS[item.kind]}</span>
@@ -289,7 +320,46 @@ function ListRow({ item, onOpen }: { item: LibraryItem; onOpen: () => void }) {
   );
 }
 
+type LibrarySection = "files" | "archived";
+
+/** Files and archived chats share the page; the switch sits under each section's header. */
 export function LibraryPage() {
+  const [section, setSection] = useState<LibrarySection>("files");
+  const tabs = <LibrarySectionSwitch section={section} onChange={setSection} />;
+  if (section === "files") return <LibraryFiles tabs={tabs} />;
+  return (
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 pt-6 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-6">
+      <header>
+        <h1 className="text-xl font-semibold tracking-tight">Library</h1>
+        <p className="text-muted-foreground mt-1 text-sm">Archived chats from every project.</p>
+      </header>
+      <ArchivedChats tabs={tabs} />
+    </div>
+  );
+}
+
+function LibrarySectionSwitch({ section, onChange }: { section: LibrarySection; onChange: (section: LibrarySection) => void }) {
+  return (
+    <div aria-label="Library section" className="bg-muted/60 flex self-start rounded-lg p-0.5">
+      {(["files", "archived"] as const).map((s) => (
+        <button
+          key={s}
+          type="button"
+          aria-pressed={section === s}
+          onClick={() => onChange(s)}
+          className={cn(
+            "text-muted-foreground rounded-md px-3 py-1 text-sm transition-colors duration-(--motion-fast) ease-out-quart pointer-coarse:px-4 pointer-coarse:py-2",
+            section === s && "bg-background text-foreground shadow-sm",
+          )}
+        >
+          {s === "files" ? "Files" : "Archived chats"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function LibraryFiles({ tabs }: { tabs: ReactNode }) {
   const projects = useData((s) => s.projects);
   const [view, setView] = useState<"grid" | "list">(() => (localStorage.getItem(VIEW_KEY) === "list" ? "list" : "grid"));
   const [kind, setKind] = useState<LibraryKind | "all">("all");
@@ -362,6 +432,74 @@ export function LibraryPage() {
     setOpen((prev) => (prev?.id === id ? null : prev));
   };
 
+  const order = useMemo(() => items?.map((i) => i.id) ?? [], [items]);
+  const selection = useSelection(order);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [loadingAll, setLoadingAll] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const selectedItems = useMemo(() => items?.filter((i) => selection.selected.has(i.id)) ?? [], [items, selection.selected]);
+  const deletable = selectedItems.filter((i) => i.deletable);
+  const [deleting, setDeleting] = useState({ count: 0, kept: 0 });
+  // Select all means every match, not only the loaded pages, so it fetches the rest first.
+  const everySelected = selection.allSelected && !cursor;
+
+  const setSelecting = (on: boolean) => {
+    selection.setMode(on);
+    setBulkError(null);
+  };
+
+  const selectEverything = async () => {
+    if (!cursor || !items) return selection.selectAll();
+    const id = ++requestId.current;
+    setLoading(true);
+    setLoadingAll(true);
+    setBulkError(null);
+    try {
+      let all = items;
+      for (let next: string | null = cursor; next; ) {
+        const page: LibraryPage = await api<LibraryPage>(`/library?${params}&cursor=${encodeURIComponent(next)}`);
+        if (id !== requestId.current) return;
+        all = [...all, ...page.items];
+        next = page.nextCursor;
+      }
+      setItems(all);
+      setCursor(null);
+      selection.selectAll(all.map((i) => i.id));
+    } catch (cause) {
+      if (id === requestId.current) setBulkError(cause instanceof Error ? cause.message : "Could not load every file.");
+    } finally {
+      if (id === requestId.current) {
+        setLoading(false);
+        setLoadingAll(false);
+      }
+    }
+  };
+
+  useSelectionKeys(selection.selecting, { onExit: () => setSelecting(false), onSelectAll: () => void selectEverything() });
+
+  const downloadSelected = async () => {
+    const files = selectedItems.filter(downloadable);
+    setBulkBusy(true);
+    setBulkError(null);
+    // One at a time: browsers drop downloads started in a burst.
+    const { failed, error } = await runBatch(files, downloadItem, 1);
+    if (failed.length) setBulkError(batchError(failed.length, files.length, "download", error));
+    setBulkBusy(false);
+  };
+
+  const deleteSelected = async () => {
+    const { failed, error } = await runBatch(deletable, deleteItem);
+    const gone = new Set(deletable.filter((i) => !failed.includes(i)).map((i) => i.id));
+    setItems((prev) => prev?.filter((i) => !gone.has(i.id)) ?? null);
+    if (gone.size) void useData.getState().refreshStorage().catch(() => {});
+    if (failed.length) {
+      setDeleting((prev) => ({ ...prev, count: failed.length }));
+      throw new Error(batchError(failed.length, deletable.length, "be deleted", error));
+    }
+    setSelecting(false);
+  };
+
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 pt-6 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-6">
       {error && <p role="alert" className="text-destructive text-sm">{error}</p>}
@@ -391,6 +529,10 @@ export function LibraryPage() {
           ))}
         </div>
       </header>
+      <div className="flex items-center justify-between gap-3">
+        {tabs}
+        <SelectModeToggle selecting={selection.selecting} onChange={setSelecting} disabled={!items?.length && !selection.selecting} />
+      </div>
 
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap gap-1.5">
@@ -462,13 +604,13 @@ export function LibraryPage() {
       ) : view === "grid" ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {items.map((item) => (
-            <GridCard key={item.id} item={item} onOpen={() => setOpen(item)} />
+            <GridCard key={item.id} item={item} onOpen={() => setOpen(item)} selection={selection.selecting ? { selected: selection.selected.has(item.id), onToggle: (range) => selection.toggle(item.id, range) } : undefined} />
           ))}
         </div>
       ) : (
         <div className="bg-card divide-border rounded-xl divide-y shadow-[var(--depth-highlight),var(--shadow-raised)]">
           {items.map((item) => (
-            <ListRow key={item.id} item={item} onOpen={() => setOpen(item)} />
+            <ListRow key={item.id} item={item} onOpen={() => setOpen(item)} selection={selection.selecting ? { selected: selection.selected.has(item.id), onToggle: (range) => selection.toggle(item.id, range) } : undefined} />
           ))}
         </div>
       )}
@@ -480,6 +622,48 @@ export function LibraryPage() {
           </Button>
         </div>
       )}
+
+      {selection.selecting && (
+        <FloatingSelectionBar
+          count={selection.selected.size}
+          allSelected={everySelected}
+          selectAllBusy={loadingAll}
+          onSelectAll={() => void selectEverything()}
+          onClear={selection.clear}
+          error={bulkError}
+        >
+          {bulkBusy && <Loader2Icon aria-label="Working" className="text-muted-foreground mx-1 size-4 animate-spin" />}
+          <Button variant="ghost" size="sm" disabled={bulkBusy || !selectedItems.some(downloadable)} onClick={() => void downloadSelected()} className="pointer-coarse:h-10">
+            <DownloadIcon /> Download
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={bulkBusy || deletable.length === 0}
+            onClick={() => {
+              setDeleting({ count: deletable.length, kept: selectedItems.length - deletable.length });
+              setConfirmDelete(true);
+            }}
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive pointer-coarse:h-10"
+          >
+            <TrashIcon /> Delete
+          </Button>
+        </FloatingSelectionBar>
+      )}
+
+      <BulkDeleteDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title={deleting.count === 1 ? "Delete 1 file permanently?" : `Delete ${deleting.count} files permanently?`}
+        description={
+          <>
+            {deleting.count === 1 ? "It is" : "They are"} removed for good and free their storage.
+            {deleting.kept > 0 && ` ${deleting.kept === 1 ? "1 selected artifact can't be deleted here and stays" : `${deleting.kept} selected artifacts can't be deleted here and stay`}.`}
+          </>
+        }
+        confirmLabel={`Delete ${deleting.count}`}
+        onConfirm={deleteSelected}
+      />
 
       <ItemPreviewDialog item={open} onClose={() => setOpen(null)} onDeleted={() => open && removeItem(open.id)} />
     </div>

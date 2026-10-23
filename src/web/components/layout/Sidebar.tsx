@@ -1,11 +1,11 @@
 import { useAui, useAuiState } from "@assistant-ui/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SIDEBAR_ITEMS } from "@shared/types";
 import { useChatPrivacyStore } from "@/state/chat-privacy";
 import { ChatSearch } from "./ChatSearch";
 import { CalendarClockIcon, FolderIcon, LibraryIcon, LogOutIcon, PanelLeftIcon, PuzzleIcon, SearchIcon, SettingsIcon, SquarePenIcon, UserRoundIcon } from "lucide-react";
 import { Link, useLocation } from "wouter";
-import { ThreadList } from "@/components/assistant-ui/elements/thread-list.aui";
+import { ThreadList, ThreadSelectionBar } from "@/components/assistant-ui/elements/thread-list.aui";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
 import { AccountAvatar } from "@/components/ui/account-avatar";
 import { ProjectSwitcher } from "./ProjectSwitcher";
@@ -32,6 +32,7 @@ export function Sidebar({ open, onToggle }: { open: boolean; onToggle: () => voi
     return () => window.removeEventListener("keydown", keydown);
   }, []);
   const me = useData((s) => s.me);
+  const panelRef = useRef<HTMLDivElement>(null);
   const [location, navigate] = useLocation();
   const rowClass = "relative hover:bg-sidebar-row-hover focus-visible:outline-ring flex min-h-9 w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm pointer-coarse:min-h-11 active:bg-sidebar-row-hover transition-colors duration-(--motion-fast) ease-out-quart";
   return (
@@ -50,7 +51,7 @@ export function Sidebar({ open, onToggle }: { open: boolean; onToggle: () => voi
         )}
       >
         {/* On desktop the panel floats inside the rail, inset from the window edge. */}
-        <div className="shell-sidebar-inner md:depth-sidebar flex h-full w-72 shrink-0 max-md:w-full flex-col md:m-2 md:h-[calc(100%-1rem)] md:w-[calc(18rem-1rem)] md:rounded-2xl">
+        <div ref={panelRef} className="shell-sidebar-inner md:depth-sidebar flex h-full w-72 shrink-0 max-md:w-full flex-col md:m-2 md:h-[calc(100%-1rem)] md:w-[calc(18rem-1rem)] md:rounded-2xl">
           <div className="flex h-12 shrink-0 items-center justify-between px-3">
             <Link href="/" onClick={() => location !== "/" && navigate("/")}>
               <Brand />
@@ -88,10 +89,22 @@ export function Sidebar({ open, onToggle }: { open: boolean; onToggle: () => voi
             ))}
           </nav>
           <ProjectSwitcher />
-          <div className="glide-host min-h-0 flex-1 overflow-y-auto overscroll-contain px-2" onClick={() => location !== "/" && navigate("/")}>
+          <div
+            className="glide-host min-h-0 flex-1 overflow-y-auto overscroll-contain px-2"
+            style={{ maskImage: "linear-gradient(to bottom, transparent, black var(--chat-list-fade, 0px))" }}
+            onScroll={(event) => {
+              const list = event.currentTarget;
+              list.style.setProperty("--chat-list-fade", `${Math.min(24, Math.max(0, list.scrollTop))}px`);
+            }}
+            // Only opening a chat leaves the current page. Row menus are portaled, but their clicks still bubble here.
+            onClick={(event) => {
+              if (location !== "/" && (event.target as Element).closest?.("[data-slot=aui_thread-list-item-trigger]")) navigate("/");
+            }}
+          >
             <GlideHighlight />
             <ThreadList />
           </div>
+          <ThreadSelectionBar scope={panelRef} />
           <div className="border-sidebar-border flex items-center gap-1 border-t p-2">
             <Menu>
               <MenuTrigger className="hover:bg-sidebar-row-hover flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors duration-(--motion-fast) ease-out-quart">

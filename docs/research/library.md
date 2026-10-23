@@ -59,3 +59,24 @@ The lazy navigation page provides grid/list layouts, filters, debounced search, 
 with a Load more button, previews, download/open-chat actions, and confirmed deletion. Failed requests
 show errors. Deletion refreshes storage usage. Tests exercise ownership of listings, previews, downloads
 and deletes, latest-version selection, name/size pagination, persistence, and quota reclamation.
+
+## Archived chats
+
+The page switches between Files and Archived chats. The archived view lists `GET /api/threads?status=archived`
+(all projects) with project name and last activity. Restore PATCHes `status: regular` and reloads the
+runtime thread list; Open also clears the project filter, navigates to `/`, and selects the chat. Export uses
+`/api/threads/:id/export`; Delete permanently confirms first. The view refetches whenever the runtime's
+active thread ids change, so a sidebar Archive shows up without a reload. `LibraryPage` renders inside
+`RuntimeProvider`, so `useAui` is available.
+
+## Multi-selection
+
+Files and Archived chats each have a Select/Done toggle beside the section switch. In selection mode a
+card or row is a checkbox (Shift+click extends from the last click), and a floating bar offers Select all
+plus bulk actions: Download and Delete for files, Restore and Delete for archived chats. Select all on Files
+fetches the remaining pages first, so it covers every match of the current filters, not only the loaded
+pages. Filter changes clear the selection. Artifacts are not deletable here; the delete dialog says how many
+selected items stay. Bulk actions fan out over the existing per-item endpoints, four at a time (downloads
+one at a time, since browsers drop bursts); failures stay selected with a summary. Escape leaves selection
+mode and Ctrl/Cmd+A selects all, except while typing or while a dialog or menu is open. Shared pieces live
+in `components/ui/selection.tsx` and `lib/selection.ts`.

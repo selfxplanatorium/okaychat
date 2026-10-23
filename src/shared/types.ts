@@ -1,4 +1,5 @@
 import type { UserAppearance } from "./appearance.js";
+import type { ImageServiceSettings } from "./image-services.js";
 
 // Types shared by server and web. Keep free of runtime imports.
 

@@ -141,11 +141,15 @@ const api = new Hono<AppEnv>()
   // Threads and history (assistant-ui ThreadHistoryAdapter rows)
   .get("/threads", (c) => {
     const project = c.req.query("project");
-    return c.json(listThreads(c.get("user").id, project === undefined ? undefined : project === "none" ? null : project));
+    const status = c.req.query("status");
+    if (status !== undefined && status !== "regular" && status !== "archived") return c.json({ error: "Invalid status" }, 400);
+    return c.json(listThreads(c.get("user").id, project === undefined ? undefined : project === "none" ? null : project, status));
   })
   .post("/threads", async (c) => {
     const user = c.get("user");
-    const { id, projectId } = (await c.req.json()) as { id?: string; projectId?: string | null };
+    const parsed = z.object({ id: clientId.optional(), projectId: z.string().max(200).nullable().optional() }).safeParse(await c.req.json());
+    if (!parsed.success) return c.json({ error: "Invalid chat" }, 400);
+    const { id, projectId } = parsed.data;
     // A project id from the client must belong to the user, or the thread would read another user's files.
     const project = projectId && getProject(user.id, projectId) ? projectId : null;
     return c.json(ensureThread(user.id, id ?? newId("thr"), project));
@@ -155,10 +159,21 @@ const api = new Hono<AppEnv>()
     return thread ? c.json({ ...thread, usage: threadUsage(c.get("user").id, thread.id) }) : c.json({ error: "Not found" }, 404);
   })
   .patch("/threads/:id", async (c) => {
-    const parsed = z.object({ title: z.string().max(200).optional(), status: z.enum(["regular", "archived"]).optional(), memoryDisabled: z.boolean().optional() }).safeParse(await c.req.json());
+    const parsed = z.object({
+      title: z.string().max(200).optional(),
+      status: z.enum(["regular", "archived"]).optional(),
+      memoryDisabled: z.boolean().optional(),
+      pinned: z.boolean().optional(),
+      projectId: z.string().nullable().optional(),
+      modelRef: z.string().min(1).max(300).optional(),
+    }).safeParse(await c.req.json());
     if (!parsed.success) return c.json({ error: "Invalid chat settings" }, 400);
-    if (!getThread(c.get("user").id, c.req.param("id"))) return c.json({ error: "Thread not found" }, 404);
-    updateThread(c.get("user").id, c.req.param("id"), parsed.data);
+    const userId = c.get("user").id;
+    if (!getThread(userId, c.req.param("id"))) return c.json({ error: "Thread not found" }, 404);
+    // A foreign project would expose its files and memories to this chat. Memory tools already offered
+    // re-check the thread's project on every call, so a move needs no extra revocation here.
+    if (parsed.data.projectId && !getProject(userId, parsed.data.projectId)) return c.json({ error: "Project not found" }, 404);
+    updateThread(userId, c.req.param("id"), parsed.data);
     return c.json({ ok: true });
   })
   .delete("/threads/:id", async (c) => {

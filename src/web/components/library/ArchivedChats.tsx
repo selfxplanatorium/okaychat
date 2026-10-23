@@ -1,0 +1,277 @@
+import { useAui, useAuiState } from "@assistant-ui/react";
+import { ArchiveIcon, ArchiveRestoreIcon, FileDownIcon, FileTextIcon, Loader2Icon, MessageCircleIcon, MoreHorizontalIcon, Trash2Icon } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useLocation } from "wouter";
+import type { ThreadSummary } from "@shared/types";
+import { DeleteChatDialog } from "@/components/chat/DeleteChatDialog";
+import { Button } from "@/components/ui/button";
+import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
+import { FloatingSelectionBar, SelectionCheck, SelectModeToggle, useSelection, useSelectionKeys } from "@/components/ui/selection";
+import { Skeleton } from "@/components/ui/skeleton";
+import { api } from "@/lib/api";
+import { batchError, runBatch } from "@/lib/selection";
+import { cn } from "@/lib/utils";
+import { exportThread, type ThreadExportFormat } from "@/lib/thread-export";
+import { useData } from "@/state/data";
+
+const formatDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { dateStyle: "medium" });
+
+/** Archived chats across every project, with restore, open, export, and permanent delete, one by one or selected together. */
+export function ArchivedChats({ tabs }: { tabs: ReactNode }) {
+  const aui = useAui();
+  const [, navigate] = useLocation();
+  const projects = useData((s) => s.projects);
+  // Archiving or restoring from the sidebar changes the runtime's list; refetch so this view follows.
+  const activeIds = useAuiState((s) => s.threads.threadIds);
+  const [threads, setThreads] = useState<ThreadSummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<ThreadSummary | null>(null);
+  const requestId = useRef(0);
+
+  const load = useCallback(async () => {
+    const id = ++requestId.current;
+    try {
+      const list = await api<ThreadSummary[]>("/threads?status=archived");
+      if (id !== requestId.current) return;
+      // Older servers ignore the filter; never show active chats here.
+      setThreads(list.filter((t) => t.status === "archived").sort((a, b) => b.updatedAt - a.updatedAt));
+      setError(null);
+    } catch (cause) {
+      if (id !== requestId.current) return;
+      setThreads((prev) => prev ?? []);
+      setError(cause instanceof Error ? cause.message : "Could not load archived chats.");
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load, activeIds]);
+
+  const projectNames = useMemo(() => new Map(projects.map((p) => [p.id, p.name])), [projects]);
+
+  const act = async (thread: ThreadSummary, task: () => Promise<void>) => {
+    setBusyId(thread.id);
+    setError(null);
+    try {
+      await task();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Something went wrong.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const unarchive = async (thread: ThreadSummary) => {
+    await api(`/threads/${thread.id}`, { method: "PATCH", json: { status: "regular" } });
+    setThreads((prev) => prev?.filter((t) => t.id !== thread.id) ?? null);
+  };
+
+  const restore = (thread: ThreadSummary) =>
+    act(thread, async () => {
+      await unarchive(thread);
+      await aui.threads.reload();
+    });
+
+  const open = (thread: ThreadSummary) =>
+    act(thread, async () => {
+      await unarchive(thread);
+      // The chat may belong to another project than the sidebar filter, so show every chat.
+      useData.getState().setActiveProject(null);
+      await aui.threads.reload();
+      navigate("/");
+      aui.threads.switchToThread(thread.id);
+    });
+
+  const exportAs = (thread: ThreadSummary, format: ThreadExportFormat) => act(thread, () => exportThread(thread.id, format, thread.title));
+
+  const order = useMemo(() => threads?.map((t) => t.id) ?? [], [threads]);
+  const selection = useSelection(order);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const [bulkDelete, setBulkDelete] = useState({ open: false, count: 0, title: null as string | null });
+  const setSelecting = (on: boolean) => {
+    selection.setMode(on);
+    setBulkError(null);
+  };
+  useSelectionKeys(selection.selecting, { onExit: () => setSelecting(false), onSelectAll: () => selection.selectAll() });
+
+  /** Runs `task` per selected chat and drops the finished ones; leaves selection mode when none failed. */
+  const applyToSelection = async (verb: string, task: (id: string) => Promise<unknown>, onFailed?: (count: number) => void) => {
+    const ids = [...selection.selected];
+    const { failed, error } = await runBatch(ids, task);
+    const done = new Set(ids.filter((id) => !failed.includes(id)));
+    setThreads((prev) => prev?.filter((t) => !done.has(t.id)) ?? null);
+    if (failed.length) {
+      onFailed?.(failed.length);
+      throw new Error(batchError(failed.length, ids.length, verb, error));
+    }
+    setSelecting(false);
+  };
+
+  const restoreSelected = async () => {
+    setBulkBusy(true);
+    setBulkError(null);
+    try {
+      await applyToSelection("restore", (id) => api(`/threads/${id}`, { method: "PATCH", json: { status: "regular" } })).finally(() => aui.threads.reload());
+    } catch (cause) {
+      setBulkError(cause instanceof Error ? cause.message : "Could not restore the selection.");
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const toolbar = (
+    <div className="flex items-center justify-between gap-3">
+      {tabs}
+      <SelectModeToggle selecting={selection.selecting} onChange={setSelecting} disabled={!threads?.length && !selection.selecting} />
+    </div>
+  );
+
+  if (threads === null) {
+    return (
+      <>
+        {toolbar}
+        <div className="flex flex-col gap-2">
+          {Array.from({ length: 5 }, (_, i) => (
+            <Skeleton key={i} className="h-12 rounded-lg" />
+          ))}
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      {toolbar}
+      {error && <p role="alert" className="text-destructive text-sm">{error}</p>}
+      {threads.length === 0 ? (
+        <div className="flex flex-col items-center py-16 text-center">
+          <ArchiveIcon aria-hidden className="text-muted-foreground mb-5 size-8" />
+          <h2 className="text-base font-medium">No archived chats</h2>
+          <p className="text-muted-foreground mt-2 max-w-xs text-sm">Chats you archive from the sidebar wait here until you restore or delete them.</p>
+        </div>
+      ) : (
+        <ul className="bg-card divide-border rounded-xl divide-y shadow-[var(--depth-highlight),var(--shadow-raised)]">
+          {threads.map((thread) => {
+            const busy = busyId === thread.id;
+            const project = thread.projectId ? (projectNames.get(thread.projectId) ?? "Unknown project") : "No project";
+            const label = (
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm">{thread.title || "New chat"}</p>
+                <p className="text-muted-foreground truncate text-xs">
+                  {project} · {formatDate(thread.updatedAt)}
+                </p>
+              </div>
+            );
+            if (selection.selecting) {
+              const selected = selection.selected.has(thread.id);
+              return (
+                <li key={thread.id}>
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={selected}
+                    // Without this Shift+click would also select the text between the two clicks.
+                    onMouseDown={(event) => event.shiftKey && event.preventDefault()}
+                    onClick={(event) => selection.toggle(thread.id, event.shiftKey)}
+                    className={cn(
+                      "hover:bg-accent/40 focus-visible:bg-accent/40 flex min-h-12 w-full items-center gap-3 px-3 py-2 text-left outline-none transition-colors duration-(--motion-fast) ease-out-quart in-[li:first-child]:rounded-t-xl in-[li:last-child]:rounded-b-xl pointer-coarse:px-4 pointer-coarse:py-3",
+                      selected && "bg-primary/10 hover:bg-primary/15",
+                    )}
+                  >
+                    <SelectionCheck checked={selected} />
+                    {label}
+                  </button>
+                </li>
+              );
+            }
+            return (
+              <li key={thread.id} className="flex min-h-12 items-center gap-2 px-3 py-2 pointer-coarse:px-4 pointer-coarse:py-3">
+                {label}
+                {busy && <Loader2Icon aria-label="Working" className="text-muted-foreground size-4 shrink-0 animate-spin" />}
+                <Button variant="outline" size="sm" disabled={busy} onClick={() => void open(thread)}>
+                  <MessageCircleIcon /> <span className="max-sm:sr-only">Open</span>
+                </Button>
+                <Button variant="outline" size="sm" disabled={busy} onClick={() => void restore(thread)}>
+                  <ArchiveRestoreIcon /> <span className="max-sm:sr-only">Restore</span>
+                </Button>
+                <Menu>
+                  <MenuTrigger render={<Button variant="ghost" size="icon-sm" disabled={busy} aria-label="More actions" className="pointer-coarse:size-10" />}>
+                    <MoreHorizontalIcon />
+                  </MenuTrigger>
+                  <MenuContent align="end" className="min-w-48">
+                    <MenuItem onClick={() => void exportAs(thread, "markdown")}>
+                      <FileTextIcon /> Export Markdown
+                    </MenuItem>
+                    <MenuItem onClick={() => void exportAs(thread, "pdf")}>
+                      <FileDownIcon /> Export PDF
+                    </MenuItem>
+                    <MenuSeparator />
+                    <MenuItem destructive onClick={() => setDeleting(thread)}>
+                      <Trash2Icon /> Delete permanently
+                    </MenuItem>
+                  </MenuContent>
+                </Menu>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {selection.selecting && (
+        <FloatingSelectionBar
+          count={selection.selected.size}
+          allSelected={selection.allSelected}
+          onSelectAll={() => selection.selectAll()}
+          onClear={selection.clear}
+          error={bulkError}
+        >
+          {bulkBusy && <Loader2Icon aria-label="Working" className="text-muted-foreground mx-1 size-4 animate-spin" />}
+          <Button variant="ghost" size="sm" disabled={bulkBusy || selection.selected.size === 0} onClick={() => void restoreSelected()} className="pointer-coarse:h-10">
+            <ArchiveRestoreIcon /> Restore
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={bulkBusy || selection.selected.size === 0}
+            onClick={() => {
+              const count = selection.selected.size;
+              setBulkDelete({ open: true, count, title: count === 1 ? (threads.find((t) => selection.selected.has(t.id))?.title ?? null) : null });
+            }}
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive pointer-coarse:h-10"
+          >
+            <Trash2Icon /> Delete
+          </Button>
+        </FloatingSelectionBar>
+      )}
+      <DeleteChatDialog
+        open={bulkDelete.open}
+        title={bulkDelete.title}
+        count={bulkDelete.count}
+        onOpenChange={(open) => setBulkDelete((prev) => ({ ...prev, open }))}
+        onConfirm={async () => {
+          try {
+            await applyToSelection(
+              "be deleted",
+              (id) => api(`/threads/${id}`, { method: "DELETE" }),
+              (count) => setBulkDelete((prev) => ({ ...prev, count })),
+            );
+          } finally {
+            void useData.getState().refreshStorage().catch(() => {});
+          }
+        }}
+      />
+      <DeleteChatDialog
+        open={deleting !== null}
+        title={deleting?.title}
+        onOpenChange={(next) => !next && setDeleting(null)}
+        onConfirm={async () => {
+          const thread = deleting!;
+          await api(`/threads/${thread.id}`, { method: "DELETE" });
+          setThreads((prev) => prev?.filter((t) => t.id !== thread.id) ?? null);
+          void useData.getState().refreshStorage().catch(() => {});
+        }}
+      />
+    </>
+  );
+}

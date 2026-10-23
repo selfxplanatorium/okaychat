@@ -8,6 +8,7 @@ Unverified: no `node_modules` in the clone, so no test run and no type check aga
 
 ## Summary
 
+- Sidebar chat titles show the full name in a tooltip after an 800 ms hover, only when the rendered title overflows. Overflow is measured when opening so hover actions, title updates, and sidebar sizing are accounted for. The tooltip is portaled outside the list's scroll mask.
 - Use `@assistant-ui/ai-sdk` directly. `@assistant-ui/react-ai-sdk` only re-exports it.
 - Own-DB threads: wrap `useChatRuntime()` in `useRemoteThreadListRuntime({ runtimeHook, adapter })`. `useChatRuntime` has no adapter option of its own.
 - Per-request model id: register it as model context `config.modelName`. It arrives in the request body as `config`.
@@ -341,3 +342,20 @@ Attachment adapters live in `runtime/attachments.ts`: images, native/extracted d
 then a binary fallback. Every non-anonymous send persists original bytes and propagates quota errors.
 Image/PDF message data URLs remain unchanged; file_id headers link the durable originals. Saving
 anonymous messages into normal history also stores inline files, without changing message parts.
+
+## Chat context menu API
+
+`threads.updated_at` means last message activity: only `appendMessage` bumps it. `updateThread` (rename, pin, archive, move, model, memory toggle, generated title) leaves it unchanged, so the sidebar's date groups do not jump to Today on a metadata edit.
+
+- `PATCH /api/threads/:id` accepts `title`, `status`, `memoryDisabled`, `pinned`, and `projectId` (`null` removes the project). A project the user does not own returns 404 `Project not found`. Moving needs no memory cleanup: offered memory tools re-check `thread.projectId` on every call.
+- `GET /api/threads?status=regular|archived` filters by status and combines with `project`. Without it both statuses are listed.
+- `POST /api/threads/:id/title` takes optional `text`. Without it the title is derived from the user text parts of the stored current branch (attachment headers skipped, 4000 chars). Foreign threads return 404; `tmp_` ids still return "Anonymous chat".
+- `GET /api/threads/:id/export?format=markdown|pdf` exports the current branch (`src/server/export.ts`): `# title`, then `## You` / `## Assistant` with text parts and `_Attachment: name_` lines. Reasoning, tool, and data parts are omitted. PDF renders that Markdown with `react-markdown` + `remark-gfm` (raw HTML escaped) and prints it with the shared Chromium (`htmlToPdf`); 503 if Chromium is unavailable. Responses are `attachment` downloads with `Cache-Control: private, no-store`. 404 for foreign threads, 400 for `tmp_` ids or another format.
+
+## Sidebar row menu (client)
+
+`ThreadListItemMenu` is a Base UI `ContextMenu` around the whole row, opened by right-click or a 500 ms long press on touch; its popup reuses `MenuContent` (`components/ui/menu.tsx`) because assistant-ui's `ThreadListItemMorePrimitive` has no submenus. There is no menu button. On fine pointers the row's hover button pins/unpins, and while Shift is held it becomes a trash button that deletes without confirmation (`useShiftHeld` shares one window key listener across rows). Items: Pin/Unpin, Share (dialog around `SharePanel`), Move to (No project + every project), Open in New Tab, Rename, Regenerate Title, Export (Markdown/PDF), Archive, Permanently Delete (`DeleteChatDialog`). Every mutation goes through `aui.threadListItem` (`updateCustom`, `rename`, `archive`, `delete`) so runtime state stays consistent. Rename and the dialogs suppress the menu's focus return, which would otherwise blur the rename field. Regenerate and export show the row's running spinner while they work.
+
+- The adapter maps `pinned` and `projectId` into `custom`; `updateCustom` PATCHes both (undefined fields drop out, `tmp_` ids are skipped). A chat created in this session has no `custom` yet and counts as belonging to the project that was active.
+- `useThreadListGroups` puts pinned chats in a leading "Pinned" group, then Today / Yesterday / Last 7 Days / Older. Labels and rows render as flat keyed siblings, so a chat changing groups keeps its DOM node and state. Entry animations (`rise-in`, label `fade-in`) drop their class after playing once, since moving a node restarts a CSS animation; `useFlip` slides only the rows and labels whose `offsetTop` changed, and `GlideHighlight` slides its card with a selected row that moved. With a project filter, a chat moved elsewhere leaves the list immediately.
+- `/?thread=<id>` deep-links a chat: `RuntimeProvider` uses it as `initialThreadId` ahead of the tab's saved selection, then removes it with `history.replaceState`. `preloadData` prefetches its messages.

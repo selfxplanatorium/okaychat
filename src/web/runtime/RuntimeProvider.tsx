@@ -235,6 +235,14 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const userId = useData((s) => s.me?.id);
   const selectionKey = selectedThreadKey(userId);
   const [initialThreadId] = useState(() => {
+    // "Open in New Tab" links carry the thread; it wins over this tab's saved selection once, then leaves the URL.
+    const url = new URL(location.href);
+    const linked = url.searchParams.get("thread");
+    if (linked !== null) {
+      url.searchParams.delete("thread");
+      history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+      if (linked && !isAnonymousChat(linked)) return linked;
+    }
     try {
       const saved = sessionStorage.getItem(selectionKey);
       return saved && !isAnonymousChat(saved) ? saved : undefined;

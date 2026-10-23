@@ -3,10 +3,10 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import {
   AuiIf,
-  ThreadListItemMorePrimitive,
   ThreadListItemPrimitive,
   ThreadListPrimitive,
   useAui,
@@ -14,17 +14,29 @@ import {
 } from "@assistant-ui/react";
 import {
   ArchiveIcon,
+  CheckIcon,
+  ChevronRightIcon,
+  DownloadIcon,
+  ExternalLinkIcon,
+  FileDownIcon,
+  FileTextIcon,
+  FolderInputIcon,
+  ListChecksIcon,
   Loader2Icon,
-  MoreHorizontalIcon,
-  PencilIcon,
+  PinIcon,
+  PinOffIcon,
   PlusIcon,
   SearchIcon,
-  TrashIcon,
+  ShareIcon,
+  SparklesIcon,
+  TextCursorIcon,
+  Trash2Icon,
+  XIcon,
 } from "lucide-react";
 import {
   forwardRef,
-  Fragment,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -32,8 +44,57 @@ import {
   type ComponentPropsWithoutRef,
   type CSSProperties,
   type FC,
+  type ReactElement,
+  type RefObject,
 } from "react";
 import { isAnonymousChat, useChatPrivacyStore } from "@/state/chat-privacy";
+import { getActiveModel, useData } from "@/state/data";
+import { api } from "@/lib/api";
+import { exportThread } from "@/lib/thread-export";
+import type { ThreadCustom } from "@/runtime/RuntimeProvider";
+import { SharePanel } from "@/components/share/ShareButton";
+import { DeleteChatDialog } from "@/components/chat/DeleteChatDialog";
+import { SelectionCheck, useSelectionKeys } from "@/components/ui/selection";
+import { batchError, runBatch } from "@/lib/selection";
+import { useThreadSelection } from "@/state/thread-selection";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { ContextMenu } from "@base-ui/react/context-menu";
+import {
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuSeparator,
+  MenuSubmenuRoot,
+  MenuSubmenuTrigger,
+  MenuTrigger,
+} from "@/components/ui/menu";
+
+// One document listener for every row's quick action, which swaps pin for delete while Shift is held.
+let shiftHeld = false;
+const shiftListeners = new Set<() => void>();
+const setShift = (held: boolean) => {
+  if (held === shiftHeld) return;
+  shiftHeld = held;
+  shiftListeners.forEach((listener) => listener());
+};
+const onShiftKey = (event: KeyboardEvent) => setShift(event.shiftKey);
+const onShiftBlur = () => setShift(false);
+const subscribeShift = (listener: () => void) => {
+  if (shiftListeners.size === 0) {
+    window.addEventListener("keydown", onShiftKey);
+    window.addEventListener("keyup", onShiftKey);
+    window.addEventListener("blur", onShiftBlur);
+  }
+  shiftListeners.add(listener);
+  return () => {
+    shiftListeners.delete(listener);
+    if (shiftListeners.size > 0) return;
+    window.removeEventListener("keydown", onShiftKey);
+    window.removeEventListener("keyup", onShiftKey);
+    window.removeEventListener("blur", onShiftBlur);
+  };
+};
+const useShiftHeld = () => useSyncExternalStore(subscribeShift, () => shiftHeld, () => false);
 
 export const ThreadList: FC = () => (
   <ThreadListRoot>
@@ -111,10 +172,12 @@ const dateGroupLabel = (
   date: Date | undefined,
   startOfToday: number,
   startOfYesterday: number,
+  startOfLastWeek: number,
 ): string => {
   if (!date || date.getTime() >= startOfToday) return "Today";
   if (date.getTime() >= startOfYesterday) return "Yesterday";
-  return "Earlier";
+  if (date.getTime() >= startOfLastWeek) return "Last 7 Days";
+  return "Older";
 };
 
 const startOfLocalDay = (date: Date) =>
@@ -154,14 +217,17 @@ const useStartOfToday = () =>
 export type ThreadListGroup = { label: string; indices: number[] };
 
 /**
- * Filters the thread list by title and buckets the matches by last activity
- * (Today, Yesterday, Earlier). `groups` is null when no thread carries a date
- * or while the local day start is unknown during server render and hydration,
- * in which case `filteredIndices` keeps the runtime order.
+ * Filters the thread list by title and buckets the matches: pinned chats
+ * first, then by last activity (Today, Yesterday, Last 7 Days, Older). `groups` is null
+ * when no thread carries a date or while the local day start is unknown
+ * during server render and hydration, in which case `filteredIndices` keeps
+ * the runtime order. With a project filter, chats moved out of that project
+ * drop out until the next reload would omit them anyway.
  */
 export const useThreadListGroups = (searchQuery = "") => {
   const threadIds = useAuiState((s) => s.threads.threadIds);
   const threadItems = useAuiState((s) => s.threads.threadItems);
+  const activeProject = useData((s) => s.activeProject);
 
   const query = searchQuery.trim().toLowerCase();
   const startOfToday = useStartOfToday();
@@ -169,16 +235,22 @@ export const useThreadListGroups = (searchQuery = "") => {
   return useMemo(() => {
     const itemsById = new Map(threadItems.map((item) => [item.id, item]));
     const dates = threadIds.map((id) => itemsById.get(id)?.lastMessageAt);
+    const custom = (id: string) =>
+      itemsById.get(id)?.custom as Partial<ThreadCustom> | undefined;
     const filteredIndices = threadIds
       .map((id, index) => ({ id, index }))
-      .filter(
-        ({ id }) =>
+      .filter(({ id }) => {
+        const projectId = custom(id)?.projectId;
+        return (
           !isAnonymousChat(itemsById.get(id)?.remoteId) &&
-          (!query || (itemsById.get(id)?.title || "New chat")
-            .toLowerCase()
-            .includes(query)),
-      )
+          // A chat created here has no custom metadata yet and belongs to this project.
+          (!activeProject || projectId === undefined || projectId === activeProject) &&
+          (!query ||
+            (itemsById.get(id)?.title || "New chat").toLowerCase().includes(query))
+        );
+      })
       .map(({ index }) => index);
+    const pinned = filteredIndices.filter((index) => custom(threadIds[index]!)?.pinned);
     if (
       startOfToday === undefined ||
       !filteredIndices.some((index) => dates[index])
@@ -186,19 +258,27 @@ export const useThreadListGroups = (searchQuery = "") => {
       return { threadIds, filteredIndices, groups: null };
     }
 
+    const lastWeek = new Date(startOfToday);
+    lastWeek.setDate(lastWeek.getDate() - 7);
+    const startOfLastWeek = lastWeek.getTime();
     const yesterday = new Date(startOfToday);
     yesterday.setDate(yesterday.getDate() - 1);
     const startOfYesterday = yesterday.getTime();
     const time = (index: number) =>
       dates[index]?.getTime() ?? Number.MAX_SAFE_INTEGER;
-    const sorted = [...filteredIndices].sort((a, b) => time(b) - time(a));
+    const sorted = filteredIndices
+      .filter((index) => !pinned.includes(index))
+      .sort((a, b) => time(b) - time(a));
 
-    const result: ThreadListGroup[] = [];
+    const result: ThreadListGroup[] = pinned.length
+      ? [{ label: "Pinned", indices: [...pinned].sort((a, b) => time(b) - time(a)) }]
+      : [];
     for (const index of sorted) {
       const label = dateGroupLabel(
         dates[index],
         startOfToday,
         startOfYesterday,
+        startOfLastWeek,
       );
       const lastGroup = result[result.length - 1];
       if (lastGroup?.label === label) {
@@ -208,21 +288,74 @@ export const useThreadListGroups = (searchQuery = "") => {
       }
     }
     return { threadIds, filteredIndices, groups: result };
-  }, [threadIds, threadItems, query, startOfToday]);
+  }, [threadIds, threadItems, activeProject, query, startOfToday]);
 };
 
-/** Rows rise in with a short stagger; the delay is capped so long lists start fast. */
-const ThreadListItemRow: FC<{ index: number }> = ({ index }) => (
-  <div
-    className="stagger animate-rise-in"
-    style={{ "--i": Math.min(index, 7) } as CSSProperties}
-  >
-    <ThreadListPrimitive.ItemByIndex
-      index={index}
-      components={{ ThreadListItem }}
-    />
-  </div>
-);
+/**
+ * Rows rise in with a short stagger when they mount; the delay is capped so long lists start fast.
+ * The class is dropped once it has played, because moving the node (pinning) would restart it.
+ */
+const ThreadListItemRow: FC<{ index: number; flipKey: string }> = ({ index, flipKey }) => {
+  const [entering, setEntering] = useState(true);
+  return (
+    <div
+      data-flip={flipKey}
+      className={cn("stagger", entering && "animate-rise-in")}
+      style={{ "--i": Math.min(index, 7) } as CSSProperties}
+      onAnimationEnd={(event) => event.target === event.currentTarget && setEntering(false)}
+    >
+      <ThreadListPrimitive.ItemByIndex
+        index={index}
+        components={{ ThreadListItem }}
+      />
+    </div>
+  );
+};
+
+const ThreadListGroupLabel: FC<{ label: string }> = ({ label }) => {
+  const [entering, setEntering] = useState(true);
+  return (
+    <div
+      data-flip={`group:${label}`}
+      data-slot="aui_thread-list-group-label"
+      className={cn("text-muted-foreground px-2.5 pt-3 pb-1 text-xs font-medium", entering && "animate-fade-in")}
+      onAnimationEnd={(event) => event.target === event.currentTarget && setEntering(false)}
+    >
+      {label}
+    </div>
+  );
+};
+
+/**
+ * Slides rows and labels whose layout position changed since the last render from their old
+ * place to the new one; anything that stayed put is left alone.
+ */
+const useFlip = (scope: RefObject<HTMLElement | null>, deps: unknown[]) => {
+  const positions = useRef(new Map<string, number>());
+  useLayoutEffect(() => {
+    const host = scope.current;
+    if (!host) return;
+    const next = new Map<string, number>();
+    for (const element of host.querySelectorAll<HTMLElement>(":scope > [data-flip]")) {
+      const key = element.dataset.flip!;
+      const top = element.offsetTop;
+      next.set(key, top);
+      const before = positions.current.get(key);
+      if (before === undefined || before === top) continue;
+      element.style.transition = "none";
+      element.style.transform = `translateY(${before - top}px)`;
+      void element.offsetHeight;
+      element.style.transition = "transform var(--motion-slow) var(--ease-out-expo)";
+      element.style.transform = "";
+      element.addEventListener(
+        "transitionend",
+        (event) => event.target === element && (element.style.transition = ""),
+        { once: true },
+      );
+    }
+    positions.current = next;
+  }, deps);
+};
 
 const ThreadListItemGroups: FC<{ searchQuery?: string }> = ({
   searchQuery = "",
@@ -230,6 +363,15 @@ const ThreadListItemGroups: FC<{ searchQuery?: string }> = ({
   const { threadIds, filteredIndices, groups } =
     useThreadListGroups(searchQuery);
   const query = searchQuery.trim();
+  const scope = useRef<HTMLDivElement>(null);
+  useFlip(scope, [groups, filteredIndices]);
+
+  // Selection follows what is on screen: Shift ranges and Select all use this order.
+  const order = useMemo(
+    () => (groups ? groups.flatMap((g) => g.indices) : filteredIndices).map((index) => threadIds[index]!),
+    [groups, filteredIndices, threadIds],
+  );
+  useEffect(() => useThreadSelection.getState().setOrder(order), [order]);
 
   // Message matches render below, so an empty title match is not a dead end.
   if (query && filteredIndices.length === 0) {
@@ -243,25 +385,21 @@ const ThreadListItemGroups: FC<{ searchQuery?: string }> = ({
     );
   }
 
-  if (!groups) {
-    return filteredIndices.map((index) => (
-      <ThreadListItemRow key={threadIds[index]} index={index} />
-    ));
-  }
-
-  return groups.map((group) => (
-    <Fragment key={group.label}>
-      <div
-        data-slot="aui_thread-list-group-label"
-        className="text-muted-foreground animate-fade-in px-2.5 pt-3 pb-1 text-xs font-medium"
-      >
-        {group.label}
-      </div>
-      {group.indices.map((index) => (
-        <ThreadListItemRow key={threadIds[index]} index={index} />
-      ))}
-    </Fragment>
-  ));
+  // Labels and rows are flat siblings, so a chat changing groups moves its node instead of remounting.
+  return (
+    <div ref={scope} className="contents">
+      {groups
+        ? groups.flatMap((group) => [
+            <ThreadListGroupLabel key={`group:${group.label}`} label={group.label} />,
+            ...group.indices.map((index) => (
+              <ThreadListItemRow key={threadIds[index]} flipKey={threadIds[index]!} index={index} />
+            )),
+          ])
+        : filteredIndices.map((index) => (
+            <ThreadListItemRow key={threadIds[index]} flipKey={threadIds[index]!} index={index} />
+          ))}
+    </div>
+  );
 };
 
 export const ThreadListNew = forwardRef<
@@ -332,10 +470,22 @@ const ThreadListSkeleton: FC = () => {
 };
 
 export const ThreadListItem: FC = () => {
+  const id = useAuiState((s) => s.threadListItem.id);
+  const selecting = useThreadSelection((s) => s.active);
+  const selected = useThreadSelection((s) => s.active && s.ids.has(id));
   const isRunning = useAuiState((s) => s.threadListItem.isRunning);
+  // Regenerating a title or building an export reuses the running spinner, since the menu has closed.
+  const [busy, setBusy] = useState(false);
+  const title = useAuiState((s) => s.threadListItem.title) || "New chat";
   const [isRenaming, setIsRenaming] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const selectRef = useRef<HTMLButtonElement>(null);
   const restoreFocusRef = useRef(false);
+
+  // Entering selection from this row's menu keeps keyboard focus on the row.
+  useEffect(() => {
+    if (selecting && useThreadSelection.getState().anchor === id) selectRef.current?.focus();
+  }, [selecting, id]);
 
   useEffect(() => {
     if (isRenaming || !restoreFocusRef.current) return;
@@ -343,13 +493,32 @@ export const ThreadListItem: FC = () => {
     triggerRef.current?.focus();
   }, [isRenaming]);
 
-  return (
+  const row = (
     <ThreadListItemPrimitive.Root
       data-slot="aui_thread-list-item"
       data-glide
-      className="group hover:bg-sidebar-row-hover focus-visible:bg-sidebar-row-hover data-active:depth-row-active has-focus-visible:bg-sidebar-row-hover has-data-[state=open]:bg-sidebar-row-hover active:bg-sidebar-row-hover relative flex h-8 pointer-coarse:h-11 items-center rounded-lg transition-[background-color,box-shadow] duration-(--motion-fast) ease-out-quart focus-visible:outline-none"
+      data-selected={selected || undefined}
+      className="group data-selected:bg-primary/10 hover:bg-sidebar-row-hover focus-visible:bg-sidebar-row-hover data-active:depth-row-active has-focus-visible:bg-sidebar-row-hover data-popup-open:bg-sidebar-row-hover active:bg-sidebar-row-hover relative flex h-8 pointer-coarse:h-11 pointer-coarse:select-none items-center rounded-lg transition-[background-color,box-shadow] duration-(--motion-fast) ease-out-quart focus-visible:outline-none"
     >
-      {isRenaming ? (
+      {selecting ? (
+        <button
+          ref={selectRef}
+          type="button"
+          role="checkbox"
+          aria-checked={selected}
+          data-slot="aui_thread-list-item-select"
+          // Shift+click extends the selection; without this it would also select the row text.
+          onMouseDown={(event) => event.shiftKey && event.preventDefault()}
+          onClick={(event) => useThreadSelection.getState().toggle(id, event.shiftKey)}
+          className="focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-md px-2.5 text-start text-sm outline-none focus-visible:ring-1"
+        >
+          <SelectionCheck checked={selected} />
+          {(isRunning || busy) && (
+            <Loader2Icon aria-hidden className="text-muted-foreground -ms-1 size-3.5 shrink-0 animate-spin" />
+          )}
+          <ThreadListItemTitle fallback="New chat" />
+        </button>
+      ) : isRenaming ? (
         <ThreadListItemRename
           onDone={(restoreFocus) => {
             restoreFocusRef.current = restoreFocus;
@@ -357,12 +526,12 @@ export const ThreadListItem: FC = () => {
           }}
         />
       ) : (
-        <ThreadListItemPrimitive.Trigger
+        <TooltipTrigger delay={800} render={<ThreadListItemPrimitive.Trigger
           ref={triggerRef}
           data-slot="aui_thread-list-item-trigger"
-          className="focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center rounded-md px-2.5 text-start text-sm outline-none group-hover:pe-9 group-has-focus-visible:pe-9 group-has-data-[state=open]:pe-9 group-data-active:pe-9 pointer-coarse:pe-11 focus-visible:ring-1"
-        >
-          {isRunning && (
+          className="focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center rounded-md px-2.5 text-start text-sm outline-none pointer-fine:group-hover:pe-9 pointer-fine:group-has-focus-visible:pe-9 focus-visible:ring-1"
+        />}>
+          {(isRunning || busy) && (
             <Loader2Icon
               aria-hidden
               data-slot="aui_thread-list-item-running"
@@ -371,10 +540,26 @@ export const ThreadListItem: FC = () => {
           )}
           <ThreadListItemTitle fallback="New chat" />
           {isRunning && <span className="sr-only">Running</span>}
-        </ThreadListItemPrimitive.Trigger>
+        </TooltipTrigger>
       )}
-      <ThreadListItemMore onRename={() => setIsRenaming(true)} />
+      {!selecting && !isRenaming && <ThreadListItemQuickAction />}
     </ThreadListItemPrimitive.Root>
+  );
+
+  return (
+    <Tooltip onOpenChange={(open, details) => {
+      if (!open) return;
+      const label = triggerRef.current?.querySelector<HTMLElement>("[data-slot=aui-thread-list-item-title-text]");
+      if (!label || label.scrollWidth <= label.clientWidth) details.cancel();
+    }}>
+    <ThreadListItemMenu
+      row={row}
+      disabled={selecting || isRenaming}
+      onRename={() => setIsRenaming(true)}
+      onBusy={setBusy}
+    />
+    <TooltipContent side="bottom" align="start">{title}</TooltipContent>
+    </Tooltip>
   );
 };
 
@@ -419,6 +604,7 @@ const ThreadListItemTitle: FC<{ fallback: string }> = ({ fallback }) => {
       )}
       <span
         key={current}
+        data-slot="aui-thread-list-item-title-text"
         className={cn("block truncate", outgoing !== null && "shell-title-in")}
       >
         {current}
@@ -493,54 +679,387 @@ const ThreadListItemRename: FC<{
   );
 };
 
-const ThreadListItemMore: FC<{ onRename: () => void }> = ({ onRename }) => {
+/**
+ * Desktop hover action: pin or unpin, or delete without confirmation while Shift is held.
+ * Touch devices open the row menu with a long press instead.
+ */
+const ThreadListItemQuickAction: FC = () => {
+  const aui = useAui();
+  const custom = useAuiState((s) => s.threadListItem.custom) as
+    | Partial<ThreadCustom>
+    | undefined;
+  const pinned = custom?.pinned === true;
+  const deleting = useShiftHeld();
+  const label = deleting ? "Delete chat" : pinned ? "Unpin chat" : "Pin chat";
+
   return (
-    <ThreadListItemMorePrimitive.Root sharedFocusGroup>
-      <ThreadListItemMorePrimitive.Trigger asChild>
+    <Button
+      variant="ghost"
+      size="icon"
+      data-slot="aui_thread-list-item-quick-action"
+      className={cn(
+        "absolute end-1.5 top-1/2 size-6 -translate-y-1/2 p-0 opacity-0 transition-[opacity,color,background-color] duration-(--motion-fast) ease-out-quart pointer-coarse:hidden group-hover:opacity-100 group-has-focus-visible:opacity-100",
+        deleting && "text-destructive hover:bg-destructive/10 hover:text-destructive",
+      )}
+      onClick={() =>
+        void Promise.resolve()
+          .then(() =>
+            deleting
+              ? aui.threadListItem.delete()
+              : aui.threadListItem.updateCustom({ ...custom, pinned: !pinned }),
+          )
+          .catch(() => {})
+      }
+    >
+      {deleting ? (
+        <Trash2Icon className="size-3.5" />
+      ) : pinned ? (
+        <PinOffIcon className="size-3.5" />
+      ) : (
+        <PinIcon className="size-3.5" />
+      )}
+      <span className="sr-only">{label}</span>
+    </Button>
+  );
+};
+
+/** Opens on right-click, or on long press for touch, anywhere on the row. */
+const ThreadListItemMenu: FC<{
+  row: ReactElement;
+  disabled: boolean;
+  onRename: () => void;
+  onBusy: (busy: boolean) => void;
+}> = ({ row, disabled, onRename, onBusy }) => {
+  const aui = useAui();
+  const remoteId = useAuiState((s) => s.threadListItem.remoteId);
+  const title = useAuiState((s) => s.threadListItem.title);
+  const custom = useAuiState((s) => s.threadListItem.custom) as
+    | Partial<ThreadCustom>
+    | undefined;
+  const projects = useData((s) => s.projects);
+  const activeProject = useData((s) => s.activeProject);
+  const [sharing, setSharing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  // Rename and the dialogs take focus themselves; returning it to the trigger would blur the rename field.
+  const keepFocusRef = useRef(false);
+
+  // A chat created in this session has no metadata yet; it lives in the project that was active then.
+  const projectId =
+    custom && "projectId" in custom ? (custom.projectId ?? null) : activeProject;
+  const pinned = custom?.pinned === true;
+  const update = (change: Partial<ThreadCustom>) =>
+    Promise.resolve()
+      .then(() => aui.threadListItem.updateCustom({ ...custom, ...change }))
+      .catch(() => {});
+
+  const busyWhile = async (label: string, task: () => Promise<void>) => {
+    onBusy(true);
+    try {
+      await task();
+    } catch (cause) {
+      window.alert(cause instanceof Error ? cause.message : `Could not ${label}.`);
+    } finally {
+      onBusy(false);
+    }
+  };
+
+  const regenerateTitle = () =>
+    busyWhile("regenerate the title", async () => {
+      const { title } = await api<{ title: string }>(`/threads/${remoteId}/title`, {
+        method: "POST",
+        json: { modelRef: getActiveModel(remoteId)?.ref },
+      });
+      // Through the runtime, so the row and the chat header update together.
+      if (title) await aui.threadListItem.rename(title);
+    });
+
+  const withFocus = (fn: () => void) => () => {
+    keepFocusRef.current = true;
+    fn();
+  };
+
+  return (
+    <>
+      <ContextMenu.Root disabled={disabled}>
+        <ContextMenu.Trigger render={row} />
+        <MenuContent
+          side="bottom"
+          align="start"
+          sideOffset={2}
+          data-slot="aui_thread-list-item-more-content"
+          className="max-w-[calc(100vw-1rem)] min-w-48"
+          finalFocus={() => {
+            const keep = keepFocusRef.current;
+            keepFocusRef.current = false;
+            return !keep;
+          }}
+        >
+          <MenuItem onClick={withFocus(() => useThreadSelection.getState().start(aui.threadListItem.getState().id))}>
+            <ListChecksIcon /> Select
+          </MenuItem>
+          <MenuSeparator />
+          <MenuItem onClick={() => void update({ pinned: !pinned })}>
+            {pinned ? <PinOffIcon /> : <PinIcon />}
+            {pinned ? "Unpin" : "Pin"}
+          </MenuItem>
+          <MenuItem disabled={!remoteId} onClick={withFocus(() => setSharing(true))}>
+            <ShareIcon /> Share
+          </MenuItem>
+          <MenuSubmenuRoot>
+            <MenuSubmenuTrigger>
+              <FolderInputIcon />
+              <span className="flex-1">Move to</span>
+              <ChevronRightIcon className="text-muted-foreground ms-auto" />
+            </MenuSubmenuTrigger>
+            <MenuContent side="right" align="start" className="max-h-[min(24rem,var(--available-height))] max-w-[calc(100vw-1rem)]">
+              {[{ id: null, name: "No project" }, ...projects].map((p) => (
+                <MenuItem
+                  key={p.id ?? ""}
+                  disabled={p.id === projectId}
+                  onClick={() => void update({ projectId: p.id })}
+                >
+                  <CheckIcon className={cn(p.id === projectId ? "opacity-100" : "opacity-0")} />
+                  <span className="min-w-0 truncate">{p.name}</span>
+                </MenuItem>
+              ))}
+            </MenuContent>
+          </MenuSubmenuRoot>
+          <MenuItem
+            disabled={!remoteId}
+            onClick={() =>
+              window.open(`/?thread=${encodeURIComponent(remoteId!)}`, "_blank", "noopener")
+            }
+          >
+            <ExternalLinkIcon /> Open in New Tab
+          </MenuItem>
+          <MenuSeparator />
+          <MenuItem onClick={withFocus(onRename)}>
+            <TextCursorIcon /> Rename
+          </MenuItem>
+          <MenuItem disabled={!remoteId} onClick={() => void regenerateTitle()}>
+            <SparklesIcon /> Regenerate Title
+          </MenuItem>
+          <MenuSubmenuRoot>
+            <MenuSubmenuTrigger disabled={!remoteId}>
+              <DownloadIcon />
+              <span className="flex-1">Export</span>
+              <ChevronRightIcon className="text-muted-foreground ms-auto" />
+            </MenuSubmenuTrigger>
+            <MenuContent side="right" align="start">
+              <MenuItem onClick={() => void busyWhile("export the chat", () => exportThread(remoteId!, "markdown", title))}>
+                <FileTextIcon /> Markdown
+              </MenuItem>
+              <MenuItem onClick={() => void busyWhile("export the chat", () => exportThread(remoteId!, "pdf", title))}>
+                <FileDownIcon /> PDF
+              </MenuItem>
+            </MenuContent>
+          </MenuSubmenuRoot>
+          <MenuSeparator />
+          <MenuItem onClick={() => void Promise.resolve().then(() => aui.threadListItem.archive()).catch(() => {})}>
+            <ArchiveIcon /> Archive
+          </MenuItem>
+          <MenuItem destructive onClick={withFocus(() => setConfirmDelete(true))}>
+            <Trash2Icon /> Permanently Delete
+          </MenuItem>
+        </MenuContent>
+      </ContextMenu.Root>
+
+      {remoteId && (
+        <Dialog open={sharing} onOpenChange={setSharing}>
+          <DialogContent className="gap-3 sm:max-w-sm">
+            <DialogTitle className="truncate pe-6 text-base">{title || "New chat"}</DialogTitle>
+            <div>
+              <SharePanel threadId={remoteId} title={null} />
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      <DeleteChatDialog
+        open={confirmDelete}
+        title={title}
+        onOpenChange={setConfirmDelete}
+        onConfirm={async () => {
+          await aui.threadListItem.delete();
+        }}
+      />
+    </>
+  );
+};
+
+/**
+ * Actions for the chats selected in the sidebar. Pin and Move keep the selection for a follow-up;
+ * Archive and Delete leave selection mode once every chat went through. Chats that failed stay
+ * selected with the error shown.
+ */
+export const ThreadSelectionBar: FC<{ scope: RefObject<HTMLElement | null> }> = ({ scope }) => {
+  const aui = useAui();
+  const active = useThreadSelection((s) => s.active);
+  const ids = useThreadSelection((s) => s.ids);
+  const order = useThreadSelection((s) => s.order);
+  const threadItems = useAuiState((s) => s.threads.threadItems);
+  const projects = useData((s) => s.projects);
+  const activeProject = useData((s) => s.activeProject);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  // What the delete dialog names, frozen on open so its closing fade does not show the emptied selection.
+  const [deleting, setDeleting] = useState<{ count: number; title: string | null | undefined }>({ count: 0, title: null });
+  const { selectAll, clear, exit } = useThreadSelection.getState();
+
+  useSelectionKeys(active, { onExit: exit, onSelectAll: selectAll, scope });
+  useEffect(() => {
+    if (!active) setError(null);
+  }, [active]);
+
+  const count = ids.size;
+  const allSelected = order.length > 0 && order.every((id) => ids.has(id));
+  const custom = (id: string) =>
+    threadItems.find((item) => item.id === id)?.custom as Partial<ThreadCustom> | undefined;
+  const allPinned = count > 0 && [...ids].every((id) => custom(id)?.pinned === true);
+  // Same fallback as a row's menu: a chat created this session belongs to the project active then.
+  const projectOf = (id: string) => {
+    const c = custom(id);
+    return c && "projectId" in c ? (c.projectId ?? null) : activeProject;
+  };
+  const sharedProject = count > 0 && new Set([...ids].map(projectOf)).size === 1 ? projectOf([...ids][0]!) : undefined;
+
+  /** Runs `task` per selected chat; throws the summary when some failed, so callers can show it. */
+  const apply = async (verb: string, task: (id: string) => unknown, leave: boolean) => {
+    const selection = [...useThreadSelection.getState().ids];
+    setBusy(true);
+    setError(null);
+    try {
+      const { failed, error } = await runBatch(selection, task);
+      if (failed.length) {
+        useThreadSelection.setState({ ids: new Set(failed) });
+        throw new Error(batchError(failed.length, selection.length, verb, error));
+      }
+      if (leave) exit();
+    } finally {
+      setBusy(false);
+    }
+  };
+  const run = (verb: string, task: (id: string) => unknown, leave = false) =>
+    void apply(verb, task, leave).catch((cause: Error) => setError(cause.message));
+
+  const item = (id: string) => aui.threads.item({ id });
+  const actionClass =
+    "hover:bg-sidebar-row-hover focus-visible:ring-ring/50 data-popup-open:bg-sidebar-row-hover flex min-w-0 flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-[11px] leading-none outline-none transition-colors duration-(--motion-fast) ease-out-quart focus-visible:ring-1 disabled:pointer-events-none disabled:opacity-40 pointer-coarse:py-2.5 [&_svg]:size-4";
+
+  return (
+    <>
+    {active && (
+    <div
+      role="toolbar"
+      aria-label="Selected chats"
+      data-slot="aui_thread-selection-bar"
+      className="border-sidebar-border animate-rise-in flex shrink-0 flex-col gap-1 border-t px-2 pt-1.5 pb-1"
+    >
+      <div className="flex items-center gap-1">
+        <span className="min-w-0 flex-1 truncate px-1 text-sm font-medium tabular-nums" aria-live="polite">
+          {count === 0 ? "Select chats" : count === 1 ? "1 chat selected" : `${count} chats selected`}
+        </span>
+        {busy && <Loader2Icon aria-label="Working" className="text-muted-foreground size-4 shrink-0 animate-spin" />}
         <Button
           variant="ghost"
-          size="icon"
-          data-slot="aui_thread-list-item-more"
-          className="data-[state=open]:bg-accent absolute end-1.5 top-1/2 size-6 -translate-y-1/2 p-0 opacity-0 transition-[opacity,color,background-color] duration-(--motion-fast) ease-out-quart pointer-coarse:end-0.5 pointer-coarse:size-10 pointer-coarse:opacity-60 group-hover:opacity-100 group-has-focus-visible:opacity-100 group-data-active:opacity-100 data-[state=open]:opacity-100"
+          size="sm"
+          disabled={order.length === 0}
+          onClick={allSelected ? clear : selectAll}
+          className="text-sidebar-muted-foreground hover:bg-sidebar-row-hover px-2 pointer-coarse:h-10"
         >
-          <MoreHorizontalIcon className="size-3.5" />
-          <span className="sr-only">More options</span>
+          {allSelected ? "Deselect all" : "Select all"}
         </Button>
-      </ThreadListItemMorePrimitive.Trigger>
-      <ThreadListItemMorePrimitive.Content
-        side="right"
-        align="start"
-        sideOffset={6}
-        data-slot="aui_thread-list-item-more-content"
-        className="bg-popover text-popover-foreground data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:animate-out data-[side=bottom]:slide-in-from-top-1 data-[side=left]:slide-in-from-right-1 data-[side=right]:slide-in-from-left-1 data-[side=top]:slide-in-from-bottom-1 duration-(--motion-base) ease-out-expo data-[state=closed]:duration-(--motion-fast) data-[state=closed]:ease-in-quart z-50 min-w-32 overflow-hidden rounded-xl border p-1.5"
-      >
-        <ThreadListItemMorePrimitive.Item
-          data-slot="aui_thread-list-item-more-item"
-          className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none transition-colors duration-(--motion-instant) ease-out-quart"
-          onSelect={onRename}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Done selecting"
+                onClick={exit}
+                className="hover:bg-sidebar-row-hover pointer-coarse:size-10"
+              />
+            }
+          >
+            <XIcon />
+          </TooltipTrigger>
+          <TooltipContent side="top">Done (Esc)</TooltipContent>
+        </Tooltip>
+      </div>
+      {error && (
+        <p role="alert" className="text-destructive px-1 text-xs">
+          {error}
+        </p>
+      )}
+      <div className="grid grid-cols-4 gap-0.5">
+        <button
+          type="button"
+          disabled={busy || count === 0}
+          className={actionClass}
+          onClick={() =>
+            run(allPinned ? "unpin" : "pin", (id) => item(id).updateCustom({ ...custom(id), pinned: !allPinned }))
+          }
         >
-          <PencilIcon className="size-4" />
-          Rename
-        </ThreadListItemMorePrimitive.Item>
-        <ThreadListItemPrimitive.Archive asChild>
-          <ThreadListItemMorePrimitive.Item
-            data-slot="aui_thread-list-item-more-item"
-            className="hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none transition-colors duration-(--motion-instant) ease-out-quart"
+          {allPinned ? <PinOffIcon /> : <PinIcon />}
+          {allPinned ? "Unpin" : "Pin"}
+        </button>
+        <Menu>
+          <MenuTrigger disabled={busy || count === 0} className={actionClass}>
+            <FolderInputIcon /> Move
+          </MenuTrigger>
+          <MenuContent
+            side="top"
+            align="center"
+            className="max-h-[min(24rem,var(--available-height))] max-w-[calc(100vw-1rem)] min-w-48"
           >
-            <ArchiveIcon className="size-4" />
-            Archive
-          </ThreadListItemMorePrimitive.Item>
-        </ThreadListItemPrimitive.Archive>
-        <ThreadListItemPrimitive.Delete asChild>
-          <ThreadListItemMorePrimitive.Item
-            data-slot="aui_thread-list-item-more-item"
-            className="text-destructive hover:bg-destructive/10 hover:text-destructive focus:bg-destructive/10 focus:text-destructive flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none transition-colors duration-(--motion-instant) ease-out-quart"
-          >
-            <TrashIcon className="size-4" />
-            Delete
-          </ThreadListItemMorePrimitive.Item>
-        </ThreadListItemPrimitive.Delete>
-      </ThreadListItemMorePrimitive.Content>
-    </ThreadListItemMorePrimitive.Root>
+            {[{ id: null, name: "No project" }, ...projects].map((p) => (
+              <MenuItem
+                key={p.id ?? ""}
+                disabled={p.id === sharedProject}
+                onClick={() => run("move", (id) => item(id).updateCustom({ ...custom(id), projectId: p.id }))}
+              >
+                <CheckIcon className={cn(p.id === sharedProject ? "opacity-100" : "opacity-0")} />
+                <span className="min-w-0 truncate">{p.name}</span>
+              </MenuItem>
+            ))}
+          </MenuContent>
+        </Menu>
+        <button
+          type="button"
+          disabled={busy || count === 0}
+          className={actionClass}
+          onClick={() => run("archive", (id) => item(id).archive(), true)}
+        >
+          <ArchiveIcon /> Archive
+        </button>
+        <button
+          type="button"
+          disabled={busy || count === 0}
+          className={cn(actionClass, "text-destructive hover:bg-destructive/10")}
+          onClick={() => {
+            setDeleting({ count, title: threadItems.find((t) => ids.has(t.id))?.title });
+            setConfirmDelete(true);
+          }}
+        >
+          <Trash2Icon /> Delete
+        </button>
+      </div>
+    </div>
+    )}
+    {/* Outside the bar, which unmounts when selection ends, so the dialog can fade out. */}
+    <DeleteChatDialog
+      open={confirmDelete}
+      title={deleting.title}
+      count={deleting.count}
+      onOpenChange={setConfirmDelete}
+      onConfirm={() =>
+        apply("delete", (id) => item(id).delete(), true).catch((cause: unknown) => {
+          setDeleting((prev) => ({ ...prev, count: useThreadSelection.getState().ids.size }));
+          throw cause;
+        })
+      }
+    />
+    </>
   );
 };
