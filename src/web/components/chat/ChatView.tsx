@@ -65,6 +65,15 @@ function AfterMessage() {
   return <CompactionMarker />;
 }
 
+function BeforeMessages() {
+  return (
+    <>
+      <PendingBranchRun />
+      <BranchedFromBanner />
+    </>
+  );
+}
+
 export function ChatView() {
-  return <Thread components={{ Welcome, ComposerToolbar, MessageMeta, AfterMessage }} />;
+  return <Thread components={{ Welcome, ComposerToolbar, MessageMeta, AfterMessage, BeforeMessages, BranchAction: BranchMenu }} />;
 }

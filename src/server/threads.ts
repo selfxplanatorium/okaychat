@@ -16,9 +16,17 @@ interface ThreadRow {
   project_id: string | null;
   compaction_json: string | null;
   memory_disabled: number;
+  pinned: number;
+  branched_from: string | null;
+  /** Joined from the source thread; null once it is deleted. */
+  branched_title: string | null;
+  branched_exists: number | null;
   created_at: number;
   updated_at: number;
 }
+
+const SELECT_THREADS = `SELECT t.*, o.title AS branched_title, o.id IS NOT NULL AS branched_exists FROM threads t
+  LEFT JOIN threads o ON o.id = t.branched_from AND o.user_id = t.user_id`;
 
 const toSummary = (r: ThreadRow): ThreadSummary => ({
   id: r.id,
@@ -27,24 +35,25 @@ const toSummary = (r: ThreadRow): ThreadSummary => ({
   modelRef: r.model_ref,
   projectId: r.project_id,
   memoryDisabled: !!r.memory_disabled,
+  pinned: !!r.pinned,
+  branchedFrom: r.branched_from && r.branched_exists ? { id: r.branched_from, title: r.branched_title } : null,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
 
-/** `projectId` undefined lists every thread; null lists threads outside any project. */
-export function listThreads(userId: string, projectId?: string | null): ThreadSummary[] {
-  const rows = (
-    projectId === undefined
-      ? db.prepare("SELECT * FROM threads WHERE user_id = ? ORDER BY updated_at DESC LIMIT 500").all(userId)
-      : projectId === null
-        ? db.prepare("SELECT * FROM threads WHERE user_id = ? AND project_id IS NULL ORDER BY updated_at DESC LIMIT 500").all(userId)
-        : db.prepare("SELECT * FROM threads WHERE user_id = ? AND project_id = ? ORDER BY updated_at DESC LIMIT 500").all(userId, projectId)
-  ) as unknown as ThreadRow[];
+/** `projectId` undefined lists every thread; null lists threads outside any project. `status` undefined lists both. */
+export function listThreads(userId: string, projectId?: string | null, status?: "regular" | "archived"): ThreadSummary[] {
+  const where = ["t.user_id = ?"];
+  const values: string[] = [userId];
+  if (projectId === null) where.push("t.project_id IS NULL");
+  else if (projectId !== undefined) where.push("t.project_id = ?"), values.push(projectId);
+  if (status !== undefined) where.push("t.status = ?"), values.push(status);
+  const rows = db.prepare(`${SELECT_THREADS} WHERE ${where.join(" AND ")} ORDER BY t.updated_at DESC LIMIT 500`).all(...values) as unknown as ThreadRow[];
   return rows.map(toSummary);
 }
 
 export function getThread(userId: string, id: string): (ThreadSummary & { compaction: CompactionState | null }) | null {
-  const row = db.prepare("SELECT * FROM threads WHERE user_id = ? AND id = ?").get(userId, id) as ThreadRow | undefined;
+  const row = db.prepare(`${SELECT_THREADS} WHERE t.user_id = ? AND t.id = ?`).get(userId, id) as unknown as ThreadRow | undefined;
   if (!row) return null;
   return { ...toSummary(row), compaction: row.compaction_json ? (JSON.parse(row.compaction_json) as CompactionState) : null };
 }
@@ -91,6 +100,37 @@ export function setCompaction(userId: string, id: string, state: CompactionState
 
 export function deleteThread(userId: string, id: string) {
   db.prepare("DELETE FROM threads WHERE user_id = ? AND id = ?").run(userId, id);
+}
+
+/**
+ * Forks a chat at `messageId`: the new thread gets that message and its ancestors (ids kept, since message
+ * keys are per thread) and the source's settings. Compaction carries over only when its boundary is inside
+ * the copied branch.
+ */
+export function branchThread(userId: string, sourceId: string, messageId: string, id: string, modelRef?: string): ThreadSummary {
+  const source = getThread(userId, sourceId);
+  if (!source) throw new HTTPException(404, { message: "Thread not found" });
+  const rows = listMessages(userId, sourceId);
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const chain: MessageRow[] = [];
+  for (let row = byId.get(messageId); row; row = row.parent_id ? byId.get(row.parent_id) : undefined) chain.unshift(row);
+  if (!chain.length) throw new HTTPException(404, { message: "Message not found" });
+  const compaction = source.compaction && chain.some((m) => m.id === source.compaction!.boundaryMessageId) ? source.compaction : null;
+  const now = Date.now();
+  tx(() => {
+    db.prepare(
+      `INSERT INTO threads (id, user_id, title, model_ref, project_id, compaction_json, memory_disabled, branched_from, memory_cursor, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      // The copied messages belong to the source chat's memory review; the fork only reviews what follows.
+    ).run(id, userId, source.title, modelRef ?? source.modelRef, source.projectId, compaction ? JSON.stringify(compaction) : null, Number(source.memoryDisabled), sourceId, messageId, now, now);
+    const insert = db.prepare("INSERT INTO messages (id, thread_id, parent_id, format, content, bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    const copies = chain.map((m) => ({ m, json: JSON.stringify(m.content) }));
+    // A fork stores its own copy of the conversation.
+    assertStorage(userId, copies.reduce((sum, { json }) => sum + messageBytes(json), 0));
+    // Distinct timestamps keep the copied order, which defines the current branch.
+    copies.forEach(({ m, json }, i) => insert.run(m.id, id, m.parent_id, m.format, json, messageBytes(json), now - chain.length + i));
+  });
+  return getThread(userId, id)!;
 }
 
 export interface MessageRow {

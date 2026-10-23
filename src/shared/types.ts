@@ -146,6 +146,9 @@ export interface ThreadSummary {
   modelRef: string | null;
   projectId: string | null;
   memoryDisabled: boolean;
+  pinned: boolean;
+  /** The chat this one was forked from, while that chat still exists. */
+  branchedFrom: { id: string; title: string | null } | null;
   createdAt: number;
   updatedAt: number;
 }

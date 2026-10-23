@@ -1,14 +1,17 @@
 import { useAuiState } from "@assistant-ui/react";
 import { useEffect } from "react";
 import { create } from "zustand";
-import type { AssistantMetadata, CompactionState, UsageRow } from "@shared/types";
+import type { AssistantMetadata, CompactionState, ThreadSummary, UsageRow } from "@shared/types";
+import type { ModelInfo } from "@shared/types";
 import { api } from "@/lib/api";
+import { useActiveModel } from "./data";
 import { isAnonymousChat } from "./chat-privacy";
 
 interface ThreadMeta {
   memoryDisabled: boolean;
   compaction: CompactionState | null;
   usage: UsageRow | null;
+  branchedFrom: ThreadSummary["branchedFrom"];
 }
 
 interface ThreadMetaState {
@@ -29,8 +32,8 @@ export const useThreadMetaStore = create<ThreadMetaState>((set) => ({
       pending = new Promise<void>((resolve) => setTimeout(resolve, 16)).then(async () => {
         batched.delete(threadId);
         try {
-          const t = await api<{ compaction: CompactionState | null; usage: UsageRow; memoryDisabled: boolean }>(`/threads/${threadId}`);
-          set((s) => ({ byId: { ...s.byId, [threadId]: { compaction: t.compaction, usage: t.usage, memoryDisabled: t.memoryDisabled } } }));
+          const t = await api<ThreadSummary & { compaction: CompactionState | null; usage: UsageRow }>(`/threads/${threadId}`);
+          set((s) => ({ byId: { ...s.byId, [threadId]: { compaction: t.compaction, usage: t.usage, memoryDisabled: t.memoryDisabled, branchedFrom: t.branchedFrom } } }));
         } catch {
           // Thread not created yet.
         }

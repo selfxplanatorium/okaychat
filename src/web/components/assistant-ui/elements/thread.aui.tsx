@@ -108,6 +108,10 @@ export type ThreadComponents = {
   MessageMeta?: ComponentType | undefined;
   /** okaychat: rendered after every message (compaction markers). */
   AfterMessage?: ComponentType | undefined;
+  /** okaychat: rendered above the first message (fork origin). */
+  BeforeMessages?: ComponentType | undefined;
+  /** okaychat: branch action in both message action bars. */
+  BranchAction?: ComponentType | undefined;
 };
 
 const messageGroupBy = groupPartByType({
@@ -305,6 +309,7 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
           </AuiIf>
 
           <ThreadLoadEarlier />
+          {BeforeMessages && <BeforeMessages />}
 
           <MessageBaselineContext.Provider value={baseline}>
             <div
@@ -899,14 +904,21 @@ const AssistantMessage: FC = () => {
 };
 
 const AssistantActionBar: FC = () => {
+  const { BranchAction } = useContext(ThreadComponentsContext);
   return (
     <ActionBarPrimitive.Root
       hideWhenRunning
       autohide="not-last"
       // Mounted on hover: a short delay keeps a passing cursor from flashing it.
-      className="aui-assistant-action-bar-root text-muted-foreground animate-fade-in col-start-3 row-start-2 -ms-1 flex gap-1 [animation-delay:80ms]"
+      className="aui-assistant-action-bar-root text-muted-foreground animate-fade-in col-start-3 row-start-2 -ms-1 flex shrink-0 gap-1 [animation-delay:80ms]"
     >
       <CopyActionButton />
+      {BranchAction && <BranchAction />}
+      <ActionBarPrimitive.Reload asChild>
+        <TooltipIconButton tooltip="Retry">
+          <RefreshCwIcon />
+        </TooltipIconButton>
+      </ActionBarPrimitive.Reload>
       <AuiIf condition={(s) => s.thread.capabilities.feedback}>
         <ActionBarPrimitive.FeedbackPositive asChild>
           <TooltipIconButton
@@ -941,11 +953,6 @@ const AssistantActionBar: FC = () => {
           </ActionBarPrimitive.StopSpeaking>
         </AuiIf>
       </AuiIf>
-      <ActionBarPrimitive.Reload asChild>
-        <TooltipIconButton tooltip="Refresh">
-          <RefreshCwIcon />
-        </TooltipIconButton>
-      </ActionBarPrimitive.Reload>
       <ActionBarMorePrimitive.Root>
         <ActionBarMorePrimitive.Trigger asChild>
           <TooltipIconButton
@@ -1023,31 +1030,49 @@ const UserMessage: FC = () => {
             components={{ File: UserFilePart, Image: UserImagePart }}
           />
         </div>
-        <div className="aui-user-action-bar-wrapper absolute start-0 top-1/2 -translate-x-full -translate-y-1/2 pe-2 peer-empty:hidden rtl:translate-x-full">
-          <UserActionBar />
-        </div>
       </div>
 
-      <BranchPicker
-        data-slot="aui_user-branch-picker"
-        className="col-span-full col-start-1 -me-1 justify-end"
-      />
+      <div
+        data-slot="aui_user-message-footer"
+        // Fixed height: the bar mounts on hover and must not push the next message.
+        className="col-span-full col-start-1 -mt-1 -me-1 flex min-h-7 items-center justify-end"
+      >
+        <BranchPicker data-slot="aui_user-branch-picker" />
+        <UserActionBar />
+      </div>
     </MessagePrimitive.Root>
   );
 };
 
+/** Answers this user message again in the same chat; the old answer stays as a sibling branch. */
+const UserRetryButton: FC = () => {
+  const aui = useAui();
+  return (
+    <TooltipIconButton
+      tooltip="Retry"
+      onClick={() => aui.thread.startRun({ parentId: aui.message.getState().id })}
+    >
+      <RefreshCwIcon />
+    </TooltipIconButton>
+  );
+};
+
 const UserActionBar: FC = () => {
+  const { BranchAction } = useContext(ThreadComponentsContext);
   return (
     <ActionBarPrimitive.Root
       hideWhenRunning
       autohide="not-last"
-      className="aui-user-action-bar-root animate-fade-in flex flex-col items-end [animation-delay:80ms]"
+      className="aui-user-action-bar-root text-muted-foreground animate-fade-in flex gap-1 [animation-delay:80ms]"
     >
+      <UserRetryButton />
+      {BranchAction && <BranchAction />}
       <ActionBarPrimitive.Edit asChild>
         <TooltipIconButton tooltip="Edit" className="aui-user-action-edit">
-          <PencilIcon />
+          <SquarePenIcon />
         </TooltipIconButton>
       </ActionBarPrimitive.Edit>
+      <CopyActionButton />
     </ActionBarPrimitive.Root>
   );
 };
@@ -1099,7 +1124,7 @@ const BranchPicker: FC<BranchPickerPrimitive.Root.Props> = ({
           <ChevronLeftIcon />
         </TooltipIconButton>
       </BranchPickerPrimitive.Previous>
-      <span className="aui-branch-picker-state font-medium">
+      <span className="aui-branch-picker-state font-medium whitespace-nowrap">
         <BranchPickerPrimitive.Number /> / <BranchPickerPrimitive.Count />
       </span>
       <BranchPickerPrimitive.Next asChild>
