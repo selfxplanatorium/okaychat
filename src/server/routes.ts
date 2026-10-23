@@ -22,8 +22,9 @@ import { skillRoutes } from "./skills.js";
 import { deleteThreadImages, imageRoutes } from "./tools/image.js";
 import { deleteSandboxWorkspace, sandboxRoutes } from "./tools/sandbox.js";
 import { env } from "./env.js";
-import { callbackUrl, disconnectServer, serverInfo, testServer } from "./mcp/manager.js";
-import { pendingByState, StoredOAuthProvider } from "./mcp/oauth.js";
+import { assertPublicHost, BlockedAddressError } from "./public-fetch.js";
+import { callbackUrl, disconnectServer, mcpFetch, notePublicOrigin, serverInfo, testServer } from "./mcp/manager.js";
+import { StoredOAuthProvider, takePending } from "./mcp/oauth.js";
 import * as mcpStore from "./mcp/store.js";
 import { storageUsed, userStorageLimit } from "./quota.js";
 import { getSettings, updateSettings } from "./settings.js";
@@ -52,6 +53,46 @@ const mcpInput = z.object({
   }),
 });
 
+/**
+ * Non-admins may only point connections at the public internet, or any user could read the server's
+ * network through a provider or MCP URL. Requests are checked again at connection time.
+ */
+async function privateUrlError(userId: string, url: string | undefined): Promise<string | null> {
+  if (!url || mayUsePrivateHosts(userId)) return null;
+  try {
+    await assertPublicHost(new URL(url));
+    return null;
+  } catch (error) {
+    return error instanceof BlockedAddressError ? "Only admins can use local or private network addresses." : (error as Error).message;
+  }
+}
+
+const modelRef = z.string().min(1).max(300);
+// Thread and message ids are chosen by the client (assistant-ui), so only their shape is checked.
+const clientId = z.string().min(1).max(200);
+const settingsPatch = z.object({
+  // Checked against the known values in updateSettings.
+  sidebarItems: z.array(z.string()).max(50).optional(),
+  maxSteps: z.number().optional(),
+  maxSearches: z.number().optional(),
+  imageServices: z.record(z.string(), z.unknown()).optional(),
+  defaultModel: modelRef.nullable().optional(),
+  utilityModel: modelRef.nullable().optional(),
+  subagentModel: modelRef.nullable().optional(),
+  favoriteModels: z.array(modelRef).max(500).optional(),
+  reasoningEffort: z.record(modelRef, z.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"]))
+    .refine((value) => Object.keys(value).length <= 500, "too many models").optional(),
+  systemPrompt: z.string().max(50_000).optional(),
+  autoCompactAt: z.number().min(0).max(1).optional(),
+  webTools: z.boolean().optional(),
+  artifacts: z.boolean().optional(),
+  generativeUI: z.boolean().optional(),
+  subagents: z.boolean().optional(),
+  codeExecution: z.boolean().optional(),
+});
+
+const originOf = (url: string | undefined) => (url ? new URL(url).origin : undefined);
+
 /** Masked values ("••••••") from the UI mean "keep what is stored". */
 function mergeSecrets(next?: Record<string, string>, prev?: Record<string, string>) {
   if (!next) return undefined;
@@ -60,12 +101,21 @@ function mergeSecrets(next?: Record<string, string>, prev?: Record<string, strin
 
 const api = new Hono<AppEnv>()
   .use(requireUser)
+  .use(async (c, next) => {
+    // Learn the OAuth redirect origin only from signed-in requests. Any anonymous request could otherwise
+    // set a forged Host first and receive every user's authorization codes.
+    const proto = c.req.header("x-forwarded-proto")?.split(",")[0]?.trim();
+    const host = c.req.header("x-forwarded-host") ?? c.req.header("host");
+    if (host) notePublicOrigin(c.get("user").id, `${proto ?? new URL(c.req.url).protocol.replace(":", "")}://${host}`);
+    await next();
+  })
   .get("/me", (c) => c.json(c.get("user")))
   .get("/settings", (c) => c.json(getSettings(c.get("user").id)))
   .patch("/settings", async (c) => {
-    // Appearance has its own validated endpoint and must not be overwritten by a stale settings form.
-    const { appearance: _appearance, ...patch } = (await c.req.json()) as Partial<UserSettings>;
-    return c.json(updateSettings(c.get("user").id, patch));
+    // Unknown keys are dropped. Appearance has its own validated endpoint and must not be overwritten by a stale settings form.
+    const parsed = settingsPatch.safeParse(await c.req.json());
+    if (!parsed.success) return c.json({ error: `Invalid setting ${parsed.error.issues[0]?.path.join(".")}` }, 400);
+    return c.json(updateSettings(c.get("user").id, parsed.data as Partial<UserSettings>));
   })
   .route("/", appearanceRoutes)
   .route("/account", accountRoutes)
@@ -76,6 +126,8 @@ const api = new Hono<AppEnv>()
   .put("/providers/:id", async (c) => {
     const body = providerInput.safeParse(await c.req.json());
     if (!body.success) return c.json({ error: body.error.issues[0]?.message }, 400);
+    const blocked = await privateUrlError(c.get("user").id, body.data.baseURL);
+    if (blocked) return c.json({ error: blocked }, 400);
     saveConnection(c.get("user").id, c.req.param("id"), body.data);
     return c.json({ ok: true });
   })
@@ -116,8 +168,14 @@ const api = new Hono<AppEnv>()
   })
   .get("/threads/:id/messages", (c) => c.json(listMessages(c.get("user").id, c.req.param("id"))))
   .post("/threads/:id/messages", async (c) => {
-    const row = (await c.req.json()) as { id: string; parent_id: string | null; format: string; content: unknown };
-    appendMessage(c.get("user").id, c.req.param("id"), row);
+    const parsed = z.object({
+      id: clientId,
+      parent_id: clientId.nullable().optional(),
+      format: z.string().min(1).max(40),
+      content: z.record(z.string(), z.unknown()),
+    }).safeParse(await c.req.json());
+    if (!parsed.success) return c.json({ error: "Invalid message" }, 400);
+    appendMessage(c.get("user").id, c.req.param("id"), { ...parsed.data, parent_id: parsed.data.parent_id ?? null });
     return c.json({ ok: true });
   })
 
@@ -143,6 +201,10 @@ const api = new Hono<AppEnv>()
     if (!body.success) return c.json({ error: body.error.issues[0]?.message }, 400);
     // stdio servers run as the server process. Only admins may add them.
     if (body.data.transport === "stdio" && user.role !== "admin") return c.json({ error: "Only admins can add stdio servers." }, 403);
+    const blocked = await privateUrlError(user.id, body.data.transport === "stdio" ? undefined : body.data.config.url);
+    if (blocked) return c.json({ error: blocked }, 400);
+    // Every enabled server holds a live connection from this process.
+    if (mcpStore.listServers(user.id).length >= 30) return c.json({ error: "You have the maximum of 30 MCP servers. Remove one first." }, 409);
     try {
       const id = mcpStore.createServer(user.id, body.data);
       return c.json(await testServer(user.id, id));
@@ -157,19 +219,29 @@ const api = new Hono<AppEnv>()
     const prev = mcpStore.getServer(user.id, c.req.param("id"));
     if (!prev) return c.json({ error: "Not found" }, 404);
     if (body.data.transport === "stdio" && user.role !== "admin") return c.json({ error: "Only admins can add stdio servers." }, 403);
+    const blocked = await privateUrlError(user.id, body.data.transport === "stdio" ? undefined : body.data.config.url);
+    if (blocked) return c.json({ error: blocked }, 400);
+    // Stored header values and OAuth tokens belong to the old server. They must not follow a new origin.
+    const moved = originOf(body.data.config.url) !== originOf(prev.config.url);
+    if (moved && Object.values(body.data.config.headers ?? {}).includes("••••••")) {
+      return c.json({ error: "Enter the header values again when changing the server URL." }, 400);
+    }
     const config: McpServerConfig = {
       ...body.data.config,
       headers: mergeSecrets(body.data.config.headers, prev.config.headers),
       env: mergeSecrets(body.data.config.env, prev.config.env),
     };
     mcpStore.updateServer(user.id, prev.id, { ...body.data, config });
+    if (moved) mcpStore.writeOAuth(prev.id, null);
     await disconnectServer(user.id, prev.id);
     return c.json(body.data.enabled ? await testServer(user.id, prev.id) : serverInfo(mcpStore.getServer(user.id, prev.id)!));
   })
   .patch("/mcp/:id/tools", async (c) => {
     const user = c.get("user");
-    const { disabledTools } = (await c.req.json()) as { disabledTools: string[] };
-    mcpStore.updateServer(user.id, c.req.param("id"), { disabledTools });
+    const parsed = z.object({ disabledTools: z.array(z.string().max(200)).max(1000) }).safeParse(await c.req.json());
+    if (!parsed.success) return c.json({ error: "Invalid tool list" }, 400);
+    if (!mcpStore.getServer(user.id, c.req.param("id"))) return c.json({ error: "Not found" }, 404);
+    mcpStore.updateServer(user.id, c.req.param("id"), { disabledTools: parsed.data.disabledTools });
     return c.json(serverInfo(mcpStore.getServer(user.id, c.req.param("id"))!));
   })
   .post("/mcp/:id/test", async (c) => c.json(await testServer(c.get("user").id, c.req.param("id"))))
@@ -193,21 +265,25 @@ const api = new Hono<AppEnv>()
   .route("/", shareRoutes)
   .route("/", adminRoutes);
 
+const escapeHtml = (text: string) =>
+  text.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
+
 /** OAuth redirect target. Not behind requireUser: the state parameter identifies the user and server. */
 export const mcpOAuthCallback = new Hono().get("/", async (c) => {
   const state = c.req.query("state") ?? "";
-  const pending = pendingByState.get(state);
+  const pending = takePending(state);
+  // Server names and errors from the remote authorization server are untrusted text.
   const page = (message: string) =>
     c.html(`<!doctype html><meta charset="utf-8"><title>okaychat</title><body style="font-family:system-ui;padding:2rem">
-      <p>${message}</p><script>window.opener?.postMessage({type:"okaychat:mcp-oauth"},location.origin);setTimeout(()=>window.close(),1200)</script></body>`);
+      <p>${escapeHtml(message)}</p><script>window.opener?.postMessage({type:"okaychat:mcp-oauth"},location.origin);setTimeout(()=>window.close(),1200)</script></body>`);
   if (!pending) return page("This authorization link expired. Close this tab and click Authorize again.");
-  pendingByState.delete(state);
   const server = mcpStore.getServer(pending.userId, pending.serverId);
   if (!server?.config.url) return page("MCP server not found.");
-  const provider = new StoredOAuthProvider(pending.userId, pending.serverId, callbackUrl());
+  const provider = new StoredOAuthProvider(pending.userId, pending.serverId, callbackUrl(pending.userId));
   try {
     await mcpAuth(provider, {
       serverUrl: server.config.url,
+      fetchFn: mcpFetch(pending.userId),
       authorizationCode: c.req.query("code"),
       callbackState: state,
       callbackIssuer: c.req.query("iss"),

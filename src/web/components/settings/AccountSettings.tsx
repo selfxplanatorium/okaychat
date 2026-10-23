@@ -25,6 +25,81 @@ function StorageSection() {
   );
 }
 
+/** Password change and signing out other devices. Both keep this device signed in. */
+function SecuritySection() {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState<"password" | "sessions" | null>(null);
+  const [error, setError] = useState("");
+  const [status, setStatus] = useState("");
+
+  const run = async (action: "password" | "sessions", fn: () => Promise<string>) => {
+    setBusy(action);
+    setError("");
+    setStatus("");
+    try {
+      setStatus(await fn());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Something went wrong. Try again.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <SettingsSection title="Security" description="Changing your password signs out every other device.">
+      <form
+        className="flex flex-col gap-3 px-4 py-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (busy) return;
+          if (next !== confirm) return setError("The new passwords do not match.");
+          void run("password", async () => {
+            await api("/account/password", { method: "POST", json: { current, next } });
+            setCurrent("");
+            setNext("");
+            setConfirm("");
+            return "Password changed. Other devices were signed out.";
+          });
+        }}
+      >
+        <label className="flex flex-col gap-1.5 text-sm font-medium">
+          Current password
+          <Input type="password" autoComplete="current-password" value={current} required maxLength={200} disabled={busy !== null} onChange={(e) => setCurrent(e.currentTarget.value)} />
+        </label>
+        <label className="flex flex-col gap-1.5 text-sm font-medium">
+          New password
+          <Input type="password" autoComplete="new-password" value={next} required minLength={8} maxLength={200} disabled={busy !== null} onChange={(e) => setNext(e.currentTarget.value)} />
+        </label>
+        <label className="flex flex-col gap-1.5 text-sm font-medium">
+          Confirm new password
+          <Input type="password" autoComplete="new-password" value={confirm} required minLength={8} maxLength={200} disabled={busy !== null} onChange={(e) => setConfirm(e.currentTarget.value)} />
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" disabled={busy !== null || !current || next.length < 8 || !confirm}>
+            {busy === "password" ? "Changing…" : "Change password"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy !== null}
+            onClick={() => void run("sessions", async () => {
+              const { revoked } = await api<{ revoked: number }>("/account/sessions/revoke-others", { method: "POST" });
+              return revoked ? `Signed out ${revoked} other ${revoked === 1 ? "session" : "sessions"}.` : "No other devices were signed in.";
+            })}
+          >
+            {busy === "sessions" ? "Signing out…" : "Sign out other devices"}
+          </Button>
+        </div>
+        <div aria-live="polite" aria-atomic="true" className="min-h-5 text-sm">
+          {error ? <p role="alert" className="text-destructive">{error}</p> : <p className="text-muted-foreground">{status}</p>}
+        </div>
+      </form>
+    </SettingsSection>
+  );
+}
+
 /** Decode before upload, reduce oversized photos, and discard embedded photo metadata. */
 async function profilePhoto(file: File): Promise<Blob> {
   if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) throw new Error("Choose a PNG, JPEG, or WebP image.");
@@ -139,6 +214,7 @@ export function AccountSettings() {
         </form>
         <SettingsRow label="Email address" control={<span className="text-muted-foreground max-w-full break-all text-sm">{me.email}</span>} />
       </SettingsSection>
+      <SecuritySection />
       <StorageSection />
       <div aria-live="polite" aria-atomic="true" className="min-h-5 text-sm">
         {error ? <p role="alert" className="text-destructive">{error}</p> : <p className="text-muted-foreground">{status}</p>}

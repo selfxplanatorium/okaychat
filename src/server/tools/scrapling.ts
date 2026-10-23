@@ -1,8 +1,10 @@
 import { spawnSync } from "node:child_process";
 import { createMCPClient, type MCPClient } from "@ai-sdk/mcp";
 import { Experimental_StdioMCPTransport } from "@ai-sdk/mcp/mcp-stdio";
+import { egressProxyUrl } from "../egress-proxy.js";
 
-// Scrapling 0.5 runs as one shared stdio MCP server (`scrapling mcp`). It only fetches public URLs and holds
+// Scrapling 0.5 runs as one shared stdio MCP server (`scrapling mcp`). It only fetches public URLs (through
+// egress-proxy.ts) and holds
 // no user data, so sharing it across users is safe. Tool names changed in 0.5; see docs/research/scrapling.md.
 
 const COMMAND = process.env.OKAYCHAT_SCRAPLING_COMMAND ?? "scrapling";
@@ -82,11 +84,14 @@ const usable = (r: ScraplingResponse | null) => !!r && (r.status ?? 0) < 400 && 
 /** Fetch a page Node's fetch could not read: TLS-impersonated HTTP first, then a stealth browser if installed. */
 export async function scraplingFetch(url: string): Promise<{ title: string; content: string } | null> {
   if (!isAvailable()) return null;
-  let response = await call("make_request", { url, extraction_type: "markdown", main_content_only: true, impersonate: "chrome", stealthy_headers: true }, 45_000);
+  // Scrapling connects on its own. The proxy applies the public-address check to every hop it makes.
+  // Chromium still bypasses proxies for loopback; its local network access block covers that case.
+  const proxy = await egressProxyUrl();
+  let response = await call("make_request", { url, proxy, extraction_type: "markdown", main_content_only: true, impersonate: "chrome", stealthy_headers: true }, 45_000);
   if (!usable(response) && BROWSER) {
     response = await call(
       "browser_fetch_once",
-      { url, extraction_type: "markdown", main_content_only: true, headless: true, network_idle: true, solve_cloudflare: true, disable_resources: true },
+      { url, proxy, extraction_type: "markdown", main_content_only: true, headless: true, network_idle: true, solve_cloudflare: true, disable_resources: true },
       120_000,
     );
   }

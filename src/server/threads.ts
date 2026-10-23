@@ -55,19 +55,29 @@ export function ensureThread(userId: string, id: string, projectId: string | nul
   const now = Date.now();
   db.prepare("INSERT OR IGNORE INTO threads (id, user_id, project_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(id, userId, projectId, now, now);
   const thread = getThread(userId, id);
-  if (!thread) throw new Error("Thread belongs to another user");
+  // Another user's id: answer exactly as for a missing thread.
+  if (!thread) throw new HTTPException(404, { message: "Thread not found" });
   return thread;
 }
 
-export function updateThread(userId: string, id: string, patch: { title?: string; status?: "regular" | "archived"; modelRef?: string; memoryDisabled?: boolean }) {
+/**
+ * Metadata only. `updated_at` means last message activity (the sidebar groups by it), so renaming,
+ * pinning, archiving, or moving a chat must not bump it. `appendMessage` does.
+ */
+export function updateThread(
+  userId: string,
+  id: string,
+  patch: { title?: string; status?: "regular" | "archived"; modelRef?: string; memoryDisabled?: boolean; pinned?: boolean; projectId?: string | null },
+) {
   const sets: string[] = [];
-  const values: Array<string | number> = [];
+  const values: Array<string | number | null> = [];
   if (patch.title !== undefined) sets.push("title = ?"), values.push(patch.title);
   if (patch.status !== undefined) sets.push("status = ?"), values.push(patch.status);
   if (patch.modelRef !== undefined) sets.push("model_ref = ?"), values.push(patch.modelRef);
   if (patch.memoryDisabled !== undefined) sets.push("memory_disabled = ?"), values.push(Number(patch.memoryDisabled));
-  sets.push("updated_at = ?");
-  values.push(Date.now());
+  if (patch.pinned !== undefined) sets.push("pinned = ?"), values.push(Number(patch.pinned));
+  if (patch.projectId !== undefined) sets.push("project_id = ?"), values.push(patch.projectId);
+  if (!sets.length) return;
   db.prepare(`UPDATE threads SET ${sets.join(", ")} WHERE user_id = ? AND id = ?`).run(...values, userId, id);
 }
 

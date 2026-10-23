@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium, type Browser, type Page } from "playwright-core";
+import { FRAME_NETWORK_HOSTS } from "../../shared/artifact-frame.js";
 
 // Chromium renders PDFs and screenshots for the model's visual check. It is never started at boot: the
 // first job launches it, jobs share one process, and it closes after a short idle period so an unused
@@ -48,9 +49,15 @@ async function launch(): Promise<Browser> {
     .launch({
       headless: true,
       executablePath: path,
-      // --no-sandbox is required when the container runs as root. The pages themselves are isolated:
+      // --no-sandbox: Chromium's sandbox needs user namespaces, which Docker's default seccomp profile blocks. The pages are isolated:
       // every request except the document and its declared assets is aborted below.
-      args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--no-first-run", "--disable-extensions"],
+      args: [
+        "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--no-first-run", "--disable-extensions",
+        // Route handlers never see DNS prefetch, preconnect, or WebTransport, which could carry data out in a
+        // hostname. Only the artifact CDNs resolve; the document origin is served by the route handler.
+        `--host-resolver-rules=MAP * ~NOTFOUND, ${FRAME_NETWORK_HOSTS.map((host) => `EXCLUDE ${host}`).join(", ")}`,
+        "--dns-prefetch-disable",
+      ],
     })
     .then((b) => {
       browser = b;
@@ -179,10 +186,21 @@ export async function withBrowserPage<T>(html: string, options: RenderOptions, f
         javaScriptEnabled: true,
         bypassCSP: false,
         offline: false,
+        // A service worker's requests skip context.route.
+        serviceWorkers: "block",
         viewport: { width: options.width ?? 1000, height: options.height ?? 800 },
       });
       const errors: string[] = [];
       try {
+        // context.route only sees HTTP. Without this, page script could open a WebSocket to any host.
+        await context.routeWebSocket(() => true, (ws) => ws.close({ code: 1008, reason: "blocked" }));
+        // WebRTC sends STUN over UDP, which no route handler sees. Headless Chromium ignores the policy flag,
+        // so the APIs are removed from every frame before page script runs.
+        await context.addInitScript(() => {
+          for (const name of ["RTCPeerConnection", "webkitRTCPeerConnection", "RTCDataChannel", "RTCSessionDescription", "RTCIceCandidate", "WebTransport"]) {
+            Object.defineProperty(window, name, { value: undefined, configurable: false, writable: false });
+          }
+        });
         await context.route("**/*", async (route) => {
           const url = route.request().url();
           const parsed = new URL(url);

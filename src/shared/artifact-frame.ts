@@ -8,6 +8,33 @@ export const FRAME_SANDBOX = "allow-scripts allow-forms allow-modals allow-popup
 /** Public hosts a rendered artifact may load from. Everything else stays blocked. */
 export const FRAME_NETWORK_HOSTS = ["cdn.jsdelivr.net", "esm.sh", "unpkg.com", "fonts.googleapis.com", "fonts.gstatic.com"];
 
+const CDN = FRAME_NETWORK_HOSTS.map((host) => `https://${host}`).join(" ");
+
+/**
+ * Artifact code is model-written and can be steered by anything the model read. It may load libraries and
+ * fonts from the CDNs above but cannot send data anywhere else: no fetch, beacons, images, or form posts
+ * to other hosts. Meta CSPs only tighten, so content later in the document cannot loosen this.
+ */
+const FRAME_CSP = [
+  "default-src 'none'",
+  `script-src 'unsafe-inline' 'unsafe-eval' blob: ${CDN}`,
+  `style-src 'unsafe-inline' ${CDN}`,
+  `font-src data: ${CDN}`,
+  `img-src data: blob: ${CDN}`,
+  "media-src data: blob:",
+  `connect-src ${CDN}`,
+  "worker-src blob:",
+  "form-action 'none'",
+  "base-uri 'none'",
+].join("; ");
+const CSP_META = `<meta http-equiv="Content-Security-Policy" content="${FRAME_CSP}">`;
+
+/** The policy goes first, before any model-written markup can run or open a request. */
+function withCsp(html: string): string {
+  const doctype = html.match(/^\s*<!doctype[^>]*>/i)?.[0] ?? "";
+  return doctype + CSP_META + html.slice(doctype.length);
+}
+
 const json = (value: string) => JSON.stringify(value).replaceAll("</", "<\\/");
 
 // Sandboxed frames throw on storage access, which breaks many libraries. Give them per-frame memory storage.
@@ -82,8 +109,8 @@ function htmlDocument(source: string): string {
 }
 
 export function frameDocument(kind: ArtifactKind, content: string): string | null {
-  if (kind === "html") return htmlDocument(content);
-  if (kind === "react") return reactDocument(content);
-  if (kind === "svg") return svgDocument(content);
+  if (kind === "html") return withCsp(htmlDocument(content));
+  if (kind === "react") return withCsp(reactDocument(content));
+  if (kind === "svg") return withCsp(svgDocument(content));
   return null;
 }

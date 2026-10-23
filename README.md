@@ -31,7 +31,7 @@ docker compose build --build-arg SCRAPLING_BROWSER=false
 | --- | --- | --- |
 | `OKAYCHAT_SECRET` | required | Encrypts provider keys and MCP tokens. Do not change it after setup. |
 | `OKAYCHAT_ALLOW_SIGNUP` | `false` | Let people create accounts after the admin exists. |
-| `OKAYCHAT_PUBLIC_URL` | auto | Public origin for MCP OAuth redirects behind a reverse proxy. |
+| `OKAYCHAT_PUBLIC_URL` | auto | Public origin for MCP OAuth redirects behind a reverse proxy. Without it, each user's own requests set their redirect origin. |
 | `OKAYCHAT_SANDBOX_TOKEN` | required | Shared secret between the app and the code sandbox. |
 | `OKAYCHAT_SEARXNG_URL` | set by compose | SearXNG instance for web search. Without it, search falls back to scraping public engines. |
 | `OKAYCHAT_PORT` | `8787` | Host port in compose. |

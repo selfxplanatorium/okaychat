@@ -118,8 +118,15 @@ working.
 - Every request except the injected document is aborted. Model-written HTML cannot reach the network,
   the LAN, cloud metadata (`169.254.169.254`), or `file://`. Images must be data URIs; fonts come from
   the system.
-- `--no-sandbox` is required when the container runs as root. Isolation comes from the context, not the
-  OS sandbox.
+- `context.route` only sees HTTP, so the other channels are closed separately: WebSockets are refused with
+  `routeWebSocket`, service workers are blocked, an init script removes WebRTC and WebTransport from every
+  frame, and `--host-resolver-rules` lets only the artifact CDNs (`FRAME_NETWORK_HOSTS`) resolve, so DNS
+  prefetch and preconnect cannot carry data out in a hostname. `allowHosts` must stay within that list.
+- `--no-sandbox`: Chromium's sandbox needs user namespaces, which Docker's default seccomp profile blocks.
+  Isolation comes from the context and the rules above, not the OS sandbox.
+- DOCX and XLSX are measured with `assertZipBounds` (`documents/zip-bounds.ts`) before mammoth, exceljs, or
+  fflate opens them: at most 200 MB expanded and 10,000 entries, checked against both the central
+  directory and a streaming count, so neither overlapping entries nor understated headers get through.
 - `rendererAvailable()` checks `OKAYCHAT_CHROMIUM_PATH`, then Playwright's registry (which honours
   `PLAYWRIGHT_BROWSERS_PATH`).
 

@@ -5,6 +5,7 @@ import TurndownService from "turndown";
 import { extractText, getDocumentProxy } from "unpdf";
 import { z } from "zod";
 import { DEFAULT_USER_SETTINGS } from "../../shared/types.js";
+import { assertPublicHost, BlockedAddressError, publicFetch, readCapped } from "../public-fetch.js";
 import { scraplingFetch } from "./scrapling.js";
 import { SearchBudget } from "./search-budget.js";
 
@@ -124,30 +125,35 @@ function looksBlocked(status: number, text: string) {
 export async function webFetch(url: string): Promise<{ title: string; content: string; via: string }> {
   const parsed = new URL(url);
   if (!/^https?:$/.test(parsed.protocol)) throw new Error("Only http and https URLs are allowed");
+  // The model chooses this URL, and a fetched page can steer the model. Internal hosts stay unreachable.
+  const blocked = "web_fetch can only read pages on the public internet.";
+  await assertPublicHost(parsed, blocked);
   let res: Response | null = null;
   let error: string | null = null;
   // A thin result (JS shell or a genuinely short page) is kept in case Scrapling cannot do better.
   let thin: { title: string; content: string } | null = null;
   try {
-    res = await fetch(parsed, {
+    res = await publicFetch(parsed, {
       headers: { "User-Agent": BROWSER_UA, Accept: "text/html,application/xhtml+xml,application/pdf,text/plain,*/*", "Accept-Language": "en-US,en;q=0.9" },
       redirect: "follow",
       signal: AbortSignal.timeout(20_000),
     });
   } catch (e) {
+    if (e instanceof BlockedAddressError) throw new Error(blocked);
     error = (e as Error).message;
   }
 
   if (res) {
     const type = res.headers.get("content-type") ?? "";
-    const length = Number(res.headers.get("content-length") ?? 0);
-    if (length > MAX_BYTES) throw new Error(`Page is larger than ${MAX_BYTES / 1024 / 1024} MB`);
+    const tooLarge = `Page is larger than ${MAX_BYTES / 1024 / 1024} MB`;
+    if (Number(res.headers.get("content-length") ?? 0) > MAX_BYTES) throw new Error(tooLarge);
+    const bytes = await readCapped(res, MAX_BYTES, tooLarge);
     if (type.includes("application/pdf")) {
-      const pdf = await getDocumentProxy(new Uint8Array(await res.arrayBuffer()));
+      const pdf = await getDocumentProxy(bytes);
       const { text } = await extractText(pdf, { mergePages: true });
       return { title: parsed.pathname.split("/").pop() || url, content: text as string, via: "fetch" };
     }
-    const body = await res.text();
+    const body = new TextDecoder().decode(bytes);
     if (!looksBlocked(res.status, body)) {
       if (type.includes("html") || body.trimStart().startsWith("<")) {
         const { title, markdown } = htmlToMarkdown(body, res.url || url);

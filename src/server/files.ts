@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import mammoth from "mammoth";
+import { assertZipBounds } from "./documents/zip-bounds.js";
 import { extractText, getDocumentProxy } from "unpdf";
 import type { AppEnv } from "./auth.js";
 import { newId } from "./crypto.js";
@@ -24,6 +25,7 @@ export async function extract(name: string, type: string, data: Uint8Array): Pro
     return { text: body, pages: totalPages };
   }
   if (lower.endsWith(".docx") || type.includes("officedocument.wordprocessingml")) {
+    assertZipBounds(data);
     const { value } = await mammoth.extractRawText({ buffer: Buffer.from(data) });
     return { text: value };
   }

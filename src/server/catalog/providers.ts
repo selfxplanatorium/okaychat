@@ -1,8 +1,10 @@
+import { HTTPException } from "hono/http-exception";
 import type { ModelInfo, ProviderConnectionInput, ProviderInfo } from "../../shared/types.js";
 import { decrypt, encrypt } from "../crypto.js";
 import { db } from "../db.js";
 import { USER_AGENT } from "../env.js";
-import { getCatalog, isSupportedProvider, resolveRoute, toModelInfo, unknownModel, type RawProvider } from "./models-dev.js";
+import { publicFetch } from "../public-fetch.js";
+import { getCatalog, isChatModelId, isSupportedProvider, resolveRoute, toModelInfo, unknownModel, type RawProvider } from "./models-dev.js";
 
 export const OPENCODE_GO = "opencode-go";
 const GO_MODELS_URL = "https://opencode.ai/inference/go/v1/models";
@@ -29,12 +31,19 @@ export interface Connection {
   enabled: boolean;
   /** Configured by an admin for every user. The user cannot see or change it. */
   shared?: boolean;
+  /** A non-admin's own base URL: every request must reach a public address, never the server's network. */
+  guarded?: boolean;
 }
+
+/** Admins may point connections at local servers (Ollama, LM Studio). Other users may not. */
+export const mayUsePrivateHosts = (userId: string) =>
+  (db.prepare("SELECT role FROM users WHERE id = ?").get(userId) as { role: string } | undefined)?.role === "admin";
 
 /** A user id, or null for the server-wide connections an admin shares with every user. */
 export type ConnectionScope = string | null;
 
 function readScope(scope: ConnectionScope): Map<string, Connection> {
+  const guarded = scope !== null && !mayUsePrivateHosts(scope);
   const rows = (
     scope === null
       ? db.prepare("SELECT provider_id, api_key_enc, base_url, config_json, enabled FROM shared_connections").all()
@@ -52,6 +61,7 @@ function readScope(scope: ConnectionScope): Map<string, Connection> {
           name: config.name,
           enabled: r.enabled === 1,
           ...(scope === null ? { shared: true } : {}),
+          ...(guarded && r.base_url ? { guarded: true } : {}),
         },
       ];
     }),
@@ -71,8 +81,12 @@ export function getConnection(userId: string, providerId: string): Connection | 
 export function saveConnection(scope: ConnectionScope, providerId: string, input: ProviderConnectionInput) {
   const existing = readScope(scope).get(providerId);
   // An omitted key keeps the stored one, so the UI never needs to read secrets back.
-  const apiKey = input.apiKey === undefined ? existing?.apiKey : input.apiKey || undefined;
   const baseURL = input.baseURL === undefined ? existing?.baseURL : input.baseURL.trim() || undefined;
+  // A kept key must never follow a new endpoint, or a hijacked session could redirect it to its own host.
+  if (input.apiKey === undefined && existing?.apiKey && originOf(baseURL) !== originOf(existing.baseURL)) {
+    throw new HTTPException(400, { message: "Enter the API key again when changing the base URL." });
+  }
+  const apiKey = input.apiKey === undefined ? existing?.apiKey : input.apiKey || undefined;
   const name = input.name ?? existing?.name;
   const values = [
     providerId,
@@ -97,6 +111,14 @@ export function saveConnection(scope: ConnectionScope, providerId: string, input
   }
   liveCache.clear();
 }
+
+const originOf = (url: string | undefined) => {
+  try {
+    return url ? new URL(url).origin : undefined;
+  } catch {
+    return url;
+  }
+};
 
 export function deleteConnection(scope: ConnectionScope, providerId: string) {
   if (scope === null) db.prepare("DELETE FROM shared_connections WHERE provider_id = ?").run(providerId);
@@ -160,13 +182,13 @@ const LIVE_TTL_MS = 15 * 60 * 1000;
 
 const liveInflight = new Map<string, Promise<string[] | null>>();
 
-function fetchLive(url: string, apiKey?: string): Promise<string[] | null> {
+function fetchLive(url: string, apiKey?: string, guarded = false): Promise<string[] | null> {
   let pending = liveInflight.get(url);
   if (!pending) {
     pending = (async () => {
       const hit = liveCache.get(url);
       try {
-        const res = await fetch(url, {
+        const res = await (guarded ? publicFetch : fetch)(url, {
           headers: { "User-Agent": USER_AGENT, ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
           signal: AbortSignal.timeout(8_000),
         });
@@ -186,11 +208,11 @@ function fetchLive(url: string, apiKey?: string): Promise<string[] | null> {
   return pending;
 }
 
-async function fetchLiveIds(url: string, apiKey?: string): Promise<string[] | null> {
+async function fetchLiveIds(url: string, apiKey?: string, guarded = false): Promise<string[] | null> {
   const hit = liveCache.get(url);
-  if (!hit) return fetchLive(url, apiKey);
+  if (!hit) return fetchLive(url, apiKey, guarded);
   // A known list answers at once. An expired one is refreshed behind the request instead of delaying it.
-  if (Date.now() - hit.at >= LIVE_TTL_MS) void fetchLive(url, apiKey);
+  if (Date.now() - hit.at >= LIVE_TTL_MS) void fetchLive(url, apiKey, guarded);
   return hit.ids;
 }
 
@@ -247,9 +269,9 @@ export async function resolveModel(userId: string, ref: string): Promise<{ model
   const slash = ref.indexOf("/");
   const providerId = ref.slice(0, slash);
   const conn = getConnection(userId, providerId);
-  if (!conn || !conn.enabled) throw new Error(`Provider ${providerId} is not connected`);
+  if (!conn || !conn.enabled) throw new HTTPException(400, { message: `Provider ${providerId} is not connected` });
   const models = await listModels(userId);
   const model = models.find((m) => m.ref === ref);
-  if (!model) throw new Error(`Unknown model ${ref}`);
+  if (!model) throw new HTTPException(400, { message: `Unknown model ${ref}` });
   return { model, conn };
 }

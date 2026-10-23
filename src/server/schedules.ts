@@ -13,6 +13,8 @@ import { appendMessage, currentBranch, ensureThread, getThread, updateThread } f
 
 const RUN_TIMEOUT_MS = 10 * 60_000;
 const MIN_INTERVAL_MIN = 15;
+// Each schedule runs unattended, possibly on a server-wide provider key. Bound what one account can queue.
+const MAX_SCHEDULES = 50;
 
 interface Row {
   id: string;
@@ -167,6 +169,8 @@ export const scheduleRoutes = new Hono<AppEnv>()
   .post("/schedules", async (c) => {
     const body = input.safeParse(await c.req.json());
     if (!body.success) return c.json({ error: body.error.issues[0]?.message }, 400);
+    const { n } = db.prepare("SELECT COUNT(*) AS n FROM schedules WHERE user_id = ?").get(c.get("user").id) as { n: number };
+    if (n >= MAX_SCHEDULES) return c.json({ error: `You have the maximum of ${MAX_SCHEDULES} scheduled prompts. Delete one first.` }, 409);
     const id = newId("sch");
     const { title, prompt, modelRef, spec, enabled } = body.data;
     db.prepare(

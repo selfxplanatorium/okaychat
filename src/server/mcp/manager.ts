@@ -3,7 +3,9 @@ import { createMCPClient, MCPClientError, UnauthorizedError, type MCPClient } fr
 import { Experimental_StdioMCPTransport } from "@ai-sdk/mcp/mcp-stdio";
 import { dynamicTool, jsonSchema, type ToolSet } from "ai";
 import type { McpServerInfo, McpStatus, McpToolInfo } from "../../shared/types.js";
+import { mayUsePrivateHosts } from "../catalog/providers.js";
 import { env } from "../env.js";
+import { publicFetch } from "../public-fetch.js";
 import { StoredOAuthProvider } from "./oauth.js";
 import { getServer, listServers, type McpServerRecord } from "./store.js";
 
@@ -53,12 +55,17 @@ interface Entry {
 
 const entries = new Map<string, Entry>();
 
-let publicUrl = process.env.OKAYCHAT_PUBLIC_URL?.replace(/\/$/, "");
-/** First request teaches us our public origin when OKAYCHAT_PUBLIC_URL is unset. */
-export function notePublicOrigin(origin: string) {
-  publicUrl ??= origin;
+const publicUrl = process.env.OKAYCHAT_PUBLIC_URL?.replace(/\/$/, "");
+// Without OKAYCHAT_PUBLIC_URL, each user's first request teaches us the origin they reach us on. Kept per
+// user, so a forged Host header can only misdirect the sender's own authorization codes.
+const userOrigins = new Map<string, string>();
+export function notePublicOrigin(userId: string, origin: string) {
+  if (!userOrigins.has(userId)) userOrigins.set(userId, origin);
 }
-export const callbackUrl = () => `${publicUrl ?? `http://localhost:${env.port}`}/api/mcp/oauth/callback`;
+export const callbackUrl = (userId: string) => `${publicUrl ?? userOrigins.get(userId) ?? `http://localhost:${env.port}`}/api/mcp/oauth/callback`;
+
+/** Admins may reach MCP servers on the local network. Other users' servers must be on the public internet. */
+export const mcpFetch = (userId: string) => (mayUsePrivateHosts(userId) ? undefined : publicFetch);
 
 const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, "_");
 
@@ -114,6 +121,8 @@ async function openClientWith(server: McpServerRecord, entry: Entry, protocolVer
   };
   if (server.transport === "stdio") {
     if (!server.config.command) throw new Error("stdio server needs a command");
+    // stdio runs as the server process. A demoted admin's servers must stop running.
+    if (!mayUsePrivateHosts(server.userId)) throw new Error("Only admins can run stdio servers.");
     return createMCPClient({
       ...common,
       transport: new Experimental_StdioMCPTransport({
@@ -125,11 +134,11 @@ async function openClientWith(server: McpServerRecord, entry: Entry, protocolVer
     });
   }
   if (!server.config.url) throw new Error("Remote server needs a URL");
-  const authProvider = new StoredOAuthProvider(server.userId, server.id, callbackUrl());
+  const authProvider = new StoredOAuthProvider(server.userId, server.id, callbackUrl(server.userId));
   try {
     return await createMCPClient({
       ...common,
-      transport: { type: server.transport, url: server.config.url, headers: server.config.headers, authProvider },
+      transport: { type: server.transport, url: server.config.url, headers: server.config.headers, authProvider, fetch: mcpFetch(server.userId) },
     });
   } catch (error) {
     if (error instanceof UnauthorizedError || authProvider.authorizationUrl) {

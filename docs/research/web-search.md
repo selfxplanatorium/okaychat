@@ -202,7 +202,7 @@ Limits (recommendation):
 - Timeout 15 s, max 5 redirects.
 - Read the body as a stream and abort past about 2 MB.
 - Only accept `text/html` and `text/plain`.
-- Block private and loopback IP targets (SSRF) before connecting.
+- Block private and loopback IP targets (SSRF) before connecting. Implemented in `src/server/public-fetch.ts`: the DNS answer is checked inside the socket lookup (no rebinding gap) and each redirect is rechecked. The Scrapling fallback only gets a pre-check of the first host.
 - Truncate Markdown to about 50k characters, and say so in the tool result.
 
 ### When to fall back to Scrapling

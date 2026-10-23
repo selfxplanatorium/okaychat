@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import { assertZipBounds } from "./zip-bounds.js";
 import FormulaParser from "fast-formula-parser";
 import { Criteria } from "fast-formula-parser/formulas/helpers.js";
 import { Infix } from "fast-formula-parser/formulas/operators.js";
@@ -251,6 +252,7 @@ export function recalculate(wb: ExcelJS.Workbook) {
 // --- Create, load, save -----------------------------------------------------------------------------------
 
 export async function loadXlsx(data: Uint8Array): Promise<ExcelJS.Workbook> {
+  assertZipBounds(data);
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(Buffer.from(data) as unknown as ArrayBuffer);
   return wb;

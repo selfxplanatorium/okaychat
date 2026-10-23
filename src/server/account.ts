@@ -2,7 +2,8 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import type { AppEnv } from "./auth.js";
-import { accountProfile } from "./auth.js";
+import { accountProfile, limited, passwordSchema, recordFailure } from "./auth.js";
+import { hashPassword, verifyPassword } from "./crypto.js";
 import { db } from "./db.js";
 import { assertStorage, QuotaError } from "./quota.js";
 
@@ -67,6 +68,27 @@ export const accountRoutes = new Hono<AppEnv>()
     if (!parsed.success) return c.json({ error: "Enter a display name between 1 and 80 characters." }, 400);
     db.prepare("UPDATE users SET name = ? WHERE id = ?").run(parsed.data.name, c.get("user").id);
     return c.json(accountProfile(c.get("user").id)!);
+  })
+  .post("/password", async (c) => {
+    const parsed = z.object({ current: z.string().min(1).max(200), next: passwordSchema }).safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: "Enter your current password and a new password of 8 to 200 characters." }, 400);
+    const { id } = c.get("user");
+    // A stolen session must not be able to guess the password it needs to take the account over.
+    const key = `password:${id}`;
+    if (limited(key, 10)) return c.json({ error: "Too many failed attempts. Try again in 15 minutes." }, 429);
+    const row = db.prepare("SELECT password_hash FROM users WHERE id = ?").get(id) as { password_hash: string };
+    if (!(await verifyPassword(parsed.data.current, row.password_hash))) {
+      recordFailure(key);
+      return c.json({ error: "Your current password is incorrect." }, 403);
+    }
+    db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(await hashPassword(parsed.data.next), id);
+    // Every other device signs in again with the new password.
+    db.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?").run(id, c.get("session"));
+    return c.json({ ok: true });
+  })
+  .post("/sessions/revoke-others", (c) => {
+    const result = db.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?").run(c.get("user").id, c.get("session"));
+    return c.json({ revoked: Number(result.changes) });
   })
   .put("/avatar", bodyLimit({ maxSize: MAX_AVATAR_BYTES + 64 * 1024, onError: (c) => c.json({ error: "Choose a profile picture smaller than 5 MB." }, 413) }), async (c) => {
     const form = await c.req.formData().catch(() => null);

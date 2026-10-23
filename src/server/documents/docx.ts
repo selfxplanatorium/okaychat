@@ -22,6 +22,7 @@ import {
   type ParagraphChild,
 } from "docx";
 import { unzipSync, zipSync } from "fflate";
+import { assertZipBounds } from "./zip-bounds.js";
 import { parseHTML } from "linkedom";
 import { z } from "zod";
 
@@ -623,6 +624,7 @@ function writeText(node: XmlElement, text: string) {
 
 /** Text view for the model: one numbered paragraph per line, with its style. */
 export function readDocxText(data: Uint8Array): string {
+  assertZipBounds(data);
   const files = unzipSync(data);
   const xml = files["word/document.xml"];
   if (!xml) throw new Error("This file is not a Word document (word/document.xml is missing).");
@@ -666,6 +668,7 @@ function replaceInParagraph(paragraph: XmlElement, find: string, replace: string
 
 /** Applies paragraph-level edits to an existing document, keeping everything else intact. */
 export function editDocx(data: Uint8Array, ops: DocxOp[]): Uint8Array {
+  assertZipBounds(data);
   const files = unzipSync(data);
   const raw = files["word/document.xml"];
   if (!raw) throw new Error("This file is not a Word document.");

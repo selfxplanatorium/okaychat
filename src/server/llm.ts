@@ -6,6 +6,7 @@ import type { JSONValue, LanguageModel, ModelMessage } from "ai";
 import type { ModelInfo, ReasoningEffort } from "../shared/types.js";
 import type { Connection } from "./catalog/providers.js";
 import { USER_AGENT } from "./env.js";
+import { publicFetch } from "./public-fetch.js";
 
 type ProviderOptions = Record<string, Record<string, JSONValue>>;
 
@@ -36,6 +37,7 @@ export function createModel(info: ModelInfo, conn: Connection, opts: { affinity:
   const headers = affinityHeaders(info.providerId, opts.affinity);
   const apiKey = conn.apiKey ?? "not-needed";
   const baseURL = info.baseURL;
+  const fetch = conn.guarded ? publicFetch : undefined;
   const cacheKey = opts.affinity.slice(0, 64);
   const effort = opts.effort && info.reasoning && (!info.reasoningEfforts || info.reasoningEfforts.includes(opts.effort)) ? opts.effort : undefined;
   const passthrough = (system: string | undefined, messages: ModelMessage[]) => ({
@@ -45,7 +47,7 @@ export function createModel(info: ModelInfo, conn: Connection, opts: { affinity:
 
   switch (info.format) {
     case "openai-responses": {
-      const provider = createOpenAI({ apiKey, baseURL, headers });
+      const provider = createOpenAI({ apiKey, baseURL, headers, fetch });
       const openai: Record<string, JSONValue> = { promptCacheKey: cacheKey, store: false };
       if (effort) {
         openai.reasoningEffort = effort;
@@ -54,7 +56,7 @@ export function createModel(info: ModelInfo, conn: Connection, opts: { affinity:
       return { model: provider.responses(info.id), providerOptions: { openai }, markCache: passthrough };
     }
     case "anthropic": {
-      const provider = createAnthropic({ apiKey, baseURL, headers });
+      const provider = createAnthropic({ apiKey, baseURL, headers, fetch });
       const anthropic: Record<string, JSONValue> = {};
       if (effort && effort !== "none") {
         if (info.reasoningEfforts?.length) anthropic.effort = effort === "minimal" ? "low" : effort;
@@ -64,7 +66,7 @@ export function createModel(info: ModelInfo, conn: Connection, opts: { affinity:
       return { model: provider(info.id), providerOptions: { anthropic }, markCache: anthropicBreakpoints };
     }
     case "google": {
-      const provider = createGoogleGenerativeAI({ apiKey, baseURL, headers });
+      const provider = createGoogleGenerativeAI({ apiKey, baseURL, headers, fetch });
       const google: Record<string, JSONValue> = {};
       if (info.reasoning) {
         google.thinkingConfig = {
@@ -81,6 +83,7 @@ export function createModel(info: ModelInfo, conn: Connection, opts: { affinity:
         apiKey,
         baseURL: baseURL ?? "",
         headers,
+        fetch,
         includeUsage: true,
         // Most compatible backends (DeepSeek, Kimi, GLM, Qwen) honor OpenAI's prompt_cache_key or ignore it.
         transformRequestBody: (body) => ({ ...body, prompt_cache_key: cacheKey }),

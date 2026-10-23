@@ -18,7 +18,15 @@ interface Stored {
 }
 
 /** Pending browser authorizations, by OAuth state. Lost on restart, which only means the user clicks Authorize again. */
-export const pendingByState = new Map<string, { userId: string; serverId: string }>();
+const pendingByState = new Map<string, { userId: string; serverId: string; expiresAt: number }>();
+const PENDING_TTL_MS = 15 * 60_000;
+
+/** Takes a pending authorization once. Expired or unknown states return undefined. */
+export function takePending(state: string): { userId: string; serverId: string } | undefined {
+  const pending = pendingByState.get(state);
+  pendingByState.delete(state);
+  return pending && pending.expiresAt > Date.now() ? pending : undefined;
+}
 
 /**
  * Per (user, server) OAuth storage, encrypted in mcp_servers.oauth_enc.
@@ -83,7 +91,10 @@ export class StoredOAuthProvider implements OAuthClientProvider {
   }
   state() {
     const state = randomBytes(32).toString("base64url");
-    pendingByState.set(state, { userId: this.userId, serverId: this.serverId });
+    const now = Date.now();
+    // Abandoned authorizations would otherwise accumulate for the life of the process.
+    for (const [key, entry] of pendingByState) if (entry.expiresAt <= now) pendingByState.delete(key);
+    pendingByState.set(state, { userId: this.userId, serverId: this.serverId, expiresAt: now + PENDING_TTL_MS });
     return state;
   }
   saveState(state: string) {
