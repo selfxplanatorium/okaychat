@@ -107,3 +107,37 @@
     scroll-behavior: auto !important;
   }
 }
+
+/*
+ * Appearance > Motion switches (data-motion-off on <html>). Durations collapse
+ * to 1ms instead of `none`, as above, so code waiting for animationend or
+ * transitionend on an exit still runs. Loading indicators and icon gestures
+ * have their own switches, so the interface rule leaves them alone.
+ */
+html[data-motion-off~="interface"] {
+  scroll-behavior: auto !important;
+}
+html[data-motion-off~="interface"] *:not(.animate-spin, .animate-pulse, .animate-pulse-soft, .shimmer, [data-icon-motion], [data-icon-motion] *),
+html[data-motion-off~="interface"] *:not(.shimmer)::before,
+html[data-motion-off~="interface"] *:not(.skeleton-shimmer)::after {
+  animation-duration: 1ms !important;
+  animation-delay: 0ms !important;
+  animation-iteration-count: 1 !important;
+}
+html[data-motion-off~="loading"] :is(.animate-spin, .animate-pulse, .animate-pulse-soft, .shimmer) {
+  animation: none !important;
+}
+/* The moving highlight is a pseudo-element; without motion it would sit still on the text. */
+html[data-motion-off~="loading"] .shimmer::before,
+html[data-motion-off~="loading"] .skeleton-shimmer::after {
+  display: none !important;
+}
+html[data-motion-off~="icons"] :is([data-icon-motion], [data-icon-motion] *) {
+  animation: none !important;
+}
+html[data-motion-off~="transitions"] *,
+html[data-motion-off~="transitions"] *::before,
+html[data-motion-off~="transitions"] *::after {
+  transition-duration: 1ms !important;
+  transition-delay: 0ms !important;
+}

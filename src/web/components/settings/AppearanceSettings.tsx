@@ -13,7 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { DEFAULT_APPEARANCE, useAppearance } from "@/state/appearance";
-import type { AppearanceSettings } from "@shared/appearance";
+import { MOTION_GROUPS, type AppearanceSettings, type MotionGroup } from "@shared/appearance";
 import type { InstalledFont } from "@shared/types";
 import { installFont, removeFont, useInstalledFonts } from "@/state/fonts";
 import {
@@ -51,6 +51,13 @@ import {
   type ChatWidth,
 } from "@/theme/settings";
 import { isVsCodeThemeFile, pairVsCodeThemes, parseVsCodeThemeFile, resolveThemeLabelCollisions } from "@/theme/vscode-import";
+
+const MOTION_OPTIONS: Array<{ group: MotionGroup; label: string; description: string }> = [
+  { group: "interface", label: "Interface animations", description: "Messages, menus, dialogs, and pages animate as they appear and leave." },
+  { group: "transitions", label: "Transitions", description: "Hover states, color changes, and panels fade or slide instead of switching at once." },
+  { group: "icons", label: "Icon animations", description: "Icons move when you hover over or click a control." },
+  { group: "loading", label: "Loading indicators", description: "Spinners, pulses, and shimmering text while something is working." },
+];
 
 const CHAT_WIDTH_OPTIONS: Array<{ value: ChatWidth; label: string }> = [
   { value: "comfortable", label: "Comfortable (default)" },
@@ -660,12 +667,51 @@ export function AppearanceSettings() {
             </div>
           }
         />
+        <SettingsRow
+          label="Square corners"
+          description="Remove rounded corners from every surface, control, and image."
+          reset={s.squareCorners !== DEFAULT_APPEARANCE.squareCorners ? () => reset("squareCorners") : null}
+          control={<Switch aria-label="Square corners" checked={s.squareCorners} onCheckedChange={(checked) => update({ squareCorners: Boolean(checked) })} />}
+        />
       </SettingsSection>
 
       <SettingsSection title="Motion">
         <SettingsRow
+          label="Animations"
+          description="Turn off to stop every animation. Your system's reduced-motion setting also applies."
+          reset={s.motionOff.length ? () => reset("motionOff") : null}
+          control={
+            <Switch
+              aria-label="Animations"
+              checked={s.motionOff.length < MOTION_GROUPS.length}
+              onCheckedChange={(checked) => update({ motionOff: checked ? [] : [...MOTION_GROUPS] })}
+            />
+          }
+        />
+        {MOTION_OPTIONS.map((option) => (
+          <SettingsRow
+            key={option.group}
+            className="sm:pl-8"
+            label={option.label}
+            description={option.description}
+            control={
+              <Switch
+                aria-label={option.label}
+                checked={!s.motionOff.includes(option.group)}
+                onCheckedChange={(checked) =>
+                  update({
+                    motionOff: checked
+                      ? s.motionOff.filter((group) => group !== option.group)
+                      : MOTION_GROUPS.filter((group) => group === option.group || s.motionOff.includes(group)),
+                  })
+                }
+              />
+            }
+          />
+        ))}
+        <SettingsRow
           label="Panel animations"
-          description="Set how fast panels open and close."
+          description="Set how fast panels open and close. Applies while transitions are on."
           reset={s.panelAnimationDurationMs !== DEFAULT_APPEARANCE.panelAnimationDurationMs ? () => reset("panelAnimationDurationMs") : null}
           control={
             <SettingsSlider

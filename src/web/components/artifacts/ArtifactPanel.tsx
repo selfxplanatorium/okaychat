@@ -7,6 +7,7 @@ import { Select } from "@/components/ui/select";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { motionAllowed } from "@/state/appearance";
 import { useArtifactPanel } from "@/state/artifacts";
 import { useCurrentThreadId } from "@/state/thread-meta";
 import { DocumentPreview } from "./DocumentPreview";
@@ -18,7 +19,7 @@ type OpenArtifact = { threadId: string; id: string; version?: number };
 
 /** Matches the close transition, so the panel unmounts after it has slid away. */
 function panelExitMs() {
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return 0;
+  if (!motionAllowed("transitions")) return 0;
   const raw = getComputedStyle(document.documentElement).getPropertyValue("--panel-animation-duration").trim();
   const ms = raw ? Number.parseFloat(raw) : 240;
   return Number.isFinite(ms) ? ms : 240;

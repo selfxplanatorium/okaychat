@@ -1,6 +1,6 @@
 # Visual depth
 
-The app follows the brand icon: surfaces lit from above, a one-pixel inner highlight on the top edge, a faint inner shade on the bottom edge, and soft shadows tinted by the theme. The approved mockup is the reference: floating frosted sidebar, accent glow in the canvas, a lifted composer with a focus halo, gradient accent controls, and spring presses.
+The app follows the brand icon: surfaces lit from above, a one-pixel inner highlight on the top edge, a faint inner shade on the bottom edge, and soft shadows tinted by the theme. The approved mockup is the reference: floating frosted sidebar, a lifted composer with a focus halo, gradient accent controls, and spring presses. The main canvas uses a solid theme background to avoid gradient banding on displays.
 
 ## Where it lives
 
@@ -12,12 +12,11 @@ The app follows the brand icon: surfaces lit from above, a one-pixel inner highl
 | `--depth-line` | Hairline outline drawn as a 0-spread shadow, so it does not change layout |
 | `--depth-shadow-tint` | Shadow color. The foreground pulled toward the accent in light mode, black in dark |
 | `--shadow-raised`, `--shadow-float` | Two elevations: resting on the canvas, floating over content |
-| `--depth-glow`, `--depth-canvas-glow` | Focus halo and the radial accent glow in the canvas |
+| `--depth-glow` | Focus halo |
 | `--depth-primary-top`, `--depth-primary-bottom`, `--depth-primary-shadow` | The accent control gradient and its tinted drop shadow |
 
 | Utility | Applied to |
 | --- | --- |
-| `depth-canvas` | Shell root (`ChatShell.tsx`). The thread root is transparent so the glow shows through |
 | `depth-primary` | `Button` default variant, checked `Switch` track, highlighted menu and select items, send/stop |
 | `depth-float` | Menus, popovers, selects, the auth card |
 | `depth-sidebar` | Desktop sidebar panel and settings nav (`md:` only; on the phone they keep the overlay and the top bar) |
@@ -32,6 +31,7 @@ Settings cards (`SettingsUI` sections, theme library cards, color scheme tiles) 
 
 ## Rules
 
+- Text selection in `index.css` uses the theme's accent and paired foreground, falling back to the default primary pair.
 - Derive every depth color from semantic tokens with `color-mix`. Never hardcode a hex in `depth.css`, or a theme switch will leave stale colors behind.
 - `depth-primary` sets `box-shadow` directly, which replaces Tailwind's `ring-*` shadow. Its focus state uses an outline instead. Do the same in any new utility that owns `box-shadow`.
 - `.depth-press` lives in `@layer components` so a `transition-*` utility passed by a caller still wins. Custom `@utility` blocks support variants (`md:depth-sidebar`, `data-active:depth-row-active`).
@@ -46,3 +46,5 @@ Base UI switches expose `data-disabled` on the root rather than a native `disabl
 Highlighted select items use `text-primary-foreground` for both the main label and nested muted text, such as a model provider. Muted text must not keep the normal surface color over the accent gradient.
 
 Sidebar navigation shortcuts, including New chat, use the same quiet hover/selected row surface (`bg-sidebar-row-hover`), without accent elevation. Accent controls remain reserved for actions within the page.
+
+The chat list uses an alpha gradient mask at its top edge beneath the project switcher. Scrolling increases the fade from 0 to 24 px, revealing the actual sidebar surface in every theme and glass setting; returning to the top removes it. The scroll handler updates a CSS variable directly to avoid React renders while scrolling.

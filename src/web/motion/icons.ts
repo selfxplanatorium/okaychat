@@ -83,7 +83,9 @@ let installed = false;
 export function installIconMotion() {
   if (installed || typeof window === "undefined") return;
   installed = true;
-  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
+  const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+  // Appearance > Motion writes data-motion-off on the root element.
+  const reduce = { get matches() { return query.matches || /\bicons\b/.test(document.documentElement.dataset.motionOff ?? ""); } };
   let hovered: Element | null = null;
   let pending = 0;
 

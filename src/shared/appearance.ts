@@ -11,6 +11,10 @@ const customTheme = z.object({
   managed: z.boolean().optional(),
 });
 
+/** Animation groups the user can switch off. Turning all of them off disables every animation. */
+export const MOTION_GROUPS = ["icons", "interface", "transitions", "loading"] as const;
+export type MotionGroup = (typeof MOTION_GROUPS)[number];
+
 export const appearanceSchema = z.object({
   theme: z.string().max(100),
   mode: z.enum(["system", "light", "dark"]),
@@ -19,6 +23,9 @@ export const appearanceSchema = z.object({
   glassOpacity: z.number().int().min(40).max(100),
   appearanceContrast: z.number().int().min(50).max(200),
   panelAnimationDurationMs: z.number().int().min(0).max(400),
+  // Defaults keep snapshots and caches written before these fields valid.
+  motionOff: z.array(z.enum(MOTION_GROUPS)).max(MOTION_GROUPS.length).default([]),
+  squareCorners: z.boolean().default(false),
   chatWidth: z.enum(["comfortable", "wide", "full"]),
   fontFamilySans: z.string().max(200),
   fontFamilyComposer: z.string().max(200),

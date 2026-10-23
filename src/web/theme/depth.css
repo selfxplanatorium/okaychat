@@ -25,9 +25,8 @@
     0 1px 1px color-mix(in srgb, var(--depth-shadow-tint) 4%, transparent),
     0 4px 10px -2px color-mix(in srgb, var(--depth-shadow-tint) 6%, transparent),
     0 18px 40px -14px color-mix(in srgb, var(--depth-shadow-tint) 18%, transparent);
-  /* Focus halo and canvas glow. */
+  /* Focus halo. */
   --depth-glow: color-mix(in oklab, var(--primary) 22%, transparent);
-  --depth-canvas-glow: color-mix(in oklab, var(--primary) 13%, transparent);
   /* Solid accent controls: lighter at the top, deeper at the bottom. */
   --depth-primary-top: color-mix(in oklab, var(--primary), white 26%);
   --depth-primary-bottom: color-mix(in oklab, var(--primary), black 16%);
@@ -48,21 +47,9 @@
     0 6px 14px -4px rgb(0 0 0 / 40%),
     0 24px 48px -16px rgb(0 0 0 / 60%);
   --depth-glow: color-mix(in oklab, var(--primary) 18%, transparent);
-  --depth-canvas-glow: color-mix(in oklab, var(--primary) 9%, transparent);
   /* Dark themes use a light accent, so the top only brightens a little. */
   --depth-primary-top: color-mix(in oklab, var(--primary), white 12%);
   --depth-primary-bottom: color-mix(in oklab, var(--primary), black 22%);
-}
-
-/* App background: the canvas with the accent glowing in from the top. */
-@utility depth-canvas {
-  background:
-    radial-gradient(120% 70% at 72% -12%, var(--depth-canvas-glow), transparent 62%),
-    linear-gradient(
-      180deg,
-      var(--background),
-      color-mix(in oklab, var(--background), var(--foreground) 3%)
-    );
 }
 
 /* Solid accent control (buttons, send, checked switch track). */

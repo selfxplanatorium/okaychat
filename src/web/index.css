@@ -11,6 +11,10 @@
   * {
     @apply border-border;
   }
+  ::selection {
+    background-color: var(--app-theme-accent, var(--primary));
+    color: var(--app-theme-accent-foreground, var(--primary-foreground));
+  }
   body {
     @apply bg-background text-foreground antialiased;
   }
@@ -77,6 +81,14 @@
   .panel-transition {
     transition-duration: 0ms;
   }
+}
+
+/* Appearance > Square corners. Overrides every radius, including pills, avatars, and scrollbars. */
+html[data-corners="square"] *,
+html[data-corners="square"] *::before,
+html[data-corners="square"] *::after,
+html[data-corners="square"] ::-webkit-scrollbar-thumb {
+  border-radius: 0 !important;
 }
 
 /* Word wrap setting for code blocks. */

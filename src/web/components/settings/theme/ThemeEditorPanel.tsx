@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { motionAllowed } from "@/state/appearance";
 import { getThemeRoleLabel, ThemeColorField } from "./ThemeColorPicker";
 import {
   clearThemeInspectorHover,
@@ -504,7 +505,7 @@ export function ThemeEditorPanel({
     requestAnimationFrame(() => {
       panelRef.current
         ?.querySelector(`[data-theme-color-role="${visibleRole}"]`)
-        ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        ?.scrollIntoView({ behavior: motionAllowed("interface") ? "smooth" : "auto", block: "nearest" });
     });
   };
 

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import type { AppearanceSettings, UserAppearance } from "@shared/appearance";
+import type { AppearanceSettings, MotionGroup, UserAppearance } from "@shared/appearance";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { applyAppearanceContrast } from "@/theme/contrast";
@@ -38,6 +38,8 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   glassOpacity: DEFAULT_GLASS_OPACITY,
   appearanceContrast: DEFAULT_APPEARANCE_CONTRAST,
   panelAnimationDurationMs: DEFAULT_PANEL_ANIMATION_DURATION_MS,
+  motionOff: [],
+  squareCorners: false,
   chatWidth: DEFAULT_CHAT_WIDTH,
   fontFamilySans: "",
   fontFamilyComposer: "",
@@ -129,6 +131,12 @@ export function restoreAppearance(value: UserAppearance) {
   useAppearance.setState(settings);
 }
 
+/** False when the OS asks for reduced motion or the user switched the group off in Appearance. */
+export function motionAllowed(group: MotionGroup): boolean {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return false;
+  return !useAppearance.getState().motionOff.includes(group);
+}
+
 const systemDarkQuery = () => window.matchMedia("(prefers-color-scheme: dark)");
 
 /** The appearance currently on screen. */
@@ -168,6 +176,10 @@ function applySettings(s: AppearanceSettings) {
   } as Parameters<typeof applyAppearanceFontVariables>[1]);
   root.style.setProperty("--panel-animation-duration", `${s.panelAnimationDurationMs}ms`);
   root.dataset.wordWrap = String(s.wordWrap);
+  // motion.css matches groups with ~=, so the attribute is a space-separated list.
+  if (s.motionOff.length) root.dataset.motionOff = s.motionOff.join(" ");
+  else delete root.dataset.motionOff;
+  root.dataset.corners = s.squareCorners ? "square" : "round";
 }
 
 /** Mount once at the app root. Keeps the DOM in sync with the store and the OS color scheme. */

@@ -55,6 +55,12 @@ Glass implementation notes:
 | --- | --- | --- | --- | --- | --- | --- |
 | S12 | Panel animations | Range slider with output (`{value} ms`) and a replay preview button (`Replay panel animation preview`) | 0 to 400 ms, step 25 | 0 (off) | "Set how fast panels open and close." | Yes |
 
+okaychat additions (not in T3Code):
+
+- `Square corners` (Interface section, `squareCorners`) sets `data-corners="square"` on `<html>`. `index.css` then forces `border-radius: 0` on every element, pseudo-element, and scrollbar thumb, so pills, avatars, and `rounded-full` go square too. Artifact frames are separate documents and keep their own styles.
+- `Animations` plus four group switches (`motionOff`, groups in `MOTION_GROUPS`): interface (entrances, exits, smooth scrolling), transitions (hover, color, panels), icons (`motion/icons.ts` gestures), and loading (spin, pulse, shimmer, skeleton). The master switch turns all groups off or on. The groups go into `data-motion-off` as a space-separated list, matched with `~=` at the end of `motion/motion.css`. Durations collapse to 1 ms, like the OS reduced-motion rule, so code waiting for `animationend`/`transitionend` still runs. JS that animates checks `motionAllowed(group)` from `state/appearance.ts`, which also honors `prefers-reduced-motion`. A new loading animation class must be added to the loading exclusions there, or switching interface animations off freezes it.
+- Both fields use `.default()` in the schema, so stored snapshots and caches written before them still parse.
+
 The preview is a small sidebar/content mock. It animates width and border with `duration-(--preview-duration) ease-out`. It respects `prefers-reduced-motion`.
 
 ## Section: Typography

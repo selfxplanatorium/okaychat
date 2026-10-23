@@ -25,7 +25,7 @@ beforeEach(() => db.exec("DELETE FROM user_settings"));
 const appearance: UserAppearance = {
   theme: "test-theme", mode: "dark", halves: { light: "ocean" },
   customThemes: [{ id: "test-theme", label: "Test", appearance: "dark", colors: { canvas: "#112233" }, variants: { light: { canvas: "#eeeeee" } } }],
-  glassOpacity: 80, appearanceContrast: 100, panelAnimationDurationMs: 0, chatWidth: "comfortable",
+  glassOpacity: 80, appearanceContrast: 100, panelAnimationDurationMs: 0, motionOff: [], squareCorners: false, chatWidth: "comfortable",
   fontFamilySans: "", fontFamilyComposer: "", fontFamilyCode: "", fontSizeInterface: 16, fontSizePrompt: 14, fontSizeCode: 13,
   fontSmoothing: true, wordWrap: true, typographyAdvanced: false,
 };
