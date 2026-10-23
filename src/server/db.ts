@@ -321,6 +321,39 @@ const migrations: Array<string | (() => void)> = [
       storeInlineAttachments(db, row.user_id, row.thread_id, content);
     }
   },
+  `ALTER TABLE threads ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;`,
+  // Image APIs return JPEG and WebP too. Codex output and older rows are PNG.
+  `ALTER TABLE images ADD COLUMN mime TEXT NOT NULL DEFAULT 'image/png';`,
+  // A fork remembers its source chat for the "Branched from" link. No foreign key: deleting the source keeps the fork.
+  `ALTER TABLE threads ADD COLUMN branched_from TEXT;`,
+  // Memory v2 (docs/research/memory.md): a synthesized summary per scope, background extraction from idle
+  // chats (cursor per thread), past-chat search, and a per-thread summary snapshot that keeps the prompt prefix stable.
+  `
+  ALTER TABLE memory_preferences ADD COLUMN chat_search INTEGER NOT NULL DEFAULT 1;
+  CREATE TABLE memory_summaries (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    scope TEXT NOT NULL DEFAULT '',
+    content_enc TEXT,
+    fingerprint TEXT NOT NULL DEFAULT '',
+    revision INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    attempted_at INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, scope)
+  );
+  ALTER TABLE threads ADD COLUMN memory_cursor TEXT;
+  ALTER TABLE threads ADD COLUMN memory_scanned_at INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE threads ADD COLUMN memory_snapshot_enc TEXT;
+  ALTER TABLE threads ADD COLUMN memory_snapshot_at INTEGER NOT NULL DEFAULT 0;
+  `,
+  // Message text counts toward the storage quota. Inline data URLs are charged as uploads instead.
+  () => {
+    db.exec("ALTER TABLE messages ADD COLUMN bytes INTEGER NOT NULL DEFAULT 0");
+    const update = db.prepare("UPDATE messages SET bytes = ? WHERE rowid = ?");
+    for (const row of db.prepare("SELECT rowid, content FROM messages").iterate() as Iterable<{ rowid: number; content: string }>) {
+      update.run(Buffer.byteLength(row.content.replace(/data:[^"]*/g, "")), row.rowid);
+    }
+  },
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

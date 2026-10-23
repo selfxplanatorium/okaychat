@@ -16,8 +16,15 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       db.exec("INSERT INTO images (id,user_id,prompt,created_at) VALUES ('legacy-image','legacy','legacy image',1)");
       db.exec("INSERT INTO threads (id,user_id,created_at,updated_at) VALUES ('historical','legacy',1,1)");
       db.prepare("INSERT INTO messages (id,thread_id,format,content,created_at) VALUES ('m1','historical','ai-sdk/v6',?,1)").run(JSON.stringify({role:'user',parts:[{type:'file',filename:'legacy.png',mediaType:'image/png',url:'data:image/png;base64,bGVnYWN5LWZpbGU='},{type:'text',text:'<attachment file_id=\"upl_pdf\"></attachment>'}]}));
-      const version = db.prepare("PRAGMA user_version").get().user_version;
-      db.exec('PRAGMA user_version = ' + (version - 1));
+      // Rewind to just before the inline-file migration (15), undoing the later threads.pinned (16), images.mime (17), threads.branched_from (18), memory v2 (19), and messages.bytes changes.
+      db.exec("DROP TABLE memory_summaries");
+      db.exec("ALTER TABLE memory_preferences DROP COLUMN chat_search");
+      for (const column of ["memory_cursor", "memory_scanned_at", "memory_snapshot_enc", "memory_snapshot_at"]) db.exec("ALTER TABLE threads DROP COLUMN " + column);
+      db.exec("ALTER TABLE threads DROP COLUMN pinned");
+      db.exec("ALTER TABLE images DROP COLUMN mime");
+      db.exec("ALTER TABLE threads DROP COLUMN branched_from");
+      db.exec("ALTER TABLE messages DROP COLUMN bytes");
+      db.exec('PRAGMA user_version = 14');
       db.close();`);
     mkdirSync(path.join(directory, "images", "legacy"), { recursive: true });
     writeFileSync(path.join(directory, "images", "legacy", "legacy-image.png"), Buffer.alloc(42));
