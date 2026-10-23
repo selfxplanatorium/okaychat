@@ -11,19 +11,20 @@ import {
 } from "ai";
 import { frontendTools, type FrontendTools } from "assistant-stream/ai-sdk";
 import { createInMemoryResumableStreamStore, createResumableStreamContext, RESUMABLE_STREAM_ID_HEADER } from "assistant-stream/resumable";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { AssistantMetadata, ModelInfo, ReasoningEffort, TokenUsage, UserSettings } from "../shared/types.js";
 import type { AppEnv } from "./auth.js";
-import { ARTIFACT_INSTRUCTIONS, artifactTools } from "./artifacts.js";
+import { artifactsInCurrentTurn, artifactTools } from "./artifacts.js";
+import { promptText } from "./prompts.js";
 import { listModels, resolveModel } from "./catalog/providers.js";
-import { isConnected as codexConnected } from "./codex.js";
 import { newId } from "./crypto.js";
 import { applyCompaction, compact, currentContextTokens, summaryMessages } from "./compaction.js";
 import { createModel } from "./llm.js";
 import { toolsForUser } from "./mcp/manager.js";
-import { imageTools } from "./tools/image.js";
-import { sandboxConfigured, sandboxTools } from "./tools/sandbox.js";
+import { enabledImageServices, imageTools } from "./tools/image.js";
+import { SandboxTurn, sandboxConfigured, sandboxTools } from "./tools/sandbox.js";
 import { subagentTools } from "./tools/subagent.js";
 import { injectScreenshots } from "./tools/screenshots.js";
 import type { VisualShot } from "./documents/visual.js";
@@ -34,27 +35,33 @@ import { adaptPdfParts } from "./pdf-parts.js";
 import { projectContext } from "./projects.js";
 import { turnSkills } from "./skills.js";
 import { getSettings, subagentModelRefs } from "./settings.js";
-import { ensureThread, getThread, isTemporaryThread, setCompaction, updateThread } from "./threads.js";
+import { currentBranch, ensureThread, getThread, isTemporaryThread, setCompaction, updateThread, userText } from "./threads.js";
 import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "./usage.js";
-
-const BASE_SYSTEM = `You are okaychat, a helpful assistant. Use Markdown. Use fenced code blocks with a language tag.
-Use LaTeX with $...$ inline and $$...$$ for display math. When tools are available, use them when they help, and say what you found.
-When you use web results, cite sources inline as Markdown links.`;
 
 // AssistantChatTransport sends the thread's remote id as `id` and model context as `config`, `system`, and `tools`.
 const chatBody = z.object({
   messages: z.array(z.any()),
-  id: z.string().min(1),
-  config: z.object({ modelName: z.string().min(3), reasoningEffort: z.string().optional(), temporaryPersonalization: z.boolean().optional() }).loose(),
+  id: z.string().min(1).max(200),
+  config: z
+    .object({
+      modelName: z.string().min(3),
+      reasoningEffort: z.string().optional(),
+      temporaryPersonalization: z.boolean().optional(),
+      /** Per-chat web search toggle from the composer. The account's webTools setting still wins when off. */
+      webSearch: z.boolean().optional(),
+    })
+    .loose(),
   // Browser-executed tools (generative UI) and the instructions that go with them.
   system: z.string().optional(),
   tools: z.record(z.string(), z.any()).optional(),
 });
 
-function systemPrompt(userPrompt: string, project: string, mcpInstructions: string[], artifacts: boolean, clientSystem?: string, memory?: string): string {
+function systemPrompt(model: ModelInfo, userPrompt: string, project: string, mcpInstructions: string[], artifacts: boolean, clientSystem?: string, memory?: string): string {
   // Order matters for caching: static text first, nothing that changes per request.
-  const parts = [BASE_SYSTEM, `Today's date: ${new Date().toISOString().slice(0, 10)}.`];
-  if (artifacts) parts.push(ARTIFACT_INSTRUCTIONS);
+  // The model line is stable per chat: switching models already starts a new cache.
+  const identity = promptText("modelIdentity", { name: model.name, id: model.id, provider: model.providerId, knowledge: model.knowledge ?? "unknown" });
+  const parts = [promptText("chat"), identity, promptText("date", { date: new Date().toISOString().slice(0, 10) })].filter((part) => part.trim());
+  if (artifacts) parts.push(promptText("artifacts"));
   if (userPrompt.trim()) parts.push(`# User instructions\n${userPrompt.trim()}`);
   if (project) parts.push(project);
   if (mcpInstructions.length) parts.push(`# Tool server instructions\n${mcpInstructions.join("\n\n")}`);
@@ -76,6 +83,8 @@ export interface TurnOptions {
   clientSystem?: string;
   /** Only anonymous chats use this flag. Personalization is read-only and off by default. */
   temporaryPersonalization?: boolean;
+  /** Per-chat composer toggle; absent falls back to the account setting. */
+  webSearch?: boolean;
   signal?: AbortSignal;
 }
 
@@ -114,7 +123,7 @@ export async function turnStream(opts: TurnOptions) {
       const mcp = model.toolCall && !temporary ? await toolsForUser(user.id) : { tools: {}, instructions: [], servers: [] };
       const searchBudget = new SearchBudget(settings.maxSearches, searchesInCurrentTurn(uiMessages));
       const remainingSteps = Math.max(0, settings.maxSteps - agentStepsInCurrentTurn(uiMessages));
-      const builtInWeb = model.toolCall && settings.webTools ? webTools({ searchBudget }) : {};
+      const builtInWeb = model.toolCall && settings.webTools ? webTools({ searchBudget, search: opts.webSearch ?? true }) : {};
       const lastUser = uiMessages.findLast((message) => message.role === "user");
       const query = lastUser?.parts.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n") ?? "";
       const memory = temporary
@@ -138,14 +147,16 @@ export async function turnStream(opts: TurnOptions) {
       // view_artifact stores its PNG here; prepareStep attaches it once as a user image message.
       const shots = new Map<string, VisualShot>();
       const injectedShots = new Set<string>();
+      const sandboxTurn = new SandboxTurn();
+      const imageServices = model.toolCall && !temporary ? enabledImageServices(user.id, settings) : [];
       const tools: ToolSet = {
         ...builtInWeb,
         ...(model.toolCall ? memory.tools : {}),
         ...(skills.tools),
         ...subagents,
-        ...(useArtifacts ? artifactTools(threadId, user.id, { shots, canViewImages: model.inputModalities.includes("image") }) : {}),
-        ...(model.toolCall && !temporary && codexConnected(user.id) ? imageTools(user.id, threadId, signal) : {}),
-        ...(model.toolCall && !temporary && settings.codeExecution && sandboxConfigured() ? sandboxTools(user.id, threadId, signal) : {}),
+        ...(useArtifacts ? artifactTools(threadId, user.id, { shots, canViewImages: model.inputModalities.includes("image"), savedThisTurn: artifactsInCurrentTurn(uiMessages) }) : {}),
+        ...(imageServices.length ? imageTools(user.id, threadId, imageServices, signal) : {}),
+        ...(model.toolCall && !temporary && settings.codeExecution && sandboxConfigured() ? sandboxTools(user.id, threadId, signal, sandboxTurn) : {}),
         ...(useGenerativeUI ? frontendTools(opts.clientTools!) : {}),
         ...mcp.tools,
       };
@@ -159,8 +170,8 @@ export async function turnStream(opts: TurnOptions) {
         const lastUserIndex = converted.findLastIndex((message) => message.role === "user");
         converted.splice(lastUserIndex < 0 ? converted.length : lastUserIndex, 0, { role: "user", content: currentContext });
       }
-      const memoryInstructions = [temporary ? "This is an anonymous chat. It is not saved in okaychat history and must never create or change saved memories. Do not claim that this hides the conversation from the selected model provider." : "", memory.instructions].filter(Boolean).join("\n\n");
-      const { system, messages } = handle.markCache(systemPrompt(personalized ? settings.systemPrompt : "", temporary ? "" : projectContext(userId, thread.projectId), mcp.instructions, useArtifacts, useGenerativeUI ? opts.clientSystem : undefined, memoryInstructions), [
+      const memoryInstructions = [temporary ? promptText("anonymous") : "", memory.instructions].filter(Boolean).join("\n\n");
+      const { system, messages } = handle.markCache(systemPrompt(model, personalized ? settings.systemPrompt : "", temporary ? "" : projectContext(userId, thread.projectId), mcp.instructions, useArtifacts, useGenerativeUI ? opts.clientSystem : undefined, memoryInstructions), [
         ...(summary ? summaryMessages(summary) : []),
         ...converted,
       ]);
@@ -198,6 +209,8 @@ export async function turnStream(opts: TurnOptions) {
         },
         onEnd: () => {
           if (!temporary) recordUsage({ userId: user.id, threadId, providerId: model.providerId, modelId: model.id, kind: "chat", usage: total, cost });
+          // The answer is given: drop the turn's scratch and superseded sandbox outputs.
+          sandboxTurn.prune(user.id);
         },
       });
 
@@ -237,11 +250,40 @@ const resumable = createResumableStreamContext({
 });
 const runs = new Map<string, { userId: string; controller: AbortController }>();
 
+// Each turn can fan out into sub-agents, browser renders, and sandbox runs, possibly on a server-wide key.
+const MAX_ACTIVE_TURNS = 4;
+const activeTurns = new Map<string, number>();
+
+/** Reserves a turn slot for the user, or returns null when all are taken. The release runs once. */
+function reserveTurn(userId: string): (() => void) | null {
+  const count = activeTurns.get(userId) ?? 0;
+  if (count >= MAX_ACTIVE_TURNS) return null;
+  activeTurns.set(userId, count + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const left = (activeTurns.get(userId) ?? 1) - 1;
+    if (left > 0) activeTurns.set(userId, left);
+    else activeTurns.delete(userId);
+  };
+}
+
+/** Releases the slot when the turn's stream ends, errors, or is cancelled. */
+function releasing<T>(stream: ReadableStream<T>, release: () => void, signal: AbortSignal): ReadableStream<T> {
+  signal.addEventListener("abort", release, { once: true });
+  return stream.pipeThrough(new TransformStream<T, T>({ flush: release }));
+}
+
+const busy = (c: Context) => c.json({ error: `You already have ${MAX_ACTIVE_TURNS} replies running. Wait for one to finish or stop it.` }, 429);
+
 export const chatRoutes = new Hono<AppEnv>()
   .post("/chat", async (c) => {
     const user = c.get("user");
     const parsed = chatBody.safeParse(await c.req.json());
     if (!parsed.success) return c.json({ error: "Pick a model before sending." }, 400);
+    const release = reserveTurn(user.id);
+    if (!release) return busy(c);
     if (isTemporaryThread(parsed.data.id)) {
       try {
         const stream = await turnStream({
@@ -250,12 +292,14 @@ export const chatRoutes = new Hono<AppEnv>()
           modelRef: parsed.data.config.modelName,
           effort: parsed.data.config.reasoningEffort as ReasoningEffort | undefined,
           temporaryPersonalization: parsed.data.config.temporaryPersonalization ?? false,
+          webSearch: parsed.data.config.webSearch,
           uiMessages: parsed.data.messages as UIMessage[],
           // Anonymous turns have no resumable copy and end when the request disconnects.
           signal: c.req.raw.signal,
         });
-        return createUIMessageStreamResponse({ stream, headers: { "Cache-Control": "no-store" } });
+        return createUIMessageStreamResponse({ stream: releasing(stream, release, c.req.raw.signal), headers: { "Cache-Control": "no-store" } });
       } catch (error) {
+        release();
         return c.json({ error: (error as Error).message }, 400);
       }
     }
@@ -268,19 +312,21 @@ export const chatRoutes = new Hono<AppEnv>()
         threadId: parsed.data.id,
         modelRef: parsed.data.config.modelName,
         effort: parsed.data.config.reasoningEffort as ReasoningEffort | undefined,
+        webSearch: parsed.data.config.webSearch,
         uiMessages: parsed.data.messages as UIMessage[],
         clientTools: parsed.data.tools as FrontendTools | undefined,
         clientSystem: parsed.data.system,
         signal: controller.signal,
       });
       runs.set(streamId, { userId: user.id, controller });
-      const response = createUIMessageStreamResponse({ stream });
+      const response = createUIMessageStreamResponse({ stream: releasing(stream, release, controller.signal) });
       const body = await resumable.run(streamId, () => response.body!);
       const headers = new Headers(response.headers);
       headers.set(RESUMABLE_STREAM_ID_HEADER, streamId);
       return new Response(body, { headers });
     } catch (error) {
       controller.abort();
+      release();
       runs.delete(streamId);
       return c.json({ error: (error as Error).message }, 400);
     }
@@ -302,14 +348,19 @@ export const chatRoutes = new Hono<AppEnv>()
     const user = c.get("user");
     const threadId = c.req.param("id");
     if (isTemporaryThread(threadId)) return c.json({ error: "Anonymous chats cannot save compaction" }, 400);
-    const body = (await c.req.json()) as { messages: UIMessage[]; modelRef: string };
+    const parsed = z.object({ messages: z.array(z.any()), modelRef: z.string().min(3).max(300) }).safeParse(await c.req.json());
+    if (!parsed.success) return c.json({ error: "Invalid compaction request" }, 400);
+    const body = parsed.data as { messages: UIMessage[]; modelRef: string };
     const thread = getThread(user.id, threadId);
     if (!thread) return c.json({ error: "Thread not found" }, 404);
     if (body.messages.length < 2) return c.json({ error: "Not enough conversation to compact" }, 400);
     const { model, conn } = await resolveModel(user.id, getSettings(user.id).utilityModel ?? body.modelRef).catch(() =>
       resolveModel(user.id, body.modelRef),
     );
-    const state = await compact({ userId: user.id, threadId, messages: body.messages, previous: thread.compaction, model, conn });
+    // Provider errors explain themselves; the global handler would hide them behind a generic 500.
+    const state = await compact({ userId: user.id, threadId, messages: body.messages, previous: thread.compaction, model, conn }).catch((error: unknown) => {
+      throw new HTTPException(502, { message: describeProviderError(error) });
+    });
     setCompaction(user.id, threadId, state);
     return c.json(state);
   })
@@ -322,8 +373,13 @@ export const chatRoutes = new Hono<AppEnv>()
     const user = c.get("user");
     const threadId = c.req.param("id");
     if (isTemporaryThread(threadId)) return c.json({ title: "Anonymous chat" });
-    const body = (await c.req.json()) as { text: string; modelRef?: string };
-    const fallback = body.text.trim().split("\n")[0]!.slice(0, 60) || "New chat";
+    if (!getThread(user.id, threadId)) return c.json({ error: "Thread not found" }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as { text?: string; modelRef?: string };
+    // Regenerating from the sidebar sends no text: title the stored conversation instead.
+    const text = body.text?.trim()
+      ? body.text
+      : userText(currentBranch(user.id, threadId));
+    const fallback = text.trim().split("\n")[0]!.slice(0, 60) || "New chat";
     const ref = getSettings(user.id).utilityModel ?? body.modelRef;
     let title = fallback;
     if (ref) {
@@ -334,7 +390,7 @@ export const chatRoutes = new Hono<AppEnv>()
           model: handle.model,
           providerOptions: handle.providerOptions,
           maxOutputTokens: 400,
-          prompt: `Write a short title (max 6 words) for a chat that starts with the message below. Reply with the title only, no quotes or punctuation at the end.\n\n<message>\n${body.text.slice(0, 4000)}\n</message>`,
+          prompt: promptText("title", { message: text.slice(0, 4000) }),
         });
         const usage = normalizeUsage(result.totalUsage);
         recordUsage({ userId: user.id, threadId, providerId: model.providerId, modelId: model.id, kind: "title", usage, cost: costOf(model.cost, usage) });

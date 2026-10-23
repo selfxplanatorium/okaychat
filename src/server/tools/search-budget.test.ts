@@ -33,6 +33,12 @@ test("a zero search limit blocks the network without removing page reading", asy
   assert.ok(tools.web_fetch?.execute);
 });
 
+test("the composer search toggle hides searching but keeps page reading", () => {
+  const tools = webTools({ search: false });
+  assert.equal(tools.web_search, undefined);
+  assert.ok(tools.web_fetch?.execute);
+});
+
 test("failed searches consume a query without granting retry loops", async (t) => {
   const network = t.mock.method(globalThis, "fetch", async () => { throw new Error("offline"); });
   const tools = webTools({ searchBudget: new SearchBudget(1) });
