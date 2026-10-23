@@ -21,6 +21,14 @@ export function quotaMessage(used: number, limit: number): string {
   return `Storage quota exceeded: ${gb(used)} of ${gb(limit)} already used. Delete old chats, attachments, or fonts to make room.`;
 }
 
+/**
+ * Stored bytes of one message. Inline data URLs are left out: those attachments are also kept in
+ * `uploads` and charged there, so counting them here would bill the same file twice.
+ */
+export function messageBytes(contentJson: string): number {
+  return Buffer.byteLength(contentJson.replace(/data:[^"]*/g, ""));
+}
+
 /** SQL for one user's stored bytes. The argument is either `@user` or a users alias like `u.id`. */
 export function storageUsedSql(user: string): string {
   // `length(CAST(x AS BLOB))` counts UTF-8 bytes; `length` on TEXT would count characters. The named

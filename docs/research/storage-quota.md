@@ -11,8 +11,9 @@ Each account has one limit: `OKAYCHAT_STORAGE_LIMIT` bytes (default 1 GiB), over
 - Every artifact version: UTF-8 source bytes plus built document bytes.
 - Generated images (`images.size`, backed by PNGs on disk); pre-quota images are stat'ed at startup to backfill their size.
 - Durable `sandbox_files.data`; scratch workspaces are outside account storage.
-- Uploaded fonts, account avatar, encrypted memory bytes, and extracted project-file text.
+- Uploaded fonts, account avatar, encrypted memory bytes (facts and summaries), and extracted project-file text.
 - Skill names, descriptions, instructions, reference paths and reference contents, counted as UTF-8 bytes across `skills` and `skill_files`.
+- Message JSON (`messages.bytes`), without inline `data:` URLs, which are charged once as uploads. Branching charges the copy. Existing rows are backfilled by a migration.
 
 Settings, provider/MCP credentials, skill-source credentials and other small configuration rows do not
 count. Message text and its existing inline file representation are not separately charged: the owned

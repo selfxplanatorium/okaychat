@@ -1,7 +1,7 @@
 import type { UIMessage } from "ai";
 import { HTTPException } from "hono/http-exception";
 import type { CompactionState, ThreadSummary } from "../shared/types.js";
-import { assertStorage } from "./quota.js";
+import { assertStorage, messageBytes } from "./quota.js";
 import { storeInlineAttachments } from "./attachment-storage.js";
 import { db, tx } from "./db.js";
 
@@ -111,13 +111,18 @@ export function listMessages(userId: string, threadId: string): MessageRow[] {
 export function appendMessage(userId: string, threadId: string, row: MessageRow) {
   tx(() => {
     ensureThread(userId, threadId);
-    const previous = db.prepare("SELECT content FROM messages WHERE thread_id = ? AND id = ?").get(threadId, row.id) as { content: string } | undefined;
-    if (previous?.content !== JSON.stringify(row.content)) storeInlineAttachments(db, userId, threadId, row.content, (bytes) => { assertStorage(userId, bytes); });
+    const previous = db.prepare("SELECT content, bytes FROM messages WHERE thread_id = ? AND id = ?").get(threadId, row.id) as { content: string; bytes: number } | undefined;
+    const json = JSON.stringify(row.content);
+    const bytes = messageBytes(json);
+    if (previous?.content !== json) {
+      storeInlineAttachments(db, userId, threadId, row.content, (size) => { assertStorage(userId, size); });
+      assertStorage(userId, bytes - (previous?.bytes ?? 0));
+    }
     // Upsert: assistant messages are re-sent when a stream finishes or a tool result lands.
     db.prepare(
-      `INSERT INTO messages (id, thread_id, parent_id, format, content, created_at) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT (thread_id, id) DO UPDATE SET parent_id = excluded.parent_id, format = excluded.format, content = excluded.content`,
-    ).run(row.id, threadId, row.parent_id, row.format, JSON.stringify(row.content), Date.now());
+      `INSERT INTO messages (id, thread_id, parent_id, format, content, bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (thread_id, id) DO UPDATE SET parent_id = excluded.parent_id, format = excluded.format, content = excluded.content, bytes = excluded.bytes`,
+    ).run(row.id, threadId, row.parent_id, row.format, json, bytes, Date.now());
     db.prepare("UPDATE threads SET updated_at = ? WHERE id = ?").run(Date.now(), threadId);
   });
 }
