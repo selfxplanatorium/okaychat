@@ -8,10 +8,11 @@ import { requireAdmin, signupAllowed, type AppEnv } from "./auth.js";
 import { deleteConnection, listProviders, saveConnection } from "./catalog/providers.js";
 import { hashPassword, newId } from "./crypto.js";
 import { db } from "./db.js";
+import { listPrompts, MAX_PROMPT_CHARS, setPrompt } from "./prompts.js";
 import { storageUsedSql } from "./quota.js";
 
 const userInput = z.object({
-  email: z.string().trim().email(),
+  email: z.string().trim().email().toLowerCase(),
   name: z.string().trim().min(1).max(80),
   password: z.string().min(8).max(200),
   role: z.enum(["admin", "user"]).default("user"),
@@ -32,8 +33,6 @@ const providerInput = z.object({
   enabled: z.boolean().optional(),
 });
 
-const adminCount = () => (db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin'").get() as { n: number }).n;
-
 export const adminRoutes = new Hono<AppEnv>()
   .use("/admin/*", requireAdmin)
   .get("/admin/users", (c) => {
@@ -51,7 +50,7 @@ export const adminRoutes = new Hono<AppEnv>()
   .post("/admin/users", async (c) => {
     const body = userInput.safeParse(await c.req.json());
     if (!body.success) return c.json({ error: body.error.issues[0]?.message }, 400);
-    if (db.prepare("SELECT 1 FROM users WHERE email = ?").get(body.data.email)) return c.json({ error: "That email is already registered." }, 409);
+    if (db.prepare("SELECT 1 FROM users WHERE lower(email) = ?").get(body.data.email)) return c.json({ error: "That email is already registered." }, 409);
     db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(
       newId("usr"),
       body.data.email,
@@ -68,7 +67,8 @@ export const adminRoutes = new Hono<AppEnv>()
     const id = c.req.param("id");
     const target = db.prepare("SELECT role FROM users WHERE id = ?").get(id) as { role: string } | undefined;
     if (!target) return c.json({ error: "Not found" }, 404);
-    if (body.data.role === "user" && target.role === "admin" && adminCount() === 1) return c.json({ error: "Keep at least one admin." }, 400);
+    // The requester is always an admin, so blocking self-demotion also keeps at least one admin.
+    if (body.data.role === "user" && id === c.get("user").id) return c.json({ error: "You cannot remove your own admin role." }, 400);
     if (body.data.name) db.prepare("UPDATE users SET name = ? WHERE id = ?").run(body.data.name, id);
     if (body.data.role) db.prepare("UPDATE users SET role = ? WHERE id = ?").run(body.data.role, id);
     if (body.data.storageLimit !== undefined) db.prepare("UPDATE users SET storage_limit = ? WHERE id = ?").run(body.data.storageLimit, id);
@@ -95,6 +95,14 @@ export const adminRoutes = new Hono<AppEnv>()
       String(body.data.allowSignup),
     );
     return c.json({ allowSignup: signupAllowed() });
+  })
+  .get("/admin/prompts", (c) => c.json(listPrompts()))
+  .put("/admin/prompts/:key", async (c) => {
+    // null restores the default. An empty string is a valid override: it removes that prompt.
+    const body = z.object({ value: z.string().max(MAX_PROMPT_CHARS).nullable() }).safeParse(await c.req.json());
+    if (!body.success) return c.json({ error: body.error.issues[0]?.message }, 400);
+    if (!setPrompt(c.req.param("key"), body.data.value)) return c.json({ error: "Not found" }, 404);
+    return c.json(listPrompts().find((p) => p.key === c.req.param("key")));
   })
   .get("/admin/providers", async (c) => c.json(await listProviders(null)))
   .put("/admin/providers/:id", async (c) => {

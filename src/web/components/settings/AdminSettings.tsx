@@ -1,10 +1,12 @@
-import { HardDriveIcon, KeyRoundIcon, Loader2Icon, PlusIcon, TrashIcon } from "lucide-react";
+import { HardDriveIcon, KeyRoundIcon, Loader2Icon, PencilIcon, PlusIcon, TrashIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
-import type { AdminUser, ProviderInfo, StorageInfo } from "@shared/types";
+import type { AdminPrompt, AdminUser, ProviderInfo, StorageInfo } from "@shared/types";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { api, formatBytes, formatCost } from "@/lib/api";
 import { useData } from "@/state/data";
 import { ProviderLists, ProviderScopeProvider } from "./ProvidersSettings";
@@ -62,11 +64,96 @@ function parseLimit(text: string): number | null | undefined {
   return Number.isFinite(bytes) && bytes > 0 ? bytes : undefined;
 }
 
+type UserEdit = { kind: "limit" | "password"; user: AdminUser };
+
+/** Edits one user's storage limit or password. Stays open with the error when the save fails. */
+function UserEditDialog({ edit, onClose, onSaved }: { edit: UserEdit | null; onClose: () => void; onSaved: () => void }) {
+  const [text, setText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // Keep the last edit while the dialog animates out.
+  const [shown, setShown] = useState(edit);
+  if (edit && edit !== shown) {
+    setShown(edit);
+    setText(edit.kind === "limit" && edit.user.storageLimit !== null ? formatBytes(edit.user.storageLimit) : "");
+    setError(null);
+  }
+  const user = shown?.user;
+  const isLimit = shown?.kind === "limit";
+
+  const save = async () => {
+    if (!user) return;
+    let json: Record<string, unknown>;
+    if (isLimit) {
+      // An untouched prefill keeps the exact stored bytes, which formatBytes rounds.
+      const parsed = user.storageLimit !== null && text === formatBytes(user.storageLimit) ? user.storageLimit : parseLimit(text);
+      if (parsed === undefined) return setError('Use a size like "2 GB" or "500 MB".');
+      json = { storageLimit: parsed };
+    } else {
+      if (text.length < 8) return setError("Use at least 8 characters.");
+      json = { password: text };
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/admin/users/${user.id}`, { method: "PATCH", json });
+      onSaved();
+      onClose();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={edit !== null} onOpenChange={(next) => !next && !busy && onClose()}>
+      <DialogContent showCloseButton={false} className="sm:max-w-sm">
+        <form
+          className="grid gap-5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void save();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle className="text-base">{isLimit ? "Storage limit" : "Reset password"}</DialogTitle>
+            <DialogDescription>
+              {isLimit
+                ? `For ${user?.email}. A bare number means MB. Leave empty to use the server default.`
+                : `For ${user?.email}. They will be signed out everywhere.`}
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            aria-label={isLimit ? "Storage limit" : "New password"}
+            type={isLimit ? "text" : "password"}
+            autoComplete={isLimit ? "off" : "new-password"}
+            placeholder={isLimit ? "Server default" : "8+ characters"}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            autoFocus
+          />
+          {error && <p role="alert" className="text-error settings-error text-xs">{error}</p>}
+          <DialogFooter>
+            <DialogClose type="button" disabled={busy} render={<Button variant="outline" />}>
+              Cancel
+            </DialogClose>
+            <Button type="submit" disabled={busy || (!isLimit && !text)}>
+              {busy && <Loader2Icon className="animate-spin" />} {isLimit ? "Save" : "Reset password"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function Users({ defaultLimit }: { defaultLimit: number | null }) {
   const me = useData((s) => s.me);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [edit, setEdit] = useState<UserEdit | null>(null);
   const refresh = useCallback(() => api<AdminUser[]>("/admin/users").then(setUsers), []);
   useEffect(() => {
     void refresh();
@@ -84,20 +171,6 @@ function Users({ defaultLimit }: { defaultLimit: number | null }) {
 
   const limitLabel = (u: AdminUser) =>
     u.storageLimit !== null ? formatBytes(u.storageLimit) : defaultLimit !== null ? `default ${formatBytes(defaultLimit)}` : "default";
-  const editLimit = (u: AdminUser) => {
-    const text = prompt(
-      `Storage limit for ${u.email} — e.g. "2 GB" or "500 MB" (a bare number means MB). Leave empty to reset to the server default.`,
-      u.storageLimit !== null ? `${u.storageLimit} B` : "",
-    );
-    if (text === null) return;
-    const parsed = parseLimit(text);
-    if (parsed === undefined) {
-      setError(`Could not read that limit for ${u.name}. Use a size like "2 GB".`);
-      return;
-    }
-    void act(() => api(`/admin/users/${u.id}`, { method: "PATCH", json: { storageLimit: parsed } }));
-  };
-
   return (
     <SettingsSection
       title="Users"
@@ -132,23 +205,21 @@ function Users({ defaultLimit }: { defaultLimit: number | null }) {
             aria-label={`Role of ${u.name}`}
             className="h-7 w-24 text-xs"
             value={u.role}
+            disabled={u.id === me?.id}
             onValueChange={(role) => void act(() => api(`/admin/users/${u.id}`, { method: "PATCH", json: { role } }))}
             options={[
               { value: "user", label: "User" },
               { value: "admin", label: "Admin" },
             ]}
           />
-          <Button size="icon-sm" variant="ghost" aria-label={`Storage limit of ${u.name}`} onClick={() => editLimit(u)}>
+          <Button size="icon-sm" variant="ghost" aria-label={`Storage limit of ${u.name}`} onClick={() => setEdit({ kind: "limit", user: u })}>
             <HardDriveIcon />
           </Button>
           <Button
             size="icon-sm"
             variant="ghost"
             aria-label={`Reset password of ${u.name}`}
-            onClick={() => {
-              const password = prompt(`New password for ${u.email} (8+ characters). They will be signed out.`);
-              if (password) void act(() => api(`/admin/users/${u.id}`, { method: "PATCH", json: { password } }));
-            }}
+            onClick={() => setEdit({ kind: "password", user: u })}
           >
             <KeyRoundIcon />
           </Button>
@@ -161,6 +232,84 @@ function Users({ defaultLimit }: { defaultLimit: number | null }) {
           >
             <TrashIcon />
           </Button>
+        </div>
+      ))}
+      <UserEditDialog edit={edit} onClose={() => setEdit(null)} onSaved={() => void refresh()} />
+    </SettingsSection>
+  );
+}
+
+function PromptEditor({ item, onSaved, onClose }: { item: AdminPrompt; onSaved: (next: AdminPrompt) => void; onClose: () => void }) {
+  const [text, setText] = useState(item.value ?? item.defaultValue);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const save = async (value: string | null) => {
+    setBusy(true);
+    setError(null);
+    try {
+      onSaved(await api<AdminPrompt>(`/admin/prompts/${item.key}`, { method: "PUT", json: { value } }));
+      onClose();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="animate-rise-in flex flex-col gap-2 px-4 pb-3">
+      <Textarea aria-label={item.label} className="max-h-[60vh] font-mono text-xs md:text-xs" value={text} onChange={(e) => setText(e.target.value)} autoFocus />
+      {item.placeholders.length > 0 && (
+        <p className="text-muted-foreground text-xs">Placeholders: {item.placeholders.map((name) => `{${name}}`).join(", ")}</p>
+      )}
+      {error && <p className="text-error settings-error text-xs">{error}</p>}
+      <div className="flex justify-end gap-2">
+        {item.value !== null && (
+          <Button type="button" variant="ghost" disabled={busy} onClick={() => void save(null)}>
+            Reset to default
+          </Button>
+        )}
+        <Button type="button" variant="ghost" onClick={onClose}>
+          Cancel
+        </Button>
+        {/* Saving the unchanged default keeps the default, so later default updates still apply. */}
+        <Button type="button" disabled={busy} onClick={() => void save(text === item.defaultValue ? null : text)}>
+          {busy && <Loader2Icon className="animate-spin" />} Save
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function SystemPrompts() {
+  const [prompts, setPrompts] = useState<AdminPrompt[]>([]);
+  const [editing, setEditing] = useState<string | null>(null);
+  useEffect(() => {
+    void api<AdminPrompt[]>("/admin/prompts").then(setPrompts);
+  }, []);
+  return (
+    <SettingsSection title="System prompts" description="Server-wide instructions sent to models for every user. Changes apply to the next request.">
+      {prompts.map((item) => (
+        <div key={item.key} className="flex flex-col">
+          <div className="flex items-center gap-3 px-4 py-3">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">
+                {item.label} {item.value !== null && <span className="text-muted-foreground font-normal">(customized)</span>}
+              </p>
+              <p className="text-muted-foreground text-xs">{item.description}</p>
+            </div>
+            {editing !== item.key && (
+              <Button size="icon-sm" variant="ghost" aria-label={`Edit ${item.label}`} onClick={() => setEditing(item.key)}>
+                <PencilIcon />
+              </Button>
+            )}
+          </div>
+          {editing === item.key && (
+            <PromptEditor
+              item={item}
+              onSaved={(next) => setPrompts((list) => list.map((p) => (p.key === next.key ? next : p)))}
+              onClose={() => setEditing(null)}
+            />
+          )}
         </div>
       ))}
     </SettingsSection>
@@ -186,7 +335,7 @@ export function AdminSettings() {
   }, []);
 
   return (
-    <SettingsPage title="Admin" description="Manage who can use this server and which provider keys everyone shares.">
+    <SettingsPage title="Admin" description="Manage who can use this server, the system prompts, and which provider keys everyone shares.">
       <SettingsSection title="Access">
         <SettingsRow
           label="Open sign-up"
@@ -203,6 +352,7 @@ export function AdminSettings() {
         />
       </SettingsSection>
       <Users defaultLimit={defaultLimit} />
+      <SystemPrompts />
       <h2 className="mt-2 text-sm font-medium">Server-wide providers</h2>
       <p className="text-muted-foreground -mt-2 text-xs">Every user can use these keys. A user's own key for the same provider takes precedence. Usage is still tracked per user.</p>
       <ProviderScopeProvider base="/admin/providers" providers={providers} refresh={refreshProviders}>

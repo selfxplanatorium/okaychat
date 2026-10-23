@@ -3,14 +3,12 @@ import { z } from "zod";
 import type { ModelInfo, TokenUsage } from "../../shared/types.js";
 import { resolveModel } from "../catalog/providers.js";
 import { createModel } from "../llm.js";
+import { promptText } from "../prompts.js";
 import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "../usage.js";
 import type { SearchBudget } from "./search-budget.js";
 
 // A sub-agent runs one self-contained task on a model the user allows, in its own context, with the
 // read-only tools. Only its final report goes back to the main model, which keeps the main context small.
-
-const SUBAGENT_SYSTEM = `You are a sub-agent working for another assistant. Complete the task you are given using your tools when they help.
-You cannot ask questions; make reasonable assumptions and state them. End with a concise, complete report of what you found or produced. Cite sources as Markdown links.`;
 
 const MAX_STEPS = 15;
 const PROGRESS_INTERVAL_MS = 250;
@@ -49,7 +47,7 @@ export function subagentTools(opts: { userId: string; threadId: string; allowed:
         const result = streamText({
           model: handle.model,
           providerOptions: handle.providerOptions,
-          system: SUBAGENT_SYSTEM + (opts.searchBudget ? `\nWeb searches share the parent reply's budget: ${opts.searchBudget.remaining} queries remain. Use targeted searches and finish from collected evidence when the budget is exhausted.` : ""),
+          system: [promptText("subagent"), opts.searchBudget ? promptText("subagentSearchBudget", { remaining: opts.searchBudget.remaining }) : ""].filter((part) => part.trim()).join("\n"),
           prompt: task,
           tools: opts.subTools,
           stopWhen: stepCountIs(maxSteps + 1),

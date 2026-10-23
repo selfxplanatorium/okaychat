@@ -2,16 +2,8 @@ import { convertToModelMessages, generateText, type ModelMessage, type UIMessage
 import type { AssistantMetadata, CompactionState, ModelInfo } from "../shared/types.js";
 import type { Connection } from "./catalog/providers.js";
 import { createModel } from "./llm.js";
+import { promptText } from "./prompts.js";
 import { costOf, normalizeUsage, recordUsage } from "./usage.js";
-
-const SUMMARY_PROMPT = `You are compacting a long conversation so it can continue in a fresh context window.
-Write a summary that lets the assistant continue seamlessly. Include:
-- The user's goals and any constraints or preferences they stated.
-- Key facts, decisions, and conclusions reached so far.
-- Important code, data, names, numbers, URLs, and file paths, verbatim where they matter.
-- Tool calls that were made and what they returned, briefly.
-- Open questions and the next step that was in progress.
-Write in the second person to the assistant ("The user asked you..."). Be dense. No preamble.`;
 
 /** Rough token estimate when the provider has not told us yet. */
 export const estimateTokens = (value: unknown) => Math.ceil(JSON.stringify(value).length / 4);
@@ -62,7 +54,7 @@ export async function compact(opts: {
   const result = await generateText({
     model: handle.model,
     providerOptions: handle.providerOptions,
-    messages: [...history, { role: "user", content: SUMMARY_PROMPT }],
+    messages: [...history, { role: "user", content: promptText("compaction") }],
     maxOutputTokens: Math.min(8_000, opts.model.maxOutput),
   });
   const usage = normalizeUsage(result.totalUsage);

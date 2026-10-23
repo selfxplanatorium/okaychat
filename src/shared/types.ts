@@ -364,6 +364,33 @@ export interface LibraryPage {
   nextCursor: string | null;
 }
 
+export type PromptKey =
+  | "chat"
+  | "modelIdentity"
+  | "date"
+  | "artifacts"
+  | "anonymous"
+  | "subagent"
+  | "subagentSearchBudget"
+  | "compaction"
+  | "title"
+  | "imageRelay"
+  | "memory"
+  | "memoryExtract"
+  | "memorySummary";
+
+/** A server-wide system prompt as the admin page shows it. */
+export interface AdminPrompt {
+  key: PromptKey;
+  label: string;
+  description: string;
+  /** Names usable as `{name}` in the text. */
+  placeholders: string[];
+  defaultValue: string;
+  /** The admin's override, or null when the default is in use. */
+  value: string | null;
+}
+
 export interface AdminUser {
   id: string;
   email: string;

@@ -23,26 +23,6 @@ import { getThread } from "./threads.js";
 
 const TEXT_KINDS = ["html", "react", "svg", "markdown", "code"] as const satisfies readonly TextArtifactKind[];
 
-export const ARTIFACT_INSTRUCTIONS = `# Artifacts
-Use create_artifact for substantial, self-contained content the user will view, reuse, or iterate on: web pages, apps, components, diagrams, documents, reports, scripts over ~20 lines. Do not use it for short answers, explanations, or small snippets.
-- Kinds: html (complete page, inline CSS/JS, CDN scripts allowed), react (one file, default-export a component; import from npm packages by name, Tailwind classes work), svg, markdown, code (set language).
-- To change an artifact, call update_artifact with its id. Prefer small exact edits; send full content only for rewrites.
-
-# Documents
-Use create_document for files the user downloads and opens outside the app: PDF, Word (docx), and Excel (xlsx).
-- pdf and docx: write HTML and CSS, not a script. Headings, paragraphs, lists, tables, images as data URIs, page breaks, colours, and \`@page { size; margin }\` work. \`<header>\` and \`<footer>\` repeat on every page; write {page} and {pages} where the page number belongs. The same HTML builds both formats, so prefer it over the other source styles.
-- xlsx: pass a JSON workbook (see the tool's schema): sheets, rows, and cells. A cell string starting with \`=\` is a formula; the stored file includes its computed value.
-- To change a document, call edit_document with the same kind of source you created it with. Prefer \`edits\` (exact find/replace) over resending the whole source.
-- A file the user attached carries a \`file_id\` in its <attachment> header. Call import_document with it, then read_document, then edit with that format's \`ops\` (docx paragraphs, xlsx cells/rows/sheets, pdf pages/forms). Those edit the file in place.
-- read_document before editing a file whose structure you do not know. Do not repeat a document's HTML or JSON in your reply.
-- Documents show in the side panel with the source alongside. Summarize what you made or changed.
-
-# Visual check
-When a layout matters, look at it before you call the work finished. view_artifact renders the current version and returns a PNG screenshot to you: HTML, React, and SVG pages in full, one PDF or Word page per call (\`page\`), or one spreadsheet sheet (\`sheet\`). It reports JavaScript errors from the page too.
-- Check new or changed PDFs, Word files, spreadsheets, and web artifacts for clipped text, broken tables, overlaps, overflow, and missing content. Fix them with edit_document or update_artifact and look again.
-- One screenshot per call, at most ${MAX_SHOTS_PER_TURN} per reply. The image is shown once; it is not repeated in later turns.
-- This tool is absent on non-vision models and servers without Chromium. Text-only artifacts (markdown, code) are read with read_artifact.`;
-
 interface Row {
   id: string;
   version: number;
