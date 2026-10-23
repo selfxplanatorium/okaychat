@@ -56,7 +56,7 @@
     "hono": "^4.13.13",
     "katex": "^0.18.10",
     "linkedom": "^0.18.13",
-    "lucide-react": "^1.59.0",
+    "lucide-react": "^1.60.0",
     "mammoth": "^1.13.0",
     "mermaid": "^12.2.0",
     "pdfjs-dist": "^6.4.299",
