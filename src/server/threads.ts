@@ -137,3 +137,17 @@ export function currentBranch(userId: string, threadId: string): UIMessage[] {
   }
   return out;
 }
+
+/** Stored user messages carry attachments as `<attachment name="…">` text parts. Returns the name, or undefined for normal text. */
+export function attachmentName(text: string): string | undefined {
+  return /^<attachment name="([^"]*)"/.exec(text)?.[1];
+}
+
+/** The user's own words on the current branch, without attachment bodies, as the title prompt sees them. */
+export function userText(messages: UIMessage[], max = 4000): string {
+  return messages
+    .filter((m) => m.role === "user")
+    .flatMap((m) => m.parts.flatMap((p) => (p.type === "text" && attachmentName(p.text) === undefined ? [p.text] : [])))
+    .join("\n\n")
+    .slice(0, max);
+}

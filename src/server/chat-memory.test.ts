@@ -22,7 +22,8 @@ const { fileRoutes } = await import("./files.js");
 const { requireUser } = await import("./auth.js");
 const { sha256 } = await import("./crypto.js");
 const app = new Hono().use(requireUser).route("/", chatRoutes).route("/", fileRoutes);
-db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES ('alice', 'alice@example.test', 'Alice', 'unused', 'user', 1)").run();
+// Admin: a non-admin base URL goes through the address-checked fetch, which bypasses the mocked global fetch.
+db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES ('alice', 'alice@example.test', 'Alice', 'unused', 'admin', 1)").run();
 db.prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, 'alice', ?)").run(sha256("alice-session"), Date.now() + 600_000);
 saveConnection("alice", "custom-test", { baseURL: "http://mock.test/v1" });
 updateSettings("alice", { maxSteps: 1, maxSearches: 0, webTools: false, artifacts: false, generativeUI: false, subagents: false, autoCompactAt: 0 });

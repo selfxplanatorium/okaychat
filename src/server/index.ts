@@ -75,4 +75,5 @@ void warmCatalog().catch(() => {});
 
 serve({ fetch: app.fetch, port: env.port, hostname: env.host }, (info) => {
   console.log(`okaychat listening on http://${env.host}:${info.port}`);
+  startMemoryWorker();
 });

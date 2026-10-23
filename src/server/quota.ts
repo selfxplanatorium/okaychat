@@ -41,7 +41,9 @@ export function storageUsedSql(user: string): string {
     UNION ALL SELECT COALESCE(SUM(length(data)), 0) FROM user_avatars WHERE user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(size), 0) FROM images WHERE user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(length(data)), 0) FROM sandbox_files WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(m.bytes), 0) FROM messages m JOIN threads t ON t.id = m.thread_id WHERE t.user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(length(CAST(content_enc AS BLOB))), 0) FROM memories WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(length(CAST(content_enc AS BLOB))), 0) FROM memory_summaries WHERE user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(length(CAST(content AS BLOB))), 0) FROM project_files
       WHERE project_id IN (SELECT id FROM projects WHERE user_id = ${user})
     UNION ALL SELECT COALESCE(SUM(length(CAST(name AS BLOB)) + length(CAST(description AS BLOB)) + length(CAST(body AS BLOB))), 0)

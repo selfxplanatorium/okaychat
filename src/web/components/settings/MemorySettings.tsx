@@ -1,9 +1,10 @@
-import { CheckIcon, CopyIcon, DownloadIcon, Loader2Icon, PencilIcon, PlusIcon, TrashIcon, UploadIcon } from "lucide-react";
+import { CheckIcon, CopyIcon, DownloadIcon, Loader2Icon, PencilIcon, PlusIcon, RefreshCwIcon, TrashIcon, UploadIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { MemoryEntry, MemoryImportPreview, MemoryImportSource, MemoryPreferences, MemorySnapshot } from "@shared/memory";
+import type { MemoryEntry, MemoryImportPreview, MemoryImportSource, MemoryPreferences, MemorySnapshot, MemorySummary } from "@shared/memory";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { SimpleMarkdown } from "@/components/ui/simple-markdown";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
@@ -165,6 +166,24 @@ function MemoryImport({ onImported, disabled }: { onImported: (message: string) 
   );
 }
 
+function SummaryView({ summary, label, busy, onRefresh }: { summary: MemorySummary; label: string; busy: boolean; onRefresh: () => void }) {
+  return (
+    <div className="flex flex-col gap-2 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-medium">{label}</h3>
+        <Button size="sm" variant="ghost" disabled={busy} onClick={onRefresh}>{busy ? <Loader2Icon className="animate-spin" /> : <RefreshCwIcon />} Rewrite</Button>
+      </div>
+      {summary.content
+        ? <SimpleMarkdown className="text-sm">{summary.content}</SimpleMarkdown>
+        : <p className="text-muted-foreground text-sm">{summary.error ? `Could not write the summary: ${summary.error}` : "Writing the summary…"}</p>}
+      <p className="text-muted-foreground text-xs">
+        {summary.updatedAt ? `Written ${new Date(summary.updatedAt).toLocaleString()}` : "Not written yet"}
+        {summary.content && summary.stale ? " · Memories changed since, an update is queued" : ""}
+      </p>
+    </div>
+  );
+}
+
 export function MemorySettings() {
   const [snapshot, setSnapshot] = useState<MemorySnapshot | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -175,6 +194,7 @@ export function MemorySettings() {
   const [editing, setEditing] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [refreshing, setRefreshing] = useState<string | null>(null);
   const projects = useData((s) => s.projects);
 
   const reload = async () => {
@@ -207,6 +227,15 @@ export function MemorySettings() {
     await api("/memory/preferences", { method: "PATCH", json: patch });
     window.dispatchEvent(new Event("okaychat:memory"));
   });
+  const refresh = async (scope: string | null) => {
+    setRefreshing(scope ?? "");
+    setError(null);
+    try {
+      const { summaries } = await api<{ summaries: MemorySummary[] }>("/memory/summaries/refresh", { method: "POST", json: { scope } });
+      setSnapshot((current) => current && { ...current, summaries });
+    } catch (e) { setError((e as Error).message); }
+    finally { setRefreshing(null); }
+  };
   const save = (content: string, entry?: MemoryEntry) => mutate(() => api(entry ? `/memory/${entry.id}` : "/memory", { method: entry ? "PATCH" : "POST", json: { content } }), "Memory saved.");
   const filtered = snapshot?.entries.filter((entry) => `${entry.content} ${SOURCE_LABELS[entry.source]}`.toLowerCase().includes(query.toLowerCase().trim())) ?? [];
 
@@ -222,11 +251,23 @@ export function MemorySettings() {
           label="Save memories automatically"
           className={!snapshot.preferences.enabled ? "text-muted-foreground" : undefined}
           description={<span id="memory-auto-save-description">{snapshot.preferences.enabled
-            ? "Let the assistant save lasting facts you share. When off, ask it to remember something and approve the change in chat."
+            ? "Let the assistant save lasting facts you share, and review finished chats for them in the background with your utility model. When off, ask it to remember something and approve the change in chat."
             : "Turn on Use memory to enable automatic saving."}</span>}
           control={<Switch aria-label="Save memories automatically" aria-describedby="memory-auto-save-description" checked={snapshot.preferences.autoSave} disabled={busy || !snapshot.preferences.enabled} onCheckedChange={(autoSave) => void preferences({ autoSave })} />}
         />
+        <SettingsRow
+          label="Search past chats"
+          className={!snapshot.preferences.enabled ? "text-muted-foreground" : undefined}
+          description="Let the assistant find and read your earlier chats when you refer to them. Project chats search only their project. Chats with memory off are never searched."
+          control={<Switch aria-label="Search past chats" checked={snapshot.preferences.chatSearch} disabled={busy || !snapshot.preferences.enabled} onCheckedChange={(chatSearch) => void preferences({ chatSearch })} />}
+        />
         <p className="text-muted-foreground px-4 py-3 text-xs">Memories belong to your account. When used, they are sent to your selected model provider. Automatic saving requires a model with tool support and is selective. Deleting a chat does not delete its saved memories.</p>
+      </SettingsSection>}
+      {snapshot && snapshot.entries.length > 0 && <SettingsSection title="Memory summary" description="What every chat starts with, rewritten from your saved memories after they change. Project chats also get their project's summary. Edit or delete memories below to change it.">
+        {snapshot.summaries.length === 0 && <p className="text-muted-foreground px-4 py-6 text-sm">{snapshot.preferences.enabled ? "The summary is written within a few minutes of saving memories." : "Turn on Use memory to write a summary."}</p>}
+        {snapshot.summaries.map((summary) => <SummaryView key={summary.scope ?? ""} summary={summary} busy={refreshing === (summary.scope ?? "")}
+          label={summary.scope ? projects.find((project) => project.id === summary.scope)?.name ?? "Project" : "All chats"}
+          onRefresh={() => void refresh(summary.scope)} />)}
       </SettingsSection>}
       {snapshot && <SettingsSection title={`Saved memories (${snapshot.entries.length})`} description={snapshot.preferences.enabled ? "Review and correct what the assistant remembers." : "Memory is paused. You can still manage and import saved facts."} action={editing !== "new" && <Button size="sm" variant="outline" disabled={busy} onClick={() => { setEditing("new"); setDeleting(null); }}><PlusIcon /> Add memory</Button>}>
         {snapshot.entries.length > 0 && <div className="p-3"><Input type="search" aria-label="Search memories" placeholder="Search memories…" value={query} onChange={(e) => setQuery(e.target.value)} /></div>}
