@@ -18,9 +18,11 @@ import type { ThreadSummary } from "@shared/types";
 import { api, takePrefetched } from "@/lib/api";
 import { toolkit } from "@/components/chat/tool-ui";
 import { WidgetInstructions, widgets } from "@/components/genui/toolkit";
-import { getActiveModel, selectedThreadKey, threadsPath, useActiveModel, useData } from "@/state/data";
+import { getActiveModel, selectedThreadKey, threadsPath, useData } from "@/state/data";
+import { useChatModel } from "@/state/thread-meta";
 import { StoredImageAttachmentAdapter, DocumentAttachmentAdapter, CodeAttachmentAdapter, BinaryAttachmentAdapter } from "./attachments";
 import { chatPrivacyFor, isAnonymousChat, useChatPrivacy, useChatPrivacyStore } from "@/state/chat-privacy";
+import { chatSearchFor, useChatSearch, useChatSearchStore } from "@/state/chat-search";
 
 /** Reads the answer, not its Markdown: code blocks, link targets, and formatting marks are dropped. */
 class SpokenTextAdapter extends WebSpeechSynthesisAdapter {
@@ -43,30 +45,52 @@ const voiceAdapters = {
   ...("speechSynthesis" in window ? { speech: new SpokenTextAdapter() } : {}),
 };
 
+/** Thread metadata the sidebar reads from `threadListItem.custom`. */
+export type ThreadCustom = { pinned: boolean; projectId: string | null };
+const threadCustom = (t: ThreadSummary): ThreadCustom => ({ pinned: t.pinned, projectId: t.projectId });
+
 const threadListAdapter: RemoteThreadListAdapter = {
   async list() {
     const path = threadsPath(useData.getState().activeProject);
     const threads = await (takePrefetched<ThreadSummary[]>(path) ?? api<ThreadSummary[]>(path));
+    useData.getState().rememberThreadModels(Object.fromEntries(threads.flatMap((t) => (t.modelRef ? [[t.id, t.modelRef]] : []))));
     return {
       threads: threads.map((t) => ({
         remoteId: t.id,
         status: t.status,
         title: t.title ?? undefined,
+        lastMessageAt: new Date(t.updatedAt),
+        custom: threadCustom(t),
       })),
     };
   },
   async initialize(localId) {
+    // The new chat's composer choice becomes the thread's own, so later new-chat choices cannot change it.
+    const bindModel = (remoteId: string) => {
+      const ref = getActiveModel()?.ref;
+      if (ref) useData.setState((s) => ({ threadModels: { ...s.threadModels, [remoteId]: ref } }));
+    };
     if (chatPrivacyFor({ id: localId }).temporary) {
       const remoteId = `tmp_${generateId()}`;
       useChatPrivacyStore.getState().bind(localId, remoteId);
+      useChatSearchStore.getState().bind(localId, remoteId);
+      bindModel(remoteId);
       return { remoteId, externalId: undefined };
     }
     const thread = await api<ThreadSummary>("/threads", { method: "POST", json: { projectId: useData.getState().activeProject } });
+    useChatSearchStore.getState().bind(localId, thread.id);
+    bindModel(thread.id);
     return { remoteId: thread.id, externalId: undefined };
   },
   async rename(remoteId, title) {
     if (isAnonymousChat(remoteId)) return;
     await api(`/threads/${remoteId}`, { method: "PATCH", json: { title } });
+  },
+  async updateCustom(remoteId, custom) {
+    if (isAnonymousChat(remoteId)) return;
+    const { pinned, projectId } = (custom ?? {}) as Partial<ThreadCustom>;
+    // Undefined fields drop out of the JSON body, so an unknown project is left alone.
+    await api(`/threads/${remoteId}`, { method: "PATCH", json: { pinned, projectId } });
   },
   async archive(remoteId) {
     if (isAnonymousChat(remoteId)) return;
@@ -83,7 +107,8 @@ const threadListAdapter: RemoteThreadListAdapter = {
   async fetch(remoteId) {
     if (isAnonymousChat(remoteId)) return { remoteId, status: "regular", title: "Anonymous chat" };
     const t = await api<ThreadSummary>(`/threads/${remoteId}`);
-    return { remoteId: t.id, status: t.status, title: t.title ?? undefined };
+    if (t.modelRef) useData.getState().rememberThreadModels({ [t.id]: t.modelRef });
+    return { remoteId: t.id, status: t.status, title: t.title ?? undefined, lastMessageAt: new Date(t.updatedAt), custom: threadCustom(t) };
   },
   async generateTitle(remoteId, messages) {
     if (isAnonymousChat(remoteId)) return createAssistantStream(async (controller) => { controller.appendText("Anonymous chat"); });
@@ -93,7 +118,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
       .map((p) => (p.type === "text" ? p.text : ""))
       .join("\n")
       .slice(0, 4000);
-    const modelRef = getActiveModel()?.ref;
+    const modelRef = getActiveModel(remoteId)?.ref;
     return createAssistantStream(async (controller) => {
       const { title } = await api<{ title: string }>(`/threads/${remoteId}/title`, { method: "POST", json: { text, modelRef } });
       controller.appendText(title);
@@ -149,15 +174,16 @@ const threadListAdapter: RemoteThreadListAdapter = {
 /** Sends the composer's model and reasoning effort with every request as model context `config`. */
 function ModelContextBridge() {
   const aui = useAui();
-  const model = useActiveModel();
+  const model = useChatModel();
   const privacy = useChatPrivacy();
   const effort = useData((s) => (model ? s.settings?.reasoningEffort[model.ref] : undefined));
+  const webSearch = useChatSearch().enabled;
   useEffect(
     () =>
       aui.modelContext.register({
-        getModelContext: () => ({ config: { modelName: model?.ref, reasoningEffort: effort, temporaryPersonalization: chatPrivacyFor(aui.threadListItem.getState()).personalized } }),
+        getModelContext: () => ({ config: { modelName: getActiveModel(aui.threadListItem.getState().remoteId)?.ref, reasoningEffort: effort, webSearch: chatSearchFor(aui.threadListItem.getState()), temporaryPersonalization: chatPrivacyFor(aui.threadListItem.getState()).personalized } }),
       }),
-    [aui, model?.ref, effort, privacy.personalized, privacy.temporary],
+    [aui, model?.ref, effort, webSearch, privacy.personalized, privacy.temporary],
   );
   return null;
 }

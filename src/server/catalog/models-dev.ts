@@ -143,10 +143,21 @@ function toCost(raw: RawModel["cost"]): ModelCost | undefined {
   };
 }
 
+// models.dev lists embedding, rerank, and speech models with text output, and most image models with
+// text+image output, so modalities alone let them into the chat picker. Their ids are the reliable signal.
+const NON_CHAT_ID = /embed|rerank|retriever|moderation|whisper|transcri|tts|speech|realtime|image|imagen|dall-e|sora|veo|video/i;
+
+/** False for models that cannot answer a chat request: embeddings, rerankers, speech, image, and video. */
+export function isChatModelId(id: string, family?: string): boolean {
+  return !NON_CHAT_ID.test(id) && !NON_CHAT_ID.test(family ?? "");
+}
+
 export function toModelInfo(provider: RawProvider, model: RawModel): ModelInfo | null {
   const route = resolveRoute(provider, model);
   if (!route) return null;
-  if (model.modalities?.output && !model.modalities.output.includes("text")) return null;
+  const output = model.modalities?.output;
+  if (output && (!output.includes("text") || output.some((m) => m !== "text"))) return null;
+  if (!isChatModelId(model.id, model.family)) return null;
   const cost = toCost(model.cost);
   return {
     ref: `${provider.id}/${model.id}`,

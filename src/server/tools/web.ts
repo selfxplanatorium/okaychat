@@ -166,30 +166,32 @@ export async function webFetch(url: string): Promise<{ title: string; content: s
     error = `HTTP ${res.status}`;
   }
 
+  // Scrapling makes its own connections through the egress proxy, which checks every hop.
   const scraped = await scraplingFetch(url);
   if (scraped) return { ...scraped, via: "scrapling" };
   if (thin) return { ...thin, via: "fetch" };
   throw new Error(`Could not read ${url} (${error ?? "empty page"})`);
 }
 
-/** Built-in tools every chat gets when the model supports tool calls. */
-export function webTools(opts: { searchBudget?: SearchBudget } = {}): ToolSet {
+/** Built-in tools every chat gets when the model supports tool calls. `search: false` keeps page reading. */
+export function webTools(opts: { searchBudget?: SearchBudget; search?: boolean } = {}): ToolSet {
   const searchBudget = opts.searchBudget ?? new SearchBudget(DEFAULT_USER_SETTINGS.maxSearches);
-  return {
-    web_search: tool({
-      description:
-        `Search the web. Returns titles, URLs, and snippets. Use targeted queries for facts that need verification; stop once you have enough evidence. At most ${searchBudget.limit} search queries are allowed for the entire reply, shared with sub-agents. Follow up with web_fetch to read a result; reading pages does not count toward this limit.`,
-      inputSchema: z.object({
-        query: z.string().min(1).describe("Search query, as you would type it into a search engine"),
-        limit: z.number().int().min(1).max(20).optional().describe("Max results, default 8"),
-      }),
-      execute: async ({ query, limit }) => {
-        if (!searchBudget.reserve()) {
-          throw new Error(`The web search limit (${searchBudget.limit} queries per reply) has been reached. Answer using the evidence already collected; you may still read known URLs with web_fetch.`);
-        }
-        return webSearch(query, limit ?? 8);
-      },
+  const web_search = tool({
+    description:
+      `Search the web. Returns titles, URLs, and snippets. Use targeted queries for facts that need verification; stop once you have enough evidence. At most ${searchBudget.limit} search queries are allowed for the entire reply, shared with sub-agents. Follow up with web_fetch to read a result; reading pages does not count toward this limit.`,
+    inputSchema: z.object({
+      query: z.string().min(1).describe("Search query, as you would type it into a search engine"),
+      limit: z.number().int().min(1).max(20).optional().describe("Max results, default 8"),
     }),
+    execute: async ({ query, limit }) => {
+      if (!searchBudget.reserve()) {
+        throw new Error(`The web search limit (${searchBudget.limit} queries per reply) has been reached. Answer using the evidence already collected; you may still read known URLs with web_fetch.`);
+      }
+      return webSearch(query, limit ?? 8);
+    },
+  });
+  return {
+    ...(opts.search === false ? {} : { web_search }),
     web_fetch: tool({
       description:
         "Read a web page or PDF by URL and return its main content as Markdown. Long pages are paged: pass `page` to continue. Handles pages that block bots or need JavaScript.",

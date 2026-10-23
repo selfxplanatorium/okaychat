@@ -43,6 +43,9 @@ export const useThreadMetaStore = create<ThreadMetaState>((set) => ({
 
 export const useCurrentThreadId = () => useAuiState((s) => s.threadListItem.remoteId ?? null);
 
+/** The model of the open chat: its own choice once it has a thread, the new-chat choice before. */
+export const useChatModel = (): ModelInfo | undefined => useActiveModel(useCurrentThreadId());
+
 /** Keeps compaction + usage for the open thread fresh: on switch and whenever a run ends. */
 export function useThreadMeta(): ThreadMeta | null {
   const threadId = useCurrentThreadId();

@@ -238,7 +238,7 @@ async function modelsForProvider(provider: RawProvider, conn: Connection): Promi
   // Unknown ids usually share a wire format with their family (qwen3.6 with qwen3.8, grok-4.6 with grok-4.7).
   const familyOf = (id: string) => id.match(/^[a-z]+/)?.[0] ?? id;
   const sibling = (id: string) => known.find((m) => familyOf(m.id) === familyOf(id));
-  return live.map((id) => {
+  return live.filter((id) => isChatModelId(id)).map((id) => {
     const hit = byId.get(id);
     if (hit) return hit;
     const kin = sibling(id);
@@ -248,8 +248,8 @@ async function modelsForProvider(provider: RawProvider, conn: Connection): Promi
 
 async function modelsForCustom(conn: Connection): Promise<ModelInfo[]> {
   if (!conn.baseURL) return [];
-  const ids = (await fetchLiveIds(`${conn.baseURL.replace(/\/$/, "")}/models`, conn.apiKey)) ?? [];
-  return ids.map((id) => ({ ...unknownModel(conn.providerId, id, "openai-chat", conn.baseURL), name: id }));
+  const ids = (await fetchLiveIds(`${conn.baseURL.replace(/\/$/, "")}/models`, conn.apiKey, conn.guarded)) ?? [];
+  return ids.filter((id) => isChatModelId(id)).map((id) => ({ ...unknownModel(conn.providerId, id, "openai-chat", conn.baseURL), name: id }));
 }
 
 export async function listModels(userId: string): Promise<ModelInfo[]> {

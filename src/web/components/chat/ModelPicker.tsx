@@ -1,4 +1,4 @@
-import { BrainIcon, CheckIcon, ChevronDownIcon, EyeIcon, SearchIcon, StarIcon, WrenchIcon } from "lucide-react";
+import { BrainIcon, CheckIcon, ChevronDownIcon, EyeIcon, SearchIcon, StarIcon, WrenchIcon, ZapIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import type { ModelInfo, ReasoningEffort } from "@shared/types";
@@ -7,7 +7,9 @@ import { Menu, MenuContent, MenuItem, MenuLabel, MenuTrigger } from "@/component
 import { TextSwap } from "@/components/assistant-ui/elements/surfaces";
 import { formatTokens } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { useActiveModel, useData } from "@/state/data";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { useData } from "@/state/data";
+import { useChatModel, useCurrentThreadId } from "@/state/thread-meta";
 
 const OPENCODE_GO = "opencode-go";
 
@@ -28,18 +30,12 @@ function Capabilities({ model }: { model: ModelInfo }) {
   );
 }
 
-export function ModelPicker() {
+/** Favorites first, then connected providers with OpenCode Go leading. Shared by the composer picker and the branch menu. */
+export function useModelGroups(query = "") {
   const models = useData((s) => s.models);
   const providers = useData((s) => s.providers);
   const favorites = useData((s) => s.settings?.favoriteModels ?? []);
-  const updateSettings = useData((s) => s.updateSettings);
-  const selectModel = useData((s) => s.selectModel);
-  const active = useActiveModel();
-  const [query, setQuery] = useState("");
-  const [open, setOpen] = useState(false);
-  const [, navigate] = useLocation();
-
-  const groups = useMemo(() => {
+  return useMemo(() => {
     const q = query.trim().toLowerCase();
     const match = (m: ModelInfo) => !q || `${m.name} ${m.id} ${m.providerId}`.toLowerCase().includes(q);
     const providerName = (id: string) => providers.find((p) => p.id === id)?.name ?? id;
@@ -56,6 +52,20 @@ export function ModelPicker() {
       })),
     ];
   }, [models, providers, favorites, query]);
+}
+
+export function ModelPicker() {
+  const models = useData((s) => s.models);
+  const favorites = useData((s) => s.settings?.favoriteModels ?? []);
+  const updateSettings = useData((s) => s.updateSettings);
+  const selectModel = useData((s) => s.selectModel);
+  const active = useChatModel();
+  const threadId = useCurrentThreadId();
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [, navigate] = useLocation();
+
+  const groups = useModelGroups(query);
 
   const toggleFavorite = (ref: string) =>
     updateSettings({ favoriteModels: favorites.includes(ref) ? favorites.filter((f) => f !== ref) : [...favorites, ref] });
@@ -89,7 +99,7 @@ export function ModelPicker() {
             className="placeholder:text-muted-foreground h-7 pointer-coarse:h-9 min-w-0 flex-1 bg-transparent text-sm outline-none"
           />
         </div>
-        <div className="flex-1 overflow-y-auto overscroll-contain p-1">
+        <ScrollArea className="flex-1" viewportClassName="p-1">
           {groups.map((group) => (
             <div key={group.id} className="mb-1">
               <div className="text-muted-foreground flex items-center gap-2 px-2 pt-2 pb-1 text-xs font-medium">
@@ -103,12 +113,12 @@ export function ModelPicker() {
                   aria-selected={m.ref === active?.ref}
                   tabIndex={0}
                   onClick={() => {
-                    selectModel(m.ref);
+                    selectModel(m.ref, threadId);
                     setOpen(false);
                   }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
-                      selectModel(m.ref);
+                      selectModel(m.ref, threadId);
                       setOpen(false);
                     }
                   }}
@@ -144,14 +154,14 @@ export function ModelPicker() {
             </div>
           ))}
           {groups.length === 0 && <p className="text-muted-foreground px-3 py-6 text-center text-sm">No models match.</p>}
-        </div>
+        </ScrollArea>
       </PopoverContent>
     </Popover>
   );
 }
 
-const EFFORT_LABELS: Record<ReasoningEffort, string> = {
-  none: "Off",
+export const EFFORT_LABELS: Record<ReasoningEffort, string> = {
+  none: "Instant",
   minimal: "Minimal",
   low: "Low",
   medium: "Medium",
@@ -160,27 +170,38 @@ const EFFORT_LABELS: Record<ReasoningEffort, string> = {
   max: "Max",
 };
 
-export function EffortPicker() {
-  const active = useActiveModel();
+/** Shared by the desktop effort menu and the mobile composer menu. */
+export function useEffortChoices() {
+  const active = useChatModel();
   const efforts = useData((s) => s.settings?.reasoningEffort ?? {});
   const updateSettings = useData((s) => s.updateSettings);
+  const current = active ? efforts[active.ref] : undefined;
+  const options = (active?.reasoningEfforts?.length ? active.reasoningEfforts : ["low", "medium", "high"]) as ReasoningEffort[];
+  const set = (effort: ReasoningEffort | undefined) => {
+    if (active) void updateSettings({ reasoningEffort: { ...efforts, [active.ref]: effort as never } });
+  };
+  return { active, current, options, set };
+}
+
+/** "Instant" means reasoning is off, which only exists for models that offer it. */
+export function EffortPicker() {
+  const { active, current, options, set } = useEffortChoices();
   if (!active?.reasoning) return null;
-  const options = (active.reasoningEfforts?.length ? active.reasoningEfforts : ["low", "medium", "high"]) as ReasoningEffort[];
-  const current = efforts[active.ref];
+  const instant = current === "none";
   return (
     <Menu>
       <MenuTrigger className="hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 shrink-0 pointer-coarse:h-9 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart">
-        <BrainIcon className="size-3.5" />
+        {instant ? <ZapIcon className="size-3.5" /> : <BrainIcon className="size-3.5" />}
         <TextSwap value={current ? EFFORT_LABELS[current] : "Default"} />
       </MenuTrigger>
       <MenuContent side="top">
         <MenuLabel>Reasoning effort</MenuLabel>
-        <MenuItem onClick={() => updateSettings({ reasoningEffort: { ...efforts, [active.ref]: undefined as never } })}>
+        <MenuItem onClick={() => set(undefined)}>
           <CheckIcon className={cn(!current ? "opacity-100" : "opacity-0")} />
           Model default
         </MenuItem>
         {options.map((e) => (
-          <MenuItem key={e} onClick={() => updateSettings({ reasoningEffort: { ...efforts, [active.ref]: e } })}>
+          <MenuItem key={e} onClick={() => set(e)}>
             <CheckIcon className={cn(current === e ? "opacity-100" : "opacity-0")} />
             {EFFORT_LABELS[e] ?? e}
           </MenuItem>

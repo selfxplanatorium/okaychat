@@ -127,7 +127,7 @@ export function ChatPrivacyMenu() {
         parent = id;
       }
       const text = messages.filter((m) => m.role === "user").flatMap((m) => m.parts).map((p) => (p.type === "text" ? p.text : "")).join("\n").slice(0, 4000);
-      const modelRef = getActiveModel()?.ref;
+      const modelRef = getActiveModel(previous.remoteId)?.ref;
       await api(`/threads/${thread.id}/title`, { method: "POST", json: { text, modelRef } }).catch(() => {});
       await aui.threads.reload();
       aui.threads.switchToThread(thread.id);

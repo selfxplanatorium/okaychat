@@ -6,8 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { api, formatCost, formatTokens } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { useActiveModel, useData } from "@/state/data";
-import { metadataOf, useContextUsage, useCurrentThreadId, useThreadMeta, useThreadMetaStore } from "@/state/thread-meta";
+import { useData } from "@/state/data";
+import { metadataOf, useContextUsage, useCurrentThreadId, useThreadMeta, useThreadMetaStore, useChatModel } from "@/state/thread-meta";
 import { useChatPrivacy } from "@/state/chat-privacy";
 
 function Ring({ fraction }: { fraction: number }) {
@@ -40,7 +40,7 @@ export function ContextMeter() {
   const privacy = useChatPrivacy();
   const usage = useContextUsage();
   const meta = useThreadMeta();
-  const model = useActiveModel();
+  const model = useChatModel();
   const threadId = useCurrentThreadId();
   const configuredAutoCompactAt = useData((s) => s.settings?.autoCompactAt ?? 0.8);
   const autoCompactAt = privacy.temporary ? 0 : configuredAutoCompactAt;

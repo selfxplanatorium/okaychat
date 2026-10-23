@@ -1,7 +1,9 @@
 import { useMemo } from "react";
 import { Thread } from "@/components/assistant-ui/elements/thread.aui";
 import { CompactionMarker, ContextMeter, MessageMeta } from "./ContextMeter";
+import { MobileComposerMenu, SearchToggle } from "./ComposerControls";
 import { EffortPicker, ModelPicker } from "./ModelPicker";
+import { BranchedFromBanner, BranchMenu, PendingBranchRun } from "./branch";
 import { pickWelcomeLine } from "./welcome-lines";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
@@ -48,8 +50,12 @@ function Welcome() {
 function ComposerToolbar() {
   return (
     <>
+      <MobileComposerMenu />
       <ModelPicker />
-      <EffortPicker />
+      <div className="flex max-sm:hidden pointer-coarse:hidden">
+        <EffortPicker />
+      </div>
+      <SearchToggle />
       <ContextMeter />
     </>
   );

@@ -9,8 +9,10 @@ interface DataState {
   models: ModelInfo[];
   mcp: Array<McpServerInfo & { authorizationUrl?: string }>;
   loaded: boolean;
-  /** Model chosen in the composer. Falls back to settings.defaultModel. */
+  /** Model chosen in the composer of a chat that has no thread yet. Falls back to the project/account default. */
   selectedModel: string | null;
+  /** Model of each stored chat, by thread id: picked in its composer or last used, as saved on the thread. */
+  threadModels: Record<string, string>;
   projects: Project[];
   /** Sidebar filter and home of new chats. Null shows every chat. */
   activeProject: string | null;
@@ -23,7 +25,10 @@ interface DataState {
   refreshMcp: () => Promise<void>;
   refreshStorage: () => Promise<void>;
   updateSettings: (patch: Partial<UserSettings>) => Promise<void>;
-  selectModel: (ref: string) => void;
+  /** Picks the model for a chat. Without a thread id it applies to the new chat being written. */
+  selectModel: (ref: string, threadId?: string | null) => void;
+  /** Records models saved on threads without overriding a choice made in this page. */
+  rememberThreadModels: (models: Record<string, string>) => void;
   resetModel: () => void;
 }
 
@@ -40,6 +45,7 @@ export const useData = create<DataState>((set, get) => ({
   storage: null,
   // A previous chat's composer choice must not override the account default on reload.
   selectedModel: null,
+  threadModels: {},
   projects: [],
   activeProject: localStorage.getItem(PROJECT_KEY),
   setActiveProject: (id) => {
@@ -77,27 +83,34 @@ export const useData = create<DataState>((set, get) => ({
     set({ settings: await api<UserSettings>("/settings", { method: "PATCH", json: patch }) });
     if (Object.hasOwn(patch, "defaultModel")) get().resetModel();
   },
-  selectModel: (ref) => {
-    set({ selectedModel: ref });
+  selectModel: (ref, threadId) => {
+    if (!threadId) return set({ selectedModel: ref });
+    set((s) => ({ threadModels: { ...s.threadModels, [threadId]: ref } }));
+    if (!isTemporaryThread(threadId)) void api(`/threads/${threadId}`, { method: "PATCH", json: { modelRef: ref } }).catch(() => {});
   },
+  rememberThreadModels: (models) => set((s) => ({ threadModels: { ...models, ...s.threadModels } })),
   resetModel: () => {
     localStorage.removeItem(SELECTED_KEY);
     set({ selectedModel: null });
   },
 }));
 
-/** The model the next message will use. */
-export function useActiveModel(): ModelInfo | undefined {
-  return useData(resolveActiveModel);
+// Same test as isAnonymousChat, which lives with assistant-ui code this module must not import.
+const isTemporaryThread = (id: string) => id.startsWith("tmp_");
+
+/** The model the next message of a chat will use. Without a thread id: the new chat being written. */
+export function useActiveModel(threadId?: string | null): ModelInfo | undefined {
+  return useData((s) => resolveActiveModel(s, threadId));
 }
 
-function resolveActiveModel({ models, selectedModel: selected, settings, projects, activeProject }: DataState): ModelInfo | undefined {
+function resolveActiveModel({ models, selectedModel, threadModels, settings, projects, activeProject }: DataState, threadId?: string | null): ModelInfo | undefined {
+  const selected = threadId ? threadModels[threadId] : selectedModel;
   const fallback = settings?.defaultModel;
   const projectModel = projects.find((p) => p.id === activeProject)?.defaultModel;
   return models.find((m) => m.ref === selected) ?? models.find((m) => m.ref === projectModel) ?? models.find((m) => m.ref === fallback) ?? models[0];
 }
 
-export const getActiveModel = () => resolveActiveModel(useData.getState());
+export const getActiveModel = (threadId?: string | null) => resolveActiveModel(useData.getState(), threadId);
 
 export const selectedThreadKey = (userId: string | undefined) => `okaychat:thread:${userId}`;
 export const threadsPath = (project: string | null) => (project ? `/threads?project=${encodeURIComponent(project)}` : "/threads");
@@ -111,9 +124,9 @@ export function preloadData(userId: string) {
   const promise = useData.getState().load();
   promise.catch(() => {});
   prefetch(threadsPath(useData.getState().activeProject));
-  // RuntimeProvider restores this tab's selected chat; its messages are needed for the first paint.
+  // RuntimeProvider restores this tab's selected chat (or a ?thread= link); its messages are needed for the first paint.
   try {
-    const saved = sessionStorage.getItem(selectedThreadKey(userId));
+    const saved = new URLSearchParams(location.search).get("thread") || sessionStorage.getItem(selectedThreadKey(userId));
     // Same test as isAnonymousChat, which lives with assistant-ui code this entry module must not import.
     if (saved && !saved.startsWith("tmp_")) prefetch(`/threads/${saved}/messages`);
   } catch {

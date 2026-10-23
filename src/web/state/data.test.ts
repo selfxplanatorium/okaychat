@@ -12,7 +12,7 @@ Object.defineProperty(globalThis, "localStorage", { value: {
 const { useData, getActiveModel } = await import("./data.js");
 const models = ["deepseek", "luna", "project"].map((id) => ({ ref: `p/${id}` })) as ModelInfo[];
 const initiallySelected = useData.getState().selectedModel;
-beforeEach(() => useData.setState({ settings: { ...DEFAULT_USER_SETTINGS, defaultModel: "p/luna" }, models, projects: [], activeProject: null, selectedModel: null }));
+beforeEach(() => useData.setState({ settings: { ...DEFAULT_USER_SETTINGS, defaultModel: "p/luna" }, models, projects: [], activeProject: null, selectedModel: null, threadModels: {} }));
 
 test("a persisted composer choice cannot override the account default on load", () => {
   assert.equal(initiallySelected, null);
@@ -48,5 +48,22 @@ test("saving a default replaces the stale composer override and supports clearin
     assert.equal(getActiveModel()?.ref, "p/deepseek");
     useData.getState().selectModel("unavailable/model");
     assert.equal(getActiveModel()?.ref, "p/deepseek");
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("each chat keeps its own model when another chat or the new chat picks one", async () => {
+  const originalFetch = globalThis.fetch;
+  const patches: unknown[] = [];
+  globalThis.fetch = async (input, init) => (patches.push([String(input), JSON.parse(init!.body as string)]), Response.json({ ok: true }));
+  try {
+    useData.getState().rememberThreadModels({ a: "p/deepseek" });
+    useData.getState().selectModel("p/project", "b");
+    useData.getState().selectModel("p/luna");
+    assert.equal(getActiveModel("a")?.ref, "p/deepseek");
+    assert.equal(getActiveModel("b")?.ref, "p/project");
+    assert.equal(getActiveModel()?.ref, "p/luna");
+    assert.deepEqual(patches, [["/api/threads/b", { modelRef: "p/project" }]]);
+    useData.getState().rememberThreadModels({ b: "p/deepseek" });
+    assert.equal(getActiveModel("b")?.ref, "p/project");
   } finally { globalThis.fetch = originalFetch; }
 });
