@@ -70,15 +70,21 @@ export function artifactData(threadId: string, id: string, version?: number): Ui
 function saveVersion(
   threadId: string,
   a: Omit<ArtifactVersion, "version" | "createdAt" | "size"> & { data?: Uint8Array },
+  turn: Set<string>,
 ): ArtifactToolResult {
   const prev = latestArtifact(threadId, a.id);
-  const version = (prev?.version ?? 0) + 1;
+  // One version per artifact per turn: edits within a turn replace that turn's version, so the
+  // version list follows the user's requests instead of the agent's drafts.
+  const replace = prev !== null && turn.has(a.id);
+  turn.add(a.id);
+  const version = replace ? prev.version : (prev?.version ?? 0) + 1;
   const bytes = (a.data?.byteLength ?? 0) + Buffer.byteLength(a.content, "utf8");
-  // Every version keeps its bytes, so the whole new version counts. The owner comes from the thread;
-  // the tools run for its user, including server-side schedule runs.
+  const freed = replace ? prev.size + Buffer.byteLength(prev.content, "utf8") : 0;
+  // A new version keeps its bytes next to the old ones; a replaced draft charges only its growth.
+  // The owner comes from the thread; the tools run for its user, including server-side schedule runs.
   const owner = db.prepare("SELECT user_id FROM threads WHERE id = ?").get(threadId) as { user_id: string } | undefined;
-  if (owner) assertStorage(owner.user_id, bytes);
-  db.prepare("INSERT INTO artifacts (thread_id, id, version, title, kind, language, content, data, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+  if (owner) assertStorage(owner.user_id, bytes - freed);
+  db.prepare("INSERT OR REPLACE INTO artifacts (thread_id, id, version, title, kind, language, content, data, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
     threadId,
     a.id,
     version,
@@ -163,11 +169,11 @@ function documentOf(threadId: string, id: string) {
 }
 
 /** Saves a document artifact, giving it a non-clashing id when one is already taken. */
-function createDocument(threadId: string, input: { id: string; title: string; kind: DocumentArtifactKind; source: string; data: Uint8Array }) {
+function createDocument(threadId: string, turn: Set<string>, input: { id: string; title: string; kind: DocumentArtifactKind; source: string; data: Uint8Array }) {
   let key = slug(input.id);
   for (let n = 2; latestArtifact(threadId, key); n++) key = `${slug(input.id)}-${n}`;
   const title = input.title.trim() || "Document";
-  return saveVersion(threadId, { id: key, title, kind: input.kind, language: null, content: input.source, data: input.data });
+  return saveVersion(threadId, { id: key, title, kind: input.kind, language: null, content: input.source, data: input.data }, turn);
 }
 
 function uploadedBytes(userId: string, ref: { fileId?: string; name?: string }): { name: string; mime: string; data: Uint8Array } {
@@ -193,10 +199,33 @@ export interface ArtifactToolOptions {
   shots?: Map<string, VisualShot>;
   /** Only vision models get view_artifact. */
   canViewImages?: boolean;
+  /** Artifact ids already saved in this turn by an earlier request (browser-tool continuations). */
+  savedThisTurn?: Iterable<string>;
+}
+
+const SAVING_TOOLS = new Set(["create_artifact", "update_artifact", "create_document", "edit_document", "import_document"]);
+
+/** Artifact ids saved since the last user message, so a continuation request keeps editing the same version. */
+export function artifactsInCurrentTurn(messages: Array<{ role: string; parts: unknown[] }>): Set<string> {
+  let ids = new Set<string>();
+  for (const message of messages) {
+    if (message.role === "user") ids = new Set();
+    if (message.role !== "assistant") continue;
+    for (const part of message.parts) {
+      if (!part || typeof part !== "object") continue;
+      const p = part as { type?: string; output?: unknown };
+      const name = p.type?.startsWith("tool-") ? p.type.slice(5) : undefined;
+      const id = p.output && typeof p.output === "object" ? (p.output as { id?: unknown }).id : undefined;
+      if (name && SAVING_TOOLS.has(name) && typeof id === "string") ids.add(id);
+    }
+  }
+  return ids;
 }
 
 export function artifactTools(threadId: string, userId: string, visual: ArtifactToolOptions = {}): ToolSet {
   const shots = visual.shots;
+  // Artifact ids saved in this turn. A tool set lives for one request; continuations pass the earlier ids.
+  const turn = new Set<string>(visual.savedThisTurn);
   return {
     create_artifact: tool({
       description: "Create an artifact shown in a side panel. See the Artifacts section of the system prompt for when to use it.",
@@ -211,7 +240,7 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
         let key = slug(id);
         // Creating an id that exists would silently overwrite it, so give the new artifact its own id.
         for (let n = 2; latestArtifact(threadId, key); n++) key = `${slug(id)}-${n}`;
-        return saveVersion(threadId, { id: key, title, kind, language: language ?? null, content });
+        return saveVersion(threadId, { id: key, title, kind, language: language ?? null, content }, turn);
       },
     }),
     update_artifact: tool({
@@ -230,7 +259,7 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
         if (prev.size) throw new Error(`\`${id}\` is a document. Use edit_document.`);
         if (content === undefined && !edits?.length && !title) throw new Error("Pass `edits` or `content`.");
         const next = content ?? (edits?.length ? applyEdits(prev.content, edits) : prev.content);
-        return saveVersion(threadId, { ...prev, title: title ?? prev.title, content: next });
+        return saveVersion(threadId, { ...prev, title: title ?? prev.title, content: next }, turn);
       },
     }),
     read_artifact: tool({
@@ -259,7 +288,7 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
       }),
       execute: async ({ id, title, kind, content }) => {
         const data = await buildDocument(kind, content, title);
-        return createDocument(threadId, { id, title, kind, source: content, data });
+        return createDocument(threadId, turn, { id, title, kind, source: content, data });
       },
     }),
     edit_document: tool({
@@ -288,7 +317,7 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
 
         if (changedSource !== undefined) {
           const data = await buildDocument(docKind, changedSource, title ?? prev.title);
-          return saveVersion(threadId, { ...prev, title: title ?? prev.title, content: changedSource, data });
+          return saveVersion(threadId, { ...prev, title: title ?? prev.title, content: changedSource, data }, turn);
         }
         if (!ops?.length) throw new Error("Pass `edits`, `content`, or the format's `ops`.");
         const old = artifactData(threadId, id);
@@ -296,7 +325,7 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
         const data =
           docKind === "docx" ? editDocx(old, ops as z.infer<typeof docxOp>[]) : docKind === "xlsx" ? await editXlsx(old, ops as z.infer<typeof xlsxOp>[]) : await editPdf(old, ops as z.infer<typeof pdfOp>[]);
         // The binary has moved past the source, so keeping the source would let a later rebuild undo the ops.
-        return saveVersion(threadId, { ...prev, title: title ?? prev.title, content: "", data });
+        return saveVersion(threadId, { ...prev, title: title ?? prev.title, content: "", data }, turn);
       },
     }),
     read_document: tool({
@@ -364,7 +393,7 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
         const upload = uploadedBytes(userId, { fileId: file_id, name });
         const kind = kindOfUpload(upload.name);
         if (!kind) throw new Error(`Attachments can be imported as pdf, docx, or xlsx. \`${upload.name}\` is none of those.`);
-        return createDocument(threadId, { id, title, kind, source: "", data: upload.data });
+        return createDocument(threadId, turn, { id, title, kind, source: "", data: upload.data });
       },
     }),
   };

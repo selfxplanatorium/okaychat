@@ -33,6 +33,7 @@ The sandbox is scratch space, never the source of truth:
 
 - Every workspace is wiped ~30 minutes after its last run (`SANDBOX_IDLE_MINUTES`, default 30; a completed run touches the workspace's mtime; expiry is rechecked under its lock). The sweep runs in a background thread and kills the workspace's uid processes. The container also wipes every workspace when the runner starts.
 - Right after each run, the app downloads the files the run produced and stores them in SQLite (`sandbox_files` table), counted against the user's storage quota (see below). Download URLs in the tool result point at `/api/sandbox/:threadId/stored`, which serves the stored copy with the same untrusted-content headers. Files over the runner's 50 MB download cap keep a direct sandbox URL and die with the workspace; the tool result then carries a `storageWarning` for the model.
+- Stored outputs are drafts until the turn's answer ends. Then `SandboxTurn.prune()` deletes the files first stored in that turn that the last file-writing run did not produce. Files from earlier turns are never pruned, and a stopped turn keeps everything. The tool description tells the model to make its final run write every file the user should get.
 - Rewriting a file in a later run replaces its stored copy instead of piling up versions, charging only net byte growth. The Library lists, previews, downloads and deletes these copies. Deleting the chat deletes the stored copies (foreign-key cascade).
 
 ## Behavior

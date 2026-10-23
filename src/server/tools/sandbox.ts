@@ -31,7 +31,8 @@ Use it for calculations, data analysis, file conversion, charts, and checking co
 - Preinstalled: numpy, pandas, scipy, matplotlib, sympy, scikit-learn, pillow, openpyxl, python-docx, pypdf, requests, beautifulsoup4, lxml, pyyaml, tabulate; CLI tools curl, jq, sqlite3, git, zip, unzip, ripgrep. Internet access may be blocked, so do not rely on installing packages.
 - A file the user attached carries a \`file_id\` in its <attachment> header. Pass it in \`input_files\` to copy the file into the working directory under its name.
 - Images the run writes (png, jpg, gif, webp, svg) are shown to the user, and every created file gets a download link. Save charts with plt.savefig instead of plt.show. Do not paste file contents back unless asked.
-- Processes started in the background are stopped when the call ends.`;
+- Processes started in the background are stopped when the call ends.
+- The last call in your reply that writes files decides what the user keeps: files first created earlier in the same reply that it does not write again are deleted when you answer. Make that final call write every file the user should get.`;
 
 export const sandboxConfigured = () => !!env.sandboxUrl && env.sandboxToken.length >= 32;
 
@@ -91,11 +92,27 @@ async function copyInputs(userId: string, ws: string, fileIds: string[]): Promis
 }
 
 /**
+ * The outputs of one turn. Files first stored in this turn are drafts until the turn ends; then only the
+ * last run that wrote files is kept, so retries and scratch files do not pile up in storage.
+ */
+export class SandboxTurn {
+  readonly created = new Set<string>();
+  lastFiles: string[] = [];
+
+  /** Deletes this turn's stored files that the last file-writing run did not produce. */
+  prune(userId: string): void {
+    const keep = new Set(this.lastFiles);
+    const drop = [...this.created].filter((id) => !keep.has(id));
+    if (drop.length) db.prepare(`DELETE FROM sandbox_files WHERE user_id = ? AND id IN (${drop.map(() => "?").join(", ")})`).run(userId, ...drop);
+  }
+}
+
+/**
  * Saves a run's produced files into the user's storage (same SQLite bytes as other user files) before
  * the sandbox wipes the workspace. Rewriting a file replaces its stored copy instead of piling up
  * versions. Best effort: a file that cannot be stored keeps its direct sandbox URL.
  */
-async function storeOutputs(userId: string, threadId: string, ws: string, files: RunnerResult["files"]): Promise<string | undefined> {
+async function storeOutputs(userId: string, threadId: string, ws: string, files: RunnerResult["files"], turn?: SandboxTurn): Promise<string | undefined> {
   let warning: string | undefined;
   for (const file of files) {
     if (file.size > RUNNER_MAX_FILE) {
@@ -124,6 +141,7 @@ async function storeOutputs(userId: string, threadId: string, ws: string, files:
          ON CONFLICT (user_id, thread_id, path) DO UPDATE SET mime = excluded.mime, data = excluded.data, size = excluded.size, created_at = excluded.created_at RETURNING id`,
       ).get(newId("sbf"), userId, threadId, file.path, TYPES[ext] ?? "application/octet-stream", data, data.byteLength, Date.now()) as { id: string };
       file.fileId = stored.id;
+      if (!previous) turn?.created.add(stored.id);
       file.size = data.byteLength;
       // Bust previously cached versions when a later run replaces this path.
       file.storedUrl = `/api/sandbox/${encodeURIComponent(threadId)}/stored?path=${encodeURIComponent(file.path)}&v=${Date.now().toString(36)}`;
@@ -138,7 +156,7 @@ async function storeOutputs(userId: string, threadId: string, ws: string, files:
   return warning;
 }
 
-export async function runCode(opts: { userId: string; threadId: string; language: "python" | "bash"; code: string; timeoutS?: number; inputFiles?: string[]; signal?: AbortSignal }): Promise<RunCodeResult> {
+export async function runCode(opts: { userId: string; threadId: string; language: "python" | "bash"; code: string; timeoutS?: number; inputFiles?: string[]; signal?: AbortSignal; turn?: SandboxTurn }): Promise<RunCodeResult> {
   opts.signal?.throwIfAborted();
   if (opts.threadId.startsWith("tmp_") || !getThread(opts.userId, opts.threadId)) throw new Error("Chat not found");
   const ws = workspaceId(opts.userId, opts.threadId);
@@ -157,7 +175,9 @@ export async function runCode(opts: { userId: string; threadId: string; language
     );
     const result = (await res.json()) as RunnerResult;
     // The sandbox wipes idle workspaces, so produced files move into the user's storage right away.
-    const storageWarning = await storeOutputs(opts.userId, opts.threadId, ws, result.files);
+    const storageWarning = await storeOutputs(opts.userId, opts.threadId, ws, result.files, opts.turn);
+    const stored = result.files.flatMap((f) => (f.fileId ? [f.fileId] : []));
+    if (opts.turn && stored.length) opts.turn.lastFiles = stored;
     const base = `/api/sandbox/${encodeURIComponent(opts.threadId)}/files?path=`;
     return {
       ...result,
@@ -177,7 +197,7 @@ export async function deleteSandboxWorkspace(userId: string, threadId: string) {
   await call(`/workspaces/${workspaceId(userId, threadId)}`, { method: "DELETE" }, 10_000).catch(() => {});
 }
 
-export function sandboxTools(userId: string, threadId: string, signal?: AbortSignal): ToolSet {
+export function sandboxTools(userId: string, threadId: string, signal?: AbortSignal, turn?: SandboxTurn): ToolSet {
   return {
     run_code: tool({
       description: DESCRIPTION,
@@ -188,7 +208,7 @@ export function sandboxTools(userId: string, threadId: string, signal?: AbortSig
         input_files: z.array(z.string()).max(20).optional().describe("file_id values of attachments or fileId values of earlier saved outputs to copy into the working directory first (using safe basenames), even after scratch space expires"),
       }),
       execute: ({ language, code, timeout_seconds, input_files }) =>
-        runCode({ userId, threadId, language, code, timeoutS: timeout_seconds, inputFiles: input_files, signal }),
+        runCode({ userId, threadId, language, code, timeoutS: timeout_seconds, inputFiles: input_files, signal, turn }),
       // The model needs paths, not download URLs.
       toModelOutput: ({ output }) => ({
         type: "json",

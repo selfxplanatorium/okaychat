@@ -33,7 +33,7 @@ const { db } = await import("../db.js");
 const { requireUser } = await import("../auth.js");
 const { sha256 } = await import("../crypto.js");
 const { ensureThread } = await import("../threads.js");
-const { sandboxRoutes, sandboxTools, workspaceId } = await import("./sandbox.js");
+const { SandboxTurn, sandboxRoutes, sandboxTools, workspaceId } = await import("./sandbox.js");
 const app = new Hono().use(requireUser).route("/", sandboxRoutes);
 for (const id of ["alice", "bob"]) {
   db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, `${id}@example.test`, id, "unused", "user", Date.now());
@@ -151,4 +151,17 @@ test("saved outputs can be restored by fileId after scratch expiry, without cros
   ensureThread("bob", "thr_bob");
   const other = sandboxTools("bob", "thr_bob").run_code!;
   await assert.rejects(async () => other.execute!({ language: "python", code: "print(1)", input_files: [id] }, { toolCallId: "other", messages: [] }), /Unknown file_id/);
+});
+
+test("a finished turn keeps only the last file-writing run's new files", () => {
+  const insert = db.prepare("INSERT INTO sandbox_files (id, user_id, thread_id, path, mime, data, size, created_at) VALUES (?, 'alice', 'thr_alice', ?, 'text/plain', x'00', 1, 1)");
+  for (const id of ["sf_old", "sf_scratch", "sf_draft", "sf_final"]) insert.run(id, `${id}.txt`);
+  const turn = new SandboxTurn();
+  // sf_old came from an earlier turn, so it is never a draft of this one.
+  for (const id of ["sf_scratch", "sf_draft", "sf_final"]) turn.created.add(id);
+  turn.lastFiles = ["sf_final", "sf_old"];
+  turn.prune("alice");
+  const left = db.prepare("SELECT id FROM sandbox_files WHERE user_id = 'alice' AND id LIKE 'sf_%' ORDER BY id").all().map((r) => (r as { id: string }).id);
+  assert.ok(left.includes("sf_old") && left.includes("sf_final"));
+  assert.ok(!left.includes("sf_scratch") && !left.includes("sf_draft"));
 });

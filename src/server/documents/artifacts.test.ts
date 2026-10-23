@@ -8,7 +8,7 @@ const dataDir = mkdtempSync(path.join(os.tmpdir(), "okaychat-documents-test-"));
 process.env.OKAYCHAT_DATA_DIR = dataDir;
 process.env.OKAYCHAT_SECRET = "documents-test-secret-only-not-for-production";
 const { db } = await import("../db.js");
-const { artifactData, artifactTools, artifactVersions } = await import("../artifacts.js");
+const { artifactData, artifactTools, artifactVersions, artifactsInCurrentTurn } = await import("../artifacts.js");
 const { closeRenderer, rendererAvailable } = await import("./render.js");
 
 after(async () => {
@@ -114,4 +114,29 @@ test("view_artifact is offered only to vision models and stores one screenshot p
 
   const stored = shots.get("call-shot") as { png: Uint8Array };
   assert.deepEqual([...stored.png.slice(0, 4)], [137, 80, 78, 71]);
+});
+
+test("each turn saves one version per artifact, however many edits it makes", async () => {
+  const turn = (savedThisTurn?: string[]) => {
+    const tools = artifactTools(THREAD, USER, { savedThisTurn });
+    return (name: string, input: unknown) =>
+      (tools[name] as unknown as { execute: Execute }).execute(input as never, { toolCallId: "t", messages: [] } as never) as Promise<Record<string, unknown>>;
+  };
+  await turn()("create_artifact", { id: "notes", title: "Notes", kind: "markdown", content: "a" });
+  const second = turn();
+  await second("update_artifact", { id: "notes", content: "b" });
+  const last = await second("update_artifact", { id: "notes", content: "c" });
+  assert.equal(last.version, 2);
+  // A browser-tool continuation of the same turn still edits version 2.
+  await turn(["notes"])("update_artifact", { id: "notes", content: "d" });
+  assert.deepEqual(artifactVersions(THREAD, "notes").map((v) => [v.version, v.content]), [[1, "a"], [2, "d"]]);
+  assert.deepEqual(
+    [...artifactsInCurrentTurn([
+      { role: "user", parts: [] },
+      { role: "assistant", parts: [{ type: "tool-update_artifact", output: { id: "old" } }] },
+      { role: "user", parts: [] },
+      { role: "assistant", parts: [{ type: "tool-edit_document", output: { id: "report" } }, { type: "tool-edit_document", output: "Edit failed" }] },
+    ])],
+    ["report"],
+  );
 });
