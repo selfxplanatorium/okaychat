@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { WrapTextIcon } from "lucide-react";
 import type { HLJSApi } from "highlight.js";
 import { CopyFeedbackIcon } from "@/components/assistant-ui/elements/surfaces";
@@ -11,7 +11,7 @@ import "./code-block.css";
 let highlighterPromise: Promise<HLJSApi> | undefined;
 const loadHighlighter = () => highlighterPromise ??= import("highlight.js/lib/common").then((m) => m.default);
 
-export const CodeBlock = memo(function CodeBlock({ code, language = "" }: { code: string; language?: string }) {
+export const CodeBlock = memo(function CodeBlock({ code, language = "", actions }: { code: string; language?: string; actions?: ReactNode }) {
   const sentinelRef = useRef<HTMLSpanElement>(null);
   const [stuck, setStuck] = useState(false);
   const defaultWrap = useAppearance((s) => s.wordWrap);
@@ -61,6 +61,7 @@ export const CodeBlock = memo(function CodeBlock({ code, language = "" }: { code
       <div className="aui-code-header-root border-border/50 bg-muted sticky top-0 z-10 flex items-center justify-between gap-3 rounded-t-xl border px-3.5 py-1.5 text-xs">
         <span className="aui-code-header-language text-muted-foreground truncate font-medium lowercase">{language || "text"}</span>
         <div className="flex shrink-0 items-center gap-1">
+          {actions}
           <TooltipIconButton
             tooltip={wrap ? "Disable line wrapping" : "Enable line wrapping"}
             aria-label="Wrap code"

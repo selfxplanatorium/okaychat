@@ -9,6 +9,7 @@ import {
   useIsMarkdownCodeBlock,
 } from "@assistant-ui/react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import {
   type ComponentProps,
   type FC,
@@ -21,8 +22,12 @@ import { ImageOffIcon } from "lucide-react";
 import type { TextMessagePartProps } from "@assistant-ui/react";
 
 import { CodeBlock } from "@/components/ui/code-block";
+import { InlineMath, MathBlock } from "@/components/ui/math";
+import { MermaidDiagram } from "@/components/ui/mermaid-diagram";
+import { preprocessMarkdown } from "@/lib/markdown-math";
 import { cn } from "@/lib/utils";
 import { safeHref } from "../utils/href";
+import { MarkdownTable } from "./markdown-table";
 
 type MarkdownTextProps = Partial<TextMessagePartProps> & {
   components?: Parameters<typeof memoizeMarkdownComponents>[0];
@@ -45,6 +50,15 @@ const useShallowStable = <T extends Record<string, unknown> | undefined>(
   return ref.current;
 };
 
+const remarkPlugins = [remarkGfm, remarkMath];
+
+const defaultComponentsByLanguage: NonNullable<
+  MarkdownTextPrimitiveProps["componentsByLanguage"]
+> = {
+  math: { SyntaxHighlighter: ({ code }) => <MathBlock tex={code.trim()} /> },
+  mermaid: { SyntaxHighlighter: ({ code }) => <MermaidDiagram code={code} /> },
+};
+
 const MarkdownTextImpl: FC<MarkdownTextProps> = ({
   components,
   componentsByLanguage,
@@ -58,13 +72,18 @@ const MarkdownTextImpl: FC<MarkdownTextProps> = ({
       ...memoizeMarkdownComponents(stableComponents),
     };
   }, [stableComponents]);
+  const markdownComponentsByLanguage = useMemo(
+    () => ({ ...defaultComponentsByLanguage, ...stableComponentsByLanguage }),
+    [stableComponentsByLanguage],
+  );
 
   return (
     <MarkdownTextPrimitive
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={remarkPlugins}
+      preprocess={preprocessMarkdown}
       className="aui-md"
       components={markdownComponents}
-      componentsByLanguage={stableComponentsByLanguage}
+      componentsByLanguage={markdownComponentsByLanguage}
       defer
     />
   );
@@ -231,21 +250,11 @@ const defaultComponents = memoizeMarkdownComponents({
       {...props}
     />
   ),
-  table: ({ className, ...props }) => (
-    <div className="aui-md-table-wrapper my-3 overflow-x-auto">
-      <table
-        className={cn(
-          "aui-md-table w-full border-separate border-spacing-0",
-          className,
-        )}
-        {...props}
-      />
-    </div>
-  ),
+  table: MarkdownTable,
   th: ({ className, ...props }) => (
     <th
       className={cn(
-        "aui-md-th bg-muted px-3 py-1.5 text-start font-medium first:rounded-ss-lg last:rounded-se-lg [[align=center]]:text-center [[align=right]]:text-right",
+        "aui-md-th bg-muted text-muted-foreground border-border/60 border-b px-3 py-2 text-start font-medium whitespace-nowrap [[align=center]]:text-center [[align=right]]:text-right",
         className,
       )}
       {...props}
@@ -254,7 +263,7 @@ const defaultComponents = memoizeMarkdownComponents({
   td: ({ className, ...props }) => (
     <td
       className={cn(
-        "aui-md-td border-muted-foreground/20 border-s border-b px-3 py-1.5 text-start last:border-e [[align=center]]:text-center [[align=right]]:text-right",
+        "aui-md-td border-border/60 border-b px-3 py-2 text-start [[align=center]]:text-center [[align=right]]:text-right",
         className,
       )}
       {...props}
@@ -262,10 +271,7 @@ const defaultComponents = memoizeMarkdownComponents({
   ),
   tr: ({ className, ...props }) => (
     <tr
-      className={cn(
-        "aui-md-tr m-0 border-b p-0 first:border-t [&:last-child>td:first-child]:rounded-es-lg [&:last-child>td:last-child]:rounded-ee-lg",
-        className,
-      )}
+      className={cn("aui-md-tr [&:last-child>td]:border-b-0", className)}
       {...props}
     />
   ),
@@ -296,6 +302,13 @@ const defaultComponents = memoizeMarkdownComponents({
   img: MarkdownImage,
   code: function Code({ className, ...props }) {
     const isCodeBlock = useIsMarkdownCodeBlock();
+    if (
+      !isCodeBlock &&
+      className?.includes("math-inline") &&
+      typeof props.children === "string"
+    ) {
+      return <InlineMath tex={props.children} />;
+    }
     return (
       <code
         className={cn(

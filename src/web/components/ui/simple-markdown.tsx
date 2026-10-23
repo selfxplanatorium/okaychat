@@ -2,6 +2,10 @@ import Markdown from "react-markdown";
 import { isValidElement } from "react";
 import { CodeBlock } from "./code-block";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import { preprocessMarkdown } from "@/lib/markdown-math";
+import { InlineMath, MathBlock } from "./math";
+import { MermaidDiagram } from "./mermaid-diagram";
 import { cn } from "@/lib/utils";
 
 // Markdown outside a message part (artifact previews, sub-agent reports). Message text uses MarkdownText,
@@ -15,14 +19,24 @@ const components = {
       return <pre>{children}</pre>;
     }
     const language = /language-([^\s]+)/.exec(children.props.className ?? "")?.[1] ?? "";
+    if (language === "math") return <MathBlock tex={children.props.children.trim()} />;
+    if (language === "mermaid") return <MermaidDiagram code={children.props.children} />;
     return <CodeBlock code={children.props.children} language={language} />;
   },
+  code: ({ className, children, ...props }: React.ComponentProps<"code">) => {
+    if (className?.includes("math-inline") && typeof children === "string") return <InlineMath tex={children} />;
+    return <code className={className} {...props}>{children}</code>;
+  },
 };
+
+const remarkPlugins = [remarkGfm, remarkMath];
 
 export function SimpleMarkdown({ children, className }: { children: string; className?: string }) {
   return (
     <div className={cn(MARKDOWN_CLASSES, className)}>
-      <Markdown remarkPlugins={[remarkGfm]} components={components}>{children}</Markdown>
+      <Markdown remarkPlugins={remarkPlugins} components={components}>
+        {preprocessMarkdown(children)}
+      </Markdown>
     </div>
   );
 }

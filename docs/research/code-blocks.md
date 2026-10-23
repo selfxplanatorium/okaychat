@@ -52,3 +52,31 @@ local override versus changed default, horizontal overflow contained to pre,
 sticky header mid-block and constrained at the bottom, and full-source Copy
 on the plain-HTTP tailnet origin. `npm run typecheck`, `npm test` (78 tests), and
 `npm run build` pass.
+
+## Math and Mermaid
+
+Both Markdown renderers (`markdown-text.tsx`, `simple-markdown.tsx`) use
+`remark-math` without `rehype-katex`. remark-math then emits
+`code.language-math.math-inline` and `pre > code.language-math.math-display`,
+which our components route to `components/ui/math.tsx`. That keeps KaTeX
+(about 79 KB gzip plus fonts) in its own chunk, loaded on the first equation.
+KaTeX runs with `trust` off and `throwOnError: false`, so `\href` and similar
+commands cannot create links and bad TeX renders as a red error, not a crash.
+
+`lib/markdown-math.ts` preprocesses text before parsing: assistant-ui's
+`normalizeMathDelimiters` (`\(...\)`, `\[...\]`), then a line that is only
+`$$...$$` becomes a fenced display block (remark-math renders it inline
+otherwise), then `escapeCurrencyDollars` so `$5 and $10` stays prose.
+
+```` ```mermaid ```` blocks render through `components/ui/mermaid-diagram.tsx`.
+Mermaid 12 (and d3/elk) is a lazy chunk. Renders are debounced 250 ms and
+queued, because mermaid's config is global. `securityLevel: "strict"` is in
+mermaid's default `secure` list, so `%%{init}%%` directives cannot loosen it.
+Invalid or still-streaming source shows the normal code block; once a diagram
+renders, later invalid edits keep the last good SVG. The theme uses mermaid's
+`base` theme with our tokens resolved to sRGB hex through a canvas, because
+mermaid's color parser rejects `oklch()` and `color-mix()`. A MutationObserver
+on `<html>` re-renders on theme switches. `katex` is pinned to the 0.18 line
+so it dedupes with mermaid's copy.
+
+Server exports (`export.ts`) do not render math or diagrams yet.
