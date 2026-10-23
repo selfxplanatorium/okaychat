@@ -2,7 +2,7 @@
 
 # Code sandbox for okaychat's run_code tool. See docs/research/code-sandbox.md.
 # Packages come only from this image: the root filesystem is read-only at runtime.
-FROM python:3.12-slim-bookworm
+FROM python:3.12-slim-bookworm@sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \

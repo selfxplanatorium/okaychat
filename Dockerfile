@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- build: compile server and web bundle ----
-FROM node:22-bookworm-slim AS build
+FROM node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -9,7 +9,7 @@ COPY . .
 RUN npm run build && npm prune --omit=dev
 
 # ---- runtime ----
-FROM node:22-bookworm-slim
+FROM node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d
 
 # Python for Scrapling (web_fetch fallback for blocked or JS-heavy pages) and for stdio MCP servers run with uvx.
 RUN apt-get update \
@@ -17,7 +17,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m venv /opt/scrapling \
- && /opt/scrapling/bin/pip install --no-cache-dir "scrapling[ai]==0.5" uv \
+ && /opt/scrapling/bin/pip install --no-cache-dir "scrapling[ai]==0.5" "uv==0.13.1" \
  && find /opt/scrapling -name "__pycache__" -prune -exec rm -rf {} +
 ENV PATH="/opt/scrapling/bin:${PATH}"
 
@@ -49,5 +49,6 @@ EXPOSE 8787
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
   CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-ENTRYPOINT ["tini", "--"]
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["tini", "--", "docker-entrypoint.sh"]
 CMD ["node", "dist/server/index.js"]
