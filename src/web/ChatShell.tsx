@@ -164,8 +164,9 @@ export function Shell({ userId }: { userId: string }) {
                 </Route>
               ))}
               <Route>
-                {/* Phones have no header bar, so messages scrolling under the floating buttons blur out instead of colliding with them. */}
-                <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 z-10 h-20 bg-background/75 backdrop-blur-md [mask-image:linear-gradient(to_bottom,black_55%,transparent)] md:hidden" />
+                {/* Phones have no header bar, so messages fade out under the floating buttons. A gradient, not a
+                    mask on the viewport: a mask makes the scroller a backdrop root and mobile Chrome drops the composer's blur. */}
+                <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 z-10 h-24 bg-linear-to-b from-background from-15% to-transparent md:hidden" />
                 <ChatHeader sidebarOpen={sidebarOpen} onToggle={() => setSidebarOpen(true)} />
                 <ChatPrivacyMenu />
                 <StorageNotice />

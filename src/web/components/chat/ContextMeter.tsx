@@ -137,7 +137,7 @@ export function MessageMeta() {
   const u = meta.usage;
   const cache = u?.input ? Math.round((u.cacheRead / u.input) * 100) : 0;
   return (
-    <div className="text-muted-foreground/80 ms-auto flex items-center gap-2 pe-2 text-[11px] tabular-nums opacity-0 transition-opacity duration-(--motion-fast) delay-75 ease-out-quart [[data-role=assistant]:hover_&]:opacity-100">
+    <div className="text-muted-foreground/80 ms-auto flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap pe-2 text-[11px] tabular-nums opacity-0 transition-opacity duration-(--motion-fast) delay-75 ease-out-quart [[data-role=assistant]:hover_&]:opacity-100">
       <span>{name}</span>
       {u && (
         <span title={`Input ${u.input} (cached ${u.cacheRead}, written ${u.cacheWrite}) · Output ${u.output} (reasoning ${u.reasoning})`}>

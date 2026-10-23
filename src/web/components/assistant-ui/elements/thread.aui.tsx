@@ -310,7 +310,7 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
   isEmpty,
   autoFocus,
 }) => {
-  const { Welcome = ThreadWelcome } = useContext(ThreadComponentsContext);
+  const { Welcome = ThreadWelcome, BeforeMessages } = useContext(ThreadComponentsContext);
 
   // History arrives as one batch after a switch, marked by `isLoading` (the
   // skeleton relies on the same flag). Everything from the batch back is
@@ -326,6 +326,27 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
     generation: number;
   }>({ firstId: undefined, pending: false, generation: 0 });
   const seen = batch.current;
+
+  // The composer sits outside the scroller (see the footer below), so the
+  // content keeps an equal spacer and the composer skips the scrollbar.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const footerRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const viewport = viewportRef.current;
+    const footer = footerRef.current;
+    if (!root || !viewport || !footer) return;
+    const measure = () => {
+      root.style.setProperty("--composer-inset", `${footer.offsetHeight}px`);
+      root.style.setProperty("--thread-scrollbar", `${viewport.offsetWidth - viewport.clientWidth}px`);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(footer);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
 
   if (loadingHistory) {
     seen.pending = true;
@@ -347,7 +368,8 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
 
   return (
     <ThreadPrimitive.Root
-      className="aui-root aui-thread-root @container flex h-full flex-col"
+      ref={rootRef}
+      className="aui-root aui-thread-root @container relative flex h-full flex-col"
       style={{
         ["--thread-max-width" as string]: "var(--chat-content-max-width, 46rem)",
         // The card surface, thinned by the glass opacity setting so content
@@ -362,13 +384,14 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
       <ThreadPrimitive.Viewport
         turnAnchor="top"
         topAnchorMessageClamp={{ tallerThan: "13em", visibleHeight: "9em" }}
+        ref={viewportRef}
         data-slot="aui_thread-viewport"
-        className="relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth"
+        className="flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth"
       >
         <div
           className={cn(
             "mx-auto flex w-full max-w-(--thread-max-width) flex-1 flex-col px-4",
-            isEmpty ? "pt-[3em] md:justify-center md:pt-4" : "pt-[3em]",
+            isEmpty ? "pt-24 md:justify-center md:pt-4" : "pt-24 md:pt-[3em]",
           )}
         >
           <AuiIf condition={isNewChatView}>
@@ -397,11 +420,17 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
             </div>
           </MessageBaselineContext.Provider>
 
+          {!isEmpty && <div aria-hidden className="mt-auto h-(--composer-inset) shrink-0" />}
+
+          {/* Positioned against the root rather than the scroller, so the
+              overscroll bounce moves only the messages. */}
           <ThreadPrimitive.ViewportFooter
+            ref={footerRef}
             className={cn(
               "aui-thread-viewport-footer flex flex-col gap-4 overflow-visible pb-[max(1rem,env(safe-area-inset-bottom))] md:pb-6",
-              !isEmpty &&
-                "sticky bottom-0 mt-auto rounded-t-(--composer-radius)",
+              isEmpty
+                ? "relative"
+                : "absolute bottom-0 left-0 right-(--thread-scrollbar) mx-auto w-auto max-w-(--thread-max-width) px-4 rounded-t-(--composer-radius)",
             )}
           >
             <ThreadScrollToBottom />
@@ -715,7 +744,7 @@ const ComposerAction: FC = () => {
   return (
     <div className="aui-composer-action-wrapper relative flex items-center justify-between gap-2">
       <div className="flex min-w-0 items-center gap-1">
-        <ComposerAddAttachment />
+        <ComposerAddAttachment className="max-sm:hidden pointer-coarse:hidden" />
         {ComposerToolbar && <ComposerToolbar />}
       </div>
       <div className="flex items-center gap-1.5">
@@ -1109,9 +1138,10 @@ const UserMessage: FC = () => {
       data-slot="aui_user-message-root"
       className={cn(
         // Inset the measured anchor without changing message spacing. The
-        // reserve then stops short turns 3em below the viewport's top edge.
-        // The viewport's tall-message clamp includes this same 3em inset.
-        "-mt-[3em] grid auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 pt-[3em] [contain-intrinsic-size:auto_200px] [content-visibility:auto] [&:where(>*)]:col-start-2",
+        // reserve stops short turns below the mobile header's 5rem fade.
+        // Negative margin preserves the spacing between messages. The reserve
+        // overlaps the previous assistant footer, so only children take the pointer.
+        "pointer-events-none [&>*]:pointer-events-auto -mt-24 grid auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 pt-24 md:-mt-[3em] md:pt-[3em] [contain-intrinsic-size:auto_200px] [content-visibility:auto] [&:where(>*)]:col-start-2",
         // Sent messages come up from the composer they left.
         entering && "chat-message-in",
       )}
@@ -1209,7 +1239,7 @@ const BranchPicker: FC<BranchPickerPrimitive.Root.Props> = ({
       hideWhenSingleBranch
       className={cn(
         // Appears only once a message has siblings; ease it in like the actions.
-        "aui-branch-picker-root text-muted-foreground animate-fade-in -ms-2 me-2 inline-flex items-center text-xs [animation-delay:80ms]",
+        "aui-branch-picker-root text-muted-foreground animate-fade-in -ms-2 me-2 inline-flex shrink-0 items-center text-xs [animation-delay:80ms]",
         className,
       )}
       {...rest}

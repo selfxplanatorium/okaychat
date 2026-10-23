@@ -1,6 +1,6 @@
 "use client";
 
-import { type ComponentPropsWithRef, forwardRef } from "react";
+import { type ComponentPropsWithRef, type ReactNode, forwardRef } from "react";
 
 import {
   Tooltip,
@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export type TooltipIconButtonProps = ComponentPropsWithRef<typeof Button> & {
-  tooltip: string;
+  tooltip: ReactNode;
   side?: "top" | "bottom" | "left" | "right";
 };
 
