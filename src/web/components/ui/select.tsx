@@ -1,6 +1,7 @@
 import { Select as SelectPrimitive } from "@base-ui/react/select";
 import { CheckIcon, ChevronsUpDownIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ScrollArea } from "./scroll-area";
 
 export interface SelectOption<T extends string> {
   value: T;
@@ -49,7 +50,7 @@ export function Select<T extends string>({
         <SelectPrimitive.Positioner sideOffset={6} alignItemWithTrigger={false} className="isolate z-50">
           <SelectPrimitive.Popup
             className={cn(
-              "dropdown-glass text-popover-foreground max-h-80 min-w-(--anchor-width) origin-(--transform-origin) overflow-y-auto rounded-xl border p-1 depth-float outline-none",
+              "dropdown-glass text-popover-foreground flex max-h-80 min-w-(--anchor-width) origin-(--transform-origin) flex-col overflow-hidden rounded-xl border depth-float outline-none",
               "translate-x-0 translate-y-0 scale-100 transition-[opacity,scale,translate] duration-[var(--motion-base)] ease-out-expo",
               "data-[starting-style]:scale-96 data-[starting-style]:opacity-0",
               // Enters from the trigger's edge and settles outward, so the popup
@@ -59,18 +60,20 @@ export function Select<T extends string>({
               "data-[side=bottom]:data-[ending-style]:-translate-y-0.5 data-[side=top]:data-[ending-style]:translate-y-0.5 data-[side=left]:data-[ending-style]:translate-x-0.5 data-[side=right]:data-[ending-style]:-translate-x-0.5",
             )}
           >
-            {options.map((o) => (
-              <SelectPrimitive.Item
-                key={o.value}
-                value={o.value}
-                className="data-highlighted:depth-primary data-highlighted:text-primary-foreground data-highlighted:[&_.text-muted-foreground]:text-primary-foreground flex cursor-default items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 pointer-coarse:py-2.5 text-sm outline-none select-none transition-colors duration-[var(--motion-instant)] ease-out-quart"
-              >
-                <SelectPrimitive.ItemText>{o.label}</SelectPrimitive.ItemText>
-                <SelectPrimitive.ItemIndicator className="transition-[opacity,scale] duration-[var(--motion-base)] ease-spring data-[starting-style]:scale-0 data-[starting-style]:opacity-0">
-                  <CheckIcon className="size-3.5" />
-                </SelectPrimitive.ItemIndicator>
-              </SelectPrimitive.Item>
-            ))}
+            <ScrollArea viewportClassName="p-1">
+              {options.map((o) => (
+                <SelectPrimitive.Item
+                  key={o.value}
+                  value={o.value}
+                  className="data-highlighted:depth-primary data-highlighted:text-primary-foreground data-highlighted:[&_.text-muted-foreground]:text-primary-foreground flex cursor-default items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 pointer-coarse:py-2.5 text-sm outline-none select-none transition-colors duration-[var(--motion-instant)] ease-out-quart"
+                >
+                  <SelectPrimitive.ItemText>{o.label}</SelectPrimitive.ItemText>
+                  <SelectPrimitive.ItemIndicator className="transition-[opacity,scale] duration-[var(--motion-base)] ease-spring data-[starting-style]:scale-0 data-[starting-style]:opacity-0">
+                    <CheckIcon className="size-3.5" />
+                  </SelectPrimitive.ItemIndicator>
+                </SelectPrimitive.Item>
+              ))}
+            </ScrollArea>
           </SelectPrimitive.Popup>
         </SelectPrimitive.Positioner>
       </SelectPrimitive.Portal>
