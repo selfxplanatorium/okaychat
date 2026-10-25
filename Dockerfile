@@ -4,7 +4,7 @@
 # Scrapling away from the app's data and secrets. docker-compose.yml builds both. See docs/implementation/browser-worker.md.
 
 # ---- build: compile server, worker, and web bundle ----
-FROM node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS build
+FROM node:26-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -12,7 +12,7 @@ COPY . .
 RUN npm run build && npm prune --omit=dev && node scripts/browser-modules.mjs /worker
 
 # ---- browser worker ----
-FROM node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS browser
+FROM node:26-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS browser
 
 # Python for Scrapling (web_fetch fallback for blocked or JavaScript-heavy pages); iptables for the egress firewall.
 RUN apt-get update \
@@ -60,7 +60,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
 ENTRYPOINT ["browser-entrypoint.sh"]
 
 # ---- app (default) ----
-FROM node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS app
+FROM node:26-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS app
 
 # Python and uv for stdio MCP servers run with uvx.
 RUN apt-get update \
