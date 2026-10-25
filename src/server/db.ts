@@ -253,7 +253,7 @@ const migrations: Array<string | (() => void)> = [
   `,
   // Per-user storage quota: an optional per-user byte limit (null = server default). Generated images
   // were the only user files not counted in a table, so they get a size column. sandbox_files keeps
-  // run_code outputs after the sandbox container wipes its workspaces (docs/research/code-sandbox.md).
+  // run_code outputs after the sandbox container wipes its workspaces (docs/implementation/code-sandbox.md).
   `
   ALTER TABLE users ADD COLUMN storage_limit INTEGER;
   ALTER TABLE images ADD COLUMN size INTEGER NOT NULL DEFAULT 0;
@@ -329,7 +329,7 @@ const migrations: Array<string | (() => void)> = [
   `ALTER TABLE images ADD COLUMN mime TEXT NOT NULL DEFAULT 'image/png';`,
   // A fork remembers its source chat for the "Branched from" link. No foreign key: deleting the source keeps the fork.
   `ALTER TABLE threads ADD COLUMN branched_from TEXT;`,
-  // Memory v2 (docs/research/memory.md): a synthesized summary per scope, background extraction from idle
+  // Memory v2 (docs/implementation/memory.md): a synthesized summary per scope, background extraction from idle
   // chats (cursor per thread), past-chat search, and a per-thread summary snapshot that keeps the prompt prefix stable.
   `
   ALTER TABLE memory_preferences ADD COLUMN chat_search INTEGER NOT NULL DEFAULT 1;

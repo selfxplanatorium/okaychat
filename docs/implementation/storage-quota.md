@@ -1,0 +1,64 @@
+# Storage quota
+
+Each account has one limit: `OKAYCHAT_STORAGE_LIMIT` bytes (default 1 GiB), overridden by nullable
+`users.storage_limit` through the admin API/UI. `GET /api/storage` returns `{ used, limit, defaultLimit }`.
+
+## Accounting
+
+`src/server/quota.ts` computes usage from the owning account's rows:
+
+- Persistent original attachment bytes in `uploads`, including images, text/code, binary files, and project attachments.
+- Every artifact version: UTF-8 source bytes plus built document bytes.
+- Generated images (`images.size`, backed by files on disk; MIME comes from the stored image metadata); pre-quota images are stat'ed at startup to backfill their size.
+- Durable `sandbox_files.data`; scratch workspaces are outside account storage.
+- Uploaded fonts, account avatar, encrypted memory bytes (facts and summaries), and extracted project-file text.
+- Skill names, descriptions, instructions, reference paths and reference contents, counted as UTF-8 bytes across `skills` and `skill_files`.
+- Message JSON (`messages.bytes`), without inline `data:` URLs, which are charged once as uploads. Branching charges the copy. Existing rows are backfilled by a migration.
+
+Settings, provider/MCP credentials, skill-source credentials and other small configuration rows do not
+count. Message JSON is charged after stripping inline file data URLs; the owned original attachment
+is charged once rather than counting those bytes again in the message. Existing inline attachments are materialized by a one-time
+migration without rewriting messages. Existing files are grandfathered even if migration puts an
+account over quota; subsequent growth is refused.
+
+## Enforcement and deletion
+
+`assertStorage(userId, incoming)` throws `QuotaError`, an HTTP 413 exception, for positive net growth
+that would exceed the limit. Replacement avatars, sandbox outputs and skills subtract their old
+stored bytes; shrinking or equal-size replacements remain possible after an admin lowers a limit.
+New artifact versions retain their predecessors and therefore charge the entire new version. Repeated
+writes during the same turn overwrite that turn's version and charge only net growth.
+Checks and SQLite writes have no intervening asynchronous work. Multi-skill imports and message
+attachment materialization use transactions; nested helpers use SQLite savepoints.
+
+Enforcement covers upload storage/extraction, project original bytes plus extracted text, memory
+writes/imports, avatars, fonts, artifact/document versions, generated images, and every skill creation,
+edit, source install or import. Attachment adapters propagate failures, including native PDF, image,
+text and binary storage failures; they cannot silently continue with only a browser copy.
+
+Library deletion immediately releases the deleted upload, generated image, sandbox output, or skill
+package's charged bytes (including skill references). Deleting an original project attachment leaves
+its separately charged pinned text intact. Project/chat deletion does not remove persistent uploaded
+originals; those last until Library deletion or account deletion. Chat deletion cascades artifact and
+sandbox-output rows and removes its generated images. Account deletion cascades all owned SQLite
+files and removes the generated-image directory.
+
+`run_code` copies each returned output up to 50 MiB before returning a durable URL. Files exceeding
+that cap, failing to copy, or exceeding quota have a `storageWarning` and only a scratch download URL;
+they are not durable and disappear with the workspace. Quota rejection preserves the previous durable
+copy when an attempted replacement cannot fit.
+
+Temporary attachment extraction/storage (`temporary=1`) bypasses persistence and quota. `tmp_` chats
+cannot create stored files or run persistent tools. Explicitly saving a temporary chat to normal
+history materializes its inline attachments, enforces quota, and keeps the original message parts.
+
+## UI and checks
+
+The account page shows a storage meter; the chat notice warns at 90% and reports full storage at
+100%. Dismissal is scoped to the account and browser session. Usage refreshes after API mutations,
+chat completion, page focus, and account-page entry; the initial storage request starts with the
+shell's other startup requests. Admins see usage and can set/reset per-user limits.
+
+Tests cover ownership, UTF-8 accounting, every principal write path, replacement deltas, failed-import
+rollback, temporary non-persistence, durable outputs, legacy migration/restart behavior, and Library
+deletion freeing capacity for another write.

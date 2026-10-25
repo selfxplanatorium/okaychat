@@ -1,5 +1,5 @@
 # Direct dependencies of the sandbox image. requirements.txt is the hashed lock generated from this file;
-# regenerate it with the command in docs/research/code-sandbox.md, never edit it by hand.
+# regenerate it with the command in docs/implementation/code-sandbox.md, never edit it by hand.
 numpy==2.5.4
 pandas==3.0.6
 scipy==1.18.1

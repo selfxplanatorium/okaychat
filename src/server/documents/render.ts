@@ -3,7 +3,7 @@ import { browserConfigured, browserHealth, browserJob, browserToken } from "../b
 
 // PDFs and screenshots are rendered by the browser worker (src/browser/), a separate container with Chromium and
 // no app data or secrets. This module holds the print helpers and the calls into it. See
-// docs/research/browser-worker.md.
+// docs/implementation/browser-worker.md.
 
 /** How long the app waits for one job: the worker's own timeout plus time queued for a slot. */
 const JOB_WAIT_MS = 90_000;

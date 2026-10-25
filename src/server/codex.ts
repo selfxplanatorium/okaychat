@@ -9,7 +9,7 @@ import { env } from "./env.js";
 // Each user signs in to their own ChatGPT account through the Codex CLI. The CLI needs its credentials as
 // a plain auth.json in CODEX_HOME, so we keep them encrypted in SQLite and write them to a private temp
 // CODEX_HOME only while a command runs. Token refreshes made by the CLI are read back afterwards.
-// See docs/research/codex-images.md.
+// See docs/implementation/codex-images.md.
 
 export const CODEX_COMMAND = process.env.OKAYCHAT_CODEX_COMMAND ?? "codex";
 const TMP_ROOT = path.join(env.dataDir, "codex-tmp");
@@ -91,7 +91,7 @@ export function withCodexHome<T>(userId: string, fn: (home: string) => Promise<T
   return serialized(userId, run);
 }
 
-// Chat models call the ChatGPT backend directly with the same login (docs/research/codex-chat.md). The CLI
+// Chat models call the ChatGPT backend directly with the same login (docs/implementation/codex-chat.md). The CLI
 // refreshes tokens itself during image runs; for chat we refresh here, inside the same per-user queue.
 const TOKEN_URL = "https://auth.openai.com/oauth/token";
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";

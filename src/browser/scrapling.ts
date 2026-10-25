@@ -7,7 +7,7 @@ import { localEgressProxy } from "./egress-proxy.js";
 // Scrapling 0.5 is the web_fetch fallback for pages that block plain HTTP or need JavaScript. It fetches only
 // public URLs, through the egress proxy. It runs over stdio as a child of the fetch process, under the same user
 // (`scrape` in the container), so there is no port or token another local process could use. See
-// docs/research/scrapling.md.
+// docs/implementation/scrapling.md.
 
 const IDLE_MS = 5 * 60_000;
 
@@ -24,7 +24,7 @@ function isAvailable(): boolean {
 function getClient(): Promise<MCPClient> {
   client ??= createMCPClient({
     clientName: "okaychat",
-    // Scrapling's Python MCP server rejects the client's fallback handshake after discovery. See docs/research/mcp.md.
+    // Scrapling's Python MCP server rejects the client's fallback handshake after discovery. See docs/implementation/mcp.md.
     protocolVersionDiscovery: false,
     initializationOptions: { timeout: 30_000 },
     // The stdio transport passes only an env allowlist (PATH, HOME, ...), so forward Playwright's browser path.

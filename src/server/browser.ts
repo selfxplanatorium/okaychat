@@ -5,7 +5,7 @@ import type { Health } from "../browser/api.js";
 
 // Client for the browser worker (src/browser/, its own container in compose). The app keeps every ownership
 // check: it looks the bytes up, sends them with a fixed job type, and gets the result on the same request.
-// See docs/research/browser-worker.md.
+// See docs/implementation/browser-worker.md.
 
 // Read when used, not at import: render helpers import this module, and tests start a worker after importing them.
 // `npm run dev` points OKAYCHAT_DEV_BROWSER_URL at its local worker unless .env names another (scripts/dev-browser.sh).

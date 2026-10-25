@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Two images from one build: `app` (the default, last stage) and `browser`, the worker that runs Chromium and
-# Scrapling away from the app's data and secrets. docker-compose.yml builds both. See docs/research/browser-worker.md.
+# Scrapling away from the app's data and secrets. docker-compose.yml builds both. See docs/implementation/browser-worker.md.
 
 # ---- build: compile server, worker, and web bundle ----
 FROM node:22-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS build

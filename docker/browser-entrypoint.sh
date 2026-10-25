@@ -6,7 +6,7 @@
 #   scrape   (10002)  - the fetch server (role fetch, loopback) with Scrapling and its browser as children.
 #   egress   (10003)  - the egress proxy (dist/browser/egress.js), the only process allowed out.
 # Slots, the fetch server, and the proxy are restarted when they exit; if the job API exits, so does the container.
-# If the firewall cannot be installed and checked, nothing starts. See docs/research/browser-worker.md.
+# If the firewall cannot be installed and checked, nothing starts. See docs/implementation/browser-worker.md.
 set -eu
 
 export JOBS_UID=10001 SCRAPE_UID=10002 EGRESS_UID=10003

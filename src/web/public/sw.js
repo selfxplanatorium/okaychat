@@ -1,8 +1,8 @@
 // okaychat service worker. Makes the app installable and keeps the shell
 // available on a flaky connection. Never touches /api: chat streams, auth, and
 // user data always go to the network.
-const CACHE = "okaychat-shell-v1";
-const SHELL = ["/", "/manifest.webmanifest", "/icon.webp", "/icon-192.png", "/favicon.png"];
+const CACHE = "okaychat-shell-v2";
+const SHELL = ["/", "/manifest.webmanifest", "/icon.webp", "/wordmark.svg", "/icon-192.png", "/favicon.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));

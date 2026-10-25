@@ -1,4 +1,4 @@
-# Generated from requirements.in by uv pip compile (see docs/research/code-sandbox.md). Do not edit by hand.
+# Generated from requirements.in by uv pip compile (see docs/implementation/code-sandbox.md). Do not edit by hand.
 agate==1.14.2 \
     --hash=sha256:7f29841c39d84b1de7fde762b8d792085371515324f3a01413b20f810398225b \
     --hash=sha256:e11018371d344dda5aca16a68830b6f8e86c84c531a7bb8f81456bf5014937d4

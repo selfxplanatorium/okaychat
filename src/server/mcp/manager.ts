@@ -24,7 +24,7 @@ import { StoredOAuthProvider } from "./oauth.js";
 import { getAudience } from "../groups.js";
 import { getVisibleServer, visibleServers, type McpServerRecord } from "./store.js";
 
-// Rules from docs/research/mcp.md: @ai-sdk/mcp has no timeouts, no reconnect, and ignores
+// Rules from docs/implementation/mcp.md: @ai-sdk/mcp has no timeouts, no reconnect, and ignores
 // list_changed, so this module supplies all three. One client per (user, server), never shared.
 
 const STARTUP_TIMEOUT_MS = 20_000;

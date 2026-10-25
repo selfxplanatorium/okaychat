@@ -17,7 +17,7 @@ export interface ModelHandle {
   providerOptions: ProviderOptions;
   /**
    * Builds the request messages with cache breakpoints for formats that need them. `system[0]` is the part
-   * shared by every chat of the account, `system[1]` the chat's own context. See docs/research/prompt-caching.md.
+   * shared by every chat of the account, `system[1]` the chat's own context. See docs/implementation/prompt-caching.md.
    */
   markCache: (system: string[], messages: ModelMessage[]) => ModelMessage[];
 }
@@ -27,7 +27,7 @@ const isOpencode = (providerId: string) => providerId === "opencode-go" || provi
 /**
  * Headers that route requests to the backend holding the prefix cache. OpenCode Go picks the upstream by
  * `x-opencode-session`, so it is per account, not per chat: every chat of an account then shares the
- * cached tool and system prefix. See docs/research/prompt-caching.md.
+ * cached tool and system prefix. See docs/implementation/prompt-caching.md.
  */
 function affinityHeaders(providerId: string, affinity: string): Record<string, string> {
   const headers: Record<string, string> = { "User-Agent": USER_AGENT };
@@ -127,7 +127,7 @@ function systemMessages(system: string[], breakpoint?: ModelMessage["providerOpt
 
 /**
  * Anthropic caches only at explicit breakpoints (max 4). Mark the shared system part (covers tools + it,
- * reused by every chat) and the last message (moves forward each step). See docs/research/prompt-caching.md.
+ * reused by every chat) and the last message (moves forward each step). See docs/implementation/prompt-caching.md.
  */
 function anthropicBreakpoints(system: string[], messages: ModelMessage[]): ModelMessage[] {
   const out = [...messages];

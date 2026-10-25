@@ -17,7 +17,7 @@ import { costOf, normalizeUsage, recordUsage } from "./usage.js";
 // 1. Review: once a chat has been idle for a while, extract lasting user facts from the messages added
 //    since the last review and reconcile them with saved memory as add/update/delete operations (Mem0).
 // 2. Summarize: when a scope's facts change, rewrite the summary every chat in that scope starts with.
-// Both use the account's utility model and record usage as kind "memory". See docs/research/memory.md.
+// Both use the account's utility model and record usage as kind "memory". See docs/implementation/memory.md.
 
 const IDLE_MS = 10 * 60_000;
 /** Enabling memory reviews chats active in the last two weeks, not the whole history. */

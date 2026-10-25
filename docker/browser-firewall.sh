@@ -9,7 +9,7 @@
 #   root                                -> only the job API's port, on loopback (health check)
 # Replies on connections someone else opened (the app's job requests) are allowed. Everything else, UDP and
 # IPv6 included, is rejected. The proxy repeats the address check per connection and picks a policy by uid;
-# this makes it impossible to go around the proxy. See docs/research/browser-worker.md.
+# this makes it impossible to go around the proxy. See docs/implementation/browser-worker.md.
 set -eu
 
 : "${JOBS_UID:?}" "${SCRAPE_UID:?}" "${EGRESS_UID:?}" "${SLOT_UIDS:?}" "${SLOT_PORTS:?}" "${JOB_PORT:?}" "${EGRESS_PORT:?}" "${FETCH_PORT:?}"

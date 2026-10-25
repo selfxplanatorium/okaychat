@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-# Code sandbox for okaychat's run_code tool. See docs/research/code-sandbox.md.
+# Code sandbox for okaychat's run_code tool. See docs/implementation/code-sandbox.md.
 # Everything a run can use comes from this image: the root filesystem is read-only and runs have no network.
 
 # ---- inner.bpf: the seccomp filter bubblewrap applies to every run, generated with libseccomp ----

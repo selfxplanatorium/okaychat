@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Integration tests for the real browser worker container and the app wiring, run from the tester container
 (on the browser and default networks, like the app). Started by test/integration/run.sh; see
-docs/research/browser-worker.md. The fixture at 10.231.1.50 counts every request that reaches it: blocked
+docs/implementation/browser-worker.md. The fixture at 10.231.1.50 counts every request that reaches it: blocked
 destinations must leave its counters at zero, while the tester's own requests (positive control) arrive.
 
 Usage: python3 browser_it.py [test-name-substring ...]

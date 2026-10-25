@@ -3,8 +3,8 @@ import "culori/css";
 
 const hsl = converter("hsl");
 const rgb = converter("rgb");
-// A representative midtone of the supplied olive artwork.
-const sourceColor = hsl("#9fb03e")!;
+// The approved artwork uses the default dark-mode accent as its base.
+const sourceColor = hsl("#b5c062")!;
 let original: Promise<ImageData> | undefined;
 let requestedAccent = "";
 

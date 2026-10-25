@@ -2,7 +2,7 @@ import { browserConfigured, browserJob } from "../browser.js";
 
 // Scrapling, web_fetch's fallback for blocked or JavaScript-heavy pages, runs in the browser worker
 // (src/browser/scrapling.ts), where its connections can only leave through the egress proxy. See
-// docs/research/scrapling.md and docs/research/browser-worker.md.
+// docs/implementation/scrapling.md and docs/implementation/browser-worker.md.
 
 /** Fetch a page Node's fetch could not read: TLS-impersonated HTTP first, then a stealth browser if installed. */
 export async function scraplingFetch(url: string, signal?: AbortSignal): Promise<{ title: string; content: string } | null> {

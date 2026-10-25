@@ -1,0 +1,23 @@
+# Appearance and branding
+
+The appearance engine is ported from T3Code (MIT, Copyright (c) 2026 T3 Tools Inc.). Module origins, defaults, and DOM contracts are documented in `src/web/theme/README.md`.
+
+## Implementation
+
+The brand icon lives in `src/web/public/icon.webp` (302 × 297, lossless WebP, about 56 KB): the approved rounded, lit green tile containing two overlapping white dialogue marks with downward tails. It is separate from `wordmark.svg` (964 × 234 viewBox), which holds the approved rounded serif lettering as vector paths, without a font dependency. Both were extracted from the approved logo mockup; design explorations, prompts, and working files are not kept in the repository. The 64 px favicon, 180 px Apple touch icon, and 192/512 px PWA PNGs are rendered from the icon alone, preserving its aspect ratio.
+
+`src/web/theme/brand.ts` decodes the icon once and shifts its HSL hue and saturation from the default dark accent (`#b5c062`) to the palette's `accent` (`--app-theme-accent`, not the subtle `--accent` surface or the separate action color used by solid controls). Lightness, white dialogue marks, and alpha are preserved. This avoids CSS `hue-rotate` changing perceived saturation or clipping channels. Palette application and live editor previews both refresh the shared `--brand-icon` image and browser icon links; theme halves, OS mode changes, and account appearance restores use the same path. `Brand.tsx` renders the separate wordmark as a CSS mask filled with that same `--app-theme-accent` (falling back to `--primary` before palette application), so its flat color follows the accent exactly and immediately. Its screen-reader text keeps the brand name accessible. This component is shared by the sidebar, sign-in, onboarding, and public shares. No image processing dependency is needed at runtime.
+
+`src/web/components/settings/AppearanceSettings.tsx` renders the settings panel. The theme library and editor live in `src/web/components/settings/theme/`: preview circles, library cards (including collection cards with radial variants), the floating draggable and resizable editor panel (guided two-color mode, advanced grouped roles, merge by name), the HSV color picker, and the inspector. `ThemeEditorHost` is mounted by `ChatShell`, so the panel stays open across routes and the inspector works on the chat. Differences from the upstream port:
+
+- Environment themes are left out (okaychat has none).
+- The editor's appearance toggle is a plain segmented button pair (no `ToggleGroup` component here).
+- Font smoothing appears only in Advanced mode on macOS, as in T3Code.
+- okaychat replaces the T3Code text input with a list picker, so typed names are gone. Browsers without the Local Font Access API show only the default and uploaded fonts.
+- Default interface font is Onest, bundled with `@fontsource-variable/onest` (self-hosted, no Google request). Stored `""` means Onest. The picker keeps Golos Text alongside bundled Liberation, DejaVu, and Ubuntu faces, see `bundled-fonts.md`.
+- Uploaded fonts ("Installed fonts" row) are stored in SQLite (`user_fonts`), checked by file signature (WOFF, WOFF2, TTF, OTF; 15 MB), and served at `/api/fonts/:id/file`. The family name is the file name. `state/fonts.ts` registers each one with `FontFace` when the shell loads, so it syncs with the account. Removing a font resets any setting that still uses it.
+- No toasts. Errors are shown inline.
+- Appearance preferences and custom themes now sync per account through `/api/appearance`, stored inside `user_settings.json`. `src/shared/appearance.ts` defines the validated wire format.
+- `useSyncAppearance` migrates the first device's local preferences once, then merges only changed fields. Separate account caches (`okaychat:appearance:<userId>`) retain unsaved edits, and `focus` / `online` retry them and fetch remote changes. Concurrent changes to the same field use the last server write; unrelated fields are preserved.
+- The existing plain localStorage boot keys and `okaychat:appearance` remain as the last-used visual cache, so first paint still uses the theme before React. Login restores the current account before mounting the chat; an account without saved preferences starts from defaults if the cache belongs to someone else.
+- Theme library changes use the existing parser and notification mechanism (`replaceCustomThemes`). UI changes remain immediate, saves debounce 400 ms, and page unload attempts a keepalive write. Failures leave the outbox cached and show an inline sync status in Appearance settings. This is refresh-on-focus sync, not a live subscription between devices.

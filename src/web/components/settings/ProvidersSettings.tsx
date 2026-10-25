@@ -12,7 +12,7 @@ import { CodexConnect } from "./CodexConnect";
 import { SettingsPage, SettingsSection } from "./SettingsUI";
 
 export const OPENCODE_GO_CONSOLE = "https://opencode.ai/console";
-/** Connected through the Codex login rather than a key. See docs/research/codex-chat.md. */
+/** Connected through the Codex login rather than a key. See docs/implementation/codex-chat.md. */
 const CHATGPT = "chatgpt";
 
 /** Which connections the page edits: the user's own, or the server-wide ones an admin shares. */

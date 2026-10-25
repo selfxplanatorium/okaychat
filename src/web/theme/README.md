@@ -1,8 +1,8 @@
 # Theme and appearance
 
-Framework-free theme logic and CSS, ported from T3Code (MIT, Copyright (c) 2026 T3 Tools Inc.). No React here. The UI is built on top of these modules later.
+Framework-free theme logic and CSS, ported from T3Code (MIT, Copyright (c) 2026 T3 Tools Inc.). The React settings UI lives in `src/web/components/settings/theme/` and consumes these modules.
 
-Source files are listed in each module header. The T3Code clone used for the port is at `/tmp/research/t3code`. Its UI reference is in `docs/research/t3code-appearance.md`.
+Module headers retain their upstream attribution. Current appearance and branding behavior is documented in `docs/implementation/appearance.md`.
 
 ## Files
 
@@ -14,7 +14,8 @@ Source files are listed in each module header. The T3Code clone used for the por
 | `contrast.ts` | Writes `--appearance-contrast-*` variables from the contrast setting. | `apps/web/src/appearanceContrast.ts` |
 | `fonts.ts` | Font stacks, font family list parsing, font variable writes, size clamps, monospace detection, installed font discovery. | `apps/web/src/appearanceFonts.ts` |
 | `vscode-import.ts` | VS Code theme JSON to `ThemeDefinition`. Pairs light and dark files. Resolves label collisions. | `apps/web/src/vscodeThemeImport.ts` |
-| `depth.css` | Depth tokens and `depth-*` utilities (lit surfaces, tinted shadows, accent gradients, spring press). okaychat original, derived from the semantic tokens. See `docs/research/visual-depth.md`. | n/a |
+| `depth.css` | Depth tokens and `depth-*` utilities (lit surfaces, tinted shadows, accent gradients, spring press). okaychat original, derived from the semantic tokens. See `docs/implementation/visual-depth.md`. | n/a |
+| `brand.ts` | Tints the separate icon and browser icons to the brand accent while preserving lighting, white marks, and alpha. The separate SVG wordmark uses the same accent through a CSS mask in `Brand.tsx`. | okaychat |
 | `theme.css` | Tailwind v4 layer. Maps `--app-theme-*` to semantic tokens, exposes them as `@theme inline` colors, defines glass, contrast, chat width, font variables, and `.settings-slider`. | `apps/web/src/index.css` (extracted blocks) |
 
 `palette.ts` depends on `culori` (already in `package.json`).
@@ -64,14 +65,14 @@ Appearance settings. Keep the T3Code names. The UI syncs them per user through `
 | `fontSizeInterface` | 12 to 20 px | 16 | Sets `<html>` font size. |
 | `fontSizePrompt` | 12 to 20 px | 14 | |
 | `fontSizeCode` | 10 to 18 px | 13 | Also `--diffs-font-size` if you add diff views. |
-| `fontSizeTerminal` | 8 to 20 px | 12 | Not used. No terminal. |
 | `fontFamilySans` | string, max 200 | `""` | Empty = `DEFAULT_SANS_FONT_STACK`. |
 | `fontFamilyComposer` | string, max 200 | `""` | Empty = inherits `--font-sans`. |
 | `fontFamilyCode` | string, max 200 | `""` | Empty = `DEFAULT_CODE_FONT_STACK`. |
-| `fontFamilyTerminal` | string, max 200 | `""` | Not used. |
 | `fontSmoothing` | boolean | `true` | Sets `-webkit-font-smoothing: antialiased`. Only meaningful on macOS. |
-| `wordWrap` | boolean | `true` | Code blocks and tables. Not stored by this module. |
-| `typographyAdvanced` (localStorage `okaychat:typography-advanced`) | boolean | `false` | Shows prompt and terminal font rows. |
+| `wordWrap` | boolean | `true` | Account-synced default for code blocks and tables; each block can override it locally. |
+| `typographyAdvanced` | boolean | `false` | Account-synced switch for per-role typography controls. |
+| `motionOff` | array of `icons`, `interface`, `transitions`, `loading` | `[]` | Account-synced disabled animation groups. |
+| `squareCorners` | boolean | `false` | Account-synced square-corner option. |
 
 Theme selection (localStorage):
 
@@ -89,7 +90,7 @@ Keys are constants in `palette.ts` (`CUSTOM_THEMES_STORAGE_KEY`, etc.). The boot
 
 React mounts after first paint, so the theme must be applied before that, from an inline script in `index.html` `<head>`, placed before the module script.
 
-Use T3Code's script: `apps/web/index.html`, the first `<script>` block (an IIFE, about 400 lines, no imports). It reads the storage keys above, resolves the mode and halves, sets `.dark`, `data-theme-id`, `data-theme-selected`, `--boot-*` splash colors, and `<html>` background, and updates `meta[name="theme-color"]`. Its `<style>` block gives `html`, `body`, and `#root` the splash background so the first paint is not white in dark mode.
+The ported script is the first `<script>` block in `src/web/index.html` (an IIFE with no imports). It reads the storage keys above, resolves the mode and halves, sets `.dark`, `data-theme-id`, `data-theme-selected`, `--boot-*` splash colors, and the `<html>` background, and updates `meta[name="theme-color"]`. Its `<style>` block gives `html`, `body`, and `#root` the splash background before React mounts.
 
 Two sync points:
 
@@ -107,8 +108,7 @@ After React mounts, call `applyThemePalette(theme, appearance)` with the resolve
 - Preview sidebar artwork (`themeAllowsSidebarArtwork`, `getThemePreviewSidebarArtwork`, `subscribeToThemePreview`). Sidebar artwork is a T3 feature.
 - Mobile theme ids (`MOBILE_DEFAULT_THEME_ID`, `MOBILE_THEME_IDS`) and publish guard sets (`UNPUBLISHABLE_THEME_IDS`) in `palettes.ts`. Kept in the file because values must stay identical, but unused.
 - Diff color tokens (`--diff-*`) and the diff color scheme setting.
-- Terminal font and terminal palette roles stay in `palettes.ts` and `palette.ts`. CSS for the terminal is not ported. Add it if the app gets a terminal.
+- Terminal helper constants and palette roles remain for compatibility, but the app has no terminal and does not persist terminal typography fields in the appearance API.
 - Environment identification and composer context settings.
-- T3 chat header rules (`[data-chat-header]`), `[data-app-sidebar]` overrides, and the `t3-chat` light-mode code chip overrides. Port these when the matching UI exists.
-- Theme inspector overlay CSS (`#theme-inspector-*`). Rebuild it with the theme editor.
+- Upstream T3 chat header rules (`[data-chat-header]`), `[data-app-sidebar]` overrides, and code-chip styling; okaychat uses its own shell and chat components.
 - Stage artwork variables (`--stage-*`) and the T3 composer seam shadows.

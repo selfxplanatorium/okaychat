@@ -3,7 +3,7 @@ import { codexAccess, codexVersion, isConnected } from "../codex.js";
 
 // Chat through the user's own ChatGPT plan: the Codex CLI login, sent straight to the backend the CLI uses.
 // That backend speaks the Responses API with a few constraints the fetch below enforces.
-// See docs/research/codex-chat.md.
+// See docs/implementation/codex-chat.md.
 
 export const CHATGPT = "chatgpt";
 export const CHATGPT_NAME = "ChatGPT plan (Codex)";

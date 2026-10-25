@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Image build step: the executable view used inside every run's jail. See docs/research/code-sandbox.md.
+"""Image build step: the executable view used inside every run's jail. See docs/implementation/code-sandbox.md.
 
 The sandbox container runs without Docker's AppArmor profile (bubblewrap needs mounts), so host AppArmor profiles
 that attach by executable path apply inside it: Ubuntu 26.04 confines /usr/bin/gs and /usr/bin/qpdf to the home

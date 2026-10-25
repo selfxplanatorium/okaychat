@@ -4,3 +4,14 @@ data
 .env
 *.log
 dev-login.md
+
+# Local working files and caches
+/output/
+/tmp/
+/temp/
+/imagegen/
+/.cache/
+__pycache__/
+*.py[cod]
+*.tsbuildinfo
+.DS_Store

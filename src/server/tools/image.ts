@@ -24,7 +24,7 @@ import { getSettings } from "../settings.js";
 
 // Image generation through one of several services: the user's own ChatGPT plan (by running `codex exec`
 // as a relay that only calls Codex's built-in image tool), or an image API reached with the user's key.
-// See docs/research/image-generation.md and docs/research/codex-images.md.
+// See docs/implementation/image-generation.md and docs/implementation/codex-images.md.
 
 const IMAGE_DIR = path.join(env.dataDir, "images");
 const TIMEOUT_MS = 5 * 60_000;

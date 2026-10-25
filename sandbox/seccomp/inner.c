@@ -1,6 +1,6 @@
 // Builds inner.bpf, the seccomp filter bubblewrap installs on every run_code process right before it execs
 // the command (`bwrap --seccomp`). It is generated with libseccomp at image build time, for the build's
-// architecture, so no hand-written BPF is involved. See docs/research/code-sandbox.md.
+// architecture, so no hand-written BPF is involved. See docs/implementation/code-sandbox.md.
 //
 // The network boundary is the run's own network namespace, not this filter. The filter keeps model code from
 // leaving or rebuilding that boundary and trims kernel surface the run never needs:

@@ -1,4 +1,4 @@
-/** Image generation backends. See docs/research/image-generation.md. */
+/** Image generation backends. See docs/implementation/image-generation.md. */
 export type ImageServiceId = "codex" | "openai" | "google" | "xai" | "togetherai" | "black-forest-labs" | "fal" | "replicate";
 
 export interface ImageServiceDef {

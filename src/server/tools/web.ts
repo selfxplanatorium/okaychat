@@ -8,8 +8,8 @@ import { scraplingFetch } from "./scrapling.js";
 import { SearchBudget } from "./search-budget.js";
 
 // Free web access with no keys: SearXNG sidecar when configured, Brave's public HTML results otherwise.
-// DuckDuckGo's HTML endpoints answer 202 (bot wall) from many servers and Bing serves junk to scrapers,
-// so neither is used. See docs/research/web-search.md.
+// DuckDuckGo's HTML endpoint often returns a bot wall; only its Lite endpoint is a fallback.
+// Bing is not used. See docs/implementation/web-search.md.
 
 // linkedom, Readability, and turndown (with its own DOM) load on the first search or page read, not at boot.
 const parseHTML = async (html: string) => (await import("linkedom")).parseHTML(html);

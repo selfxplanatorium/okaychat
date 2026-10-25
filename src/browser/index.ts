@@ -4,7 +4,7 @@ import { closeRenderer } from "./render.js";
 import { createWorker } from "./server.js";
 
 // Entry point of the browser worker: Chromium for documents and previews, and Scrapling for web_fetch's
-// fallback, kept out of the app process. See docs/research/browser-worker.md.
+// fallback, kept out of the app process. See docs/implementation/browser-worker.md.
 
 if ((config.role === "all" || config.role === "dispatch") && !config.tokenFile) {
   throw new Error("BROWSER_TOKEN_FILE must name the file the app writes the worker token to");

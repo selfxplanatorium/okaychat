@@ -8,7 +8,7 @@ import { after, beforeEach, test } from "node:test";
 import { Hono } from "hono";
 
 // A fake runner stands in for sandbox/runner.py. The runner's own isolation is checked against the real
-// container (docs/research/code-sandbox.md); these tests cover what the app sends and exposes.
+// container (docs/implementation/code-sandbox.md); these tests cover what the app sends and exposes.
 const calls: Array<{ method: string; url: string; auth: string | undefined; body: Buffer }> = [];
 async function received(suffix: string) {
   const deadline = Date.now() + 5000;

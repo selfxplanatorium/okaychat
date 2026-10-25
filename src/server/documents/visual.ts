@@ -6,7 +6,7 @@ import { previewXlsx } from "./lazy.js";
 
 // The model's visual self-check. Every artifact is rendered by the browser worker in a fresh Chromium context:
 // offline for documents, sheets, and SVG; HTML and React previews may also load from the public CDNs artifact
-// pages already use. See docs/research/documents.md and docs/research/browser-worker.md.
+// pages already use. See docs/implementation/documents.md and docs/implementation/browser-worker.md.
 
 /** How much of a tall page or sheet a single shot shows. Keeps image tokens reasonable. */
 const MAX_HEIGHT = 1800;

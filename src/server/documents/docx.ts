@@ -33,7 +33,7 @@ export { docxOp, type DocxOp };
 //  - Edit: an existing document is edited in place through word/document.xml, so its styles,
 //    numbering, images, headers and fields survive. Paragraphs are addressed by the index
 //    `readDocx` prints, and a replacement can span the multiple runs Word splits text into.
-// See docs/research/documents.md.
+// See docs/implementation/documents.md.
 
 const MAX_IMAGE_PX = 600;
 
@@ -478,7 +478,7 @@ function furniture(root: { querySelector(selector: string): Element | null }, ta
   return [new Paragraph({ children: fieldRuns(text), alignment: AlignmentType.CENTER, spacing: { before: 60, after: 60 } })];
 }
 
-/** Builds a Word document from the HTML subset documented in docs/research/documents.md. */
+/** Builds a Word document from the HTML subset documented in docs/implementation/documents.md. */
 export async function createDocx(html: string, title?: string): Promise<Uint8Array> {
   // Plain text (no block markup) still becomes readable paragraphs, so a model that writes prose
   // instead of HTML does not produce one wall of text.

@@ -9,7 +9,7 @@ import { localEgressProxy } from "./egress-proxy.js";
 
 // Chromium renders PDFs and screenshots for the app's documents and the model's visual check. It starts on the
 // first job, jobs share one process with a fresh context each, and it closes after a short idle period. See
-// docs/research/browser-worker.md.
+// docs/implementation/browser-worker.md.
 //
 // Two network modes, chosen per job:
 // - offline (PDFs, Office and PDF previews, SVG, sheets): the page sees only the document and the files the job
@@ -65,7 +65,7 @@ async function launch(): Promise<Browser> {
       proxy: { server: proxy, bypass: "<-loopback>" },
       // --no-sandbox: Chromium's sandbox needs user namespaces, which the container's seccomp and AppArmor
       // profiles do not grant. Compensating controls: its own uid, no capabilities, no secrets in reach, and a
-      // firewall that lets it reach only the egress proxy. See docs/research/browser-worker.md.
+      // firewall that lets it reach only the egress proxy. See docs/implementation/browser-worker.md.
       args: [
         "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--no-first-run", "--disable-extensions",
         // Route handlers never see DNS prefetch, preconnect, or WebTransport, which could carry data out in a

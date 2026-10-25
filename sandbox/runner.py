@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """okaychat code sandbox: runs model-written Python and Bash for the app over a small HTTP API.
 
-One container serves every user. Isolation inside it comes from these rules (docs/research/code-sandbox.md):
+One container serves every user. Isolation inside it comes from these rules (docs/implementation/code-sandbox.md):
 - Every run starts inside bubblewrap with its own user, network, IPC, UTS, and mount namespaces. The
   network namespace has only its own loopback, so run code reaches nothing: not the internet, DNS, the app,
   this runner's port, or another run's listeners and abstract sockets. The mount namespace shows the read-only
@@ -860,7 +860,7 @@ def main() -> None:
     global isolation_error
     isolation_error = check_isolation()
     if isolation_error:
-        print(f"okaychat sandbox: run isolation is unavailable, refusing all runs: {isolation_error}. See docs/research/code-sandbox.md (seccomp profile sandbox/seccomp.json, apparmor=unconfined).", flush=True)
+        print(f"okaychat sandbox: run isolation is unavailable, refusing all runs: {isolation_error}. See docs/implementation/code-sandbox.md (seccomp profile sandbox/seccomp.json, apparmor=unconfined).", flush=True)
     threading.Thread(target=idle_loop, daemon=True).start()
     server.serve_forever()
 

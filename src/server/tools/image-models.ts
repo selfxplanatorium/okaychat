@@ -5,7 +5,7 @@ import { USER_AGENT } from "../env.js";
 import { publicFetch } from "../public-fetch.js";
 
 // Image model lists come from each provider, so the picker shows what the user's key can call today.
-// Black Forest Labs has no list endpoint and uses the built-in list. See docs/research/image-generation.md.
+// Black Forest Labs has no list endpoint and uses the built-in list. See docs/implementation/image-generation.md.
 
 const TTL_MS = 60 * 60_000;
 const cache = new Map<string, { list: ImageModelList; at: number }>();

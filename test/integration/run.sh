@@ -5,7 +5,7 @@
 #   - app on 127.0.0.1:$IT_APP_PORT (default 18787), standalone dev-topology containers on 18790 and 18792,
 #   - generated secrets in a temporary env file instead of the repository's .env.
 # Cleanup removes only what this script created (the okaychat-it project with its own volumes, and the
-# okaychat-it-* containers and volumes). See docs/research/code-sandbox.md and docs/research/browser-worker.md.
+# okaychat-it-* containers and volumes). See docs/implementation/code-sandbox.md and docs/implementation/browser-worker.md.
 #
 # Usage: test/integration/run.sh [--no-build] [--keep]
 set -eu

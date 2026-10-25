@@ -1,7 +1,7 @@
 // Dev only: runs the browser worker (src/browser) next to `npm run dev:server`, as its own process with a
 // clean environment, so it never sees OKAYCHAT_SECRET or other app settings. It shares the app's token file.
 // This mode has no firewall: egress is checked by the in-process proxy only. For the hardened container, use
-// scripts/dev-browser.sh. See docs/research/browser-worker.md.
+// scripts/dev-browser.sh. See docs/implementation/browser-worker.md.
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";

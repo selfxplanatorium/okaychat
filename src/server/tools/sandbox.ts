@@ -12,7 +12,7 @@ import { resultPaths } from "../sandbox-paths.js";
 
 // run_code executes model-written Python and Bash in the sandbox container (sandbox/runner.py). Each chat
 // has its own workspace; the container wipes idle workspaces, so every produced file is copied into
-// `sandbox_files` right after the run and the app serves it from SQLite. See docs/research/code-sandbox.md.
+// `sandbox_files` right after the run and the app serves it from SQLite. See docs/implementation/code-sandbox.md.
 
 const MAX_TIMEOUT_S = 300;
 // The runner transfers at most 50 MiB per file in either direction. Larger outputs can be neither stored nor

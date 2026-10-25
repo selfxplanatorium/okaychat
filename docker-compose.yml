@@ -39,7 +39,7 @@ services:
 
   # Runs model-written code for run_code. It holds no app secrets or data, and only the app can reach it.
   # Every run gets its own network namespace with nothing but loopback, so run code has no network at all.
-  # See docs/research/code-sandbox.md.
+  # See docs/implementation/code-sandbox.md.
   sandbox:
     build: ./sandbox
     image: okaychat-sandbox:latest
@@ -70,7 +70,7 @@ services:
 
   # Chromium for PDFs, document previews, and the model's visual checks, and Scrapling for web_fetch's fallback.
   # No app data, provider keys, or OKAYCHAT_SECRET; a firewall in its own network namespace lets only its
-  # egress proxy out, to public addresses. See docs/research/browser-worker.md.
+  # egress proxy out, to public addresses. See docs/implementation/browser-worker.md.
   browser:
     build:
       context: .

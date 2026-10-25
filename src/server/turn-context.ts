@@ -5,7 +5,7 @@ import { db } from "./db.js";
 // The date, recalled memory, and the skills index sit beside the user message they were computed for. Providers cache
 // by exact prefix, so dropping that block in the next turn would invalidate everything after it: the
 // previous user message, the reply, and all of its tool results. Each block is stored and replayed
-// verbatim instead. See docs/research/prompt-caching.md.
+// verbatim instead. See docs/implementation/prompt-caching.md.
 
 export interface TurnContext {
   /** The date line, so the system prefix does not change at midnight. */

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Integration tests for the real sandbox container (run_code's runner), driven over its HTTP API from the tester
 container on the sandbox network, exactly like the app. Started by test/integration/run.sh; see
-docs/research/code-sandbox.md. Every network check has a positive control: the tester itself (and run.sh, from
+docs/implementation/code-sandbox.md. Every network check has a positive control: the tester itself (and run.sh, from
 the sandbox container's own namespace) reaches the same fixture, so a refusal cannot come from a dead target.
 
 Usage: python3 sandbox_it.py [test-name-substring ...]
@@ -324,7 +324,7 @@ print(json.dumps({'workspace id visible': other in joined, 'script body visible'
         seen = json.loads(ok(py(b, "import sys; sys.argv = ['x', %r]\n" % a + probe, 20))["stdout"])
         first.result()
     assert not seen["workspace id visible"] and not seen["script body visible"], seen
-    # Known limit (docs/research/code-sandbox.md): arguments that run code passes to its own subprocesses are visible.
+    # Known limit (docs/implementation/code-sandbox.md): arguments that run code passes to its own subprocesses are visible.
     results.append({"name": "cross-run process visibility", "detail": seen})
 
 
