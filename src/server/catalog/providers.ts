@@ -256,10 +256,16 @@ export async function warmCatalog() {
   await Promise.all([getCatalog(), fetchLiveIds(GO_MODELS_URL)]);
 }
 
+// Every chat request resolves its model through listModels, so a provider's converted list is kept until the catalog changes.
+const converted = new WeakMap<RawProvider, ModelInfo[]>();
+function catalogModels(provider: RawProvider): ModelInfo[] {
+  let list = converted.get(provider);
+  if (!list) converted.set(provider, (list = Object.values(provider.models).map((m) => toModelInfo(provider, m)).filter((m): m is ModelInfo => m !== null)));
+  return list;
+}
+
 async function modelsForProvider(provider: RawProvider, conn: Connection): Promise<ModelInfo[]> {
-  const known = Object.values(provider.models)
-    .map((m) => toModelInfo(provider, m))
-    .filter((m): m is ModelInfo => m !== null)
+  const known = catalogModels(provider)
     .map((m) => (conn.baseURL && !provider.id.startsWith("opencode") ? { ...m, baseURL: conn.baseURL } : m));
 
   if (provider.id !== OPENCODE_GO) return known;

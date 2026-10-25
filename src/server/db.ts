@@ -6,7 +6,9 @@ import { resultPaths } from "./sandbox-paths.js";
 import { env } from "./env.js";
 
 export const db = new DatabaseSync(path.join(env.dataDir, "okaychat.db"));
-db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
+// synchronous = NORMAL is the WAL setting SQLite recommends: commits skip an fsync each, and a crash cannot corrupt
+// the database (a power loss can only drop the last commits).
+db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
 
 /** SQL for the joined text parts of a stored UI message (`{ role, parts, metadata }`). */
 const MESSAGE_TEXT = (row: string) =>

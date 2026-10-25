@@ -4,52 +4,14 @@ import FormulaParser from "fast-formula-parser";
 import { Criteria } from "fast-formula-parser/formulas/helpers.js";
 import { Infix } from "fast-formula-parser/formulas/operators.js";
 import SSF from "fast-formula-parser/ssf/ssf.js";
-import { z } from "zod";
 import type { SheetPreview, SheetPreviewCell } from "../../shared/types.js";
+import { workbookSpec, xlsxOp, type CellStyle, type CellValue, type WorkbookSpec, type XlsxOp } from "./schemas.js";
+
+export { workbookSpec, xlsxOp, type WorkbookSpec, type XlsxOp };
 
 // Workbooks are read and written with exceljs. Formulas are evaluated here and stored with their result,
 // so previews and viewers that do not recalculate still show numbers. Excel recalculates on open anyway.
 
-const color = z.string().describe("Hex color, e.g. `#1f4e79`");
-export const cellStyle = z.object({
-  bold: z.boolean().optional(),
-  italic: z.boolean().optional(),
-  underline: z.boolean().optional(),
-  color: color.optional(),
-  fill: color.optional().describe("Background color"),
-  size: z.number().optional().describe("Font size in points"),
-  numFmt: z.string().optional().describe("Excel number format, e.g. `#,##0.00`, `0%`, `yyyy-mm-dd`, `\"€\"#,##0`"),
-  align: z.enum(["left", "center", "right"]).optional(),
-  wrap: z.boolean().optional(),
-  border: z.boolean().optional().describe("Thin border on all sides"),
-});
-type CellStyle = z.infer<typeof cellStyle>;
-
-export const cellValue = z.union([
-  z.string().describe("Text, or a formula starting with `=`"),
-  z.number(),
-  z.boolean(),
-  z.null(),
-  cellStyle.extend({ v: z.union([z.string(), z.number(), z.boolean(), z.null()]).optional().describe("Value or `=formula`") }),
-]);
-type CellValue = z.infer<typeof cellValue>;
-
-export const workbookSpec = z.object({
-  sheets: z
-    .array(
-      z.object({
-        name: z.string(),
-        rows: z.array(z.array(cellValue)).describe("Rows of cells, starting at A1"),
-        header: z.boolean().optional().describe("Style the first row as a header (bold, shaded, bordered) and freeze it"),
-        columns: z.array(z.number()).optional().describe("Column widths in characters, from column A"),
-        freeze: z.string().optional().describe("Freeze rows above and columns left of this cell, e.g. `B2`"),
-        merges: z.array(z.string()).optional().describe("Ranges to merge, e.g. `A1:D1`"),
-        autoFilter: z.string().optional().describe("Range with filter buttons, e.g. `A1:F1`"),
-      }),
-    )
-    .min(1),
-});
-export type WorkbookSpec = z.infer<typeof workbookSpec>;
 
 const argb = (hex: string) => {
   const h = hex.replace("#", "");
@@ -343,23 +305,6 @@ function shiftReferences(wb: ExcelJS.Workbook, target: ExcelJS.Worksheet, axis: 
 
 // --- Edit operations --------------------------------------------------------------------------------------
 
-const sheetArg = z.string().optional().describe("Sheet name. Defaults to the first sheet");
-export const xlsxOp = z.discriminatedUnion("op", [
-  z.object({ op: z.literal("set_cells"), sheet: sheetArg, start: z.string().describe("Top-left cell, e.g. `B3`"), values: z.array(z.array(cellValue)) }),
-  z.object({ op: z.literal("format"), sheet: sheetArg, range: z.string().describe("e.g. `A1:F1`"), style: cellStyle }),
-  z.object({ op: z.literal("insert_rows"), sheet: sheetArg, at: z.number().int().min(1).describe("Row number the new rows take"), count: z.number().int().min(1).default(1), values: z.array(z.array(cellValue)).optional() }),
-  z.object({ op: z.literal("delete_rows"), sheet: sheetArg, at: z.number().int().min(1), count: z.number().int().min(1).default(1) }),
-  z.object({ op: z.literal("insert_columns"), sheet: sheetArg, at: z.string().describe("Column letter the new columns take"), count: z.number().int().min(1).default(1) }),
-  z.object({ op: z.literal("delete_columns"), sheet: sheetArg, at: z.string(), count: z.number().int().min(1).default(1) }),
-  z.object({ op: z.literal("add_sheet"), name: z.string(), rows: z.array(z.array(cellValue)).optional() }),
-  z.object({ op: z.literal("rename_sheet"), sheet: z.string(), name: z.string() }),
-  z.object({ op: z.literal("delete_sheet"), sheet: z.string() }),
-  z.object({ op: z.literal("column_widths"), sheet: sheetArg, widths: z.record(z.string(), z.number()).describe("Column letter to width in characters, e.g. {\"A\": 30}") }),
-  z.object({ op: z.literal("merge"), sheet: sheetArg, range: z.string() }),
-  z.object({ op: z.literal("unmerge"), sheet: sheetArg, range: z.string() }),
-  z.object({ op: z.literal("freeze"), sheet: sheetArg, cell: z.string().nullable().describe("e.g. `A2` freezes row 1. null removes it") }),
-]);
-export type XlsxOp = z.infer<typeof xlsxOp>;
 
 export async function editXlsx(data: Uint8Array, ops: XlsxOp[]): Promise<Uint8Array> {
   const wb = await loadXlsx(data);

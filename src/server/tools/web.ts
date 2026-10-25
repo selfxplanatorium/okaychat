@@ -1,7 +1,5 @@
-import { Readability } from "@mozilla/readability";
 import { tool, type ToolSet } from "ai";
-import { parseHTML } from "linkedom";
-import TurndownService from "turndown";
+import type TurndownService from "turndown";
 import { extractText, getDocumentProxy } from "unpdf";
 import { z } from "zod";
 import { DEFAULT_USER_SETTINGS } from "../../shared/types.js";
@@ -12,6 +10,9 @@ import { SearchBudget } from "./search-budget.js";
 // Free web access with no keys: SearXNG sidecar when configured, Brave's public HTML results otherwise.
 // DuckDuckGo's HTML endpoints answer 202 (bot wall) from many servers and Bing serves junk to scrapers,
 // so neither is used. See docs/research/web-search.md.
+
+// linkedom, Readability, and turndown (with its own DOM) load on the first search or page read, not at boot.
+const parseHTML = async (html: string) => (await import("linkedom")).parseHTML(html);
 
 const BROWSER_UA =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
@@ -39,7 +40,7 @@ async function brave(query: string, limit: number): Promise<SearchResult[]> {
     signal: AbortSignal.timeout(12_000),
   });
   if (!res.ok) throw new Error(`Brave ${res.status}`);
-  const { document } = parseHTML(await res.text());
+  const { document } = await parseHTML(await res.text());
   const out: SearchResult[] = [];
   for (const node of document.querySelectorAll('[data-type="web"]')) {
     const link = node.querySelector("a[href^='http']");
@@ -62,7 +63,7 @@ async function duckduckgoLite(query: string, limit: number): Promise<SearchResul
   });
   // 202 is DuckDuckGo's bot wall.
   if (res.status !== 200) throw new Error(`DuckDuckGo ${res.status}`);
-  const { document } = parseHTML(await res.text());
+  const { document } = await parseHTML(await res.text());
   const links = [...document.querySelectorAll("a.result-link")];
   const snippets = [...document.querySelectorAll(".result-snippet")];
   return links.slice(0, limit).map((a, i) => ({
@@ -99,11 +100,18 @@ export async function webSearch(query: string, limit = 8): Promise<{ engine: str
   throw new Error(`Search failed: ${errors.join("; ")}`);
 }
 
-const turndown = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced", bulletListMarker: "-" });
-turndown.remove(["script", "style", "noscript", "iframe", "svg", "form"] as never);
+let converter: Promise<TurndownService> | undefined;
+function turndownService() {
+  converter ??= import("turndown").then(({ default: Turndown }) => {
+    const turndown = new Turndown({ headingStyle: "atx", codeBlockStyle: "fenced", bulletListMarker: "-" });
+    turndown.remove(["script", "style", "noscript", "iframe", "svg", "form"] as never);
+    return turndown;
+  });
+  return converter;
+}
 
-function htmlToMarkdown(html: string, url: string): { title: string; markdown: string } {
-  const { document } = parseHTML(html);
+async function htmlToMarkdown(html: string, url: string): Promise<{ title: string; markdown: string }> {
+  const [{ document }, { Readability }, turndown] = await Promise.all([parseHTML(html), import("@mozilla/readability"), turndownService()]);
   // Readability needs a base URL to resolve relative links.
   const base = document.createElement("base");
   base.setAttribute("href", url);
@@ -156,7 +164,7 @@ export async function webFetch(url: string): Promise<{ title: string; content: s
     const body = new TextDecoder().decode(bytes);
     if (!looksBlocked(res.status, body)) {
       if (type.includes("html") || body.trimStart().startsWith("<")) {
-        const { title, markdown } = htmlToMarkdown(body, res.url || url);
+        const { title, markdown } = await htmlToMarkdown(body, res.url || url);
         if (markdown.length > 200) return { title, content: markdown, via: "fetch" };
         if (res.ok && markdown) thin = { title, content: markdown };
       } else if (res.ok) {
@@ -166,7 +174,7 @@ export async function webFetch(url: string): Promise<{ title: string; content: s
     error = `HTTP ${res.status}`;
   }
 
-  // Scrapling makes its own connections through the egress proxy, which checks every hop.
+  // Scrapling runs in the browser worker, where its connections can leave only through the egress proxy.
   const scraped = await scraplingFetch(url);
   if (scraped) return { ...scraped, via: "scrapling" };
   if (thin) return { ...thin, via: "fetch" };

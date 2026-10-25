@@ -46,7 +46,7 @@ import { StoredOAuthProvider, takePending } from "./mcp/oauth.js";
 import * as mcpStore from "./mcp/store.js";
 import { storageUsed, userStorageLimit } from "./quota.js";
 import { getSettings, updateSettings } from "./settings.js";
-import { appendMessage, branchThread, deleteThread, ensureThread, getThread, listMessages, listThreads, updateThread } from "./threads.js";
+import { appendMessage, branchThread, deleteThread, ensureThread, getThread, listMessagesJson, listThreads, updateThread } from "./threads.js";
 import { goWindows, threadUsage, usageSummary } from "./usage.js";
 
 const providerInput = z.object({
@@ -209,7 +209,7 @@ const api = new Hono<AppEnv>()
     return c.json(branchThread(c.get("user").id, c.req.param("id"), parsed.data.messageId, newId("thr"), parsed.data.modelRef));
   })
   .route("/", exportRoutes)
-  .get("/threads/:id/messages", (c) => c.json(listMessages(c.get("user").id, c.req.param("id"))))
+  .get("/threads/:id/messages", (c) => c.body(listMessagesJson(c.get("user").id, c.req.param("id")), 200, { "Content-Type": "application/json" }))
   .post("/threads/:id/messages", async (c) => {
     const parsed = z.object({
       id: clientId,

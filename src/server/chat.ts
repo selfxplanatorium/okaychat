@@ -311,7 +311,8 @@ export async function turnStream(opts: TurnOptions) {
 // Streams live in memory for 15 minutes after their last update. A restart drops them; the client then shows what was saved.
 const RESUME_TTL_MS = 15 * 60_000;
 const resumable = createResumableStreamContext({
-  store: createInMemoryResumableStreamStore(),
+  // Without a sweep, expired replies stay in memory until the next chat request touches the store.
+  store: createInMemoryResumableStreamStore({ gcIntervalMs: 60_000 }),
   ttlMs: RESUME_TTL_MS,
   onFinalize: (streamId) => setTimeout(() => runs.delete(streamId), RESUME_TTL_MS).unref(),
 });

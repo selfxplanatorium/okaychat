@@ -24,7 +24,9 @@ import {
 import { unzipSync, zipSync } from "fflate";
 import { assertZipBounds } from "./zip-bounds.js";
 import { parseHTML } from "linkedom";
-import { z } from "zod";
+import { docxOp, type DocxOp } from "./schemas.js";
+
+export { docxOp, type DocxOp };
 
 // DOCX has two paths:
 //  - Create: a restricted HTML subset becomes a real Word document through the `docx` package.
@@ -550,25 +552,6 @@ export async function createDocx(html: string, title?: string): Promise<Uint8Arr
 
 // --- Reading and editing an existing DOCX --------------------------------------------------------------
 
-export const docxOp = z.discriminatedUnion("op", [
-  z.object({
-    op: z.literal("replace_text"),
-    find: z.string().min(1).describe("Exact text, which may span bold/italic runs"),
-    replace: z.string().describe("Replacement text. Use insert_paragraph for new lines"),
-    paragraph: z.number().int().min(1).optional().describe("Only this paragraph (1-based, as read_document prints)"),
-    all: z.boolean().optional().describe("Replace every match instead of requiring exactly one"),
-  }),
-  z.object({ op: z.literal("set_text"), paragraph: z.number().int().min(1), text: z.string().describe("Replaces all text, keeping the paragraph's first-run formatting") }),
-  z.object({
-    op: z.literal("insert_paragraph"),
-    after: z.number().int().min(0).describe("Paragraph index to insert after; 0 puts it first"),
-    text: z.string(),
-    style: z.string().optional().describe("Paragraph style id, e.g. `Heading2`"),
-  }),
-  z.object({ op: z.literal("delete_paragraph"), paragraph: z.number().int().min(1) }),
-  z.object({ op: z.literal("set_style"), paragraph: z.number().int().min(1), style: z.string().describe("Paragraph style id, e.g. `Heading1` or `Normal`") }),
-]);
-export type DocxOp = z.infer<typeof docxOp>;
 
 const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 

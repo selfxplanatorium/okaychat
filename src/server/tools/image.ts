@@ -3,13 +3,8 @@ import { createReadStream, mkdirSync } from "node:fs";
 import { readFile, realpath, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { createBlackForestLabs } from "@ai-sdk/black-forest-labs";
-import { createFal } from "@ai-sdk/fal";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
-import { createReplicate } from "@ai-sdk/replicate";
-import { createTogetherAI } from "@ai-sdk/togetherai";
-import { createXai } from "@ai-sdk/xai";
 import { generateImage as generateWithModel, tool, type ImageModel, type ToolSet } from "ai";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -238,7 +233,8 @@ export function enabledImageServices(userId: string, settings: UserSettings): Im
     });
 }
 
-function imageModel(service: ImageService): ImageModel {
+// Image-only providers load when an image is first generated with them; OpenAI and Google are loaded for chat anyway.
+async function imageModel(service: ImageService): Promise<ImageModel> {
   const { apiKey, baseURL, guarded } = service.conn!;
   const settings = { apiKey, baseURL, headers: { "User-Agent": USER_AGENT }, fetch: guarded ? publicFetch : undefined };
   const model = service.model!;
@@ -248,15 +244,15 @@ function imageModel(service: ImageService): ImageModel {
     case "google":
       return createGoogleGenerativeAI(settings).image(model);
     case "xai":
-      return createXai(settings).image(model);
+      return (await import("@ai-sdk/xai")).createXai(settings).image(model);
     case "togetherai":
-      return createTogetherAI(settings).image(model);
+      return (await import("@ai-sdk/togetherai")).createTogetherAI(settings).image(model);
     case "black-forest-labs":
-      return createBlackForestLabs(settings).image(model);
+      return (await import("@ai-sdk/black-forest-labs")).createBlackForestLabs(settings).image(model);
     case "fal":
-      return createFal(settings).image(model);
+      return (await import("@ai-sdk/fal")).createFal(settings).image(model);
     case "replicate":
-      return createReplicate({ apiToken: apiKey, baseURL, headers: settings.headers, fetch: settings.fetch }).image(model);
+      return (await import("@ai-sdk/replicate")).createReplicate({ apiToken: apiKey, baseURL, headers: settings.headers, fetch: settings.fetch }).image(model);
     case "codex":
       throw new Error("Codex has no image API.");
   }
@@ -267,7 +263,7 @@ async function generateWithApi(service: ImageService, prompt: string, references
   const abortSignal = AbortSignal.any([AbortSignal.timeout(TIMEOUT_MS), ...(signal ? [signal] : [])]);
   try {
     const result = await generateWithModel({
-      model: imageModel(service),
+      model: await imageModel(service),
       prompt: images.length ? { text: prompt, images } : prompt,
       // A retry bills a second image, so allow only one.
       maxRetries: 1,

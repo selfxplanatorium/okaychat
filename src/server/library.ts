@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import type { ArtifactKind, LibraryItem, LibraryKind, LibraryPage, LibrarySort } from "../shared/types.js";
 import type { AppEnv } from "./auth.js";
 import { db } from "./db.js";
-import { previewXlsx } from "./documents/xlsx.js";
+import { previewXlsx } from "./documents/lazy.js";
 import { getSkill, deleteSkill } from "./skills.js";
 import { imagePath } from "./tools/image.js";
 

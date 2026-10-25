@@ -1,12 +1,11 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import mammoth from "mammoth";
 import { assertZipBounds } from "./documents/zip-bounds.js";
 import { extractText, getDocumentProxy } from "unpdf";
 import type { AppEnv } from "./auth.js";
 import { newId } from "./crypto.js";
 import { db } from "./db.js";
-import { readXlsx } from "./documents/xlsx.js";
+import { readXlsx } from "./documents/lazy.js";
 import { assertStorage, QuotaError } from "./quota.js";
 
 export const MAX_BYTES = 25 * 1024 * 1024;
@@ -26,6 +25,7 @@ export async function extract(name: string, type: string, data: Uint8Array): Pro
   }
   if (lower.endsWith(".docx") || type.includes("officedocument.wordprocessingml")) {
     assertZipBounds(data);
+    const { default: mammoth } = await import("mammoth");
     const { value } = await mammoth.extractRawText({ buffer: Buffer.from(data) });
     return { text: value };
   }

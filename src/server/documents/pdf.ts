@@ -1,42 +1,13 @@
 import { PDFCheckBox, PDFDocument, PDFDropdown, PDFOptionList, PDFRadioGroup, PDFTextField, StandardFonts, degrees, rgb } from "@cantoo/pdf-lib";
 import { extractText, getDocumentProxy } from "unpdf";
-import { z } from "zod";
+import { pdfOp, type PdfOp } from "./schemas.js";
+
+export { pdfOp, type PdfOp };
 
 // PDFs are made by rendering HTML in Chromium (see render.ts). Existing PDFs are changed structurally
 // with pdf-lib: pages, rotation, stamps, form fields, metadata. Rewriting a PDF's body text is not
 // something any library does reliably, so the tool tells the model to rebuild such a document from HTML.
 
-export const pdfOp = z.discriminatedUnion("op", [
-  z.object({
-    op: z.literal("rotate_pages"),
-    pages: z.string().default("all").describe("`all`, `2`, `1-3`, or `1,3,5`"),
-    angle: z.union([z.literal(90), z.literal(180), z.literal(270)]).describe("Added to the current rotation"),
-  }),
-  z.object({ op: z.literal("delete_pages"), pages: z.string().describe("`2`, `1-3`, or `1,3,5`. At least one page must remain") }),
-  z.object({
-    op: z.literal("move_page"),
-    from: z.number().int().min(1),
-    to: z.number().int().min(1).describe("Position the page takes after removal, 1-based"),
-  }),
-  z.object({
-    op: z.literal("add_text"),
-    page: z.number().int().min(1).describe("1-based page number"),
-    x: z.number().describe("Points from the left edge"),
-    y: z.number().describe("Points from the top edge"),
-    text: z.string(),
-    size: z.number().min(4).max(144).default(12),
-    color: z.string().default("#000000").describe("Hex color"),
-  }),
-  z.object({ op: z.literal("fill_form"), fields: z.record(z.string(), z.union([z.string(), z.boolean()])) }),
-  z.object({
-    op: z.literal("set_metadata"),
-    title: z.string().optional(),
-    author: z.string().optional(),
-    subject: z.string().optional(),
-    keywords: z.array(z.string()).optional(),
-  }),
-]);
-export type PdfOp = z.infer<typeof pdfOp>;
 
 function pageNumbers(spec: string, total: number): number[] {
   if (/^\s*all\s*$/i.test(spec)) return Array.from({ length: total }, (_, i) => i + 1);

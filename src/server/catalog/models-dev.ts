@@ -56,6 +56,42 @@ const OPENAI_COMPATIBLE_BASES: Record<string, string> = {
   fireworks: "https://api.fireworks.ai/inference/v1",
 };
 
+// The catalog is about 6 MB of JSON. Only the fields above are kept: the rest (descriptions, dates,
+// weights flags) roughly doubled the heap the parsed catalog holds for the life of the process.
+function compact(catalog: Catalog): Catalog {
+  const out: Catalog = {};
+  for (const [key, p] of Object.entries(catalog)) {
+    const models: Record<string, RawModel> = {};
+    for (const [id, m] of Object.entries(p.models ?? {})) {
+      models[id] = {
+        id: m.id,
+        name: m.name,
+        family: m.family,
+        attachment: m.attachment,
+        reasoning: m.reasoning,
+        reasoning_options: m.reasoning_options,
+        tool_call: m.tool_call,
+        temperature: m.temperature,
+        knowledge: m.knowledge,
+        release_date: m.release_date,
+        status: m.status,
+        modalities: m.modalities && { input: m.modalities.input, output: m.modalities.output },
+        limit: m.limit && { context: m.limit.context, input: m.limit.input, output: m.limit.output },
+        provider: m.provider && { npm: m.provider.npm, api: m.provider.api },
+        cost: m.cost && {
+          input: m.cost.input,
+          output: m.cost.output,
+          cache_read: m.cost.cache_read,
+          cache_write: m.cost.cache_write,
+          tiers: m.cost.tiers?.map((t) => ({ input: t.input, output: t.output, cache_read: t.cache_read, cache_write: t.cache_write, tier: t.tier && { size: t.tier.size } })),
+        },
+      };
+    }
+    out[key] = { id: p.id, name: p.name, npm: p.npm, api: p.api, env: p.env, doc: p.doc, models };
+  }
+  return out;
+}
+
 let memory: { data: Catalog; fetchedAt: number } | null = null;
 let inflight: Promise<Catalog> | null = null;
 
@@ -64,7 +100,7 @@ function refresh(): Promise<Catalog> {
     try {
       const res = await fetch(SOURCE, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15_000) });
       if (!res.ok) throw new Error(`models.dev ${res.status}`);
-      const data = (await res.json()) as Catalog;
+      const data = compact((await res.json()) as Catalog);
       memory = { data, fetchedAt: Date.now() };
       await writeFile(CACHE_FILE, JSON.stringify(memory));
       return data;
@@ -82,7 +118,9 @@ function refresh(): Promise<Catalog> {
 async function load(): Promise<Catalog> {
   if (!memory) {
     try {
-      memory = JSON.parse(await readFile(CACHE_FILE, "utf8")) as { data: Catalog; fetchedAt: number };
+      const cached = JSON.parse(await readFile(CACHE_FILE, "utf8")) as { data: Catalog; fetchedAt: number };
+      // Copies written before compaction still hold every field.
+      memory = { data: compact(cached.data), fetchedAt: cached.fetchedAt };
     } catch {
       // No disk cache yet.
     }

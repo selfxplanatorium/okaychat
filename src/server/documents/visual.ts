@@ -2,7 +2,7 @@ import type { ArtifactKind, SheetPreview, SheetPreviewCell } from "../../shared/
 import { frameDocument } from "../../shared/artifact-frame.js";
 import { BrowserJobError } from "../browser.js";
 import { rendererAvailable, screenshotHtml, screenshotPage } from "./render.js";
-import { previewXlsx } from "./xlsx.js";
+import { previewXlsx } from "./lazy.js";
 
 // The model's visual self-check. Every artifact is rendered by the browser worker in a fresh Chromium context:
 // offline for documents, sheets, and SVG; HTML and React previews may also load from the public CDNs artifact

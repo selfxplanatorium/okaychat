@@ -5,7 +5,7 @@ import type { UIMessage } from "ai";
 import { Hono } from "hono";
 import type { ArtifactToolResult, DocumentArtifactKind, SharedPart, SharedThread } from "../shared/types.js";
 import { artifactData, artifactVersions, DOCUMENT_MIME, documentFilename } from "./artifacts.js";
-import { previewXlsx } from "./documents/xlsx.js";
+import { previewXlsx } from "./documents/lazy.js";
 import type { AppEnv } from "./auth.js";
 import { randomToken } from "./crypto.js";
 import { db } from "./db.js";

@@ -148,3 +148,17 @@ test("branching copies the chain up to a message into a new chat and leaves the 
   await call("/threads/t1", { method: "DELETE" });
   assert.equal(getThread("alice", fork.id)!.branchedFrom, null);
 });
+
+test("message list returns stored JSON unchanged and hides other users' threads", async () => {
+  const content = { role: "user", parts: [{ type: "text", text: "quote \" and Ünïcode  " }], metadata: { custom: { n: 1 } } };
+  appendMessage("alice", "t1", { id: "m1", parent_id: null, format: "ai-sdk/v6", content });
+  appendMessage("alice", "t1", { id: "m2", parent_id: "m1", format: "ai-sdk/v6", content: { role: "assistant", parts: [] } });
+  const res = await call("/threads/t1/messages");
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type") ?? "", /application\/json/);
+  assert.deepEqual(await res.json(), [
+    { id: "m1", parent_id: null, format: "ai-sdk/v6", content },
+    { id: "m2", parent_id: "m1", format: "ai-sdk/v6", content: { role: "assistant", parts: [] } },
+  ]);
+  assert.deepEqual(await (await call("/threads/t1/messages", { user: "bob" })).json(), []);
+});

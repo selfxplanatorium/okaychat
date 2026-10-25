@@ -5,11 +5,10 @@ import type { ArtifactKind, ArtifactToolResult, ArtifactVersion, DocumentArtifac
 import { DOCUMENT_KINDS } from "../shared/types.js";
 import type { AppEnv } from "./auth.js";
 import { db } from "./db.js";
-import { createDocx, docxOp, editDocx, readDocxText } from "./documents/docx.js";
-import { editPdf, pdfOp, readPdf } from "./documents/pdf.js";
+import { createDocx, createXlsx, editDocx, editPdf, editXlsx, previewXlsx, readDocxText, readPdf, readXlsx } from "./documents/lazy.js";
 import { htmlToPdf, pageFurniture, printDocument, rendererAvailable } from "./documents/render.js";
 import { screenshotArtifact, type VisualShot } from "./documents/visual.js";
-import { createXlsx, editXlsx, previewXlsx, readXlsx, workbookSpec, xlsxOp } from "./documents/xlsx.js";
+import { docxOp, pdfOp, workbookSpec, xlsxOp } from "./documents/schemas.js";
 import { assertStorage } from "./quota.js";
 import { convertToPdf } from "./tools/sandbox.js";
 import { MAX_SHOTS_PER_TURN } from "./tools/screenshots.js";
@@ -340,7 +339,7 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
         const old = artifactData(threadId, id);
         if (!old) throw new Error(`\`${id}\` has no file yet.`);
         const data =
-          docKind === "docx" ? editDocx(old, ops as z.infer<typeof docxOp>[]) : docKind === "xlsx" ? await editXlsx(old, ops as z.infer<typeof xlsxOp>[]) : await editPdf(old, ops as z.infer<typeof pdfOp>[]);
+          docKind === "docx" ? await editDocx(old, ops as z.infer<typeof docxOp>[]) : docKind === "xlsx" ? await editXlsx(old, ops as z.infer<typeof xlsxOp>[]) : await editPdf(old, ops as z.infer<typeof pdfOp>[]);
         // The binary has moved past the source, so keeping the source would let a later rebuild undo the ops.
         return saveVersion(threadId, { ...prev, title: title ?? prev.title, content: "", data }, turn);
       },
@@ -353,7 +352,7 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
       }),
       execute: async ({ id, range }) => {
         const { artifact, data, kind } = documentOf(threadId, id);
-        const text = kind === "docx" ? readDocxText(data) : kind === "xlsx" ? await readXlsx(data, range) : await readPdf(data);
+        const text = kind === "docx" ? await readDocxText(data) : kind === "xlsx" ? await readXlsx(data, range) : await readPdf(data);
         return { id, version: artifact.version, kind, text };
       },
     }),

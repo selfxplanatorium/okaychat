@@ -149,6 +149,19 @@ export function listMessages(userId: string, threadId: string): MessageRow[] {
   return rows.map((r) => ({ ...r, content: JSON.parse(r.content) }));
 }
 
+/**
+ * The same list as listMessages, as a JSON array. Stored content is already JSON, so it is spliced in as is:
+ * parsing and re-serializing every message (inline attachments can be megabytes) doubled the work and memory.
+ */
+export function listMessagesJson(userId: string, threadId: string): string {
+  if (!getThread(userId, threadId)) return "[]";
+  const rows = db
+    .prepare("SELECT id, parent_id, format, content FROM messages WHERE thread_id = ? ORDER BY created_at, rowid")
+    .all(threadId) as Array<{ id: string; parent_id: string | null; format: string; content: string }>;
+  const items = rows.map((r) => `{"id":${JSON.stringify(r.id)},"parent_id":${JSON.stringify(r.parent_id)},"format":${JSON.stringify(r.format)},"content":${r.content}}`);
+  return `[${items.join(",")}]`;
+}
+
 export function appendMessage(userId: string, threadId: string, row: MessageRow) {
   tx(() => {
     ensureThread(userId, threadId);
