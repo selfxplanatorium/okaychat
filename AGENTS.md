@@ -219,3 +219,7 @@ Documents and screenshots in dev use the local browser worker that `npm run dev`
 Code execution in dev: set `OKAYCHAT_SANDBOX_TOKEN` and `OKAYCHAT_SANDBOX_URL=http://127.0.0.1:8790` in `.env`, then run `scripts/dev-sandbox.sh` (container `okaychat-dev-sandbox`). Unlike compose, the dev sandbox container has internet access, but runs still have no network: each gets its own network namespace.
 
 The server reads `.env` only at start. Restart `npm run dev` after editing it.
+
+Dev login: `dev-login.md` (gitignored) holds the account for signing in to the dev server. Use it to test UI changes in the browser instead of asking.
+
+**Before the repo goes public:** when the user says to make the repo public, delete `dev-login.md` from disk (not only ignored), remove its `.gitignore` line, and remove this "Dev login" paragraph and this instruction from AGENTS.md.
