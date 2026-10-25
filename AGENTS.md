@@ -103,6 +103,7 @@ docs/                 Reusable documentation (see below)
 - `docs/research/web-search.md`, `docs/research/scrapling.md`: keyless search and page fetching.
 - `docs/research/bundled-fonts.md`: fonts shipped in the picker, their licenses, and the Liberation source.
 - `docs/research/codex-images.md`: image generation through the Codex CLI, login, credential handling.
+- `docs/research/codex-chat.md`: chatting with the user's ChatGPT plan through the Codex backend: endpoint, headers, body rules, token refresh.
 - `docs/research/image-generation.md`: image services (Codex, OpenAI, Gemini, xAI, Together, FLUX, fal, Replicate), key reuse, service choice.
 - `docs/research/generative-ui.md`: `generative-frame` widgets and spec mode, browser-executed tools.
 - `docs/research/documents.md`: PDF/DOCX/XLSX tools, the HTML subset, in-place editing, Chromium lifecycle.

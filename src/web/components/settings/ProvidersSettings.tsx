@@ -8,9 +8,12 @@ import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 import { AudienceButton } from "./Audience";
+import { CodexConnect } from "./CodexConnect";
 import { SettingsPage, SettingsSection } from "./SettingsUI";
 
 export const OPENCODE_GO_CONSOLE = "https://opencode.ai/console";
+/** Connected through the Codex login rather than a key. See docs/research/codex-chat.md. */
+const CHATGPT = "chatgpt";
 
 /** Which connections the page edits: the user's own, or the server-wide ones an admin shares. */
 interface ProviderScope {
@@ -89,6 +92,7 @@ export function ProviderForm({ provider, onSaved, autoFocus }: { provider: Provi
 
 function ProviderRow({ provider, index, expanded, onToggle }: { provider: ProviderInfo; index: number; expanded: boolean; onToggle: () => void }) {
   const { base, refresh } = useScope();
+  const chatgpt = provider.id === CHATGPT;
   return (
     <div className="stagger animate-rise-in px-4 py-3" style={{ "--i": index } as CSSProperties}>
       <div className="flex items-center gap-3">
@@ -120,35 +124,46 @@ function ProviderRow({ provider, index, expanded, onToggle }: { provider: Provid
                 await refresh();
               }}
             />
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label={`Disconnect ${provider.name}`}
-              onClick={async () => {
-                await api(`${base}/${provider.id}`, { method: "DELETE" });
-                await refresh();
-              }}
-            >
-              <TrashIcon />
-            </Button>
+            {!chatgpt && (
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label={`Disconnect ${provider.name}`}
+                onClick={async () => {
+                  await api(`${base}/${provider.id}`, { method: "DELETE" });
+                  await refresh();
+                }}
+              >
+                <TrashIcon />
+              </Button>
+            )}
           </>
         )}
       </div>
       {expanded && (
         <div className="settings-collapse mt-3">
-          <div className="flex flex-col gap-2">
-            <ProviderForm provider={provider} onSaved={onToggle} autoFocus />
-            {provider.doc && (
-              <a
-                href={provider.id === "opencode-go" ? OPENCODE_GO_CONSOLE : provider.doc}
-                target="_blank"
-                rel="noreferrer"
-                className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs transition-colors duration-(--motion-fast)"
-              >
-                {provider.id === "opencode-go" ? "Get a key in the OpenCode console" : "Provider docs"} <ExternalLinkIcon className="size-3" />
-              </a>
-            )}
-          </div>
+          {chatgpt ? (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-muted-foreground max-w-sm text-xs">
+                Chat with the models of your own ChatGPT plan. Signs in through the Codex CLI with a one-time code. The same login generates images.
+              </p>
+              <CodexConnect onChange={refresh} />
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <ProviderForm provider={provider} onSaved={onToggle} autoFocus />
+              {provider.doc && (
+                <a
+                  href={provider.id === "opencode-go" ? OPENCODE_GO_CONSOLE : provider.doc}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs transition-colors duration-(--motion-fast)"
+                >
+                  {provider.id === "opencode-go" ? "Get a key in the OpenCode console" : "Provider docs"} <ExternalLinkIcon className="size-3" />
+                </a>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

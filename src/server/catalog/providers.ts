@@ -5,13 +5,14 @@ import { db } from "../db.js";
 import { audienceIncludes, clearAudience, getAudience } from "../groups.js";
 import { USER_AGENT } from "../env.js";
 import { publicFetch } from "../public-fetch.js";
+import { CHATGPT, CHATGPT_BASE_URL, CHATGPT_NAME, chatgptConnected, chatgptModels } from "./chatgpt.js";
 import { getCatalog, isChatModelId, isSupportedProvider, resolveRoute, toModelInfo, unknownModel, type RawProvider } from "./models-dev.js";
 
 export const OPENCODE_GO = "opencode-go";
 const GO_MODELS_URL = "https://opencode.ai/inference/go/v1/models";
 
 // Shown first, in this order. OpenCode Go is the default connection.
-const PRIMARY = [OPENCODE_GO, "opencode", "anthropic", "openai", "google", "openrouter", "deepseek", "xai", "mistral", "groq"];
+const PRIMARY = [OPENCODE_GO, CHATGPT, "opencode", "anthropic", "openai", "google", "openrouter", "deepseek", "xai", "mistral", "groq"];
 
 // models.dev calls the pay-as-you-go gateway just "OpenCode", which reads like OpenCode Go.
 const NAMES: Record<string, string> = { opencode: "Opencode Zen" };
@@ -76,8 +77,13 @@ function readScope(scope: ConnectionScope, viewer?: string): Map<string, Connect
 
 /** What a user can use: server-wide connections, overridden by the user's own for the same provider. */
 function readConnections(userId: string): Map<string, Connection> {
-  const shared = [...readScope(null, userId)].filter(([, c]) => c.enabled);
-  return new Map([...shared, ...readScope(userId)]);
+  const shared = [...readScope(null, userId)].filter(([, c]) => c.enabled && c.providerId !== CHATGPT);
+  const own = readScope(userId);
+  // The ChatGPT login lives in codex_auth. A provider_connections row only records whether chat uses it.
+  const chatgpt = own.get(CHATGPT);
+  own.delete(CHATGPT);
+  if (chatgptConnected(userId)) own.set(CHATGPT, { providerId: CHATGPT, baseURL: CHATGPT_BASE_URL, enabled: chatgpt?.enabled ?? true });
+  return new Map([...shared, ...own]);
 }
 
 export function getConnection(userId: string, providerId: string): Connection | undefined {
@@ -85,6 +91,11 @@ export function getConnection(userId: string, providerId: string): Connection | 
 }
 
 export function saveConnection(scope: ConnectionScope, providerId: string, input: ProviderConnectionInput) {
+  if (providerId === CHATGPT) {
+    // A ChatGPT plan belongs to one person. It is connected through the Codex login, never with a key.
+    if (scope === null) throw new HTTPException(400, { message: "A ChatGPT plan cannot be shared with other users." });
+    input = { enabled: input.enabled };
+  }
   const existing = readScope(scope).get(providerId);
   // An omitted key keeps the stored one, so the UI never needs to read secrets back.
   const baseURL = input.baseURL === undefined ? existing?.baseURL : input.baseURL.trim() || undefined;
@@ -164,6 +175,20 @@ export async function listProviders(scope: ConnectionScope): Promise<ProviderInf
       baseURL: conn?.baseURL ?? provider.api,
       modelCount: Object.keys(provider.models).length,
       ...(scope === null && conn ? { audience: getAudience("provider", provider.id) } : {}),
+    });
+  }
+  if (scope !== null) {
+    const conn = connections.get(CHATGPT);
+    out.push({
+      id: CHATGPT,
+      name: CHATGPT_NAME,
+      primary: true,
+      custom: false,
+      needsBaseURL: false,
+      connected: !!conn,
+      enabled: conn?.enabled ?? false,
+      shared: false,
+      modelCount: conn ? (await chatgptModels(scope)).length : 0,
     });
   }
   for (const conn of connections.values()) {
@@ -268,6 +293,7 @@ export async function listModels(userId: string): Promise<ModelInfo[]> {
   const lists = await Promise.all(
     connections.map((conn) => {
       if (isCustom(conn.providerId)) return modelsForCustom(conn);
+      if (conn.providerId === CHATGPT) return chatgptModels(userId);
       const provider = catalog[conn.providerId];
       return provider ? modelsForProvider(provider, conn) : Promise.resolve([]);
     }),

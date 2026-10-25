@@ -4,6 +4,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { JSONValue, LanguageModel, ModelMessage } from "ai";
 import type { ModelInfo, ReasoningEffort } from "../shared/types.js";
+import { CHATGPT, chatgptFetch } from "./catalog/chatgpt.js";
 import type { Connection } from "./catalog/providers.js";
 import { sha256 } from "./crypto.js";
 import { USER_AGENT } from "./env.js";
@@ -54,7 +55,8 @@ export function createModel(info: ModelInfo, conn: Connection, opts: { userId: s
 
   switch (info.format) {
     case "openai-responses": {
-      const provider = createOpenAI({ apiKey, baseURL, headers, fetch });
+      const chatgpt = info.providerId === CHATGPT;
+      const provider = createOpenAI(chatgpt ? { apiKey: "chatgpt-login", baseURL, headers, fetch: chatgptFetch(opts.userId) } : { apiKey, baseURL, headers, fetch });
       const openai: Record<string, JSONValue> = { promptCacheKey: cacheKey, store: false };
       if (effort) {
         openai.reasoningEffort = effort;
@@ -62,7 +64,8 @@ export function createModel(info: ModelInfo, conn: Connection, opts: { userId: s
       }
       // GPT-5.6+ cache only at breakpoints; the implicit one sits at the end of the conversation. An explicit
       // one after the shared system part lets new chats and changed chat context reuse tools + system.
-      const markCache = EXPLICIT_BREAKPOINTS.test(info.id)
+      // The ChatGPT backend rejects prompt_cache_breakpoint and caches by prompt_cache_key alone.
+      const markCache = !chatgpt && EXPLICIT_BREAKPOINTS.test(info.id)
         ? (system: string[], messages: ModelMessage[]) => [...systemMessages(system, OPENAI_BREAKPOINT), ...messages]
         : passthrough;
       return { model: provider.responses(info.id), providerOptions: { openai }, markCache };
