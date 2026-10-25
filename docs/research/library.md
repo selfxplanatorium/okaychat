@@ -39,6 +39,14 @@ breaking; unique keys break equal values. Sizes are available before sorting, in
 images. Artifact source kind is retained separately from the Library category so HTML/SVG/Markdown
 previews use the correct renderer. Malformed cursors return an empty page.
 
+Skeletons appear only for loads slower than 400 ms (`Delayed` in `components/ui/skeleton.tsx`, a timer
+because reduced motion zeroes animation delays). `state/library-cache.ts` keeps each filter set's first
+page for the session: a repeat visit shows it at once and refreshes it in place, and hovering, focusing,
+or pressing the sidebar Library link prefetches the default page when nothing is cached. Deletions clear
+the cache. Account changes clear cached pages and revoke in-flight requests before startup data loads, so one account cannot see another account's cached file list. Deletions also revoke in-flight requests so they cannot restore removed entries. A filter, sort, or search change keeps the current items on screen until the new first page
+arrives (they dim only if it takes over 300 ms). Files and Archived chats stay mounted and are hidden
+with `hidden`, so switching sections never refetches behind a skeleton.
+
 ## Downloads, previews and deletion
 
 - `GET /api/uploads/:id/file` serves owned originals. Raster images and PDFs can be inline; SVG and

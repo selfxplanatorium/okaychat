@@ -13,6 +13,7 @@ import { ProjectSwitcher } from "./ProjectSwitcher";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
+import { prefetchLibrary } from "@/state/library-cache";
 
 import { Brand } from "./Brand";
 import { GlideHighlight } from "./GlideHighlight";
@@ -86,6 +87,8 @@ export function Sidebar({ open, onToggle }: { open: boolean; onToggle: () => voi
                 href={item.href}
                 aria-current={location === item.href ? "page" : undefined}
                 className={cn(rowClass, location === item.href && "bg-sidebar-row-hover")}
+                // Start the Library's first page while the pointer heads for the click, so it opens with data.
+                {...(item.id === "library" ? { onPointerEnter: prefetchLibrary, onFocus: prefetchLibrary, onPointerDown: prefetchLibrary } : {})}
               >
                 <item.icon className="size-4 shrink-0" /> {item.label}
               </Link>

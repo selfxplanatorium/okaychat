@@ -10,12 +10,13 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { SimpleMarkdown } from "@/components/ui/simple-markdown";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Delayed, Skeleton } from "@/components/ui/skeleton";
 import { BulkDeleteDialog, FloatingSelectionBar, SelectionCheck, SelectModeToggle, useSelection, useSelectionKeys } from "@/components/ui/selection";
 import { api } from "@/lib/api";
 import { batchError, runBatch } from "@/lib/selection";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
+import { cachedLibraryPage, DEFAULT_LIBRARY_QUERY, fetchLibraryFirstPage, forgetLibraryPages } from "@/state/library-cache";
 import { ArchivedChats } from "./ArchivedChats";
 
 // The Library lists everything the agent received or produced for this account: uploads, generated
@@ -322,19 +323,26 @@ function ListRow({ item, onOpen, selection }: { item: LibraryItem; onOpen: () =>
 
 type LibrarySection = "files" | "archived";
 
-/** Files and archived chats share the page; the switch sits under each section's header. */
+/**
+ * Files and archived chats share the page; the switch sits under each section's header. Both stay mounted,
+ * so switching shows the loaded list at once instead of refetching behind a skeleton.
+ */
 export function LibraryPage() {
   const [section, setSection] = useState<LibrarySection>("files");
   const tabs = <LibrarySectionSwitch section={section} onChange={setSection} />;
-  if (section === "files") return <LibraryFiles tabs={tabs} />;
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 pt-6 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-6">
-      <header>
-        <h1 className="text-xl font-semibold tracking-tight">Library</h1>
-        <p className="text-muted-foreground mt-1 text-sm">Archived chats from every project.</p>
-      </header>
-      <ArchivedChats tabs={tabs} />
-    </div>
+    <>
+      <div hidden={section !== "files"} className="contents">
+        <LibraryFiles tabs={tabs} />
+      </div>
+      <div hidden={section !== "archived"} className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 pt-6 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-6">
+        <header>
+          <h1 className="text-xl font-semibold tracking-tight">Library</h1>
+          <p className="text-muted-foreground mt-1 text-sm">Archived chats from every project.</p>
+        </header>
+        <ArchivedChats tabs={tabs} />
+      </div>
+    </>
   );
 }
 
@@ -368,8 +376,9 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<LibrarySort>("newest");
-  const [items, setItems] = useState<LibraryItem[] | null>(null);
-  const [cursor, setCursor] = useState<string | null>(null);
+  // A visit after the first starts from the last result, refreshed in place by the load below.
+  const [items, setItems] = useState<LibraryItem[] | null>(() => cachedLibraryPage(DEFAULT_LIBRARY_QUERY)?.items ?? null);
+  const [cursor, setCursor] = useState<string | null>(() => cachedLibraryPage(DEFAULT_LIBRARY_QUERY)?.nextCursor ?? null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<LibraryItem | null>(null);
@@ -398,7 +407,9 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
       setLoading(true);
       setError(null);
       try {
-        const page = await api<LibraryPage>(`/library?${params}${nextCursor ? `&cursor=${encodeURIComponent(nextCursor)}` : ""}`);
+        const page = nextCursor
+          ? await api<LibraryPage>(`/library?${params}&cursor=${encodeURIComponent(nextCursor)}`)
+          : await fetchLibraryFirstPage(params.toString());
         if (id !== requestId.current) return;
         setItems((prev) => (nextCursor && prev ? [...prev, ...page.items] : page.items));
         setCursor(page.nextCursor);
@@ -411,12 +422,17 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
     [params],
   );
 
-  // New filters reset the list; cursors are per filter set.
+  // New filters restart paging; cursors are per filter set. The current items stay until the new page
+  // arrives, so a filter switch never blanks the grid into a skeleton.
   useEffect(() => {
-    setItems(null);
     setCursor(null);
     void load(null);
   }, [load]);
+
+  // A filter's first page is loading over the previous filter's items. They dim only if it takes a while,
+  // so quick responses swap in place without any visible step.
+  const refreshing = loading && cursor === null && items !== null;
+  const fade = cn("transition-opacity duration-(--motion-fast)", refreshing && "opacity-60 delay-300");
 
   // Infinite scroll with a real button fallback (keyboard, touch, reduced motion).
   useEffect(() => {
@@ -428,6 +444,7 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
   }, [cursor, loading, load]);
 
   const removeItem = (id: string) => {
+    forgetLibraryPages();
     setItems((prev) => prev?.filter((i) => i.id !== id) ?? null);
     setOpen((prev) => (prev?.id === id ? null : prev));
   };
@@ -491,6 +508,7 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
   const deleteSelected = async () => {
     const { failed, error } = await runBatch(deletable, deleteItem);
     const gone = new Set(deletable.filter((i) => !failed.includes(i)).map((i) => i.id));
+    forgetLibraryPages();
     setItems((prev) => prev?.filter((i) => !gone.has(i.id)) ?? null);
     if (gone.size) void useData.getState().refreshStorage().catch(() => {});
     if (failed.length) {
@@ -590,11 +608,13 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
       </div>
 
       {items === null ? (
-        <div className={cn(view === "grid" ? "grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4" : "flex flex-col gap-2")}>
-          {Array.from({ length: 8 }, (_, i) => (
-            <Skeleton key={i} className={view === "grid" ? "aspect-[4/3] rounded-xl" : "h-10 rounded-lg"} />
-          ))}
-        </div>
+        <Delayed>
+          <div className={cn("animate-fade-in", view === "grid" ? "grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4" : "flex flex-col gap-2")}>
+            {Array.from({ length: 8 }, (_, i) => (
+              <Skeleton key={i} className={view === "grid" ? "aspect-[4/3] rounded-xl" : "h-10 rounded-lg"} />
+            ))}
+          </div>
+        </Delayed>
       ) : items.length === 0 ? (
         <div className="flex flex-col items-center py-16 text-center">
           <PaperclipIcon aria-hidden className="text-muted-foreground mb-5 size-8" />
@@ -602,13 +622,13 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
           <p className="text-muted-foreground mt-2 max-w-xs text-sm">Files you attach and things your chats create — images, documents, spreadsheets — collect here.</p>
         </div>
       ) : view === "grid" ? (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div aria-busy={refreshing} className={cn("grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4", fade)}>
           {items.map((item) => (
             <GridCard key={item.id} item={item} onOpen={() => setOpen(item)} selection={selection.selecting ? { selected: selection.selected.has(item.id), onToggle: (range) => selection.toggle(item.id, range) } : undefined} />
           ))}
         </div>
       ) : (
-        <div className="bg-card divide-border rounded-xl divide-y shadow-[var(--depth-highlight),var(--shadow-raised)]">
+        <div aria-busy={refreshing} className={cn("bg-card divide-border rounded-xl divide-y shadow-[var(--depth-highlight),var(--shadow-raised)]", fade)}>
           {items.map((item) => (
             <ListRow key={item.id} item={item} onOpen={() => setOpen(item)} selection={selection.selecting ? { selected: selection.selected.has(item.id), onToggle: (range) => selection.toggle(item.id, range) } : undefined} />
           ))}

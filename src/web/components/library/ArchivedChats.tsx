@@ -7,7 +7,7 @@ import { DeleteChatDialog } from "@/components/chat/DeleteChatDialog";
 import { Button } from "@/components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
 import { FloatingSelectionBar, SelectionCheck, SelectModeToggle, useSelection, useSelectionKeys } from "@/components/ui/selection";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Delayed, Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { batchError, runBatch } from "@/lib/selection";
 import { cn } from "@/lib/utils";
@@ -132,11 +132,13 @@ export function ArchivedChats({ tabs }: { tabs: ReactNode }) {
     return (
       <>
         {toolbar}
-        <div className="flex flex-col gap-2">
-          {Array.from({ length: 5 }, (_, i) => (
-            <Skeleton key={i} className="h-12 rounded-lg" />
-          ))}
-        </div>
+        <Delayed>
+          <div className="animate-fade-in flex flex-col gap-2">
+            {Array.from({ length: 5 }, (_, i) => (
+              <Skeleton key={i} className="h-12 rounded-lg" />
+            ))}
+          </div>
+        </Delayed>
       </>
     );
   }
