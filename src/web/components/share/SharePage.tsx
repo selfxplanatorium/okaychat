@@ -1,8 +1,13 @@
 import { AppWindowIcon, CodeIcon, FileSpreadsheetIcon, FileTextIcon, ImageIcon, WrenchIcon } from "lucide-react";
+import { useAssistantUiThemeTokens } from "generative-frame/assistant-ui";
+import { Widget } from "generative-frame/react";
+import { SpecRenderer } from "generative-frame/spec/react";
 import { useEffect, useState, type CSSProperties } from "react";
 import type { ArtifactVersion, SharedPart, SharedThread } from "@shared/types";
 import { DocumentPreview } from "@/components/artifacts/DocumentPreview";
 import { FRAME_SANDBOX, frameDocument } from "@/components/artifacts/frame";
+import { catalog, components } from "@/components/genui/catalog";
+import { widgetOptions } from "@/components/genui/toolkit";
 import { Brand } from "@/components/layout/Brand";
 import { SimpleMarkdown } from "@/components/ui/simple-markdown";
 import { api } from "@/lib/api";
@@ -51,6 +56,19 @@ function SharedArtifact({ token, part }: { token: string; part: Extract<SharedPa
     </div>
   );
 }
+
+function SharedWidget({ code }: { code: string }) {
+  const tokens = useAssistantUiThemeTokens();
+  // Read-only: a prompt from the widget has no chat to go to.
+  return <Widget code={code} {...widgetOptions} tokens={tokens} onPrompt={() => {}} className="my-3" />;
+}
+
+// Interactions still update the spec's local state; actions that would talk to the chat do nothing.
+const readOnlyHandlers = {
+  sendMessage: () => {},
+  updateModelContext: () => {},
+  copyText: (params: Record<string, unknown>) => (typeof params.text === "string" ? navigator.clipboard?.writeText(params.text) : undefined),
+};
 
 /** Public, read-only view of a shared thread. Rendered without login. */
 export function SharePage({ token }: { token: string }) {
@@ -110,6 +128,12 @@ export function SharePage({ token }: { token: string }) {
                         <img key={i} src={p.url} alt="" className="my-3 max-h-[32rem] rounded-xl border" />
                       ) : p.type === "artifact" ? (
                         <SharedArtifact key={i} token={token} part={p} />
+                      ) : p.type === "widget" ? (
+                        <SharedWidget key={i} code={p.code} />
+                      ) : p.type === "spec" ? (
+                        <div key={i} className="my-3">
+                          <SpecRenderer spec={p.spec} catalog={catalog} components={components} handlers={readOnlyHandlers} />
+                        </div>
                       ) : (
                         <p key={i} className="text-muted-foreground my-1 flex items-center gap-1.5 text-xs">
                           <WrenchIcon className="size-3" /> Used {p.name.replaceAll("_", " ")}

@@ -2,6 +2,8 @@ import { createReadStream } from "node:fs";
 import path from "node:path";
 import { Readable } from "node:stream";
 import type { UIMessage } from "ai";
+import { applyWidgetEdits, type WidgetEdit } from "generative-frame/tools";
+import { parseSpecStream, type Spec } from "generative-frame/spec";
 import { Hono } from "hono";
 import type { ArtifactToolResult, DocumentArtifactKind, SharedPart, SharedThread } from "../shared/types.js";
 import { artifactData, artifactVersions, DOCUMENT_MIME, documentFilename } from "./artifacts.js";
@@ -13,7 +15,7 @@ import { env } from "./env.js";
 import { currentBranch, getThread } from "./threads.js";
 
 // Read-only public links. A link is live: it shows the thread's current branch, and revoking deletes it.
-// Only text, generated images, and artifacts are exposed. Reasoning, tool inputs, usage, and costs stay private.
+// Only text, generated images, artifacts, and generative UI (final widget code and specs) are exposed. Reasoning, tool inputs, usage, and costs stay private.
 
 interface ShareRow {
   token: string;
@@ -28,17 +30,64 @@ const byToken = (token: string) => db.prepare("SELECT * FROM shares WHERE token 
 const toolName = (part: { type: string; toolName?: string }) => part.toolName ?? part.type.replace(/^tool-/, "");
 
 const ARTIFACT_TOOLS = new Set(["create_artifact", "update_artifact", "create_document", "edit_document", "import_document"]);
+// Helpers (`read_me`, `preview_widget`) render nothing in the chat either.
+const GENERATIVE_TOOLS = new Set(["show_widget", "edit_widget", "render_spec", "read_me", "preview_widget"]);
 
-function sharedParts(message: UIMessage, token: string): SharedPart[] {
+type GenerativePart = Extract<SharedPart, { type: "widget" | "spec" }>;
+
+/**
+ * Widgets and specs are replayed from history the way generative-frame does on the client: `show_widget`
+ * sets a title's code and `edit_widget` applies to it; `render_spec` patches apply onto the title's earlier
+ * spec. Results of earlier tools are not mounted under `/tools`, since tool outputs stay private.
+ */
+function generativeUI() {
+  const codes = new Map<string, string>();
+  const specs = new Map<string, Spec>();
+  return (name: string, input: Record<string, unknown>): GenerativePart | undefined => {
+    const title = typeof input.title === "string" ? input.title : "";
+    if (name === "show_widget" && typeof input.widget_code === "string" && input.widget_code.trim()) {
+      codes.set(title, input.widget_code);
+      return { type: "widget", title, code: input.widget_code };
+    }
+    if (name === "edit_widget" && Array.isArray(input.edits)) {
+      const previous = codes.get(title);
+      const applied = previous === undefined ? undefined : applyWidgetEdits(previous, input.edits as WidgetEdit[]);
+      if (!applied?.ok) return undefined;
+      codes.set(title, applied.code);
+      return { type: "widget", title, code: applied.code };
+    }
+    if (name === "render_spec") {
+      const base = specs.get(title);
+      let spec: Spec | undefined;
+      if (input.spec && typeof input.spec === "object" && typeof (input.spec as Spec).root === "string") {
+        const given = input.spec as Spec;
+        spec = { state: {}, ...given, elements: given.elements && typeof given.elements === "object" ? given.elements : {} };
+      } else if (typeof input.patches === "string") spec = parseSpecStream(input.patches, base ? { initial: base } : {}).spec;
+      if (!spec) return undefined;
+      specs.set(title, spec);
+      return { type: "spec", title, spec };
+    }
+    return undefined;
+  };
+}
+
+function sharedParts(message: UIMessage, token: string, resolveUI: ReturnType<typeof generativeUI>): SharedPart[] {
   const out: SharedPart[] = [];
   for (const raw of message.parts) {
-    const part = raw as { type: string; text?: string; mediaType?: string; url?: string; state?: string; output?: unknown; toolName?: string };
+    const part = raw as { type: string; text?: string; mediaType?: string; url?: string; state?: string; input?: unknown; output?: unknown; toolName?: string };
     if (part.type === "text" && part.text?.trim()) out.push({ type: "text", text: part.text });
     else if (part.type === "file" && part.mediaType?.startsWith("image/") && part.url?.startsWith("data:")) out.push({ type: "image", url: part.url });
     else if (part.type.startsWith("tool-") || part.type === "dynamic-tool") {
       const name = toolName(part);
       const output = part.state === "output-available" ? part.output : undefined;
-      if (name === "generate_image" && (output as { id?: string })?.id) {
+      const ui = GENERATIVE_TOOLS.has(name) && part.input && typeof part.input === "object" ? resolveUI(name, part.input as Record<string, unknown>) : undefined;
+      if (ui) {
+        // A later call with the same title in the same message replaces what an earlier one shows.
+        const earlier = out.findIndex((p) => (p.type === "widget" || p.type === "spec") && p.type === ui.type && p.title === ui.title);
+        if (earlier >= 0) out.splice(earlier, 1);
+        out.push(ui);
+      } else if (GENERATIVE_TOOLS.has(name)) continue;
+      else if (name === "generate_image" && (output as { id?: string })?.id) {
         out.push({ type: "image", url: `/api/public/shares/${token}/images/${(output as { id: string }).id}` });
       } else if (ARTIFACT_TOOLS.has(name) && (output as ArtifactToolResult)?.id) {
         const a = output as ArtifactToolResult;
@@ -75,12 +124,13 @@ export const publicShareRoutes = new Hono()
     const share = byToken(c.req.param("token"));
     const thread = share && getThread(share.user_id, share.thread_id);
     if (!share || !thread) return c.json({ error: "This link was revoked or never existed." }, 404);
+    const resolveUI = generativeUI();
     const body: SharedThread = {
       title: thread.title,
       createdAt: thread.createdAt,
       messages: currentBranch(share.user_id, share.thread_id)
         .filter((m) => m.role === "user" || m.role === "assistant")
-        .map((m) => ({ id: m.id, role: m.role as "user" | "assistant", parts: sharedParts(m, share.token) }))
+        .map((m) => ({ id: m.id, role: m.role as "user" | "assistant", parts: sharedParts(m, share.token, resolveUI) }))
         .filter((m) => m.parts.length > 0),
     };
     return c.json(body);

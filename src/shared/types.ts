@@ -1,5 +1,6 @@
 import type { UserAppearance } from "./appearance.js";
 import type { ImageServiceSettings } from "./image-services.js";
+import type { Spec } from "generative-frame/spec";
 
 // Types shared by server and web. Keep free of runtime imports.
 
@@ -407,6 +408,8 @@ export type SharedPart =
   | { type: "text"; text: string }
   | { type: "image"; url: string }
   | { type: "artifact"; id: string; title: string; kind: ArtifactKind; version: number }
+  | { type: "widget"; title: string; code: string }
+  | { type: "spec"; title: string; spec: Spec }
   | { type: "tool"; name: string };
 
 export interface SharedThread {
