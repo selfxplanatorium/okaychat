@@ -13,10 +13,16 @@ import {
   MIN_PROMPT_FONT_SIZE,
 } from "./settings";
 
-// Golos Text is bundled (see main.tsx), so it renders the same on every device.
-export const DEFAULT_SANS_FONT_LABEL = "Golos Text";
+// Fontsource variable families include "Variable" in their CSS name, but the picker uses familiar labels.
+const FONT_FAMILY_ALIASES = new Map([
+  ["Onest", "Onest Variable"],
+  ["Golos Text", "Golos Text Variable"],
+]);
+
+// Onest is bundled (see main.tsx), so it renders the same on every device. Keep in sync with theme.css.
+export const DEFAULT_SANS_FONT_LABEL = "Onest";
 export const DEFAULT_SANS_FONT_STACK =
-  `"${DEFAULT_SANS_FONT_LABEL}", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`;
+  `"${FONT_FAMILY_ALIASES.get(DEFAULT_SANS_FONT_LABEL)}", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`;
 
 // Concrete names first: some engines alias `ui-monospace` to the
 // proportional system UI font, which would break every code surface.
@@ -44,7 +50,8 @@ export function resolveTerminalFontSizePreference(input: {
 }
 
 function quoteFontFamilyName(name: string): string {
-  const bare = name.trim();
+  const trimmed = name.trim();
+  const bare = FONT_FAMILY_ALIASES.get(trimmed) ?? trimmed;
   if (bare.length === 0) return "";
   if (/^(['"]).*\1$/.test(bare)) return bare;
   if (/^[a-zA-Z][a-zA-Z0-9-]*$/.test(bare)) return bare;

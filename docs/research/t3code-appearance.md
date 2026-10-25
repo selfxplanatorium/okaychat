@@ -72,14 +72,14 @@ Heading `Typography`. Header switch labeled `Advanced` (aria "Show advanced typo
 
 Each font row has:
 
-- Family control. A list picker: the default (Golos Text), then uploaded fonts (tagged "Uploaded"), then system fonts from `queryLocalFonts`. System fonts load when the list opens, which is the user gesture the browser needs. The code row lists monospace faces only. A stored family that is no longer installed still shows, so it stays visible.
+- Family control. A list picker: the default (Onest), then bundled fonts (including Golos Text), uploaded fonts (tagged "Uploaded"), and system fonts from `queryLocalFonts`. System fonts load when the list opens, which is the user gesture the browser needs. The code row lists monospace faces only. A stored family that is no longer installed still shows, so it stays visible.
 - Size select, `{n} px`, integer steps.
 - Reset button (shown when family or size differs from default). Reset restores family and size together.
 - Monospace rows accept only fixed-width families (checked by advance widths of glyphs `i M W 0 @ # . space` in four style variants).
 
 | Code | Searchable title | Row | Family default | Size control | Size range (px) | Size default (px) | Description text | Applies |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| S13 | Interface font | Family + size | Golos Text (bundled), then the system UI stack (`-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`) | `""` (empty = default stack) | 12 to 20 | 16 | "Everything outside code blocks and the terminal." | Yes |
+| S13 | Interface font | Family + size | Onest (bundled), then the system UI stack (`-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`) | `""` (empty = default stack) | 12 to 20 | 16 | "Everything outside code blocks and the terminal." | Yes |
 | S14 | Prompt font | Family + size (advanced only) | Follows the interface family | `""` | 12 to 20 | 14 | "Only the box you write prompts in. Mono works well here." | Yes |
 | S15 | Code font | Family + size. Monospace only. Simple mode title: "Monospace font" | `"SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace` | `""` | 10 to 18 | 13 | "Code blocks, diffs, and file previews." (simple mode adds "and the terminal") | Yes |
 | S16 | Terminal font | Family + size (advanced only) | Follows code font | `""` | 8 to 20 | 12 | "Terminal output, independent from code blocks and diffs." | No |
@@ -183,7 +183,7 @@ The brand artwork lives in `src/web/public/icon.webp` (256 × 250, lossless WebP
 - The editor's appearance toggle is a plain segmented button pair (no `ToggleGroup` component here).
 - Font smoothing appears only in Advanced mode on macOS, as in T3Code.
 - okaychat replaces the T3Code text input with a list picker, so typed names are gone. Browsers without the Local Font Access API show only the default and uploaded fonts.
-- Default interface font is Golos Text, bundled with `@fontsource-variable/golos-text` (self-hosted, no Google request). Stored `""` means Golos Text. The picker also lists bundled Liberation, DejaVu, and Ubuntu faces, see `bundled-fonts.md`.
+- Default interface font is Onest, bundled with `@fontsource-variable/onest` (self-hosted, no Google request). Stored `""` means Onest. The picker keeps Golos Text alongside bundled Liberation, DejaVu, and Ubuntu faces, see `bundled-fonts.md`.
 - Uploaded fonts ("Installed fonts" row) are stored in SQLite (`user_fonts`), checked by file signature (WOFF, WOFF2, TTF, OTF; 15 MB), and served at `/api/fonts/:id/file`. The family name is the file name. `state/fonts.ts` registers each one with `FontFace` when the shell loads, so it syncs with the account. Removing a font resets any setting that still uses it.
 - No toasts. Errors are shown inline.
 - Appearance preferences and custom themes now sync per account through `/api/appearance`, stored inside `user_settings.json`. `src/shared/appearance.ts` defines the validated wire format.

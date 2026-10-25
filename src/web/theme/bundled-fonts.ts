@@ -1,4 +1,4 @@
-// Fonts shipped with the app, so every device gets the same choices. Golos Text is the default, not listed here.
+// Fonts shipped with the app, so every device gets the same choices. Onest is the default, not listed here.
 // Liberation is a metric match for Arial, Times New Roman, and Courier New. The rest are common Linux faces.
 // Sources: src/web/fonts/bundled.css (Liberation) and the @fontsource packages imported in main.tsx.
 export interface BundledFont {
@@ -7,6 +7,7 @@ export interface BundledFont {
 }
 
 export const BUNDLED_FONTS: readonly BundledFont[] = [
+  { family: "Golos Text", monospace: false },
   { family: "Liberation Sans", monospace: false },
   { family: "Liberation Serif", monospace: false },
   { family: "Liberation Mono", monospace: true },
