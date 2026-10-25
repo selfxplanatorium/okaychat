@@ -8,6 +8,7 @@ Unverified: no `node_modules` in the clone, so no test run and no type check aga
 
 ## Summary
 
+- New-chat greetings live in `components/chat/welcome-lines.ts`: dry, gently mischievous humor, with roughly one third of each available pool using `{name}`. Selection combines general lines with the current time-of-day pool and skips personalized lines when the account has no name.
 - Sidebar chat titles show the full name in a tooltip after an 800 ms hover, only when the rendered title overflows. Overflow is measured when opening so hover actions, title updates, and sidebar sizing are accounted for. The tooltip is portaled outside the list's scroll mask.
 - Use `@assistant-ui/ai-sdk` directly. `@assistant-ui/react-ai-sdk` only re-exports it.
 - Own-DB threads: wrap `useChatRuntime()` in `useRemoteThreadListRuntime({ runtimeHook, adapter })`. `useChatRuntime` has no adapter option of its own.
