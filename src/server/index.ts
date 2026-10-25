@@ -11,6 +11,7 @@ import { logger } from "hono/logger";
 import { HTTPException } from "hono/http-exception";
 import { authRoutes } from "./auth.js";
 import { warmCatalog } from "./catalog/providers.js";
+import { probeRenderer } from "./documents/render.js";
 import { env } from "./env.js";
 import { startMemoryWorker } from "./memory-learn.js";
 import { api, mcpOAuthCallback } from "./routes.js";
@@ -76,4 +77,5 @@ void warmCatalog().catch(() => {});
 serve({ fetch: app.fetch, port: env.port, hostname: env.host }, (info) => {
   console.log(`okaychat listening on http://${env.host}:${info.port}`);
   startMemoryWorker();
+  probeRenderer();
 });

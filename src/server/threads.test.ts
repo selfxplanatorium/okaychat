@@ -14,7 +14,8 @@ const { db } = await import("./db.js");
 const { sha256 } = await import("./crypto.js");
 const { api } = await import("./routes.js");
 const { appendMessage, getThread } = await import("./threads.js");
-const { rendererAvailable, closeRenderer } = await import("./documents/render.js");
+const { startTestWorker } = await import("../browser/test-worker.js");
+const worker = await startTestWorker();
 
 const app = new Hono().route("/api", api);
 for (const id of ["alice", "bob"]) {
@@ -22,7 +23,7 @@ for (const id of ["alice", "bob"]) {
   db.prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)").run(sha256(id), id, Date.now() + 600_000);
 }
 after(async () => {
-  await closeRenderer();
+  await worker.close();
   db.close();
   rmSync(dataDir, { recursive: true, force: true });
 });
@@ -121,7 +122,7 @@ test("export checks ownership, temporary ids, and the format", async () => {
   assert.equal((await call("/threads/t1/export")).status, 400);
 });
 
-test("pdf export prints through the shared renderer", { skip: !rendererAvailable() && "Chromium is not installed" }, async () => {
+test("pdf export prints through the shared renderer", { skip: !worker.available && "Chromium is not installed" }, async () => {
   store("t1", "m1", null, "user", [{ type: "text", text: "| a | b |\n| - | - |\n| 1 | 2 |\n\n```js\nconsole.log(1)\n```" }]);
   const response = await call("/threads/t1/export?format=pdf");
   assert.equal(response.status, 200);

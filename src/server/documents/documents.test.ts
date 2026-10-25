@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { createDocx, editDocx, readDocxText } from "./docx.js";
 import { editPdf, readPdf } from "./pdf.js";
-import { closeRenderer, htmlToPdf, pageFurniture, printDocument, rendererAvailable } from "./render.js";
+import { startTestWorker } from "../../browser/test-worker.js";
+import { htmlToPdf, pageFurniture, printDocument } from "./render.js";
 import { createXlsx, editXlsx, previewXlsx, readXlsx, loadXlsx } from "./xlsx.js";
 
-// Do not leave Chromium alive until its idle timer during a test run.
-after(closeRenderer);
+// PDFs come from the browser worker; this one runs in the test process. Closing it also closes Chromium.
+const worker = await startTestWorker();
+after(worker.close);
 
 const text = new TextDecoder();
 
@@ -119,7 +121,7 @@ test("docx: a missing find target reports the paragraph", async () => {
   assert.throws(() => editDocx(data, [{ op: "replace_text", find: "missing", replace: "x" }]), /not found/);
 });
 
-test("pdf: HTML renders to a text PDF and ops change it", { skip: !rendererAvailable() && "Chromium is not installed" }, async () => {
+test("pdf: HTML renders to a text PDF and ops change it", { skip: !worker.available && "Chromium is not installed" }, async () => {
   const html = "<header>Invoice · page {page} of {pages}</header><h1>Invoice</h1><p>Total: €120</p><div style='break-before:page'>Page two</div>";
   const furniture = pageFurniture(html);
   const pdf = await htmlToPdf(printDocument(furniture.body), { headerTemplate: furniture.headerTemplate, footerTemplate: furniture.footerTemplate });

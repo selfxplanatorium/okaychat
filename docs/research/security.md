@@ -25,11 +25,15 @@ Not defended against: an admin (who controls the server), anyone who can run cod
 | Account recovery | Password change revokes other sessions; "Sign out other devices"; admin reset revokes all | `account.ts`, `admin.ts` |
 | Response headers | `frame-ancestors 'self'`, `X-Frame-Options`, `nosniff`, referrer policy; generic 500s with a log reference | `index.ts` |
 | Input | zod on every JSON body, 100 MB body cap, per-route upload caps, bounded ids | routes |
-| Outbound requests | Public-address check at connection time, revalidated redirects, byte caps: `web_fetch`, non-admin provider/MCP URLs, image model lists, skill sources, Scrapling via the egress proxy | `public-fetch.ts`, `egress-proxy.ts` |
+| Outbound requests | Public-address check at connection time, revalidated redirects, byte caps: `web_fetch`, non-admin provider/MCP URLs, image model lists, skill sources | `public-fetch.ts` |
+| Browser worker egress | Chromium and Scrapling reach the network only through the worker's egress proxy (public addresses; CDN hosts only for renders), enforced by a per-uid firewall in the worker's network namespace. No app data, secrets, or host mounts; own users; no capabilities after start | `src/browser/`, `docker/browser-*.sh`, `docs/research/browser-worker.md` |
 | Stored secrets | Write-only in the UI; never follow a changed origin; MCP OAuth tokens cleared on URL change | `providers.ts`, `routes.ts`, `skills.ts` |
 | User files | Served with `sandbox` CSP, `nosniff`, download by default; images/fonts sniffed | `files.ts`, `tools/sandbox.ts`, `fonts.ts`, `account.ts` |
 | Artifacts in the browser | Sandboxed opaque-origin iframe plus a meta CSP: network only to `FRAME_NETWORK_HOSTS`, no form posts | `shared/artifact-frame.ts` |
-| Server rendering | Request routing, WebSocket/WebRTC/service-worker blocks, DNS limited to the CDNs | `documents/render.ts` |
+| MCP Apps | Same opaque-origin sandbox (`allow-scripts` only) with a CSP built from the server's declared https domains, none by default. Apps reach only their own server through our API; tools that would ask first need Allow in the card; `ui/message` fills the composer, never sends | `components/chat/McpApp.tsx`, `mcp/manager.ts` |
+| MCP elicitation | Forms only (no URL mode), flat typed fields validated server-side, answered only by the asking user, cancelled after 10 min or on Stop; sub-agents and schedules decline | `mcp/elicitation.ts` |
+| Shared MCP servers | Admin-owned; viewers never see headers, env, or command; per-user OAuth tokens; a demoted admin's servers stop being shared | `mcp/store.ts` |
+| Server rendering | Separate container. Offline by default (only the document and staged files); HTML/React previews may load from the artifact CDNs through the egress proxy. WebSocket/WebRTC/service-worker blocks, DNS limited to the CDNs, timeouts that close the job's context | `src/browser/render.ts` |
 | Office files | ZIP expansion bounded before any parser runs | `documents/zip-bounds.ts` |
 | Code execution | Separate container, internal-only network, no secrets, per-chat uid, dropped capabilities, read-only root | `sandbox/`, `docker-compose.yml` |
 | Persistent writes | Skill installs always need approval; memory writes need approval after outside content | `skills.ts`, `memory.ts` |
@@ -41,8 +45,10 @@ Not defended against: an admin (who controls the server), anyone who can run cod
 
 - **Prompt injection is not solved.** It is contained: the injected model cannot reach the server's network, exfiltrate through rendered HTML, or silently persist instructions. It can still give a wrong answer, call MCP tools you enabled without approval, or ask you to approve something harmful. Read approval prompts.
 - **Artifact popups.** `allow-popups` lets an artifact open a URL after a user click; the URL can carry data. Browsers block popups without a click.
-- **Scrapling's Chromium bypasses proxies for loopback** (`127.0.0.1` inside the app container). Chromium's local network access block stops page requests from public pages to loopback.
-- **Chromium runs with `--no-sandbox`.** A renderer exploit lands in the app container as `node`. Keep the image updated.
+- **Chromium runs with `--no-sandbox`** in the browser worker (its namespace sandbox is unavailable under Docker and Ubuntu's user-namespace restriction). A render exploit lands in that job's slot user: its own job, the artifact CDNs through the proxy, nothing else. An exploit through a page Scrapling reads lands in `scrape`: concurrent fetches and the public internet through the proxy. Neither reaches the app, its data or secrets, the worker token, the sandbox, or private networks. See `docs/research/browser-worker.md`. Keep the image updated.
+- **The sandbox container runs without Docker's AppArmor profile** and with a seccomp profile that lets the runner create user namespaces, which bubblewrap needs. Run code cannot create namespaces (inner seccomp filter). Host AppArmor profiles that attach by path are kept off run code by the jail's exec view. See `docs/research/code-sandbox.md`.
+- **Concurrent runs see each other's process list** (pids and command lines, including arguments run code passes to its subprocesses), not environments, memory, descriptors, or files.
+- **Concurrent runs share the sandbox's 2 GB and 2 CPUs.** One run can starve or OOM-kill another; limits are per process and per workspace, not per run.
 - **Shared provider keys have no per-user spend limit.** Usage and cost per user are recorded and visible to admins; the concurrency and schedule caps only bound the rate.
 - **No 2FA or session list.** Sessions can be revoked as a group.
 - **Sign-up reveals registered emails** ("already registered"). Keep sign-up closed on servers that do not need it.

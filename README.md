@@ -13,17 +13,20 @@ docker compose up -d --build
 
 Open http://localhost:8787. The first account you create is the admin. Paste your OpenCode Go key (https://opencode.ai/console) on the first screen, or connect another provider under Settings → Providers.
 
-Compose starts three containers:
+Compose starts four containers:
 
 - `okaychat`: the app, with data in the `okaychat-data` volume (SQLite + caches).
 - `searxng`: a private search engine for the `web_search` tool. It is not exposed outside the compose network.
-- `sandbox`: runs Python and Bash for the `run_code` tool, with one private workspace per chat. It has no internet access and holds no app secrets. See `docs/research/code-sandbox.md`.
+- `sandbox`: runs Python and Bash for the `run_code` tool, with one private workspace per chat and an offline toolset (FFmpeg, LibreOffice, Pandoc, Tesseract/OCRmyPDF, poppler, Ghostscript, Graphviz, scientific Python, and more). Every run is jailed without any network access, and the container holds no app secrets. It needs the seccomp profile and AppArmor setting in `docker-compose.yml`. See `docs/research/code-sandbox.md`.
+- `browser`: Chromium for PDFs, document previews, and the model's visual checks, and Scrapling for pages that block plain fetches. It holds no app data or secrets, and a firewall in its own network namespace lets only its egress proxy reach public addresses. The app generates its token; nothing to configure. See `docs/research/browser-worker.md`.
 
-Smaller image without the headless browser used for JavaScript-heavy pages:
+Without Scrapling's stealth-browser fallback for JavaScript-heavy pages (documents still use the worker's Chromium):
 
 ```sh
 docker compose build --build-arg SCRAPLING_BROWSER=false
 ```
+
+Updating a setup that ran the previous three containers: run `docker compose up -d --build`. The data volume is reused; the `okaychat-browser-token` volume is created automatically, and the browser container needs the capabilities listed in `docker-compose.yml`.
 
 ## Configuration
 
@@ -41,7 +44,7 @@ docker compose build --build-arg SCRAPLING_BROWSER=false
 ```sh
 npm install
 cp .env.example .env   # set OKAYCHAT_SECRET
-npm run dev            # server on :8787, web on :5173
+npm run dev            # server on :8787, web on :5173, browser worker on :8791
 ```
 
 See `AGENTS.md` for architecture and conventions, and `docs/ROADMAP.md` for what is built and what is next.

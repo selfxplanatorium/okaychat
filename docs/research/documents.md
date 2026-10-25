@@ -26,7 +26,7 @@ returns metadata (`size`) without the bytes; the web panel fetches
 
 ### PDF
 
-HTML and CSS are rendered to a vector PDF by Chromium through `playwright-core`. `PRINT_DEFAULTS` in
+HTML and CSS are rendered to a vector PDF by Chromium in the browser worker (`docs/research/browser-worker.md`), offline. `PRINT_DEFAULTS` in
 `documents/render.ts` gives plain HTML a readable document look; anything the model writes later in the
 document overrides it. `@page` sets size and margins. A top-level `<header>` and `<footer>` are removed
 from the flow and passed to Chrome as page templates, so they repeat on every page and `{page}` /
@@ -82,12 +82,12 @@ for PDF.
 ## Visual self-check
 
 `view_artifact(id, page?, sheet?)` gives the model its own eyes. It renders the current version in the
-same Chromium and returns a PNG:
+browser worker's Chromium and returns a PNG:
 
 - HTML, React, and SVG: the artifact document from `src/shared/artifact-frame.ts`, so the screenshot is
-  the same DOM the panel shows. React still needs the public CDNs (Babel, esm.sh, Tailwind); only those
-  hosts are allowed, everything else is aborted. Tall pages are clipped to 1800 CSS pixels.
-- PDF: `pdfjs-dist` is served into the page from `node_modules` and draws the requested page to a
+  the same DOM the panel shows. HTML and React still need the public CDNs (Babel, esm.sh, Tailwind); only those
+  hosts are allowed, through the worker's egress proxy, and everything else is aborted. SVG renders offline. Tall pages are clipped to 1800 CSS pixels.
+- PDF: `pdfjs-dist` is served into the page from the worker's `node_modules` and draws the requested page to a
   canvas; the canvas is captured at 1000 px wide. This is exact, including form fields and embedded
   fonts. Pages are addressed with `page`, default 1.
 - DOCX: `docx-preview` and `jszip` are served into the page, the file renders into Word-like pages, and
@@ -103,36 +103,29 @@ history stays text-only, so later turns do not resend images. A reply may spend 
 model is told the image follows and that it is not repeated. Page JavaScript errors and console errors
 come back in the tool text even for a model that cannot see images.
 
-Non-vision models do not get the tool. Without Chromium, the tool is absent and the text tools keep
-working.
+Non-vision models do not get the tool. Without a browser worker (`OKAYCHAT_BROWSER_URL`), the tool is absent and
+the text tools keep working. Blocked requests (a missing image, a non-CDN script) come back in `pageErrors` with
+the reason.
 
 ## Chromium lifecycle and isolation
 
-`src/server/documents/render.ts`:
+Chromium runs only in the browser worker container (`src/browser/render.ts`); the app calls it through
+`documents/render.ts` and `src/server/browser.ts`. Lifecycle, timeouts, the offline/cdn modes, the egress
+firewall, and `--no-sandbox` are in `docs/research/browser-worker.md`. In short:
 
-- Chromium is never started at boot. The first PDF job launches it.
-- One browser and one process serve every user. Jobs run in a fresh browser context with its own route
-  table, at most two at a time; others wait.
-- After 60 seconds with no jobs, the browser closes. `unref`'d timer, so it does not hold the process
-  open.
-- Every request except the injected document is aborted. Model-written HTML cannot reach the network,
-  the LAN, cloud metadata (`169.254.169.254`), or `file://`. Images must be data URIs; fonts come from
-  the system.
-- `context.route` only sees HTTP, so the other channels are closed separately: WebSockets are refused with
-  `routeWebSocket`, service workers are blocked, an init script removes WebRTC and WebTransport from every
-  frame, and `--host-resolver-rules` lets only the artifact CDNs (`FRAME_NETWORK_HOSTS`) resolve, so DNS
-  prefetch and preconnect cannot carry data out in a hostname. `allowHosts` must stay within that list.
-- `--no-sandbox`: Chromium's sandbox needs user namespaces, which Docker's default seccomp profile blocks.
-  Isolation comes from the context and the rules above, not the OS sandbox.
+- In the container each render runs in a fresh slot process and Chromium, then exits (two concurrent slots by default).
+  The local dev worker shares Chromium across fresh contexts and closes it after 60 s idle.
+- Every request except the document and its staged files is aborted (cdn mode adds `FRAME_NETWORK_HOSTS`).
+  Model-written HTML cannot reach the LAN, cloud metadata, the app, or `file://`. Images must be data URIs;
+  fonts come from the worker's system fonts.
+- WebSockets refused, service workers blocked, WebRTC and WebTransport removed, DNS limited to the CDNs.
+- A timed-out or abandoned job has its context closed before its slot is released; a wedged browser is killed.
 - DOCX and XLSX are measured with `assertZipBounds` (`documents/zip-bounds.ts`) before mammoth, exceljs, or
   fflate opens them: at most 200 MB expanded and 10,000 entries, checked against both the central
   directory and a streaming count, so neither overlapping entries nor understated headers get through.
-- `rendererAvailable()` checks `OKAYCHAT_CHROMIUM_PATH`, then Playwright's registry (which honours
-  `PLAYWRIGHT_BROWSERS_PATH`).
 
-PDF creation needs the Playwright Chromium build. The Docker image installs it only when built with
-`SCRAPLING_BROWSER=true` (the default); with `false`, PDF creation reports that rendering is unavailable
-while DOCX, XLSX, and all reading/editing keep working. In dev, Playwright's browser cache is used.
+Without a worker, PDF creation reports that rendering is unavailable while DOCX, XLSX, and all reading/editing
+keep working. In dev, `npm run dev` starts a local worker that uses Playwright's browser cache.
 
 ## Web previews
 
@@ -148,7 +141,7 @@ The public share page uses the same component with the public artifact routes.
 
 | Package | Purpose |
 | --- | --- |
-| `playwright-core` | Drives the Chromium already in the image. 14 MB, no dependencies, downloads nothing. |
+| `playwright-core` | Drives Chromium in the browser worker. 14 MB, no dependencies, downloads nothing. The app no longer loads it. |
 | `docx` | Creates Word documents. |
 | `exceljs` | Reads and writes workbooks. |
 | `@cantoo/pdf-lib` | Maintained `pdf-lib` fork, used for PDF structure and forms. |

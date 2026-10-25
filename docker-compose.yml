@@ -1,6 +1,8 @@
 services:
   okaychat:
-    build: .
+    build:
+      context: .
+      target: app
     image: okaychat:latest
     restart: unless-stopped
     ports:
@@ -14,12 +16,17 @@ services:
       OKAYCHAT_SEARXNG_URL: http://searxng:8080
       OKAYCHAT_SANDBOX_URL: http://sandbox:8080
       OKAYCHAT_SANDBOX_TOKEN: ${OKAYCHAT_SANDBOX_TOKEN:?set OKAYCHAT_SANDBOX_TOKEN in .env}
+      OKAYCHAT_BROWSER_URL: http://browser:8080
+      # The app generates the worker's token here on first start; only the worker also mounts this volume.
+      OKAYCHAT_BROWSER_TOKEN_FILE: /run/okaychat-browser/token
     volumes:
       - okaychat-data:/data
-    networks: [default, sandbox]
+      - okaychat-browser-token:/run/okaychat-browser
+    networks: [default, sandbox, browser]
     depends_on:
       - searxng
       - sandbox
+      - browser
 
   # Private metasearch for the web_search tool. No keys, not exposed outside the compose network.
   searxng:
@@ -56,11 +63,40 @@ services:
     pids_limit: 512
     mem_limit: 2g
     cpus: 2
+  # Chromium for PDFs, document previews, and the model's visual checks, and Scrapling for web_fetch's fallback.
+  # No app data, provider keys, or OKAYCHAT_SECRET; a firewall in its own network namespace lets only its
+  # egress proxy out, to public addresses. See docs/research/browser-worker.md.
+  browser:
+    build:
+      context: .
+      target: browser
+    image: okaychat-browser:latest
+    restart: unless-stopped
+    environment:
+      BROWSER_TOKEN_FILE: /run/okaychat-browser/token
+    volumes:
+      - okaychat-browser-token:/run/okaychat-browser:ro
+    networks: [browser]
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    cap_drop: [ALL]
+    # NET_ADMIN and CHOWN only at start (firewall, scratch directories); the entrypoint drops both, using SETPCAP,
+    # before anything else runs. Long-lived root processes keep SETUID, SETGID, SETPCAP; worker users keep nothing.
+    cap_add: [NET_ADMIN, CHOWN, SETUID, SETGID, SETPCAP]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: 1536m
+    cpus: 2
 
 networks:
   sandbox:
     internal: true
+  # Not internal: the worker's egress proxy reaches public web pages and the artifact CDNs through it.
+  browser:
 
 volumes:
   okaychat-data:
   okaychat-sandbox:
+  okaychat-browser-token:

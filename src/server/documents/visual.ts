@@ -1,18 +1,12 @@
-import { createRequire } from "node:module";
-import path from "node:path";
 import type { ArtifactKind, SheetPreview, SheetPreviewCell } from "../../shared/types.js";
-import { FRAME_NETWORK_HOSTS, frameDocument } from "../../shared/artifact-frame.js";
-import { rendererAvailable, screenshotHtml, withBrowserPage } from "./render.js";
+import { frameDocument } from "../../shared/artifact-frame.js";
+import { BrowserJobError } from "../browser.js";
+import { rendererAvailable, screenshotHtml, screenshotPage } from "./render.js";
 import { previewXlsx } from "./xlsx.js";
 
-// The model's visual self-check. Every rendered artifact runs in the same locked-down Chromium the PDF
-// writer uses: no network except the public CDNs artifact pages already need, no file access, and a
-// fresh context per shot. See docs/research/documents.md.
-
-const require = createRequire(import.meta.url);
-const pdfjsRoot = () => path.dirname(require.resolve("pdfjs-dist/package.json"));
-const docxPreviewFile = () => require.resolve("docx-preview");
-const jszipFile = () => path.join(path.dirname(require.resolve("jszip/package.json")), "dist", "jszip.min.js");
+// The model's visual self-check. Every artifact is rendered by the browser worker in a fresh Chromium context:
+// offline for documents, sheets, and SVG; HTML and React previews may also load from the public CDNs artifact
+// pages already use. See docs/research/documents.md and docs/research/browser-worker.md.
 
 /** How much of a tall page or sheet a single shot shows. Keeps image tokens reasonable. */
 const MAX_HEIGHT = 1800;
@@ -28,7 +22,6 @@ export interface VisualRequest {
   page?: number;
   sheet?: string;
 }
-
 export interface VisualShot {
   png: Uint8Array;
   width: number;
@@ -40,7 +33,7 @@ export interface VisualShot {
 /** Thrown when a visual check cannot be produced; the message is written for the model to act on. */
 export class VisualError extends Error {}
 
-const NEEDS_CHROMIUM = "Visual checks need Chromium on this server. Set OKAYCHAT_CHROMIUM_PATH, or build the image with SCRAPLING_BROWSER=true.";
+const NEEDS_CHROMIUM = "Visual checks need the browser worker, which this server does not have (OKAYCHAT_BROWSER_URL).";
 
 function assertAvailable() {
   if (!rendererAvailable()) throw new VisualError(NEEDS_CHROMIUM);
@@ -54,6 +47,16 @@ function documentData(request: VisualRequest, what: string): Uint8Array {
 /** Screenshot one visual artifact: a page, a sheet, or the whole page for web content. */
 export async function screenshotArtifact(request: VisualRequest): Promise<VisualShot> {
   assertAvailable();
+  try {
+    return await screenshotKind(request);
+  } catch (error) {
+    // The worker's own refusals (a page out of range, a file that does not parse) are for the model to act on.
+    if (error instanceof BrowserJobError && error.forModel) throw new VisualError(error.message);
+    throw error;
+  }
+}
+
+async function screenshotKind(request: VisualRequest): Promise<VisualShot> {
   switch (request.kind) {
     case "html":
     case "react":
@@ -78,7 +81,7 @@ async function screenshotFrame(request: VisualRequest): Promise<VisualShot> {
   const result = await screenshotHtml(documentHtml, {
     width: 1000,
     maxHeight: MAX_HEIGHT,
-    allowHosts: request.kind === "svg" ? undefined : FRAME_NETWORK_HOSTS,
+    network: request.kind === "svg" ? "offline" : "cdn",
   });
   return {
     png: result.png,
@@ -89,134 +92,12 @@ async function screenshotFrame(request: VisualRequest): Promise<VisualShot> {
   };
 }
 
-function pdfViewer(pageNumber: number): string {
-  return `<!doctype html><html><head><meta charset="utf-8">
-<style>
-  html,body{margin:0;background:#e9e9ec;font:12px system-ui,sans-serif}
-  #stage{display:flex;justify-content:center;padding:16px}
-  canvas{display:block;background:#fff;box-shadow:0 1px 8px rgba(0,0,0,.18);max-width:100%;height:auto}
-</style></head><body><div id="stage"></div>
-<script type="module">
-try {
-  const pdfjs = await import("/pdfjs/build/pdf.mjs");
-  pdfjs.GlobalWorkerOptions.workerSrc = "/pdfjs/build/pdf.worker.mjs";
-  const doc = await pdfjs.getDocument({
-    url: "/file.pdf",
-    cMapUrl: "/pdfjs/cmaps/",
-    cMapPacked: true,
-    standardFontDataUrl: "/pdfjs/standard_fonts/",
-  }).promise;
-  window.__pages = doc.numPages;
-  if (${pageNumber} > doc.numPages) throw new Error("This PDF has " + doc.numPages + " page" + (doc.numPages === 1 ? "" : "s") + ".");
-  const page = await doc.getPage(${pageNumber});
-  const base = page.getViewport({ scale: 1 });
-  const viewport = page.getViewport({ scale: Math.min(2.5, 1000 / base.width) });
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.ceil(viewport.width);
-  canvas.height = Math.ceil(viewport.height);
-  document.getElementById("stage").append(canvas);
-  await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
-  window.__ready = true;
-} catch (error) {
-  window.__error = error?.message ?? String(error);
-}
-</script></body></html>`;
-}
-
 async function screenshotPdf(request: VisualRequest): Promise<VisualShot> {
-  const data = documentData(request, "PDF");
-  const pageNumber = request.page ?? 1;
-  return withBrowserPage(
-    pdfViewer(pageNumber),
-    {
-      width: 1060,
-      resources: { "/file.pdf": { contentType: "application/pdf", bytes: data } },
-      roots: { "/pdfjs/": pdfjsRoot() },
-      waitFor: "window.__ready === true || !!window.__error",
-    },
-    async ({ page, errors }) => {
-      const failure = await page.evaluate(() => (window as unknown as { __error?: string }).__error);
-      if (failure) throw new VisualError(capitalize(failure));
-      const canvas = page.locator("#stage canvas");
-      const box = await canvas.boundingBox();
-      const png = await canvas.screenshot({ type: "png" });
-      const pages = await page.evaluate(() => (window as unknown as { __pages?: number }).__pages ?? 1);
-      return {
-        png: new Uint8Array(png),
-        width: Math.round(box?.width ?? 1000),
-        height: Math.round(box?.height ?? 1400),
-        label: `page ${pageNumber} of ${pages}`,
-        errors,
-      };
-    },
-  );
-}
-
-function docxViewer(): string {
-  return `<!doctype html><html><head><meta charset="utf-8">
-<style>
-  html,body{margin:0;background:#e9e9ec}
-  #doc{display:flex;justify-content:center;padding:16px}
-</style></head><body><div id="doc"></div>
-<script src="/vendor/jszip.min.js"></script>
-<script src="/vendor/docx-preview.js"></script>
-<script>
-(async () => {
-  try {
-    const buf = await (await fetch("/file.docx")).arrayBuffer();
-    await docx.renderAsync(buf, document.getElementById("doc"), null, {
-      className: "docx",
-      inWrapper: true,
-      breakPages: true,
-      renderHeaders: true,
-      renderFooters: true,
-      ignoreWidth: false,
-      ignoreHeight: false,
-    });
-    window.__pages = document.querySelectorAll("#doc .docx-wrapper > section.docx").length;
-    window.__ready = true;
-  } catch (error) {
-    window.__error = error?.message ?? String(error);
-  }
-})();
-</script></body></html>`;
+  return screenshotPage("pdf", documentData(request, "PDF"), request.page ?? 1);
 }
 
 async function screenshotDocx(request: VisualRequest): Promise<VisualShot> {
-  const data = documentData(request, "Word file");
-  const pageNumber = request.page ?? 1;
-  return withBrowserPage(
-    docxViewer(),
-    {
-      width: 1000,
-      resources: {
-        "/file.docx": {
-          contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          bytes: data,
-        },
-        "/vendor/jszip.min.js": { contentType: "text/javascript", file: jszipFile() },
-        "/vendor/docx-preview.js": { contentType: "text/javascript", file: docxPreviewFile() },
-      },
-      waitFor: "window.__ready === true || !!window.__error",
-    },
-    async ({ page, errors }) => {
-      const failure = await page.evaluate(() => (window as unknown as { __error?: string }).__error);
-      if (failure) throw new VisualError(capitalize(failure));
-      const pages = await page.evaluate(() => (window as unknown as { __pages?: number }).__pages ?? 0);
-      if (!pages) throw new VisualError("The Word file rendered no pages.");
-      if (pageNumber > pages) throw new VisualError(`This Word file has ${pages} page${pages === 1 ? "" : "s"}.`);
-      const section = page.locator("#doc .docx-wrapper > section.docx").nth(pageNumber - 1);
-      const box = await section.boundingBox();
-      const png = await section.screenshot({ type: "png" });
-      return {
-        png: new Uint8Array(png),
-        width: Math.round(box?.width ?? 816),
-        height: Math.round(box?.height ?? 1056),
-        label: `page ${pageNumber} of ${pages}`,
-        errors,
-      };
-    },
-  );
+  return screenshotPage("docx", documentData(request, "Word file"), request.page ?? 1);
 }
 
 const columnName = (n: number): string => (n <= 0 ? "" : columnName(Math.floor((n - 1) / 26)) + String.fromCharCode(65 + ((n - 1) % 26)));
@@ -286,5 +167,3 @@ async function screenshotXlsx(request: VisualRequest): Promise<VisualShot> {
     errors: result.errors,
   };
 }
-
-const capitalize = (text: string) => (text ? text[0]!.toUpperCase() + text.slice(1) : text);

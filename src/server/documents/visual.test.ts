@@ -4,12 +4,14 @@ import type { ModelMessage } from "ai";
 import { injectScreenshots, MAX_SHOTS_PER_TURN } from "../tools/screenshots.js";
 import type { VisualShot } from "./visual.js";
 import { createDocx } from "./docx.js";
-import { closeRenderer, htmlToPdf, rendererAvailable } from "./render.js";
+import { startTestWorker } from "../../browser/test-worker.js";
+import { htmlToPdf } from "./render.js";
 import { VisualError, screenshotArtifact } from "./visual.js";
 import { createXlsx } from "./xlsx.js";
 
-// Close Chromium so its child process does not keep the test runner alive until the idle timer fires.
-after(closeRenderer);
+// Screenshots come from the browser worker; this one runs in the test process. Closing it also closes Chromium.
+const worker = await startTestWorker();
+after(worker.close);
 
 const PNG = [137, 80, 78, 71];
 const isPng = (bytes: Uint8Array) => PNG.every((value, i) => bytes[i] === value);
@@ -58,7 +60,7 @@ test("the per-reply screenshot budget is small enough to bound image tokens", ()
   assert.ok(MAX_SHOTS_PER_TURN >= 3 && MAX_SHOTS_PER_TURN <= 10);
 });
 
-test("visual checks render web, PDF, Word, and spreadsheet artifacts", { skip: !rendererAvailable() && "Chromium is not installed" }, async () => {
+test("visual checks render web, PDF, Word, and spreadsheet artifacts", { skip: !worker.available && "Chromium is not installed" }, async () => {
   const html = await screenshotArtifact({ kind: "html", title: "Page", content: "<style>body{padding:24px}</style><h1>Hello</h1><p>World</p>" });
   assert.ok(isPng(html.png));
   assert.ok(html.width > 100 && html.height > 40 && html.height < 1800);

@@ -26,6 +26,7 @@ okaychat is a self-hosted AI chat app meant to replace LibreChat and Open WebUI.
 | Math / diagrams | `remark-math` + KaTeX, Mermaid, both lazy-loaded on first use | Chat Markdown renders LaTeX and ```` ```mermaid ```` blocks. See `docs/research/code-blocks.md` |
 | Generative UI | `generative-frame` (spec mode + sandboxed widgets) | Both renderers, streaming, render reports for repair. See `docs/research/generative-ui.md` |
 | Files | `unpdf` (PDF), `mammoth` (DOCX) | Pure JS, no native deps |
+| Browser worker | Separate `browser` container (`src/browser/`): Playwright Chromium + Scrapling, egress proxy, per-uid firewall | Keeps Chromium and untrusted pages away from app data and secrets. See `docs/research/browser-worker.md` |
 | Images | Codex CLI, AI SDK image providers (`@ai-sdk/xai`, `black-forest-labs`, `fal`, `replicate`, `togetherai` plus openai/google) | Small packages on the same provider-utils. See `docs/research/image-generation.md` |
 | Web | `linkedom` + `@mozilla/readability` + `turndown`; SearXNG sidecar for search | Free, no keys. See `docs/research/web-search.md` |
 | Theming | Port of T3Code appearance settings (MIT) | Required by the product brief |
@@ -53,12 +54,12 @@ src/server/
   quota.ts            Per-user storage quota: used-byte SQL, limits, assertStorage for every write path
   attachment-storage.ts Materializes legacy/saved temporary inline files without changing history
   public-fetch.ts     Address-checked fetch for user/model-chosen URLs: pinned public DNS, revalidated redirects, body caps
-  egress-proxy.ts     Loopback HTTP/CONNECT proxy with the same address check, for tools that connect on their own (Scrapling)
+  browser.ts          Client for the browser worker: job calls, health, the worker token the app generates
   skill-fetch.ts      Skill-source HTTP transport on top of public-fetch: port, HTTPS-downgrade, and token safeguards
-  export.ts           Chat export (Markdown, PDF via the shared Chromium)
+  export.ts           Chat export (Markdown, PDF via the browser worker)
   library.ts          Library: persistent uploads, sandbox outputs, generated images, latest artifacts, skill packages; owned previews/deletes
-  documents/          PDF (Chromium), DOCX creation + OOXML editing, XLSX read/write/preview
-  codex.ts            Codex CLI login (device code) and per-run CODEX_HOME with encrypted credentials
+  documents/          PDF (browser worker), DOCX creation + OOXML editing, XLSX read/write/preview
+  codex.ts            Codex CLI login (device code), per-run CODEX_HOME with encrypted credentials, token refresh for chat
   llm.ts              Model factory per wire format, cache breakpoints, OpenCode headers
   catalog/            models.dev catalog + provider connections (encrypted keys)
   mcp/                MCP connection manager, OAuth provider, storage
@@ -76,6 +77,8 @@ src/web/
   theme/              T3Code theme engine port (see its README); bundled-fonts.ts lists the shipped font families; depth.css holds the depth utilities
   fonts/              Bundled Liberation TTFs and their CSS (see docs/research/bundled-fonts.md)
   state/              zustand stores (data, appearance, fonts, thread meta); appearance-sync.ts handles account cache and outbox
+src/browser/          Browser worker (own container): job server, Playwright renderer and viewers, Scrapling client, egress proxy
+docker/               SearXNG settings, browser worker entrypoint and firewall
 sandbox/              Code sandbox container: runner.py (stdlib HTTP service), Dockerfile, pinned requirements.txt
 src/shared/types.ts   Types shared by both sides
 src/shared/appearance.ts  Appearance schema and shared types
@@ -106,7 +109,8 @@ docs/                 Reusable documentation (see below)
 - `docs/research/skills.md`: the Agent Skills format, sources, tools, approval flow, and caching.
 - `docs/research/account-profile.md`: profile photo validation, resizing, storage, and private serving.
 - `docs/research/step-limits.md`: independent agent/search limits and shared delegated-search budgets.
-- `docs/research/code-sandbox.md`: the `run_code` sandbox container, its safeguards, and the runner API.
+- `docs/research/code-sandbox.md`: the `run_code` sandbox container, its per-run jail, installed tools, and the runner API.
+- `docs/research/browser-worker.md`: the browser worker container, its job API, token, egress firewall, and rendering policies.
 - `docs/research/storage-quota.md`: what counts against the per-user storage quota and where it is enforced.
 - `docs/research/security.md`: threat model, the controls per area, and the known residual risks. Read before changing auth, outbound requests, rendering, or tool approval.
 - `docs/research/mobile-pwa.md`: manifest, service worker, install requirements, safe areas, touch sizing, drawer gestures.
@@ -135,9 +139,9 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 - models.dev lists embedding, rerank, and speech models with text output and most image models with text+image output. The chat model list drops models whose output is anything but text, and ids/families matching `NON_CHAT_ID` in `catalog/models-dev.ts` (live and custom-provider lists too).
 - OpenCode Go ids missing from models.dev inherit the wire format of a sibling in the same family (`qwen3.6-plus` uses Anthropic like `qwen3.8-max`).
 - Documents are artifacts with bytes: `content` is the HTML/JSON source and `data`/`size` the built file. `edit_document` with source edits rebuilds; with `ops` it edits the binary and clears the source so a rebuild cannot undo it. Imported attachments are only editable with `ops`.
-- The PDF renderer never starts at boot: `documents/render.ts` launches Chromium on the first job, shares it, and closes it 60 s after the last one. Every request except the injected document is aborted, so model HTML cannot reach the network or `file://`.
+- Chromium runs only in the browser worker container (`src/browser/`), never in the app. In the container each part is its own user: the job API (`jobs`, holds the token, no browser), one render slot per concurrent job (exits after each job), the fetch server with Scrapling over stdio (`scrape`), and the egress proxy (`egress`); the firewall allows each only the connections in `docs/research/browser-worker.md`. `npm run dev` runs all of it in one process (role `all`). It starts on the first job, shares one process across fresh contexts, and closes 60 s after the last one. Renders are offline (only the document and staged files) except HTML/React previews, which may load `FRAME_NETWORK_HOSTS` through the worker's egress proxy. A timed-out or abandoned job has its context closed (browser killed if wedged) before its slot is released. The app talks to it through `browser.ts` with a token it generates into `OKAYCHAT_BROWSER_TOKEN_FILE`; there is no `.env` entry. See `docs/research/browser-worker.md`.
 - `tsconfig.server.json` includes the DOM lib because `linkedom`/`@xmldom/xmldom` types refer to `Element`/`Document`. Use the xmldom aliases (`XmlElement`, `Document as XmlDocument`) in OOXML code.
-- `view_artifact` renders in the shared Chromium and returns a screenshot to the model. The image is injected once by `prepareStep` as a synthetic user message, never inside the tool result (OpenAI-compatible APIs stringify tool content). Only vision models get the tool, six screenshots per reply, and nothing image-related is persisted. PDF pages come from pdf.js, DOCX from docx-preview, XLSX from the preview JSON.
+- `view_artifact` renders in the browser worker and returns a screenshot to the model. The image is injected once by `prepareStep` as a synthetic user message, never inside the tool result (OpenAI-compatible APIs stringify tool content). Only vision models get the tool, six screenshots per reply, and nothing image-related is persisted. PDF pages come from pdf.js, DOCX from docx-preview, XLSX from the preview JSON.
 - DuckDuckGo HTML endpoints return 202 (bot wall) from many servers and Bing serves junk to scrapers. Search goes SearXNG, then Brave HTML, then DuckDuckGo lite.
 - Context fill uses the last step's input + output tokens, not the turn total.
 - `generate_image` offers every connected image service the account left on. OpenAI/Gemini/xAI/Together reuse the chat provider connection; image-only keys are `image-<service>` provider connections. With several services the tool requires a `service` and tells the model to ask the user first. Generated images may be JPEG/WebP/GIF: `images.mime` is authoritative, the file name stays `<id>.png`. See `docs/research/image-generation.md`.
@@ -173,7 +177,7 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 - Storage is quotaed per user (`src/server/quota.ts`, `docs/research/storage-quota.md`): uploads, artifact versions (source + built bytes), generated images, sandbox outputs, fonts, avatar, memories, project originals/text, and skill metadata/bodies/references. Replacement writes charge net growth. `assertStorage` throws `QuotaError` (HTTP 413 on routes, a tool error for the model). Default limit `OKAYCHAT_STORAGE_LIMIT` (1 GiB), per-user override in nullable `users.storage_limit` set via the admin API. `/api/storage` returns `{ used, limit, defaultLimit }`; the chat shell warns from 90% (`StorageNotice`).
 - Attachments are persistent original bytes in `uploads`, independent of sandbox configuration; no age pruning. Image/PDF data URL parts remain unchanged, alongside a `file_id` header. Storage failures block sends. Temporary extraction/storage stays temporary; explicitly saving a temporary chat materializes inline files. An executable, transactional migration does the same for legacy inline attachments up to 25 MiB, without rewriting history or re-creating Library-deleted files on restart. Upload originals survive chat/project deletion until Library/account deletion. The Library includes sandbox outputs and complete skill ZIP packages. See the storage/library docs.
 - Auth hardening (`auth.ts`, `index.ts`): `hono/csrf` guards every `/api/*` write, so cross-site form posts (including login) get 403. Failed logins are limited in memory per email (10) and per socket + last `X-Forwarded-For` hop (50) for 15 minutes. Unknown emails still run scrypt against a dummy hash. Sign-up hashes the password before reading the user count, so concurrent first sign-ups cannot both become admin. The MCP OAuth redirect origin is `OKAYCHAT_PUBLIC_URL`, else learned per user from that user's own signed-in requests, so a forged `Host` only misdirects the sender's own codes. The OAuth callback page escapes all text. Unexpected 500s return a generic message with a log reference; throw `HTTPException` for messages the user should see. Every response gets `frame-ancestors 'self'`, `nosniff`, and a referrer policy; a script CSP is impossible because srcdoc artifact frames inherit it. `/api/*` bodies are capped at 100 MB, and `PATCH /settings` drops unknown keys. Emails are stored lowercase; login matches `lower(email)` for older mixed-case rows. The Docker image starts as root only to chown `/data`, then runs as `node`.
-- Outbound requests to URLs a user or model chose go through `publicFetch` (`public-fetch.ts`): DNS is checked at connection time, every redirect is revalidated, and private, loopback, link-local, and tailnet ranges are refused. This covers `web_fetch`, non-admin provider base URLs (`Connection.guarded`), image-model lists, and non-admin MCP servers (`mcpFetch`). Admins may use local hosts (Ollama, LAN MCP servers), and only admins' stdio servers run. Scrapling connects through `egress-proxy.ts`, which applies the same check to every hop (its Chromium still bypasses proxies for loopback). Tests that point a mock provider at a local or mocked URL must make the user an admin. Changing a provider base URL or MCP URL to another origin requires re-entering the key/header values and clears MCP OAuth tokens, so a hijacked session cannot redirect stored secrets.
+- Outbound requests to URLs a user or model chose go through `publicFetch` (`public-fetch.ts`): DNS is checked at connection time, every redirect is revalidated, and private, loopback, link-local, and tailnet ranges are refused. This covers `web_fetch`, non-admin provider base URLs (`Connection.guarded`), image-model lists, and non-admin MCP servers (`mcpFetch`). Admins may use local hosts (Ollama, LAN MCP servers), and only admins' stdio servers run. Scrapling and the worker's Chromium connect only through the worker's egress proxy (`src/browser/egress-proxy.ts`), which applies the same check to every hop and picks a policy by the connecting socket's uid; the worker's firewall blocks everything else. Tests that point a mock provider at a local or mocked URL must make the user an admin. Changing a provider base URL or MCP URL to another origin requires re-entering the key/header values and clears MCP OAuth tokens, so a hijacked session cannot redirect stored secrets.
 - Model-written HTML never gets an open network. Artifact frames carry a meta CSP (`artifact-frame.ts`: scripts, styles, fonts, images, and connections only from `FRAME_NETWORK_HOSTS`, no form posts), and the server renderer additionally blocks WebSockets, WebRTC, service workers, and DNS for other hosts. See `docs/research/documents.md`.
 - Abuse limits: 4 concurrent chat turns per account (`reserveTurn` in `chat.ts`), 50 schedules, 30 MCP servers. Users change their password under Account (current password required, 10 failures per 15 min, other sessions revoked) and can sign out other devices; `c.get("session")` is the current session's token hash.
 - DB migrations are append-only SQL or synchronous functions, each wrapped with its own version update in one transaction. `tx()` uses savepoints so multi-skill imports and nested storage helpers roll back atomically.
@@ -182,7 +186,7 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 
 | Command | What it does |
 | --- | --- |
-| `npm run dev` | Server (tsx watch, 127.0.0.1:8787) + Vite (tailnet IP:5173, proxies `/api`) |
+| `npm run dev` | Server (tsx watch, 127.0.0.1:8787) + Vite (tailnet IP:5173, proxies `/api`) + browser worker (127.0.0.1:8791, own process, no firewall) |
 | `npm run typecheck` | Both tsconfigs |
 | `npm test` | Node tests (appearance, account pictures, storage quota, tool limits, library, memory, skills, sandbox, and streamed chat integration) |
 | `npm run build` / `npm start` | Production build and server |
@@ -192,7 +196,7 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 Local dev needs `.env` with `OKAYCHAT_SECRET` (see `.env.example`). Web tools in dev need two helpers, or search fails (Brave 429, DuckDuckGo 202 from this host):
 
 - SearXNG container `okaychat-dev-searxng` on `127.0.0.1:8888` (`OKAYCHAT_SEARXNG_URL`). Command in `.env.example`.
-- Scrapling via `scripts/dev-scrapling.sh`, which runs it from the `okaychat:latest` image (`OKAYCHAT_SCRAPLING_COMMAND`). Build the image first.
+- Scrapling via `scripts/dev-scrapling.sh`, which runs it from the `okaychat-browser:latest` image (`OKAYCHAT_SCRAPLING_COMMAND`, read by the dev browser worker). Build it first: `docker build --target browser -t okaychat-browser:latest .`.
 
 Code execution in dev: set `OKAYCHAT_SANDBOX_TOKEN` and `OKAYCHAT_SANDBOX_URL=http://127.0.0.1:8790` in `.env`, then run `scripts/dev-sandbox.sh` (container `okaychat-dev-sandbox`). Unlike compose, the dev sandbox has internet access.
 

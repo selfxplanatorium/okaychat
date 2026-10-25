@@ -120,3 +120,15 @@ Unverified: the Chromium download failed in the sandbox, so the browser layer si
 - Scrapling: BSD-3-Clause. Verified.
 - Playwright: not checked here (typically Apache-2.0). Unverified.
 - Chromium: not checked here. Unverified.
+
+## In okaychat (2026-10-25)
+
+Scrapling runs in the browser worker container, not the app: `scrapling mcp --http --host 127.0.0.1 --port 8092`
+as its own user (`scrape`), with a random `SCRAPLING_MCP_AUTH_TOKEN` per container start that only the job server
+knows. The job server calls `make_request`, then `browser_fetch_once` when `OKAYCHAT_SCRAPLING_BROWSER=true`,
+always with `proxy` set to the worker's egress proxy; the worker firewall rejects any connection that does not go
+through it. Verified in the integration suite: example.com through Scrapling works, while the fixture's private
+address, a hostname resolving to it, loopback, `0x7f000001`, `[::1]`, and the compose service names return no page
+and leave the fixture's counters at zero. The app reaches it as `POST /v1/fetch` (`src/server/tools/scrapling.ts`).
+In dev the local worker starts it over stdio (`OKAYCHAT_SCRAPLING_COMMAND`). Node playwright-core 1.64.0 and
+Scrapling's Python playwright 1.64.0 use the same Chromium revision (1248), so the image has one browser.

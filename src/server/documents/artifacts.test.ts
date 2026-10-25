@@ -9,10 +9,11 @@ process.env.OKAYCHAT_DATA_DIR = dataDir;
 process.env.OKAYCHAT_SECRET = "documents-test-secret-only-not-for-production";
 const { db } = await import("../db.js");
 const { artifactData, artifactTools, artifactVersions, artifactsInCurrentTurn } = await import("../artifacts.js");
-const { closeRenderer, rendererAvailable } = await import("./render.js");
+const { startTestWorker } = await import("../../browser/test-worker.js");
+const worker = await startTestWorker();
 
 after(async () => {
-  await closeRenderer();
+  await worker.close();
   rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -96,7 +97,7 @@ test("import_document copies an upload and refuses unknown formats", async () =>
   await assert.rejects(run("import_document", { id: "x", title: "x" }), /file_id or name/);
 });
 
-test("view_artifact is offered only to vision models and stores one screenshot per call", { skip: !rendererAvailable() && "Chromium is not installed" }, async () => {
+test("view_artifact is offered only to vision models and stores one screenshot per call", { skip: !worker.available && "Chromium is not installed" }, async () => {
   const blind = artifactTools(THREAD, USER, { canViewImages: false });
   assert.equal(blind.view_artifact, undefined);
 

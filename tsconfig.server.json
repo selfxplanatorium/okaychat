@@ -9,6 +9,6 @@
     "rootDir": "src",
     "verbatimModuleSyntax": false
   },
-  "include": ["src/server", "src/shared"],
-  "exclude": ["src/**/*.test.ts"]
+  "include": ["src/server", "src/shared", "src/browser"],
+  "exclude": ["src/**/*.test.ts", "src/browser/test-worker.ts"]
 }
