@@ -47,7 +47,7 @@ import {
   type ReactElement,
   type RefObject,
 } from "react";
-import { isAnonymousChat, useChatPrivacyStore } from "@/state/chat-privacy";
+import { isTemporaryChat, useChatPrivacyStore } from "@/state/chat-privacy";
 import { getActiveModel, useData } from "@/state/data";
 import { api } from "@/lib/api";
 import { exportThread } from "@/lib/thread-export";
@@ -242,7 +242,7 @@ export const useThreadListGroups = (searchQuery = "") => {
       .filter(({ id }) => {
         const projectId = custom(id)?.projectId;
         return (
-          !isAnonymousChat(itemsById.get(id)?.remoteId) &&
+          !isTemporaryChat(itemsById.get(id)?.remoteId) &&
           // A chat created here has no custom metadata yet and belongs to this project.
           (!activeProject || projectId === undefined || projectId === activeProject) &&
           (!query ||

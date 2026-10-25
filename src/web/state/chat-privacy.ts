@@ -6,14 +6,14 @@ export interface ChatPrivacy {
   personalized: boolean;
 }
 const NORMAL: ChatPrivacy = { temporary: false, personalized: true };
-const ANONYMOUS: ChatPrivacy = { temporary: true, personalized: false };
+const TEMPORARY: ChatPrivacy = { temporary: true, personalized: false };
 interface PrivacyState {
   byId: Record<string, ChatPrivacy>;
   set: (id: string, privacy: ChatPrivacy) => void;
   bind: (localId: string, remoteId: string) => void;
 }
 
-/** Anonymous choices exist only in this page's memory, never browser storage. */
+/** Temporary choices exist only in this page's memory, never browser storage. */
 export const useChatPrivacyStore = create<PrivacyState>((set, get) => ({
   byId: {},
   set: (id, privacy) => set((state) => ({ byId: { ...state.byId, [id]: privacy } })),
@@ -23,14 +23,14 @@ export const useChatPrivacyStore = create<PrivacyState>((set, get) => ({
   },
 }));
 
-export const isAnonymousChat = (id: string | null | undefined) => !!id?.startsWith("tmp_");
+export const isTemporaryChat = (id: string | null | undefined) => !!id?.startsWith("tmp_");
 export function chatPrivacyFor(item: { id: string; remoteId?: string | undefined }): ChatPrivacy {
   const choices = useChatPrivacyStore.getState().byId;
-  return choices[item.remoteId ?? ""] ?? choices[item.id] ?? (isAnonymousChat(item.remoteId) ? ANONYMOUS : NORMAL);
+  return choices[item.remoteId ?? ""] ?? choices[item.id] ?? (isTemporaryChat(item.remoteId) ? TEMPORARY : NORMAL);
 }
 
 export function useChatPrivacy(): ChatPrivacy {
   const id = useAuiState((s) => s.threadListItem.id);
   const remoteId = useAuiState((s) => s.threadListItem.remoteId);
-  return useChatPrivacyStore((state) => state.byId[remoteId ?? ""] ?? state.byId[id] ?? (isAnonymousChat(remoteId) ? ANONYMOUS : NORMAL));
+  return useChatPrivacyStore((state) => state.byId[remoteId ?? ""] ?? state.byId[id] ?? (isTemporaryChat(remoteId) ? TEMPORARY : NORMAL));
 }

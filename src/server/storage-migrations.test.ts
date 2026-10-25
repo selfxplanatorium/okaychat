@@ -24,6 +24,7 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       db.exec("ALTER TABLE images DROP COLUMN mime");
       db.exec("ALTER TABLE threads DROP COLUMN branched_from");
       db.exec("ALTER TABLE messages DROP COLUMN bytes");
+      db.prepare("INSERT INTO server_settings (key, value) VALUES ('prompt:anonymous', ?)").run("Keep this temporary chat out of history.");
       db.exec('PRAGMA user_version = 14');
       db.close();`);
     mkdirSync(path.join(directory, "images", "legacy"), { recursive: true });
@@ -35,10 +36,12 @@ test("integrated migrations are repeatable and backfill legacy generated image s
           skills: db.prepare("SELECT count(*) AS n FROM skills").get().n,
           sandbox: db.prepare("SELECT count(*) AS n FROM sandbox_files").get().n,
           uploads: db.prepare("SELECT count(*) AS n FROM uploads").get().n,
+          temporaryPrompt: db.prepare("SELECT value FROM server_settings WHERE key='prompt:temporary'").get().value,
+          oldPromptCount: db.prepare("SELECT count(*) AS n FROM server_settings WHERE key='prompt:anonymous'").get().n,
           original: JSON.parse(db.prepare("SELECT content FROM messages WHERE id='m1'").get().content).parts[0].url,
           users: db.prepare("SELECT count(*) AS n FROM users").get().n
         })); db.exec("DELETE FROM uploads"); db.close();`));
-      assert.deepEqual(result, { image: 42, skills: 0, sandbox: 0, users: 1, uploads: i === 0 ? 1 : 0, original: "data:image/png;base64,bGVnYWN5LWZpbGU=" });
+      assert.deepEqual(result, { image: 42, skills: 0, sandbox: 0, users: 1, uploads: i === 0 ? 1 : 0, temporaryPrompt: "Keep this temporary chat out of history.", oldPromptCount: 0, original: "data:image/png;base64,bGVnYWN5LWZpbGU=" });
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

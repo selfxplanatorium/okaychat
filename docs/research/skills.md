@@ -101,10 +101,10 @@ skill; `folderPaths` excludes the whole subtree when collecting a skill's files.
 | `install_skill` | copies one skill from a source | **yes** | replaces an installed skill of the same name |
 | `create_skill` | upserts a skill the model drafts | **yes** | `instructions` maps to the body; no frontmatter |
 
-Gating: skills exist only when the account preference is on, the chat is not anonymous (`tmp_`
+Gating: skills exist only when the account preference is on, the chat is not temporary (`tmp_`
 threads), and the model can call tools. Mutators are additionally absent from delegate tool sets
 (they also require approval, and nobody is there to approve). The "Create skill from this chat"
-menu item is shown only when the preference is on and the chat is not anonymous.
+menu item is shown only when the preference is on and the chat is not temporary.
 
 ### Caching
 
@@ -146,7 +146,7 @@ Skill edits from the UI send the whole record; an update without `files` clears 
 
 `src/server/skills.test.ts` (parsing, validation, isolation, gating, revocation, import, source
 records) and `src/server/chat-skills.test.ts` (mock-provider turnStream integration: index
-injection, stable system prefixes, tool gating, approval flow, anonymous exclusion). Tests also cover
+injection, stable system prefixes, tool gating, approval flow, temporary exclusion). Tests also cover
 quota accounting/reclamation, atomic imports, renames, nested/reference paths, ZIP expansion limits,
 mocked remote installs and revocation during download. `skill-fetch.test.ts` exercises private-address
 rejection, DNS pinning, redirect validation, and cross-origin token stripping without live network access.

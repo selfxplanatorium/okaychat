@@ -21,7 +21,7 @@ import { WidgetInstructions, widgets } from "@/components/genui/toolkit";
 import { getActiveModel, selectedThreadKey, threadsPath, useData } from "@/state/data";
 import { useChatModel } from "@/state/thread-meta";
 import { StoredImageAttachmentAdapter, DocumentAttachmentAdapter, CodeAttachmentAdapter, BinaryAttachmentAdapter } from "./attachments";
-import { chatPrivacyFor, isAnonymousChat, useChatPrivacy, useChatPrivacyStore } from "@/state/chat-privacy";
+import { chatPrivacyFor, isTemporaryChat, useChatPrivacy, useChatPrivacyStore } from "@/state/chat-privacy";
 import { chatSearchFor, useChatSearch, useChatSearchStore } from "@/state/chat-search";
 
 /** Reads the answer, not its Markdown: code blocks, link targets, and formatting marks are dropped. */
@@ -83,35 +83,35 @@ const threadListAdapter: RemoteThreadListAdapter = {
     return { remoteId: thread.id, externalId: undefined };
   },
   async rename(remoteId, title) {
-    if (isAnonymousChat(remoteId)) return;
+    if (isTemporaryChat(remoteId)) return;
     await api(`/threads/${remoteId}`, { method: "PATCH", json: { title } });
   },
   async updateCustom(remoteId, custom) {
-    if (isAnonymousChat(remoteId)) return;
+    if (isTemporaryChat(remoteId)) return;
     const { pinned, projectId } = (custom ?? {}) as Partial<ThreadCustom>;
     // Undefined fields drop out of the JSON body, so an unknown project is left alone.
     await api(`/threads/${remoteId}`, { method: "PATCH", json: { pinned, projectId } });
   },
   async archive(remoteId) {
-    if (isAnonymousChat(remoteId)) return;
+    if (isTemporaryChat(remoteId)) return;
     await api(`/threads/${remoteId}`, { method: "PATCH", json: { status: "archived" } });
   },
   async unarchive(remoteId) {
-    if (isAnonymousChat(remoteId)) return;
+    if (isTemporaryChat(remoteId)) return;
     await api(`/threads/${remoteId}`, { method: "PATCH", json: { status: "regular" } });
   },
   async delete(remoteId) {
-    if (isAnonymousChat(remoteId)) return;
+    if (isTemporaryChat(remoteId)) return;
     await api(`/threads/${remoteId}`, { method: "DELETE" });
   },
   async fetch(remoteId) {
-    if (isAnonymousChat(remoteId)) return { remoteId, status: "regular", title: "Anonymous chat" };
+    if (isTemporaryChat(remoteId)) return { remoteId, status: "regular", title: "Temporary chat" };
     const t = await api<ThreadSummary>(`/threads/${remoteId}`);
     if (t.modelRef) useData.getState().rememberThreadModels({ [t.id]: t.modelRef });
     return { remoteId: t.id, status: t.status, title: t.title ?? undefined, lastMessageAt: new Date(t.updatedAt), custom: threadCustom(t) };
   },
   async generateTitle(remoteId, messages) {
-    if (isAnonymousChat(remoteId)) return createAssistantStream(async (controller) => { controller.appendText("Anonymous chat"); });
+    if (isTemporaryChat(remoteId)) return createAssistantStream(async (controller) => { controller.appendText("Temporary chat"); });
     const text = messages
       .filter((m) => m.role === "user")
       .flatMap((m) => m.content)
@@ -135,7 +135,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
         withFormat: (fmt) => ({
           async load() {
             const { remoteId } = aui.threadListItem.getState();
-            if (!remoteId || isAnonymousChat(remoteId)) return { messages: [] };
+            if (!remoteId || isTemporaryChat(remoteId)) return { messages: [] };
             type Row = { id: string; parent_id: string | null; format: string; content: unknown };
             const path = `/threads/${remoteId}/messages`;
             const rows = await (takePrefetched<Row[]>(path) ?? api<Row[]>(path));
@@ -143,7 +143,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
           },
           async append(item) {
             const { remoteId } = await aui.threadListItem.initialize();
-            if (isAnonymousChat(remoteId)) return;
+            if (isTemporaryChat(remoteId)) return;
             await api(`/threads/${remoteId}/messages`, {
               method: "POST",
               json: { id: fmt.getId(item.message), parent_id: item.parentId, format: fmt.format, content: fmt.encode(item) },
@@ -151,7 +151,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
           },
           async update(item, localMessageId) {
             const { remoteId } = await aui.threadListItem.initialize();
-            if (isAnonymousChat(remoteId)) return;
+            if (isTemporaryChat(remoteId)) return;
             await api(`/threads/${remoteId}/messages`, {
               method: "POST",
               json: { id: localMessageId, parent_id: item.parentId, format: fmt.format, content: fmt.encode(item) },
@@ -218,7 +218,7 @@ function useThreadTransport() {
     const storage = createResumableSessionStorage({
       key: () => {
         const remoteId = aui.threadListItem.getState().remoteId;
-        return remoteId && !isAnonymousChat(remoteId) ? `okaychat:stream:${remoteId}` : undefined;
+        return remoteId && !isTemporaryChat(remoteId) ? `okaychat:stream:${remoteId}` : undefined;
       },
     });
     return new AssistantChatTransport({
@@ -241,11 +241,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     if (linked !== null) {
       url.searchParams.delete("thread");
       history.replaceState(history.state, "", url.pathname + url.search + url.hash);
-      if (linked && !isAnonymousChat(linked)) return linked;
+      if (linked && !isTemporaryChat(linked)) return linked;
     }
     try {
       const saved = sessionStorage.getItem(selectionKey);
-      return saved && !isAnonymousChat(saved) ? saved : undefined;
+      return saved && !isTemporaryChat(saved) ? saved : undefined;
     } catch {
       return undefined;
     }
@@ -255,7 +255,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     onThreadIdChange: (id) => {
       if (!id) useData.getState().resetModel();
       try {
-        if (id && !isAnonymousChat(id)) sessionStorage.setItem(selectionKey, id);
+        if (id && !isTemporaryChat(id)) sessionStorage.setItem(selectionKey, id);
         else sessionStorage.removeItem(selectionKey);
       } catch {
         // Session storage may be disabled.

@@ -5,7 +5,7 @@ import type { AssistantMetadata, CompactionState, ThreadSummary, UsageRow } from
 import type { ModelInfo } from "@shared/types";
 import { api } from "@/lib/api";
 import { useActiveModel } from "./data";
-import { isAnonymousChat } from "./chat-privacy";
+import { isTemporaryChat } from "./chat-privacy";
 
 interface ThreadMeta {
   memoryDisabled: boolean;
@@ -26,7 +26,7 @@ const batched = new Map<string, Promise<void>>();
 export const useThreadMetaStore = create<ThreadMetaState>((set) => ({
   byId: {},
   refresh: (threadId) => {
-    if (isAnonymousChat(threadId)) return Promise.resolve();
+    if (isTemporaryChat(threadId)) return Promise.resolve();
     let pending = batched.get(threadId);
     if (!pending) {
       pending = new Promise<void>((resolve) => setTimeout(resolve, 16)).then(async () => {

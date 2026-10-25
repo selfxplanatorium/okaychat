@@ -8,7 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
-import { isAnonymousChat } from "@/state/chat-privacy";
+import { isTemporaryChat } from "@/state/chat-privacy";
 import { useThreadMeta } from "@/state/thread-meta";
 import { useModelGroups } from "./ModelPicker";
 
@@ -62,7 +62,7 @@ export function PendingBranchRun() {
 export function BranchMenu() {
   const aui = useAui();
   const role = useAuiState((s) => s.message.role);
-  const anonymous = useAuiState((s) => isAnonymousChat(s.threadListItem.remoteId ?? s.threadListItem.id));
+  const temporary = useAuiState((s) => isTemporaryChat(s.threadListItem.remoteId ?? s.threadListItem.id));
   const groups = useModelGroups();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,8 +72,8 @@ export function BranchMenu() {
     return () => clearTimeout(timer);
   }, [error]);
 
-  // Anonymous chats have no stored history to fork.
-  if (anonymous) return null;
+  // Temporary chats have no stored history to fork.
+  if (temporary) return null;
 
   const branch = (modelRef?: string) => {
     const message = aui.message.getState();

@@ -41,9 +41,9 @@ The sandbox is scratch space, never the source of truth:
 - Each call is a new process: variables do not persist, files do — until the workspace is wiped (see Retention). Background processes end with the call.
 - Output keeps the first 48 KB and last 16 KB of each stream. Timeout default 60 s, max 300 s. Up to 4 runs at once; a run waits up to 30 s for a slot.
 - Stop in the chat calls `/cancel`, which kills the workspace's processes.
-- Attachments: every non-anonymous attachment is stored regardless of sandbox configuration (`/files/store`) and its header carries `file_id`; `input_files` copies it into the workspace. Saved outputs also return a `fileId` accepted by `input_files`, so a later run can restore their durable bytes after scratch expiry (using a safe basename). Images retain their original data URL message parts as well.
+- Attachments: every non-temporary attachment is stored regardless of sandbox configuration (`/files/store`) and its header carries `file_id`; `input_files` copies it into the workspace. Saved outputs also return a `fileId` accepted by `input_files`, so a later run can restore their durable bytes after scratch expiry (using a safe basename). Images retain their original data URL message parts as well.
 - Created or changed files come back with app download URLs (`/api/sandbox/:threadId/stored?path=` (scratch proxy fallback: `/files?path=`)). `toModelOutput` strips the URLs. Images render inline in the card.
-- Not offered to anonymous chats or sub-agents. Settings → General toggles it per user; it shows only when the server has `OKAYCHAT_SANDBOX_URL` and a 32+ character token.
+- Not offered to temporary chats or sub-agents. Settings → General toggles it per user; it shows only when the server has `OKAYCHAT_SANDBOX_URL` and a 32+ character token.
 
 ## Runner API
 

@@ -90,7 +90,7 @@ test("a title regenerated without text comes from the stored user messages", asy
   assert.equal(getThread("alice", "t1")!.title, "Plan a trip to Lisbon");
   assert.equal(getThread("alice", "t1")!.updatedAt > 1000, true, "appendMessage bumped it, not the title");
   assert.equal((await call("/threads/t9/title", { method: "POST", json: { text: "steal" } })).status, 404);
-  assert.deepEqual(await (await call("/threads/tmp_x/title", { method: "POST", json: { text: "x" } })).json(), { title: "Anonymous chat" });
+  assert.deepEqual(await (await call("/threads/tmp_x/title", { method: "POST", json: { text: "x" } })).json(), { title: "Temporary chat" });
 });
 
 test("markdown export contains the current branch's visible text only", async () => {
@@ -114,7 +114,7 @@ test("markdown export contains the current branch's visible text only", async ()
   assert.equal(await response.text(), "# Trip / plans: Ünïcode\n\n## You\n\n_Attachment: photo.png_\n\nWhat is this?\n\n## Assistant\n\nA **cat**.\n");
 });
 
-test("export checks ownership, anonymous ids, and the format", async () => {
+test("export checks ownership, temporary ids, and the format", async () => {
   assert.equal((await call("/threads/t9/export?format=markdown")).status, 404);
   assert.equal((await call("/threads/tmp_x/export?format=markdown")).status, 400);
   assert.equal((await call("/threads/t1/export?format=docx")).status, 400);

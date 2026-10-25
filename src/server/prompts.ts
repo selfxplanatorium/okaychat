@@ -60,11 +60,11 @@ When a layout matters, look at it before you call the work finished. view_artifa
 - One screenshot per call, at most {maxShots} per reply. The image is shown once; it is not repeated in later turns.
 - This tool is absent on non-vision models and servers without Chromium. Text-only artifacts (markdown, code) are read with read_artifact.`,
   },
-  anonymous: {
-    label: "Anonymous chat",
-    description: "Added to anonymous chats.",
+  temporary: {
+    label: "Temporary chat",
+    description: "Added to temporary chats.",
     placeholders: [],
-    defaultValue: "This is an anonymous chat. It is not saved in okaychat history and must never create or change saved memories. Do not claim that this hides the conversation from the selected model provider.",
+    defaultValue: "This is a temporary chat. It is not saved in okaychat history and must never create or change saved memories. Do not claim that this hides the conversation from the selected model provider.",
   },
   subagent: {
     label: "Sub-agent",

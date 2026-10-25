@@ -14,10 +14,10 @@ function Welcome() {
   const name = useData((s) => s.me?.name);
   // Re-picks only when the name arrives, so the line does not change on every render.
   const line = useMemo(() => pickWelcomeLine(name), [name]);
-  const text = privacy.temporary ? "Anonymous chat" : line;
+  const text = privacy.temporary ? "Temporary chat" : line;
   return (
     <div className="mb-6 flex flex-col items-center px-2 text-center max-md:my-auto">
-      {/* Keyed by the text, so switching to an anonymous chat writes the new line in. */}
+      {/* Keyed by the text, so switching to a temporary chat writes the new line in. */}
       <p key={text} className="text-2xl font-medium tracking-tight text-balance">
         <span className="sr-only">{text}</span>
         {text.split(" ").map((word, index) => (
@@ -30,7 +30,7 @@ function Welcome() {
         ))}
       </p>
       {/* Always mounted: the row opens from zero height, so the composer below glides
-          down (and back up) instead of jumping when anonymous mode toggles. */}
+          down (and back up) instead of jumping when temporary mode toggles. */}
       <div
         inert={!privacy.temporary}
         aria-hidden={!privacy.temporary}

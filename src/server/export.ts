@@ -58,7 +58,7 @@ export const exportRoutes = new Hono<AppEnv>().get("/threads/:id/export", async 
   const threadId = c.req.param("id");
   const format = c.req.query("format");
   if (format !== "markdown" && format !== "pdf") return c.json({ error: "Format must be markdown or pdf" }, 400);
-  if (isTemporaryThread(threadId)) return c.json({ error: "Anonymous chats are not stored" }, 400);
+  if (isTemporaryThread(threadId)) return c.json({ error: "Temporary chats are not stored" }, 400);
   const thread = getThread(userId, threadId);
   if (!thread) return c.json({ error: "Thread not found" }, 404);
   const title = thread.title?.trim() || "Chat";

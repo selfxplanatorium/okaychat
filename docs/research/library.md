@@ -11,12 +11,12 @@ existing stores; there is no duplicate catalog table.
 | `run_code` outputs | `sandbox_files.data` | Durable copied bytes | Owning thread and project |
 | Skills | `skills` + `skill_files` | Stored UTF-8 instructions, metadata and references | Account; conversation-created skills are generated, manual/source skills are uploaded |
 
-All queries restrict ownership, including thread joins and file routes. Anonymous chats produce no
+All queries restrict ownership, including thread joins and file routes. Temporary chats produce no
 Library entries. Explicitly saving one into normal history stores its inline attachments at that point.
 
 ## Attachment lifetime
 
-Every accepted non-anonymous attachment is stored independently of sandbox configuration. Images keep
+Every accepted non-temporary attachment is stored independently of sandbox configuration. Images keep
 their existing data URL parts, with an additional attachment header carrying the stored `file_id`.
 Native PDFs, extracted documents, text/code and the binary fallback also retain original bytes;
 storage failures block sending instead of being swallowed. Unsupported binary formats are made

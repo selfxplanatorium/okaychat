@@ -303,15 +303,15 @@ and Stop sending cancel with no checkpoint left. The dev server needed a restart
 before its new response header appeared; absence of a checkpoint alone does not
 imply a transport-cloning bug.
 
-## 8. Anonymous threads
+## 8. Temporary threads
 
-The top-right chat menu marks a new local thread anonymous in the in-memory `chat-privacy` store. `RemoteThreadListAdapter.initialize(localId)` binds it to a generated `tmp_` remote id without calling `/threads`. History load/append/update, remote metadata operations, title generation, selected-thread storage, and resumable checkpoints skip those ids. The sidebar filters them from its indexed rows. Reload mounts a fresh normal chat, not the discarded anonymous conversation.
+The top-right chat menu marks a new local thread temporary in the in-memory `chat-privacy` store. `RemoteThreadListAdapter.initialize(localId)` binds it to a generated `tmp_` remote id without calling `/threads`. History load/append/update, remote metadata operations, title generation, selected-thread storage, and resumable checkpoints skip those ids. The sidebar filters them from its indexed rows. Reload mounts a fresh normal chat, not the discarded temporary conversation.
 
-The thread adapter owns attachments through `unstable_useAdapters`. Do not override it with a global `attachments` runtime option: AI SDK gives explicit options precedence over context adapters, which would bypass anonymous document extraction. The adapter resolves privacy lazily from its own `threadListItem` so background or switched threads use the correct mode.
+The thread adapter owns attachments through `unstable_useAdapters`. Do not override it with a global `attachments` runtime option: AI SDK gives explicit options precedence over context adapters, which would bypass temporary document extraction. The adapter resolves privacy lazily from its own `threadListItem` so background or switched threads use the correct mode.
 
 ## Model defaults and composer overrides
 
-Each stored conversation keeps its own model in `threadModels`, keyed by thread id: a pick in its composer is stored there and PATCHed to `threads.model_ref`, and the thread list and `fetch()` seed it from the server without overwriting picks made in the page. A new conversation without a thread uses the in-memory `selectedModel`, which `initialize()` copies to the new thread id. Switching chats therefore never carries a model from one chat to another. Do not restore the legacy `okaychat:selected-model` local-storage key: it otherwise silently wins over a newly saved account default. `onThreadIdChange(undefined)` signals a fresh optimistic thread and clears the override; initialization later emits the remote id and must preserve a model chosen before the first send. Saving the account default also clears the override. Active model resolution is the chat's choice → active project default → account default → first available model; unavailable references fall through. Title generation and anonymous-chat saving use the same resolver.
+Each stored conversation keeps its own model in `threadModels`, keyed by thread id: a pick in its composer is stored there and PATCHed to `threads.model_ref`, and the thread list and `fetch()` seed it from the server without overwriting picks made in the page. A new conversation without a thread uses the in-memory `selectedModel`, which `initialize()` copies to the new thread id. Switching chats therefore never carries a model from one chat to another. Do not restore the legacy `okaychat:selected-model` local-storage key: it otherwise silently wins over a newly saved account default. `onThreadIdChange(undefined)` signals a fresh optimistic thread and clears the override; initialization later emits the remote id and must preserve a model chosen before the first send. Saving the account default also clears the override. Active model resolution is the chat's choice → active project default → account default → first available model; unavailable references fall through. Title generation and temporary-chat saving use the same resolver.
 
 Settings menus contain explicit fallback items with the empty-string UI value: First available model, Same as chat model, Same as utility model, and Use account default model. Their callbacks persist JSON `null` to clear an override; `undefined` would disappear in JSON and leave the old value stored. Project switches clear composer overrides, including when leaving a project with its own default. Schedule models remain explicit because scheduled jobs need a concrete model.
 
@@ -339,9 +339,9 @@ General settings stores `sidebarItems` per account through the validated setting
 The viewport's tall-message clamp uses `13em` / `9em`: the original `10em` / `6em` plus the same inset. Keep these values aligned with the root padding. Do not add an offset only to `scrollTo`: it would leave the unwanted extra scroll range available to wheel, touch, and the scroll-to-bottom button. Verified with the actual Thread component and a local streaming runtime at desktop and mobile widths.
 
 Attachment adapters live in `runtime/attachments.ts`: images, native/extracted documents, text/code,
-then a binary fallback. Every non-anonymous send persists original bytes and propagates quota errors.
+then a binary fallback. Every non-temporary send persists original bytes and propagates quota errors.
 Image/PDF message data URLs remain unchanged; file_id headers link the durable originals. Saving
-anonymous messages into normal history also stores inline files, without changing message parts.
+temporary messages into normal history also stores inline files, without changing message parts.
 
 ## Chat context menu API
 
@@ -349,7 +349,7 @@ anonymous messages into normal history also stores inline files, without changin
 
 - `PATCH /api/threads/:id` accepts `title`, `status`, `memoryDisabled`, `pinned`, and `projectId` (`null` removes the project). A project the user does not own returns 404 `Project not found`. Moving needs no memory cleanup: offered memory tools re-check `thread.projectId` on every call.
 - `GET /api/threads?status=regular|archived` filters by status and combines with `project`. Without it both statuses are listed.
-- `POST /api/threads/:id/title` takes optional `text`. Without it the title is derived from the user text parts of the stored current branch (attachment headers skipped, 4000 chars). Foreign threads return 404; `tmp_` ids still return "Anonymous chat".
+- `POST /api/threads/:id/title` takes optional `text`. Without it the title is derived from the user text parts of the stored current branch (attachment headers skipped, 4000 chars). Foreign threads return 404; `tmp_` ids still return "Temporary chat".
 - `GET /api/threads/:id/export?format=markdown|pdf` exports the current branch (`src/server/export.ts`): `# title`, then `## You` / `## Assistant` with text parts and `_Attachment: name_` lines. Reasoning, tool, and data parts are omitted. PDF renders that Markdown with `react-markdown` + `remark-gfm` (raw HTML escaped) and prints it with the shared Chromium (`htmlToPdf`); 503 if Chromium is unavailable. Responses are `attachment` downloads with `Cache-Control: private, no-store`. 404 for foreign threads, 400 for `tmp_` ids or another format.
 
 ## Sidebar row menu (client)

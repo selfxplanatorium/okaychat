@@ -81,14 +81,14 @@ test("turnStream injects the enabled skill index and offers skill tools", async 
   assert.ok(requests[1]!.messages.some((message) => JSON.stringify(message.content).includes("Keep it terse") || message.role === "tool"));
 });
 
-test("turnStream leaves skills out when the preference is off or the chat is anonymous", async (t) => {
+test("turnStream leaves skills out when the preference is off or the chat is temporary", async (t) => {
   const requests = provider(t, []);
   saveSkill("alice", { name: "release-notes", description: "Formats release notes in house style.", body: "Keep it terse." }, "manual");
   db.prepare("INSERT INTO skill_preferences (user_id, enabled, revision) VALUES ('alice', 0, 0)").run();
   await run("plain-chat");
   assert.ok(!system(requests[0]!).includes("# Skills"));
   assert.ok(!names(requests[0]!).some((name) => name.includes("skill")));
-  // Anonymous chats never see skills, even with the preference on.
+  // Temporary chats never see skills, even with the preference on.
   db.prepare("UPDATE skill_preferences SET enabled = 1, revision = 1 WHERE user_id = 'alice'").run();
   await run("tmp_anon");
   assert.ok(!system(requests[1]!).includes("# Skills"));

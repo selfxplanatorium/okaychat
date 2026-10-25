@@ -113,7 +113,7 @@ export function ChatPrivacyMenu() {
     finally { setBusy(false); }
   };
 
-  /** Copies the current branch into a new stored thread. Anonymous turns recorded no usage, so none is backfilled. */
+  /** Copies the current branch into a new stored thread. Temporary turns recorded no usage, so none is backfilled. */
   const saveChat = async () => {
     setBusy(true);
     setError(null);
@@ -137,14 +137,14 @@ export function ChatPrivacyMenu() {
     finally { setBusy(false); }
   };
 
-  // A started anonymous chat has content worth keeping, so the ghost asks instead of discarding it.
+  // A started temporary chat has content worth keeping, so the ghost asks instead of discarding it.
   const asks = privacy.temporary && started;
-  const ghostLabel = asks ? "Save or end anonymous chat" : privacy.temporary ? "End anonymous chat" : "Start anonymous chat";
+  const ghostLabel = asks ? "Save or end temporary chat" : privacy.temporary ? "End temporary chat" : "Start temporary chat";
 
   return (
     <div className="shell-chat-actions absolute top-2 right-2 flex items-center gap-1">
       {!privacy.temporary && <ShareButton />}
-      {/* A started chat cannot become anonymous, so the share button takes the ghost's place. */}
+      {/* A started chat cannot become temporary, so the share button takes the ghost's place. */}
       {(privacy.temporary || !started) && (
         <Popover open={ghostOpen} onOpenChange={(next) => {
           if (!next) setGhostOpen(false);
@@ -158,7 +158,7 @@ export function ChatPrivacyMenu() {
             <TooltipContent side="bottom">{ghostLabel}</TooltipContent>
           </Tooltip>
           <PopoverContent align="end" className="w-72 max-w-[calc(100vw-1rem)] p-4 pointer-coarse:[&_button]:min-h-11">
-            <h2 className="text-sm font-medium">Anonymous chat</h2>
+            <h2 className="text-sm font-medium">Temporary chat</h2>
             <p className="text-muted-foreground mt-1 text-xs">This chat is not saved. Save it to keep it in your history, or end it to discard it.</p>
             <div className="mt-4 flex flex-col gap-2">
               <Button disabled={busy || running} onClick={() => void saveChat()}>Save to history</Button>
@@ -173,15 +173,15 @@ export function ChatPrivacyMenu() {
           <MoreHorizontalIcon className="size-4" />
         </PopoverTrigger>
         <PopoverContent align="end" className="w-80 max-w-[calc(100vw-1rem)] p-4">
-          <h2 className="text-sm font-medium">{privacy.temporary ? "Anonymous chat" : "Chat options"}</h2>
+          <h2 className="text-sm font-medium">{privacy.temporary ? "Temporary chat" : "Chat options"}</h2>
           {privacy.temporary ? <>
             <p className="text-muted-foreground mt-1 text-xs">Not saved in history. Disappears when you reload. Never creates memories.</p>
             <div className="my-4 flex items-center justify-between gap-4">
               <div>
-                <label htmlFor="anonymous-personalization" className="text-sm font-medium">Personalize this chat</label>
+                <label htmlFor="temporary-personalization" className="text-sm font-medium">Personalize this chat</label>
                 <p className="text-muted-foreground mt-1 text-xs">Use your saved memories and custom instructions for this chat.</p>
               </div>
-              <Switch id="anonymous-personalization" checked={privacy.personalized} disabled={busy || running} onCheckedChange={(personalized) => {
+              <Switch id="temporary-personalization" checked={privacy.personalized} disabled={busy || running} onCheckedChange={(personalized) => {
                 const item = aui.threadListItem.getState();
                 useChatPrivacyStore.getState().set(item.remoteId ?? item.id, { temporary: true, personalized });
               }} />

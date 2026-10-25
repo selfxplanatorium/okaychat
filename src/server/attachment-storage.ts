@@ -4,7 +4,7 @@ import { HTTPException } from "hono/http-exception";
 
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
-/** Legacy messages and saved anonymous chats can contain inline files without a storage marker.
+/** Legacy messages and saved temporary chats can contain inline files without a storage marker.
  * Keep those original message bytes unchanged; materialize an owned copy for the Library instead. */
 export function storeInlineAttachments(db: DatabaseSync, userId: string, threadId: string, content: unknown, check?: (bytes: number) => void): void {
   if (threadId.startsWith("tmp_") || !content || typeof content !== "object") return;

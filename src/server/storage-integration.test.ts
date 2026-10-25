@@ -161,23 +161,23 @@ test("skills created by the agent appear as downloadable Library packages and de
   assert.equal(storageUsed("alice"), 0);
 });
 
-test("saving an anonymous image to normal history stores bytes once without changing its message parts", async () => {
+test("saving a temporary image to normal history stores bytes once without changing its message parts", async () => {
   const { appendMessage, ensureThread, listMessages } = await import("./threads.js");
-  ensureThread("alice", "saved-anonymous");
+  ensureThread("alice", "saved-temporary");
   const content = { role: "user", parts: [{ type: "file", mediaType: "image/png", filename: "saved.png", url: "data:image/png;base64,Ynl0ZXM=" }] };
   const row = { id: "saved-message", parent_id: null, format: "ai-sdk/v6", content };
-  appendMessage("alice", "saved-anonymous", row);
-  appendMessage("alice", "saved-anonymous", row);
+  appendMessage("alice", "saved-temporary", row);
+  appendMessage("alice", "saved-temporary", row);
   // The message text counts too, but not the inline data URL: that file is charged once, as an upload.
   const { messageBytes } = await import("./quota.js");
   const text = messageBytes(JSON.stringify(content));
   assert.ok(text < JSON.stringify(content).length);
   assert.equal(storageUsed("alice"), 5 + text);
-  assert.deepEqual(listMessages("alice", "saved-anonymous")[0]!.content, content);
+  assert.deepEqual(listMessages("alice", "saved-temporary")[0]!.content, content);
   const item = (await library()).items[0]!;
   assert.equal(item.name, "saved.png");
-  assert.equal(item.threadId, "saved-anonymous");
+  assert.equal(item.threadId, "saved-temporary");
   await request(`/library/upload/${item.id.slice("upload:".length)}`, { method: "DELETE" });
-  appendMessage("alice", "saved-anonymous", row);
+  appendMessage("alice", "saved-temporary", row);
   assert.equal(storageUsed("alice"), text, "replaying the same message must not resurrect a deleted file");
 });

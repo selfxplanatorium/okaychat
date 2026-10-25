@@ -81,7 +81,7 @@ export interface TurnOptions {
   /** Browser-executed tools and their instructions. Absent for server-side runs. */
   clientTools?: FrontendTools;
   clientSystem?: string;
-  /** Only anonymous chats use this flag. Personalization is read-only and off by default. */
+  /** Only temporary chats use this flag. Personalization is read-only and off by default. */
   temporaryPersonalization?: boolean;
   /** Per-chat composer toggle; absent falls back to the account setting. */
   webSearch?: boolean;
@@ -170,7 +170,7 @@ export async function turnStream(opts: TurnOptions) {
         const lastUserIndex = converted.findLastIndex((message) => message.role === "user");
         converted.splice(lastUserIndex < 0 ? converted.length : lastUserIndex, 0, { role: "user", content: currentContext });
       }
-      const memoryInstructions = [temporary ? promptText("anonymous") : "", memory.instructions].filter(Boolean).join("\n\n");
+      const memoryInstructions = [temporary ? promptText("temporary") : "", memory.instructions].filter(Boolean).join("\n\n");
       const { system, messages } = handle.markCache(systemPrompt(model, personalized ? settings.systemPrompt : "", temporary ? "" : projectContext(userId, thread.projectId), mcp.instructions, useArtifacts, useGenerativeUI ? opts.clientSystem : undefined, memoryInstructions), [
         ...(summary ? summaryMessages(summary) : []),
         ...converted,
@@ -294,7 +294,7 @@ export const chatRoutes = new Hono<AppEnv>()
           temporaryPersonalization: parsed.data.config.temporaryPersonalization ?? false,
           webSearch: parsed.data.config.webSearch,
           uiMessages: parsed.data.messages as UIMessage[],
-          // Anonymous turns have no resumable copy and end when the request disconnects.
+          // Temporary turns have no resumable copy and end when the request disconnects.
           signal: c.req.raw.signal,
         });
         return createUIMessageStreamResponse({ stream: releasing(stream, release, c.req.raw.signal), headers: { "Cache-Control": "no-store" } });
@@ -347,7 +347,7 @@ export const chatRoutes = new Hono<AppEnv>()
   .post("/threads/:id/compact", async (c) => {
     const user = c.get("user");
     const threadId = c.req.param("id");
-    if (isTemporaryThread(threadId)) return c.json({ error: "Anonymous chats cannot save compaction" }, 400);
+    if (isTemporaryThread(threadId)) return c.json({ error: "Temporary chats cannot save compaction" }, 400);
     const parsed = z.object({ messages: z.array(z.any()), modelRef: z.string().min(3).max(300) }).safeParse(await c.req.json());
     if (!parsed.success) return c.json({ error: "Invalid compaction request" }, 400);
     const body = parsed.data as { messages: UIMessage[]; modelRef: string };
@@ -365,14 +365,14 @@ export const chatRoutes = new Hono<AppEnv>()
     return c.json(state);
   })
   .delete("/threads/:id/compact", (c) => {
-    if (isTemporaryThread(c.req.param("id"))) return c.json({ error: "Anonymous chats cannot save compaction" }, 400);
+    if (isTemporaryThread(c.req.param("id"))) return c.json({ error: "Temporary chats cannot save compaction" }, 400);
     setCompaction(c.get("user").id, c.req.param("id"), null);
     return c.json({ ok: true });
   })
   .post("/threads/:id/title", async (c) => {
     const user = c.get("user");
     const threadId = c.req.param("id");
-    if (isTemporaryThread(threadId)) return c.json({ title: "Anonymous chat" });
+    if (isTemporaryThread(threadId)) return c.json({ title: "Temporary chat" });
     if (!getThread(user.id, threadId)) return c.json({ error: "Thread not found" }, 404);
     const body = (await c.req.json().catch(() => ({}))) as { text?: string; modelRef?: string };
     // Regenerating from the sidebar sends no text: title the stored conversation instead.

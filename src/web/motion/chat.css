@@ -93,7 +93,7 @@
 }
 
 /*
- * Anonymous chat ghost (GhostIcon.tsx). Entering crouches, leaps with a wobble,
+ * Temporary chat ghost (GhostIcon.tsx). Entering crouches, leaps with a wobble,
  * blinks, and puffs. Leaving drops from above and splats on landing with wide
  * eyes while the tint drains. The resting "on" state floats.
  */

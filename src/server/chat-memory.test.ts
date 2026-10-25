@@ -137,26 +137,26 @@ function storedCounts() {
   ));
 }
 
-test("anonymous turns do not save data or include account personalization by default", async (t) => {
+test("temporary turns do not save data or include account personalization by default", async (t) => {
   const requests = provider(t, false);
   updateSettings("alice", { systemPrompt: "ACCOUNT_PRIVATE_INSTRUCTIONS", artifacts: true, generativeUI: true, subagents: true });
   saveMemory("alice", { content: FACT }, "manual");
   const before = storedCounts();
-  await run("tmp_default", [{ id: "anonymous-user", role: "user", parts: [{ type: "text", text: "Give me an example" }] }]);
+  await run("tmp_default", [{ id: "temporary-user", role: "user", parts: [{ type: "text", text: "Give me an example" }] }]);
   assert.deepEqual(storedCounts(), before);
   assert.ok(!JSON.stringify(requests[0]!.messages).includes(FACT));
   assert.ok(!system(requests[0]!).includes("ACCOUNT_PRIVATE_INSTRUCTIONS"));
-  assert.deepEqual(names(requests[0]!), [], "anonymous mode excludes memory mutations, artifacts, images, delegates, and browser tools");
+  assert.deepEqual(names(requests[0]!), [], "temporary mode excludes memory mutations, artifacts, images, delegates, and browser tools");
 });
 
-test("anonymous personalization reads only global memory and instructions without any writes", async (t) => {
+test("temporary personalization reads only global memory and instructions without any writes", async (t) => {
   const requests = provider(t, false);
   updateSettings("alice", { systemPrompt: "ACCOUNT_PRIVATE_INSTRUCTIONS", artifacts: true, subagents: true });
   db.prepare("INSERT INTO projects (id, user_id, name, instructions, created_at) VALUES ('private-project', 'alice', 'Private', 'PROJECT_PRIVATE_INSTRUCTIONS', 1)").run();
   saveMemory("alice", { content: FACT }, "manual");
   saveMemory("alice", { content: "PROJECT_PRIVATE_FACT", scope: "private-project" }, "manual");
   const before = storedCounts();
-  await run("tmp_personalized", [{ id: "anonymous-user", role: "user", parts: [{ type: "text", text: "Give me an example" }] }], true);
+  await run("tmp_personalized", [{ id: "temporary-user", role: "user", parts: [{ type: "text", text: "Give me an example" }] }], true);
   const sent = JSON.stringify(requests[0]!.messages);
   assert.ok(sent.includes(FACT));
   assert.ok(system(requests[0]!).includes("ACCOUNT_PRIVATE_INSTRUCTIONS"));
@@ -166,7 +166,7 @@ test("anonymous personalization reads only global memory and instructions withou
   assert.deepEqual(storedCounts(), before);
 });
 
-test("anonymous API streams bypass replay storage and reject history and compaction writes", async (t) => {
+test("temporary API streams bypass replay storage and reject history and compaction writes", async (t) => {
   provider(t, false);
   const before = storedCounts();
   const response = await app.request("http://app/chat", { method: "POST", headers: { cookie: "okaychat_session=alice-session", "Content-Type": "application/json" }, body: JSON.stringify({
@@ -179,15 +179,15 @@ test("anonymous API streams bypass replay storage and reject history and compact
   assert.throws(() => ensureThread("alice", "tmp_http"), /cannot be saved/);
   assert.throws(() => appendMessage("alice", "tmp_http", { id: "never", parent_id: null, format: "ai-sdk/v6", content: { role: "user", parts: [] } }), /cannot be saved/);
   const request = (method: string, route: string) => app.request(`http://app/threads/tmp_http/${route}`, { method, headers: { cookie: "okaychat_session=alice-session" } });
-  assert.deepEqual(await (await request("POST", "title")).json(), { title: "Anonymous chat" });
+  assert.deepEqual(await (await request("POST", "title")).json(), { title: "Temporary chat" });
   assert.equal((await request("POST", "compact")).status, 400);
   assert.equal((await request("DELETE", "compact")).status, 400);
   assert.deepEqual(storedCounts(), before);
 });
 
-test("anonymous PDF extraction returns text without storing original uploads", async () => {
+test("temporary PDF extraction returns text without storing original uploads", async () => {
   const pdf = await PDFDocument.create();
-  pdf.addPage().drawText("Anonymous document content");
+  pdf.addPage().drawText("Temporary document content");
   const bytes = await pdf.save();
   const upload = (temporary: boolean) => {
     const form = new FormData();
@@ -198,7 +198,7 @@ test("anonymous PDF extraction returns text without storing original uploads", a
   const response = await upload(true);
   assert.equal(response.status, 200);
   const content = await response.json();
-  assert.match(content.text, /Anonymous document content/);
+  assert.match(content.text, /Temporary document content/);
   assert.equal(content.fileId, undefined);
   assert.deepEqual(storedCounts(), before);
   const normal = await (await upload(false)).json();

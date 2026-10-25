@@ -375,7 +375,7 @@ export type PromptKey =
   | "modelIdentity"
   | "date"
   | "artifacts"
-  | "anonymous"
+  | "temporary"
   | "subagent"
   | "subagentSearchBudget"
   | "compaction"

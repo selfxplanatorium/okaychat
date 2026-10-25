@@ -303,7 +303,7 @@ test("bounded context prioritizes matching facts from a large memory library", (
   assert.ok(result.reduce((total, entry) => total + entry.content.length, 0) <= 1000);
 });
 
-test("anonymous memory personalization is global, read-only, and revoked by changed preferences", async () => {
+test("temporary memory personalization is global, read-only, and revoked by changed preferences", async () => {
   saveMemory("alice", { content: "Global saved fact" }, "manual");
   saveMemory("alice", { content: "Private project fact", scope: "project-a" }, "manual");
   assert.deepEqual(temporaryMemory("alice", ""), { context: "", tools: {} });

@@ -151,7 +151,7 @@ test("creating, listing, viewing, editing, and deleting are account-scoped and v
   assert.equal(list.find((s: { name: string }) => s.name === "python-upgrade").description, "New sentence.");
   assert.equal((await request("DELETE", `/${created.id}`)).status, 200);
   assert.equal((await (await request("GET", "")).json()).length, 1);
-  // Anonymous requests get 401 like every other API call.
+  // Unauthenticated requests get 401 like every other API call.
   assert.equal((await app.request("http://app/skills")).status, 401);
 });
 
@@ -207,7 +207,7 @@ test("turn tools expose mutators only in the main set and require approval", asy
   assert.equal(turn.tools.install_skill!.needsApproval, true);
   assert.equal(turn.tools.create_skill!.needsApproval, true);
   assert.notEqual(turn.tools.load_skill!.needsApproval, true);
-  // Anonymous chats and tool-less models get nothing even when the preference is on.
+  // Temporary chats and tool-less models get nothing even when the preference is on.
   assert.deepEqual(turnSkills("alice", { temporary: true, canCallTools: true }), { context: "", tools: {}, subTools: {} });
   assert.deepEqual(turnSkills("alice", { temporary: false, canCallTools: false }), { context: "", tools: {}, subTools: {} });
   assert.deepEqual(turnSkills("ghost-user", { temporary: false, canCallTools: true }), { context: "", tools: {}, subTools: {} });

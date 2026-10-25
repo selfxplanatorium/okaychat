@@ -15,7 +15,7 @@ Status: built 2026-10-20.
 Attachment bytes land in the `uploads` table (seven-day retention) before the model asks for them:
 `/api/files/extract` stores docx/xlsx and large PDFs, and `/api/files/store` stores a PDF that a model
 reads natively. `import_document` resolves the newest upload by `file_id`, or by filename for models
-that only received extracted text. Anonymous chats never store uploads.
+that only received extracted text. Temporary chats never store uploads.
 
 Documents are artifacts with `kind` `pdf`, `docx`, or `xlsx`. `artifacts.content` holds the source —
 HTML for PDF/DOCX, workbook JSON for XLSX — and `artifacts.data` holds the built file. The versions API

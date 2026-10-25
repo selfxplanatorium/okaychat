@@ -47,8 +47,8 @@ that cap, failing to copy, or exceeding quota have a `storageWarning` and only a
 they are not durable and disappear with the workspace. Quota rejection preserves the previous durable
 copy when an attempted replacement cannot fit.
 
-Anonymous attachment extraction/storage (`temporary=1`) bypasses persistence and quota. `tmp_` chats
-cannot create stored files or run persistent tools. Explicitly saving an anonymous chat to normal
+Temporary attachment extraction/storage (`temporary=1`) bypasses persistence and quota. `tmp_` chats
+cannot create stored files or run persistent tools. Explicitly saving a temporary chat to normal
 history materializes its inline attachments, enforces quota, and keeps the original message parts.
 
 ## UI and checks
@@ -59,5 +59,5 @@ chat completion, page focus, and account-page entry; the initial storage request
 shell's other startup requests. Admins see usage and can set/reset per-user limits.
 
 Tests cover ownership, UTF-8 accounting, every principal write path, replacement deltas, failed-import
-rollback, anonymous non-persistence, durable outputs, legacy migration/restart behavior, and Library
+rollback, temporary non-persistence, durable outputs, legacy migration/restart behavior, and Library
 deletion freeing capacity for another write.

@@ -95,7 +95,7 @@ export const useData = create<DataState>((set, get) => ({
   },
 }));
 
-// Same test as isAnonymousChat, which lives with assistant-ui code this module must not import.
+// Same test as isTemporaryChat, which lives with assistant-ui code this module must not import.
 const isTemporaryThread = (id: string) => id.startsWith("tmp_");
 
 /** The model the next message of a chat will use. Without a thread id: the new chat being written. */
@@ -127,7 +127,7 @@ export function preloadData(userId: string) {
   // RuntimeProvider restores this tab's selected chat (or a ?thread= link); its messages are needed for the first paint.
   try {
     const saved = new URLSearchParams(location.search).get("thread") || sessionStorage.getItem(selectedThreadKey(userId));
-    // Same test as isAnonymousChat, which lives with assistant-ui code this entry module must not import.
+    // Same test as isTemporaryChat, which lives with assistant-ui code this entry module must not import.
     if (saved && !saved.startsWith("tmp_")) prefetch(`/threads/${saved}/messages`);
   } catch {
     // Session storage may be disabled.

@@ -354,6 +354,12 @@ const migrations: Array<string | (() => void)> = [
       update.run(Buffer.byteLength(row.content.replace(/data:[^"]*/g, "")), row.rowid);
     }
   },
+  // Preserve admin overrides when renaming the temporary-chat prompt.
+  `
+  INSERT OR IGNORE INTO server_settings (key, value)
+    SELECT 'prompt:temporary', value FROM server_settings WHERE key = 'prompt:anonymous';
+  DELETE FROM server_settings WHERE key = 'prompt:anonymous';
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

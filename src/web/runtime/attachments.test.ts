@@ -34,8 +34,8 @@ test("quota failures block image, native PDF, text, and binary sends instead of 
   }
 });
 
-test("anonymous image and text sends never call storage or add file_id markers", async (t) => {
-  t.mock.method(globalThis, "fetch", async () => { throw new Error("Anonymous sends must not call storage"); });
+test("temporary image and text sends never call storage or add file_id markers", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => { throw new Error("Temporary sends must not call storage"); });
   for (const adapter of [new StoredImageAttachmentAdapter(() => true), new CodeAttachmentAdapter(() => true)]) {
     const attachment = await adapter.add({ file: new File(["bytes"], "test.txt", { type: "text/plain" }) });
     const sent = await adapter.send(attachment);

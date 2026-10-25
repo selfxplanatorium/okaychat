@@ -696,7 +696,7 @@ interface TurnSkills {
 const EMPTY_TURN: TurnSkills = { context: "", tools: {}, subTools: {} };
 
 /**
- * Builds everything a turn needs from skills. Anonymous chats (`temporary`) and models that
+ * Builds everything a turn needs from skills. Temporary chats (`temporary`) and models that
  * cannot call tools get nothing. Mutating tools are offered only in the main set; delegates only
  * receive the read-only pair. Every execution re-checks the preferences, so turning skills off
  * revokes tools a running model still holds.

@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 type Transition = "none" | "enter" | "exit";
 
 /**
- * Anonymous chat mark. Off is an outlined ghost; on is a tinted ghost that floats.
+ * Temporary chat mark. Off is an outlined ghost; on is a tinted ghost that floats.
  * Turning on crouches, leaps, and puffs; turning off drops and lands with a splat,
  * so the two transitions are distinct motions rather than one played backwards.
  * Keyframes live in motion/chat.css.
