@@ -345,11 +345,17 @@ export interface ArtifactToolResult {
 /** `daily`: at a local time on chosen weekdays (0 = Sunday). `interval`: every N minutes from the last run. */
 export type ScheduleSpec =
   | { kind: "daily"; time: string; weekdays: number[]; timeZone: string }
-  | { kind: "interval"; minutes: number };
+  | { kind: "interval"; minutes: number; timeZone?: string };
 
 export interface Schedule {
   id: string;
+  /** "same" keeps one chat for every run; "new" starts a chat per run and `threadId` is the latest one. */
+  threadMode: "same" | "new";
   threadId: string | null;
+  /** `threadId` is a chat the user picked rather than one the schedule created. */
+  threadAttached: boolean;
+  /** Project for chats the schedule creates. */
+  projectId: string | null;
   title: string;
   prompt: string;
   modelRef: string;

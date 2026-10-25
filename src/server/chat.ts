@@ -97,6 +97,8 @@ export interface TurnOptions {
   webSearch?: boolean;
   /** Someone watches the stream and can answer MCP elicitation forms. Absent for scheduled runs. */
   interactive?: boolean;
+  /** Leave the thread's model as it is (a schedule running in a chat the user picked). */
+  keepThreadModel?: boolean;
   signal?: AbortSignal;
 }
 
@@ -112,7 +114,7 @@ export async function turnStream(opts: TurnOptions) {
   const { model, conn } = await resolveModel(userId, modelRef);
   if (!temporary) {
     ensureThread(user.id, threadId);
-    updateThread(user.id, threadId, { modelRef });
+    if (!opts.keepThreadModel) updateThread(user.id, threadId, { modelRef });
   }
   const thread = temporary ? { projectId: null, compaction: null } : getThread(user.id, threadId)!;
 
@@ -334,6 +336,23 @@ function reserveTurn(userId: string): (() => void) | null {
   };
 }
 
+// Threads with an interactive turn streaming. The client persists that turn when it ends, so a scheduled run waits.
+const busyThreads = new Map<string, number>();
+export const threadBusy = (threadId: string) => busyThreads.has(threadId);
+
+function markBusy(threadId: string, release: () => void): () => void {
+  busyThreads.set(threadId, (busyThreads.get(threadId) ?? 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const left = (busyThreads.get(threadId) ?? 1) - 1;
+    if (left > 0) busyThreads.set(threadId, left);
+    else busyThreads.delete(threadId);
+    release();
+  };
+}
+
 /** Releases the slot when the turn's stream ends, errors, or is cancelled. */
 function releasing<T>(stream: ReadableStream<T>, release: () => void, signal: AbortSignal): ReadableStream<T> {
   signal.addEventListener("abort", release, { once: true });
@@ -347,8 +366,8 @@ export const chatRoutes = new Hono<AppEnv>()
     const user = c.get("user");
     const parsed = chatBody.safeParse(await c.req.json());
     if (!parsed.success) return c.json({ error: "Pick a model before sending." }, 400);
-    const release = reserveTurn(user.id);
-    if (!release) return busy(c);
+    const releaseTurn = reserveTurn(user.id);
+    if (!releaseTurn) return busy(c);
     if (isTemporaryThread(parsed.data.id)) {
       try {
         const stream = await turnStream({
@@ -362,13 +381,14 @@ export const chatRoutes = new Hono<AppEnv>()
           // Temporary turns have no resumable copy and end when the request disconnects.
           signal: c.req.raw.signal,
         });
-        return createUIMessageStreamResponse({ stream: releasing(stream, release, c.req.raw.signal), headers: { "Cache-Control": "no-store" } });
+        return createUIMessageStreamResponse({ stream: releasing(stream, releaseTurn, c.req.raw.signal), headers: { "Cache-Control": "no-store" } });
       } catch (error) {
-        release();
+        releaseTurn();
         return c.json({ error: (error as Error).message }, 400);
       }
     }
     // Generation is decoupled from this request so a reload can reattach. Stop sends an explicit cancel.
+    const release = markBusy(parsed.data.id, releaseTurn);
     const streamId = newId("str");
     const controller = new AbortController();
     try {

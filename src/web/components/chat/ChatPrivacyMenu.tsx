@@ -1,7 +1,7 @@
 import { getExternalStoreMessages, useAui, useAuiState } from "@assistant-ui/react";
 import type { UIMessage } from "ai";
 import type { ThreadSummary } from "@shared/types";
-import { MonitorIcon, MoonIcon, MoreHorizontalIcon, PuzzleIcon, SunIcon } from "lucide-react";
+import { CalendarClockIcon, MonitorIcon, MoonIcon, MoreHorizontalIcon, PuzzleIcon, SunIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -71,6 +71,7 @@ export function ChatPrivacyMenu() {
   const meta = useThreadMeta();
   const running = useAuiState((s) => s.thread.isRunning);
   const started = useAuiState((s) => s.thread.messages.length > 0);
+  const remoteId = useCurrentThreadId();
   const refresh = useThreadMetaStore((s) => s.refresh);
   const [open, setOpen] = useState(false);
   const [ghostOpen, setGhostOpen] = useState(false);
@@ -222,6 +223,16 @@ export function ChatPrivacyMenu() {
                 <PuzzleIcon className="size-4 shrink-0" />
                 Create skill from this chat
               </button>
+            )}
+            {started && remoteId && (
+              <Link
+                href={`/scheduled?thread=${encodeURIComponent(remoteId)}`}
+                onClick={() => setOpen(false)}
+                className="hover:bg-accent mb-4 -mx-2 flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors duration-(--motion-fast)"
+              >
+                <CalendarClockIcon className="size-4 shrink-0" />
+                Schedule a prompt in this chat
+              </Link>
             )}
           </>}
           <ColorSchemeToggle />
