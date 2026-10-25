@@ -31,6 +31,6 @@ Its built-in vocabulary renders unstyled markup with ~100 `data-aui="…"` hooks
 
 ## Gotchas
 
-- Tool calls collapse into a "N tool calls" group. `show_widget`, `edit_widget`, `render_spec` have `"tool-call:<name>": []` entries in `messageGroupBy` so they render inline.
+- Tool calls render as rows in a work-log group. `show_widget`, `edit_widget`, `render_spec` have `"tool-call:<name>": []` entries in `messageGroupBy` so they render inline.
 - `edit_widget` replays edits from thread history on the client, so a reload renders the edited widget without server state.
 - A spec's shared context (user choices from `updateModelContext`) also arrives in `system`. It changes only on interaction, and it is the last part of the system prompt, but it still invalidates the prompt cache from that point.

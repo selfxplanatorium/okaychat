@@ -50,6 +50,8 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   AudioLinesIcon,
+  BrainIcon,
+  ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   DownloadIcon,
@@ -76,6 +78,7 @@ import {
   type FC,
   type FocusEvent,
   type PropsWithChildren,
+  type RefObject,
 } from "react";
 import { CopyFeedbackIcon } from "@/components/assistant-ui/elements/surfaces";
 import { mcpAppOf } from "@/components/chat/McpApp";
@@ -120,8 +123,9 @@ export type ThreadComponents = {
 };
 
 const messageGroupBy = groupPartByType({
-  reasoning: ["group-chainOfThought", "group-reasoning"],
-  "tool-call": ["group-chainOfThought", "group-tool"],
+  // Reasoning and the tool calls between it form one work log.
+  reasoning: ["group-chainOfThought"],
+  "tool-call": ["group-chainOfThought"],
   "standalone-tool-call": [],
   // Artifact cards stay visible so they can be clicked and auto-open the panel.
   "tool-call:create_artifact": [],
@@ -236,7 +240,10 @@ function foldWork(base: GroupBy, parts: readonly GroupablePart[]): GroupBy {
   }
   return (part, context) => {
     const path = base(part, context);
-    return keep.has(part) ? path : ["group-work", ...path];
+    // The work group is itself the log, so its rows are not grouped again.
+    return keep.has(part)
+      ? path
+      : ["group-work", ...path.filter((key) => key !== "group-chainOfThought")];
   };
 }
 
@@ -452,9 +459,7 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
                 seen.generation > 0 && "chat-history-in",
               )}
             >
-              <ThreadPrimitive.Messages>
-                {() => <ThreadMessage />}
-              </ThreadPrimitive.Messages>
+              <WindowedMessages viewportRef={viewportRef} />
             </div>
           </MessageBaselineContext.Provider>
 
@@ -518,6 +523,183 @@ const ThreadMessage: FC = () => {
     </>
   );
 };
+
+// Long chats mount their newest messages first, so opening one paints at once. Older messages follow in
+// small slices after that paint, up to AUTO_REVEAL; anything older waits for "Show earlier messages".
+// Only rendering is windowed: the runtime holds every message, so requests, branching, and export still
+// see the whole history.
+const FIRST_PAINT = 16;
+const REVEAL_STEP = 8;
+const AUTO_REVEAL = 80;
+const MANUAL_REVEAL = 50;
+const MESSAGE_COMPONENTS = { Message: ThreadMessage };
+
+/** Message ids in order, with a stable identity while only message content changes (streaming). */
+const useMessageIds = (): readonly string[] => {
+  const messages = useAuiState((s) => s.thread.messages);
+  const ids = useRef<readonly string[]>([]);
+  const prev = ids.current;
+  if (prev.length !== messages.length || messages.some((m, i) => m.id !== prev[i])) {
+    ids.current = messages.map((m) => m.id);
+  }
+  return ids.current;
+};
+
+/** `start`: first rendered index. `floor`: how far back slices reveal without a click. */
+type MessageWindow = { firstId: string | undefined; start: number; floor: number };
+const openWindow = (ids: readonly string[]): MessageWindow => ({
+  firstId: ids[0],
+  start: Math.max(0, ids.length - FIRST_PAINT),
+  floor: Math.max(0, ids.length - AUTO_REVEAL),
+});
+
+const WindowedMessages: FC<{ viewportRef: RefObject<HTMLDivElement | null> }> = ({ viewportRef }) => {
+  const ids = useMessageIds();
+  const [stored, setWindow] = useState(() => openWindow(ids));
+  // Another thread or branch: start over from its newest messages. New messages at the end keep the window.
+  let win = stored;
+  if (stored.firstId !== ids[0]) {
+    win = openWindow(ids);
+    setWindow(win);
+  }
+  const { start, floor } = win;
+
+  // Distance from the bottom, taken just before older messages mount and restored after, so the
+  // messages being read do not move. Browsers without scroll anchoring would otherwise jump.
+  const fromBottom = useRef<number | null>(null);
+  // User scrolling only: the restore below and the viewport's own autoscroll also fire scroll events.
+  // Scroll events count while a finger or mouse button is down (scrollbar drags) or shortly after a
+  // finger lifts (a fling keeps scrolling).
+  const lastInput = useRef(0);
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    let touching = false;
+    let touchEnded = 0;
+    const input = () => {
+      lastInput.current = performance.now();
+    };
+    const touchStart = () => {
+      touching = true;
+      input();
+    };
+    const touchEnd = () => {
+      touching = false;
+      touchEnded = performance.now();
+      input();
+    };
+    let pressed = false;
+    const pointerDown = (event: Event) => {
+      if ((event as PointerEvent).pointerType !== "mouse") return;
+      pressed = true;
+      input();
+    };
+    const pointerUp = () => {
+      if (pressed) input();
+      pressed = false;
+    };
+    const scroll = () => {
+      if (touching || pressed || performance.now() - touchEnded < 1000) input();
+    };
+    const listeners: Array<[string, (event: Event) => void]> = [
+      ["pointerdown", pointerDown],
+      ["wheel", input],
+      ["keydown", input],
+      ["touchstart", touchStart],
+      ["touchmove", input],
+      ["touchend", touchEnd],
+      ["touchcancel", touchEnd],
+      ["scroll", scroll],
+    ];
+    for (const [type, listener] of listeners) viewport.addEventListener(type, listener, { passive: true });
+    window.addEventListener("pointerup", pointerUp, { passive: true });
+    return () => {
+      for (const [type, listener] of listeners) viewport.removeEventListener(type, listener);
+      window.removeEventListener("pointerup", pointerUp);
+    };
+  }, [viewportRef]);
+
+  useEffect(() => {
+    if (start <= floor) return;
+    let timer = 0;
+    const reveal = () => {
+      // Setting scrollTop mid-gesture would stop a touch fling, so wait for scrolling to settle.
+      if (performance.now() - lastInput.current < 150) {
+        timer = window.setTimeout(reveal, 150);
+        return;
+      }
+      const viewport = viewportRef.current;
+      fromBottom.current = viewport ? viewport.scrollHeight - viewport.scrollTop : null;
+      setWindow((w) => ({ ...w, start: Math.max(w.floor, w.start - REVEAL_STEP) }));
+    };
+    // After the next paint, so each slice follows a frame the user already sees.
+    const frame = requestAnimationFrame(() => {
+      timer = window.setTimeout(reveal, 0);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [start, floor, viewportRef]);
+
+  // The last reveal removes the button; keyboard focus continues at the next control, not the body.
+  const slotRef = useRef<HTMLSpanElement>(null);
+  const focusedRef = useRef<Element | null>(null);
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    const distance = fromBottom.current;
+    fromBottom.current = null;
+    if (viewport && distance !== null) viewport.scrollTo({ top: viewport.scrollHeight - distance, behavior: "instant" });
+    const slot = slotRef.current;
+    const focused = focusedRef.current;
+    if (start > 0 || !focused || focused.isConnected || !slot) return;
+    focusedRef.current = null;
+    const active = document.activeElement;
+    if (!active || active === document.body) nextFocusable(slot)?.focus();
+  }, [start, viewportRef]);
+
+  // Nothing at all for a new chat, so the group's `empty:hidden` drops its margin under the welcome line.
+  if (!ids.length) return null;
+  return (
+    <>
+      <span
+        ref={slotRef}
+        className="contents"
+        onFocus={(event) => {
+          focusedRef.current = event.target;
+        }}
+      >
+        {start > 0 && (
+          <ShowEarlierMessages
+            loading={start > floor}
+            hidden={start}
+            onShow={() => setWindow((w) => ({ ...w, floor: Math.max(0, w.floor - MANUAL_REVEAL) }))}
+          />
+        )}
+      </span>
+      {ids.slice(start).map((id, i) => (
+        <ThreadPrimitive.MessageByIndex key={id} index={start + i} components={MESSAGE_COMPONENTS} />
+      ))}
+    </>
+  );
+};
+
+const ShowEarlierMessages: FC<{ loading: boolean; hidden: number; onShow: () => void }> = ({ loading, hidden, onShow }) => (
+  <Button
+    variant="ghost"
+    size="sm"
+    data-slot="aui_thread-show-earlier"
+    aria-disabled={loading}
+    className="text-muted-foreground self-center rounded-full"
+    onClick={() => {
+      if (!loading) onShow();
+    }}
+  >
+    <span className={cn(loading && "shimmer motion-reduce:animate-none")}>
+      {loading ? "Loading earlier messages" : `Show earlier messages (${hidden} more)`}
+    </span>
+  </Button>
+);
 
 type VoiceRunPosition = "single" | "start" | "middle" | "end";
 
@@ -933,12 +1115,76 @@ const StreamingIndicator: FC<{ waiting: boolean }> = ({ waiting }) => {
   );
 };
 
+const formatElapsed = (seconds: number) =>
+  seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+
+const countPhrase = (n: number, one: string, many: string) =>
+  n === 1 ? one : many.replace("#", String(n));
+
+/** "Searched twice, read 3 pages, and used 2 tools · 41s", like a work log summary. */
 const workLabel = (
   parts: readonly GroupablePart[],
   indices: readonly number[],
+  timing: ThreadGroupPart["timing"],
 ) => {
-  const steps = indices.filter((i) => parts[i]?.type === "tool-call").length;
-  return steps ? `Worked in ${steps} ${steps === 1 ? "step" : "steps"}` : "Show work";
+  const counts = new Map<string, number>();
+  for (const i of indices) {
+    const part = parts[i];
+    if (part?.type !== "tool-call") continue;
+    const kind =
+      part.toolName === "web_search" ? "search" : part.toolName === "web_fetch" ? "read" : "tool";
+    counts.set(kind, (counts.get(kind) ?? 0) + 1);
+  }
+  const phrases = [
+    counts.get("search") && countPhrase(counts.get("search")!, "searched the web", "searched # times"),
+    counts.get("read") && countPhrase(counts.get("read")!, "read a page", "read # pages"),
+    counts.get("tool") && countPhrase(counts.get("tool")!, "used a tool", "used # tools"),
+  ].filter((p): p is string => Boolean(p));
+  const text =
+    phrases.length > 1
+      ? `${phrases.slice(0, -1).join(", ")} and ${phrases.at(-1)}`
+      : (phrases[0] ?? "worked");
+  const seconds = reasoningDuration(timing);
+  return `${text[0]!.toUpperCase()}${text.slice(1)}${seconds ? ` · ${formatElapsed(seconds)}` : ""}`;
+};
+
+/**
+ * One reasoning block as a work-log row: its first line, expanding to the full
+ * text. It stays open while it streams and folds to one line when it ends.
+ */
+const ReasoningRow: FC<{ text: string; running: boolean }> = ({ text, running }) => {
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const open = userOpen ?? running;
+  const firstLine =
+    text
+      .split("\n")
+      .map((line) => line.replace(/[#>*_`]/g, "").trim())
+      .find(Boolean) ?? "";
+  return (
+    <div className="my-1.5 text-sm">
+      <button
+        type="button"
+        onClick={() => setUserOpen(!open)}
+        className="text-muted-foreground hover:text-foreground flex w-full max-w-full items-center gap-2 text-start transition-colors duration-(--motion-fast) ease-out-quart"
+      >
+        <BrainIcon className="size-4 shrink-0" />
+        <span className={cn("min-w-0 truncate", running && "shimmer")}>
+          {open || !firstLine ? (running ? "Thinking" : "Thought") : firstLine}
+        </span>
+        <ChevronDownIcon
+          className={cn(
+            "size-3.5 shrink-0 transition-transform duration-(--motion-base) ease-out-expo",
+            !open && "-rotate-90",
+          )}
+        />
+      </button>
+      {open && (
+        <div className="text-muted-foreground border-border animate-rise-in ms-2 mt-1 border-s ps-4">
+          <MarkdownText />
+        </div>
+      )}
+    </div>
+  );
 };
 
 const AssistantMessage: FC = () => {
@@ -992,13 +1238,32 @@ const AssistantMessage: FC = () => {
                   <ToolGroupRoot variant="ghost">
                     <ToolGroupTrigger
                       count={part.indices.length}
-                      label={workLabel(parts, part.indices)}
+                      label={workLabel(parts, part.indices, part.timing)}
                     />
                     <ToolGroupContent>{children}</ToolGroupContent>
                   </ToolGroupRoot>
                 );
-              case "group-chainOfThought":
-                return <div data-slot="aui_chain-of-thought">{children}</div>;
+              case "group-chainOfThought": {
+                // Reasoning alone needs no wrapper: each block is already a row.
+                if (!part.indices.some((i) => parts[i]?.type === "tool-call")) {
+                  return children;
+                }
+                const running = part.status.type === "running";
+                return (
+                  // Open while it works, and when a call waits for approval.
+                  <ToolGroupRoot
+                    variant="ghost"
+                    open={running || part.counts.requiresAction > 0 ? true : undefined}
+                  >
+                    <ToolGroupTrigger
+                      count={part.indices.length}
+                      active={running}
+                      label={workLabel(parts, part.indices, part.timing)}
+                    />
+                    <ToolGroupContent>{children}</ToolGroupContent>
+                  </ToolGroupRoot>
+                );
+              }
               case "group-task":
                 return TaskGroupComponent ? (
                   <TaskGroupComponent group={part} />
@@ -1039,7 +1304,12 @@ const AssistantMessage: FC = () => {
               case "text":
                 return <MarkdownText />;
               case "reasoning":
-                return <Reasoning {...part} />;
+                return (
+                  <ReasoningRow
+                    text={part.text}
+                    running={part.status.type === "running"}
+                  />
+                );
               case "tool-call":
                 return part.toolUI ?? <ToolFallbackComponent {...part} />;
               case "data":

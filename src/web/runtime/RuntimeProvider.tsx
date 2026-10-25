@@ -16,7 +16,7 @@ import { createAssistantStream } from "assistant-stream";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { ThreadSummary } from "@shared/types";
 import { api, takePrefetched } from "@/lib/api";
-import { toolkit } from "@/components/chat/tool-ui";
+import { toolkit, widgetHelperRenders } from "@/components/chat/tool-ui";
 import { WidgetInstructions, widgets } from "@/components/genui/toolkit";
 import { getActiveModel, selectedThreadKey, threadsPath, useData } from "@/state/data";
 import { useChatModel } from "@/state/thread-meta";
@@ -273,7 +273,13 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       }),
     adapter: threadListAdapter,
   });
-  const config = useMemo(() => AuiConfig({ tools: Tools({ toolkit: { ...toolkit, ...widgets.toolkit } }) }), []);
+  const config = useMemo(() => {
+    const all: Record<string, object> = { ...toolkit, ...widgets.toolkit };
+    for (const [name, render] of Object.entries(widgetHelperRenders)) {
+      if (all[name]) all[name] = { ...all[name], render };
+    }
+    return AuiConfig({ tools: Tools({ toolkit: all as typeof widgets.toolkit }) });
+  }, []);
   return (
     <AssistantRuntimeProvider runtime={runtime} config={config}>
       <ModelContextBridge />

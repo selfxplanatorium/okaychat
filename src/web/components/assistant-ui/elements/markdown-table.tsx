@@ -63,6 +63,8 @@ export const MarkdownTable: FC<ComponentProps<"table">> = ({ className, children
     setWidths(Array.from(table.rows[0].cells, (cell) => cell.getBoundingClientRect().width));
   };
   const [copyMenuOpen, setCopyMenuOpen] = useState(false);
+  // The right-click menu mounts on first use; a menu root per table is real work in a long chat.
+  const [copyMenuUsed, setCopyMenuUsed] = useState(false);
   const { isCopied, copyToClipboard } = useCopyToClipboard();
 
   const text = (format: Format) => (tableRef.current ? serialize(readRows(tableRef.current), format) : "");
@@ -123,23 +125,26 @@ export const MarkdownTable: FC<ComponentProps<"table">> = ({ className, children
             onClick={() => copyToClipboard(text("plain"))}
             onContextMenu={(e) => {
               e.preventDefault();
+              setCopyMenuUsed(true);
               setCopyMenuOpen(true);
             }}
           >
             <CopyFeedbackIcon copied={isCopied} />
           </TooltipIconButton>
-          <Menu open={copyMenuOpen} onOpenChange={setCopyMenuOpen}>
-            <MenuContent side="bottom" align="end" anchor={copyRef} className="min-w-36">
-              {formatItems.map(({ format, label, icon }) => (
-                <MenuItem key={format} onClick={() => copyToClipboard(text(format))}>
-                  {icon} {label}
+          {copyMenuUsed && (
+            <Menu open={copyMenuOpen} onOpenChange={setCopyMenuOpen}>
+              <MenuContent side="bottom" align="end" anchor={copyRef} className="min-w-36">
+                {formatItems.map(({ format, label, icon }) => (
+                  <MenuItem key={format} onClick={() => copyToClipboard(text(format))}>
+                    {icon} {label}
+                  </MenuItem>
+                ))}
+                <MenuItem onClick={() => copyToClipboard(text("plain"))}>
+                  <TextIcon /> Plain
                 </MenuItem>
-              ))}
-              <MenuItem onClick={() => copyToClipboard(text("plain"))}>
-                <TextIcon /> Plain
-              </MenuItem>
-            </MenuContent>
-          </Menu>
+              </MenuContent>
+            </Menu>
+          )}
         </div>
       </div>
     </div>

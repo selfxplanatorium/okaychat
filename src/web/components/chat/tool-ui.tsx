@@ -1,4 +1,4 @@
-import { defineToolkit } from "@assistant-ui/react";
+import { defineToolkit, type ToolCallMessagePartComponent } from "@assistant-ui/react";
 import { BookOpenIcon, BotIcon, ChevronDownIcon, DownloadIcon, EyeIcon, FileTextIcon, GlobeIcon, ImageIcon, Loader2Icon, SearchIcon, SquareTerminalIcon, TriangleAlertIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { ArtifactCard } from "@/components/artifacts/ArtifactCard";
@@ -160,6 +160,18 @@ export const toolkit = defineToolkit({
     render: ({ args, result, status }) => <RunCodeCard args={args} result={result} running={status?.type === "running"} />,
   },
 });
+
+// generative-frame renders its helper tools as nothing, which leaves an empty row in the reasoning group.
+export const widgetHelperRenders: Record<string, ToolCallMessagePartComponent> = {
+  read_me: ({ status }) => {
+    const running = status?.type === "running";
+    return <ToolShell icon={<BookOpenIcon className="size-4" />} running={running} label={running ? "Reading the widget guide" : "Read the widget guide"} />;
+  },
+  preview_widget: ({ status }) => {
+    const running = status?.type === "running";
+    return <ToolShell icon={<EyeIcon className="size-4" />} running={running} label={running ? "Previewing the widget" : "Previewed the widget"} />;
+  },
+};
 
 type RunCodeResult = {
   language: "python" | "bash";

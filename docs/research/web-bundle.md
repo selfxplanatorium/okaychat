@@ -72,6 +72,44 @@ exclude `dynamicImports` until that route opens. Do not report only the tiny
 entry wrapper as the initial payload. Gzip figures are compressed file totals,
 not a claim about the deployment's HTTP compression configuration.
 
+## Long chats
+
+Measured on 2026-10-24 with a 200-message chat (each reply has a code block and a table), production
+build: opening it took 1.0 to 1.27 s in one blocking task. With the message window it paints in 200 to
+240 ms, and the newest 80 messages are mounted by about 0.75 s in slices mostly under 50 ms. Scrolling
+holds 60 fps.
+
+`WindowedMessages` (`thread.aui.tsx`) renders the list with `ThreadPrimitive.MessageByIndex` instead of
+`ThreadPrimitive.Messages`. Only rendering is windowed: the runtime holds every message, so chat
+requests, branching, and export still see the whole history.
+
+- Opening a chat mounts its newest `FIRST_PAINT` (16) messages. A different first message id (another
+  thread or branch) reopens the window; messages appended at the end never change it.
+- After each paint, `REVEAL_STEP` (8) older messages mount, back to `AUTO_REVEAL` (80) messages from
+  the end. Beyond that, "Show earlier messages (N more)" adds `MANUAL_REVEAL` (50) per click, revealed
+  in the same slices. Browser find-in-page cannot see messages that are not yet mounted.
+- Each slice records the distance from the bottom before it mounts and restores it with an instant
+  `scrollTo` after, so the text being read stays still in browsers without scroll anchoring.
+- Slices wait 150 ms after user scrolling: wheel, keys, touch, mouse drags on the scrollbar, and
+  scroll events up to 1 s after a finger lifts. Restoring `scrollTop` mid-fling would stop it. Plain
+  scroll events do not count, since the restore and the viewport's autoscroll fire them too.
+- When the last click removes the button, focus moves to the next control, as in `ThreadLoadEarlier`.
+
+Other long-chat costs:
+
+- Every `TooltipIconButton` is a trigger of one shared Base UI tooltip (`sharedTooltip` in
+  `components/ui/tooltip.tsx`, rendered once by `App`). A provider, root, and popup per button meant
+  hundreds of tooltip states per long chat.
+- Code blocks register their sticky-toolbar sentinel with `watchStuck()` (`code-block.tsx`). One frame
+  finds every pending block's scrollport and one `IntersectionObserver` serves each scrollport. Walking
+  `getComputedStyle` per block inside effects restyled the page once per block.
+- A table's right-click copy menu mounts on first use.
+- `AssistantMessage` reuses module-level grouping functions, so its `groupBy` memo holds.
+
+Per mounted message, Markdown parsing (about a fifth of the time) and assistant-ui's scaffolding remain.
+Typing into the composer cost about 12 ms per keystroke with all 200 messages mounted, because every
+store change runs each mounted message's selectors. Merging this app's selectors did not measurably change it.
+
 ## Verification
 
 Use `npm run typecheck`, `npm test`, and `npm run build`. Production smoke tests
