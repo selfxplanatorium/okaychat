@@ -115,7 +115,8 @@ export function branchThread(userId: string, sourceId: string, messageId: string
   const chain: MessageRow[] = [];
   for (let row = byId.get(messageId); row; row = row.parent_id ? byId.get(row.parent_id) : undefined) chain.unshift(row);
   if (!chain.length) throw new HTTPException(404, { message: "Message not found" });
-  const compaction = source.compaction && chain.some((m) => m.id === source.compaction!.boundaryMessageId) ? source.compaction : null;
+  const boundaries = [source.compaction?.boundaryMessageId, source.compaction?.trim?.throughMessageId];
+  const compaction = source.compaction && chain.some((m) => boundaries.includes(m.id)) ? source.compaction : null;
   const now = Date.now();
   tx(() => {
     db.prepare(
@@ -173,6 +174,16 @@ export function currentBranch(userId: string, threadId: string): UIMessage[] {
   const byId = new Map(rows.map((r) => [r.id, r]));
   const out: UIMessage[] = [];
   for (let row = rows.at(-1); row; row = row.parent_id ? byId.get(row.parent_id) : undefined) {
+    out.unshift({ id: row.id, ...(row.content as Omit<UIMessage, "id">) });
+  }
+  return out;
+}
+
+/** `messageId` and its ancestors, oldest first: the branch the client is showing. */
+export function branchMessages(userId: string, threadId: string, messageId: string): UIMessage[] {
+  const byId = new Map(listMessages(userId, threadId).map((r) => [r.id, r]));
+  const out: UIMessage[] = [];
+  for (let row = byId.get(messageId); row; row = row.parent_id ? byId.get(row.parent_id) : undefined) {
     out.unshift({ id: row.id, ...(row.content as Omit<UIMessage, "id">) });
   }
   return out;

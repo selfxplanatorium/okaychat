@@ -37,7 +37,7 @@ async function backgroundModel(userId: string, preferred?: string | null) {
 
 async function complete(userId: string, prompt: string, opts: { threadId?: string; preferred?: string | null; maxOutputTokens: number }): Promise<string> {
   const { model, conn } = await backgroundModel(userId, opts.preferred);
-  const handle = createModel(model, conn, { affinity: `memory-${userId}` });
+  const handle = createModel(model, conn, { userId });
   const result = await generateText({ model: handle.model, providerOptions: handle.providerOptions, maxOutputTokens: opts.maxOutputTokens, prompt });
   const usage = normalizeUsage(result.totalUsage);
   recordUsage({ userId, threadId: opts.threadId, providerId: model.providerId, modelId: model.id, kind: "memory", usage, cost: costOf(model.cost, usage) });

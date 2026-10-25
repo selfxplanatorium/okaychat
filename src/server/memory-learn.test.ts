@@ -124,20 +124,20 @@ test("the background tick reviews only idle chats and then writes the summary", 
   assert.equal(prompts.length, 2, "an up-to-date summary is not rewritten");
 });
 
-test("summaries enter the system prompt, stay pinned per chat, and are withdrawn when a fact is deleted", async (t) => {
+test("summaries enter the chat context, stay pinned per chat, and are withdrawn when a fact is deleted", async (t) => {
   model(t, ["## Personal context\n- Has a cat named Miso.", "## Personal context\n- Has a cat named Miso and a parrot."]);
   const cat = saveMemory("alice", { content: "Has a cat named Miso." }, "manual").entry;
   await refreshSummary("alice", "");
   ensureThread("alice", "first");
   const first = conversationMemory("alice", "first", "hello");
-  assert.match(first.instructions!, /Memory summary[\s\S]*cat named Miso/);
+  assert.match(first.summary!, /Memory summary[\s\S]*cat named Miso/);
   assert.ok(!first.context.includes("Has a cat named Miso."), "a summarized scope does not repeat every recent fact");
 
   saveMemory("alice", { content: "Has a parrot." }, "manual");
   await refreshSummary("alice", "");
-  assert.ok(!conversationMemory("alice", "first", "hello").instructions!.includes("parrot"), "a running chat keeps its pinned summary");
+  assert.ok(!conversationMemory("alice", "first", "hello").summary!.includes("parrot"), "a running chat keeps its pinned summary");
   ensureThread("alice", "second");
-  assert.ok(conversationMemory("alice", "second", "hello").instructions!.includes("parrot"), "a new chat gets the new summary");
+  assert.ok(conversationMemory("alice", "second", "hello").summary!.includes("parrot"), "a new chat gets the new summary");
 
   const { memoryRoutes } = await import("./memory.js");
   const { Hono } = await import("hono");
@@ -146,7 +146,7 @@ test("summaries enter the system prompt, stay pinned per chat, and are withdrawn
   db.prepare("INSERT OR IGNORE INTO sessions (token_hash, user_id, expires_at) VALUES (?, 'alice', ?)").run(sha256("alice"), Date.now() + 600_000);
   const app = new Hono().use(requireUser).route("/memory", memoryRoutes);
   assert.equal((await app.request(`http://app/memory/${cat.id}`, { method: "DELETE", headers: { cookie: "okaychat_session=alice" } })).status, 200);
-  for (const id of ["first", "second"]) assert.ok(!conversationMemory("alice", id, "hello").instructions!.includes("Miso"), "no chat may keep a summary that mentions a deleted fact");
+  for (const id of ["first", "second"]) assert.ok(!(conversationMemory("alice", id, "hello").summary ?? "").includes("Miso"), "no chat may keep a summary that mentions a deleted fact");
   assert.equal(listSummaries("alice")[0]!.content, null);
 });
 

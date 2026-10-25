@@ -85,6 +85,11 @@ export function GeneralSettings() {
           }
         />
         <SettingsRow
+          label="Trim before summarizing"
+          description="At the auto-compact threshold, first drop reasoning, tool results, and file contents from earlier messages while keeping all of their text. A summary is written only if that does not free enough room. Each trim or summary rewrites the history, so that reply misses the prompt cache once."
+          control={<Switch checked={settings.trimBeforeCompact === true} onCheckedChange={(trimBeforeCompact) => update({ trimBeforeCompact })} aria-label="Trim before summarizing" />}
+        />
+        <SettingsRow
           label="Max agent steps"
           description="Tool rounds per reply, followed by a final answer without tools. Web searches have a separate limit."
           reset={settings.maxSteps !== DEFAULT_USER_SETTINGS.maxSteps ? () => update({ maxSteps: DEFAULT_USER_SETTINGS.maxSteps }) : null}

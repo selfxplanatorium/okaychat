@@ -16,7 +16,7 @@ const { db } = await import("./db.js");
 const { saveConnection } = await import("./catalog/providers.js");
 const { updateSettings } = await import("./settings.js");
 const { ensureThread, updateThread, appendMessage } = await import("./threads.js");
-const { listMemories, saveMemory } = await import("./memory.js");
+const { listMemories, memoryRoutes, saveMemory } = await import("./memory.js");
 const { turnStream, chatRoutes } = await import("./chat.js");
 const { fileRoutes } = await import("./files.js");
 const { requireUser } = await import("./auth.js");
@@ -73,7 +73,8 @@ test("turnStream saves memory, gives a final answer at the agent limit, and reca
   assert.equal(listMemories("alice")[0]!.content, FACT);
   assert.equal(requests.length, 2, "one tool round plus a final model answer");
   assert.ok(names(requests[0]!).includes("memory_save"));
-  assert.deepEqual(names(requests[1]!), [], "the final step must not offer any tools");
+  assert.deepEqual(names(requests[1]!), names(requests[0]!), "the tool list stays constant so the prefix stays cached");
+  assert.equal(requests[1]!.tool_choice, "none", "the final step must not call tools");
   assert.ok(chunks.some((chunk) => chunk.type === "text-delta"));
   assert.ok(chunks.some((chunk) => chunk.type === "finish"));
   await run("second-chat", [{ id: "recall", role: "user", parts: [{ type: "text", text: "What examples should you use?" }] }]);
@@ -87,8 +88,39 @@ test("turnStream saves memory, gives a final answer at the agent limit, and reca
   updateThread("alice", "excluded-chat", { memoryDisabled: true });
   await run("excluded-chat");
   assert.ok(!system(requests[3]!).includes(FACT));
-  assert.equal(requests[3]!.messages.filter((message) => message.role === "user").length, 1, "excluded chats receive no supplemental memory data");
+  assert.ok(!JSON.stringify(requests[3]!.messages.filter((message) => message.role === "user")).includes("Retrieved saved memory"), "excluded chats receive no supplemental memory data");
   assert.ok(!names(requests[3]!).some((name) => name.startsWith("memory_")));
+});
+
+test("later turns replay each turn's recalled memory so the request prefix stays cached", async (t) => {
+  const requests = provider(t, false);
+  const { entry } = saveMemory("alice", { content: FACT }, "manual");
+  const first: UIMessage = { id: "u1", role: "user", parts: [{ type: "text", text: "Which examples do I like?" }] };
+  await run("cache-chat", [first]);
+  const turn = [first, { id: "a1", role: "assistant", parts: [{ type: "text", text: "Concise TypeScript." }] } as UIMessage];
+  await run("cache-chat", [...turn, { id: "u2", role: "user", parts: [{ type: "text", text: "And for Python?" }] }]);
+  assert.deepEqual(requests[1]!.messages.slice(0, requests[0]!.messages.length), requests[0]!.messages, "the second request extends the first");
+  assert.equal(JSON.stringify(requests[1]!.messages).split(FACT).length - 1, 1, "a fact already shown in this chat is not sent again");
+  assert.equal(JSON.stringify(requests[1]!.messages).split("Today's date").length - 1, 1, "an unchanged date is not repeated");
+  const deleted = await new Hono().use(requireUser).route("/", memoryRoutes).request(`/${entry.id}`, { method: "DELETE", headers: { Cookie: "okaychat_session=alice-session" } });
+  assert.equal(deleted.status, 200);
+  await run("cache-chat", [...turn, { id: "u2", role: "user", parts: [{ type: "text", text: "And for Python?" }] }]);
+  assert.ok(!JSON.stringify(requests[2]!.messages).includes(FACT), "a deleted fact is never replayed");
+});
+
+test("every chat shares the first system message; chat context and the date come after the tools", async (t) => {
+  const requests = provider(t, false);
+  db.prepare("INSERT INTO projects (id, user_id, name, instructions, created_at) VALUES ('layer-project', 'alice', 'Layer', 'LAYER_PROJECT_INSTRUCTIONS', 1)").run();
+  ensureThread("alice", "layer-a");
+  db.prepare("UPDATE threads SET project_id = 'layer-project' WHERE id = 'layer-a'").run();
+  await run("layer-a");
+  await run("layer-b");
+  const [a, b] = [requests[0]!.messages, requests[1]!.messages];
+  assert.deepEqual(a[0], b[0], "the shared system part is identical across chats");
+  assert.ok(!JSON.stringify(a[0]).includes("LAYER_PROJECT_INSTRUCTIONS") && !JSON.stringify(a[0]).includes("Today's date"));
+  assert.equal(a[1]!.role, "system");
+  assert.ok(JSON.stringify(a[1]).includes("LAYER_PROJECT_INSTRUCTIONS"), "project context is the second system message");
+  assert.ok(JSON.stringify(a.filter((m) => m.role === "user")).includes("Today's date"), "the date rides in the turn context");
 });
 
 for (const approved of [true, false]) {
@@ -111,13 +143,13 @@ for (const approved of [true, false]) {
     assert.equal(listMemories("alice").length, approved ? 1 : 0);
     if (approved) assert.equal(listMemories("alice")[0]!.content, FACT);
     assert.equal(requests.length, 2, "approval continuation gets exactly one final model response");
-    assert.deepEqual(names(requests[1]!), [], "continuations cannot reset their tool-round allowance");
+    assert.equal(requests[1]!.tool_choice, "none", "continuations cannot reset their tool-round allowance");
     assert.ok(continued.some((chunk) => chunk.type === "text-delta"));
     assert.ok(continued.some((chunk) => chunk.type === "finish"));
   });
 }
 
-test("continuations at an exhausted agent budget receive exactly one tool-less final step", async (t) => {
+test("continuations at an exhausted agent budget receive exactly one final step that cannot call tools", async (t) => {
   const requests = provider(t, false);
   const chunks = await run("continued-chat", [
     { id: "user", role: "user", parts: [{ type: "text", text: "Check my preferences" }] },
@@ -127,7 +159,7 @@ test("continuations at an exhausted agent budget receive exactly one tool-less f
     ] },
   ]);
   assert.equal(requests.length, 1);
-  assert.deepEqual(names(requests[0]!), []);
+  assert.equal(requests[0]!.tool_choice, "none");
   assert.ok(chunks.some((chunk) => chunk.type === "text-delta"));
 });
 
@@ -143,6 +175,7 @@ test("temporary turns do not save data or include account personalization by def
   saveMemory("alice", { content: FACT }, "manual");
   const before = storedCounts();
   await run("tmp_default", [{ id: "temporary-user", role: "user", parts: [{ type: "text", text: "Give me an example" }] }]);
+  assert.ok(system(requests[0]!).includes("This is a temporary chat."));
   assert.deepEqual(storedCounts(), before);
   assert.ok(!JSON.stringify(requests[0]!.messages).includes(FACT));
   assert.ok(!system(requests[0]!).includes("ACCOUNT_PRIVATE_INSTRUCTIONS"));

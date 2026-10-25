@@ -663,6 +663,28 @@ svg.lucide[data-icon-motion] > * {
 .lucide-shrink[data-icon-motion="press"] > * { animation: icon-converge 420ms var(--ease-spring); }
 @keyframes icon-converge { 40% { transform: translate(var(--dx), var(--dy)); } }
 
+/*
+ * Scissors: the blades turn about the pivot (12,12) and close. Blade one is the
+ * top-left ring with both halves of the falling line (children 1, 2, 5), blade
+ * two the rising line with the bottom-left ring (3, 4). Hover half-closes once,
+ * press snips twice, and .icon-snipping repeats the snip while work runs.
+ */
+.lucide-scissors[data-icon-motion],
+.lucide-scissors.icon-snipping { animation: none; }
+.lucide-scissors[data-icon-motion] > *,
+.lucide-scissors.icon-snipping > * { --snip: -1; }
+.lucide-scissors[data-icon-motion] > :is(:nth-child(3), :nth-child(4)),
+.lucide-scissors.icon-snipping > :is(:nth-child(3), :nth-child(4)) { --snip: 1; }
+.lucide-scissors[data-icon-motion="hover"] > * { animation: icon-snip-hint var(--icon-hover) var(--ease-out-quart); }
+.lucide-scissors[data-icon-motion="press"] > * { animation: icon-snip var(--icon-press) var(--ease-out-quart); }
+.lucide-scissors.icon-snipping > * { animation: icon-snip 640ms var(--ease-out-quart) infinite; }
+@keyframes icon-snip-hint { 40% { transform: rotate(calc(var(--snip) * 18deg)); } }
+@keyframes icon-snip {
+  22% { transform: rotate(calc(var(--snip) * 38deg)); }
+  44% { transform: rotate(calc(var(--snip) * 6deg)); }
+  66% { transform: rotate(calc(var(--snip) * 38deg)); }
+}
+
 /* Files: the text lines write themselves in. */
 .lucide-file-text[data-icon-motion],
 .lucide-file-spreadsheet[data-icon-motion] { animation: none; }

@@ -1,5 +1,4 @@
 import {
-  convertToModelMessages,
   createUIMessageStream,
   createUIMessageStreamResponse,
   generateText,
@@ -20,25 +19,30 @@ import { artifactsInCurrentTurn, artifactTools } from "./artifacts.js";
 import { promptText } from "./prompts.js";
 import { listModels, resolveModel } from "./catalog/providers.js";
 import { newId } from "./crypto.js";
-import { applyCompaction, compact, currentContextTokens, summaryMessages } from "./compaction.js";
+import { applyCompaction, compact, contextTokens, historyMessages, summaryMessages, trimCompaction } from "./compaction.js";
 import { createModel } from "./llm.js";
 import { toolsForUser } from "./mcp/manager.js";
 import { enabledImageServices, imageTools } from "./tools/image.js";
 import { SandboxTurn, sandboxConfigured, sandboxTools } from "./tools/sandbox.js";
 import { subagentTools } from "./tools/subagent.js";
+import { attachmentTools } from "./tools/attachments.js";
 import { injectScreenshots, injectToolImages, type ToolImage } from "./tools/screenshots.js";
 import type { VisualShot } from "./documents/visual.js";
 import { webTools } from "./tools/web.js";
 import { SearchBudget, searchesInCurrentTurn, agentStepsInCurrentTurn } from "./tools/search-budget.js";
-import { conversationMemory, temporaryMemory } from "./memory.js";
+import { conversationMemory, factsContext, memoryPreferences, temporaryMemory } from "./memory.js";
+import { contextText, insertTurnContexts, saveTurnContext, shownFactIds, storedTurnContexts } from "./turn-context.js";
 import { adaptPdfParts } from "./pdf-parts.js";
 import { projectContext } from "./projects.js";
 import { turnSkills } from "./skills.js";
 import { getSettings, subagentModelRefs } from "./settings.js";
-import { currentBranch, ensureThread, getThread, isTemporaryThread, setCompaction, updateThread, userText } from "./threads.js";
+import { branchMessages, currentBranch, ensureThread, getThread, isTemporaryThread, setCompaction, updateThread, userText } from "./threads.js";
 import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "./usage.js";
 
 // AssistantChatTransport sends the thread's remote id as `id` and model context as `config`, `system`, and `tools`.
+// After an automatic trim the context must fall below this share of the threshold, or it is summarized too.
+const TRIM_HEADROOM = 0.75;
+
 const chatBody = z.object({
   messages: z.array(z.any()),
   id: z.string().min(1).max(200),
@@ -56,19 +60,25 @@ const chatBody = z.object({
   tools: z.record(z.string(), z.any()).optional(),
 });
 
-function systemPrompt(model: ModelInfo, userPrompt: string, project: string, mcpInstructions: string[], artifacts: boolean, clientSystem?: string, memory?: string): string {
-  // Order matters for caching: static text first, nothing that changes per request.
-  // The model line is stable per chat: switching models already starts a new cache.
+/**
+ * The system part shared by every chat of the account with this model. Many templates (DeepSeek) render
+ * the tool definitions after the first system message, so anything per chat or per day here would
+ * invalidate the whole tool block. Per-chat context goes in `chatContext`, the date in the turn context.
+ */
+function systemPrompt(model: ModelInfo, userPrompt: string, mcpInstructions: string[], artifacts: boolean, clientSystem?: string, memory?: string): string {
   const identity = promptText("modelIdentity", { name: model.name, id: model.id, provider: model.providerId, knowledge: model.knowledge ?? "unknown" });
-  const parts = [promptText("chat"), identity, promptText("date", { date: new Date().toISOString().slice(0, 10) })].filter((part) => part.trim());
+  const parts = [promptText("chat"), identity].filter((part) => part.trim());
   if (artifacts) parts.push(promptText("artifacts"));
   if (userPrompt.trim()) parts.push(`# User instructions\n${userPrompt.trim()}`);
-  if (project) parts.push(project);
   if (mcpInstructions.length) parts.push(`# Tool server instructions\n${mcpInstructions.join("\n\n")}`);
   if (memory) parts.push(memory);
-  // Last: these change per turn (UI interactions) and should not invalidate the rest.
   if (clientSystem?.trim()) parts.push(clientSystem.trim());
   return parts.join("\n\n");
+}
+
+/** Per-chat system context, sent as a second system message after the tools. Changes rarely within a chat. */
+function chatContext(project: string, memorySummary?: string): string {
+  return [project, memorySummary].filter(Boolean).join("\n\n");
 }
 
 export interface TurnOptions {
@@ -115,11 +125,22 @@ export async function turnStream(opts: TurnOptions) {
       // Auto-compact before the turn when the conversation no longer fits comfortably.
       const threshold = settings.autoCompactAt;
       const history = uiMessages.slice(0, -1);
-      if (!temporary && threshold > 0 && history.length > 2 && currentContextTokens(applyCompaction(uiMessages, compaction).messages) > model.context * threshold) {
-        writer.write({ type: "data-compaction", data: { status: "running" }, transient: true });
-        compaction = await compact({ userId: user.id, threadId, messages: history, previous: compaction, model, conn });
-        setCompaction(user.id, threadId, compaction);
-        writer.write({ type: "data-compaction", data: { status: "done", boundaryMessageId: compaction.boundaryMessageId, tokensBefore: compaction.tokensBefore }, transient: true });
+      const limit = model.context * threshold;
+      if (!temporary && threshold > 0 && history.length > 2 && contextTokens(uiMessages, compaction) > limit) {
+        const trimmed = settings.trimBeforeCompact ? trimCompaction(uiMessages, compaction) : null;
+        if (trimmed) {
+          compaction = trimmed;
+          setCompaction(user.id, threadId, compaction);
+          writer.write({ type: "data-compaction", data: { status: "trimmed", ...trimmed.trim }, transient: true });
+        }
+        // Trimming alone must leave real headroom. Otherwise each following turn would cross the threshold
+        // again and rewrite the history, losing the prompt cache every time.
+        if (!trimmed || trimmed.trim!.tokensAfter > limit * TRIM_HEADROOM) {
+          writer.write({ type: "data-compaction", data: { status: "running" }, transient: true });
+          compaction = await compact({ userId: user.id, threadId, messages: history, previous: compaction, model, conn });
+          setCompaction(user.id, threadId, compaction);
+          writer.write({ type: "data-compaction", data: { status: "done", boundaryMessageId: compaction.boundaryMessageId, tokensBefore: compaction.tokensBefore }, transient: true });
+        }
       }
 
       // MCP images reach the model once, appended by prepareStep like view_artifact screenshots.
@@ -134,7 +155,7 @@ export async function turnStream(opts: TurnOptions) {
       const builtInWeb = model.toolCall && settings.webTools ? webTools({ searchBudget, search: opts.webSearch ?? true }) : {};
       const lastUser = uiMessages.findLast((message) => message.role === "user");
       const query = lastUser?.parts.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n") ?? "";
-      const memory = temporary
+      const memory: ReturnType<typeof conversationMemory> = temporary
         ? personalized ? temporaryMemory(userId, query) : { context: "", instructions: undefined, tools: {} }
         : conversationMemory(userId, threadId, query);
       // Sub-agents get the read-only pair (load/read) but never source search, install, or create.
@@ -167,19 +188,54 @@ export async function turnStream(opts: TurnOptions) {
         ...(model.toolCall && !temporary && settings.codeExecution && sandboxConfigured() ? sandboxTools(user.id, threadId, signal, sandboxTurn) : {}),
         ...(useGenerativeUI ? frontendTools(opts.clientTools!) : {}),
         ...mcp.tools,
+        // Only trimmed chats point the model at removed attachments, so others keep their tool list (and cache).
+        ...(compaction?.trim ? attachmentTools(user.id, canViewImages ? toolImages : undefined) : {}),
       };
-      const { messages: live, summary } = applyCompaction(uiMessages, compaction);
-      const handle = createModel(model, conn, { affinity: threadId, effort });
-      const converted = await convertToModelMessages(await adaptPdfParts(live, model), { tools, ignoreIncompleteToolCalls: true });
-      // Retrieved facts change with the query. Keep them near the current request so a
-      // different subset does not invalidate the stable system and conversation prefix.
-      const currentContext = [memory.context, skills.context].filter(Boolean).join("\n\n");
-      if (currentContext) {
-        const lastUserIndex = converted.findLastIndex((message) => message.role === "user");
-        converted.splice(lastUserIndex < 0 ? converted.length : lastUserIndex, 0, { role: "user", content: currentContext });
+      const applied = applyCompaction(uiMessages, compaction);
+      const { messages: live, summary } = applied;
+      const handle = createModel(model, conn, { userId, effort });
+      const modelMessages = await historyMessages(applied, (tail) => adaptPdfParts(tail, model), tools);
+      // Retrieved facts change with the query, so they sit beside the user message they were retrieved for,
+      // never in the system prefix. Stored chats replay each earlier block verbatim to keep the prefix cached.
+      let converted = modelMessages;
+      const date = promptText("date", { date: new Date().toISOString().slice(0, 10) });
+      if (temporary) {
+        const currentContext = contextText({ date, memory: memory.context, skills: skills.context });
+        if (currentContext) {
+          const lastUserIndex = converted.findLastIndex((message) => message.role === "user");
+          converted.splice(lastUserIndex < 0 ? converted.length : lastUserIndex, 0, { role: "user", content: currentContext });
+        }
+      } else {
+        const memoryRevision = memory.instructions !== undefined ? memoryPreferences(userId).revision : null;
+        const stored = storedTurnContexts(userId, threadId, { memoryRevision, skills: !!skills.context });
+        // A continuation or retry of this turn reuses the block it started with. A new block carries only what
+        // the replayed earlier blocks do not already show, so each turn adds as few uncached tokens as possible.
+        if (lastUser && !stored.has(lastUser.id)) {
+          const shown = new Set<string>();
+          let lastDate = "";
+          let lastSkills = "";
+          for (const message of live) {
+            const block = message.role === "user" && message.id !== lastUser.id ? stored.get(message.id) : undefined;
+            if (!block) continue;
+            for (const id of shownFactIds(block.memory)) shown.add(id);
+            lastDate = block.date || lastDate;
+            lastSkills = block.skills || lastSkills;
+          }
+          const fresh = {
+            date: date === lastDate ? "" : date,
+            memory: memory.facts ? factsContext(memory.facts.filter((fact) => !shown.has(fact.id))) : memory.context,
+            skills: skills.context === lastSkills ? "" : skills.context,
+          };
+          saveTurnContext(userId, threadId, lastUser.id, fresh, memoryRevision ?? 0);
+          stored.set(lastUser.id, fresh);
+        }
+        converted = insertTurnContexts(live, converted, new Map([...stored].map(([id, context]) => [id, contextText(context)])));
       }
       const memoryInstructions = [temporary ? promptText("temporary") : "", memory.instructions].filter(Boolean).join("\n\n");
-      const { system, messages } = handle.markCache(systemPrompt(model, personalized ? settings.systemPrompt : "", temporary ? "" : projectContext(userId, thread.projectId), mcp.instructions, useArtifacts, useGenerativeUI ? opts.clientSystem : undefined, memoryInstructions), [
+      const messages = handle.markCache([
+        systemPrompt(model, personalized ? settings.systemPrompt : "", mcp.instructions, useArtifacts, useGenerativeUI ? opts.clientSystem : undefined, memoryInstructions),
+        chatContext(temporary ? "" : projectContext(userId, thread.projectId), memory.summary),
+      ], [
         ...(summary ? summaryMessages(summary) : []),
         ...converted,
       ]);
@@ -191,7 +247,7 @@ export async function turnStream(opts: TurnOptions) {
 
       const result = streamText({
         model: handle.model,
-        messages: system ? [system, ...messages] : messages,
+        messages,
         allowSystemInMessages: true,
         tools,
         // Reserve one final response without tools, so hitting the limit cannot restart the
@@ -201,7 +257,8 @@ export async function turnStream(opts: TurnOptions) {
           const withShots = injectToolImages(injectScreenshots(stepMessages, shots, injectedShots), toolImages, injectedToolImages);
           return {
             ...(withShots !== stepMessages ? { messages: withShots } : {}),
-            activeTools: stepNumber >= remainingSteps ? [] : Object.keys(tools).filter((name) => name !== "web_search" || searchBudget.remaining > 0),
+            // The tool list is part of the cached prefix, so it never changes within a chat. The final step
+            // forbids calls instead of removing tools, and web_search rejects calls past the budget itself.
             ...(stepNumber >= remainingSteps ? { toolChoice: "none" as const } : {}),
           };
         },
@@ -373,6 +430,20 @@ export const chatRoutes = new Hono<AppEnv>()
     setCompaction(user.id, threadId, state);
     return c.json(state);
   })
+  .post("/threads/:id/trim", async (c) => {
+    const user = c.get("user");
+    const threadId = c.req.param("id");
+    if (isTemporaryThread(threadId)) return c.json({ error: "Temporary chats cannot save compaction" }, 400);
+    const parsed = z.object({ messageId: z.string().min(1).max(200) }).safeParse(await c.req.json());
+    if (!parsed.success) return c.json({ error: "Invalid trim request" }, 400);
+    const thread = getThread(user.id, threadId);
+    if (!thread) return c.json({ error: "Thread not found" }, 404);
+    // The stored messages, not the client's copy: trimming needs the full tool results to measure the savings.
+    const state = trimCompaction(branchMessages(user.id, threadId, parsed.data.messageId), thread.compaction);
+    if (!state) return c.json({ error: "Nothing to trim. The latest exchange always stays complete." }, 400);
+    setCompaction(user.id, threadId, state);
+    return c.json(state);
+  })
   .delete("/threads/:id/compact", (c) => {
     if (isTemporaryThread(c.req.param("id"))) return c.json({ error: "Temporary chats cannot save compaction" }, 400);
     setCompaction(c.get("user").id, c.req.param("id"), null);
@@ -394,7 +465,7 @@ export const chatRoutes = new Hono<AppEnv>()
     if (ref) {
       try {
         const { model, conn } = await resolveModel(user.id, ref);
-        const handle = createModel(model, conn, { affinity: `${threadId}-title` });
+        const handle = createModel(model, conn, { userId: user.id });
         const result = await generateText({
           model: handle.model,
           providerOptions: handle.providerOptions,

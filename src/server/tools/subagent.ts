@@ -39,7 +39,7 @@ export function subagentTools(opts: { userId: string; threadId: string; allowed:
       }),
       execute: async function* ({ task, model: ref }, { toolCallId }): AsyncGenerator<SubagentProgress> {
         const { model, conn } = await resolveModel(opts.userId, ref ?? refs[0]);
-        const handle = createModel(model, conn, { affinity: `${opts.threadId}-sub-${toolCallId}` });
+        const handle = createModel(model, conn, { userId: opts.userId });
         let usage = ZERO_USAGE;
         let cost = 0;
         const progress: SubagentProgress = { model: model.ref, status: "running", text: "", steps: 0, tools: [] };
@@ -47,14 +47,16 @@ export function subagentTools(opts: { userId: string; threadId: string; allowed:
         const result = streamText({
           model: handle.model,
           providerOptions: handle.providerOptions,
-          system: [promptText("subagent"), opts.searchBudget ? promptText("subagentSearchBudget", { remaining: opts.searchBudget.remaining }) : ""].filter((part) => part.trim()).join("\n"),
-          prompt: task,
+          // The remaining search budget changes per delegation, so it rides with the task, after the tools.
+          messages: handle.markCache([promptText("subagent")], [{
+            role: "user",
+            content: [opts.searchBudget ? promptText("subagentSearchBudget", { remaining: opts.searchBudget.remaining }) : "", task].filter((part) => part.trim()).join("\n\n"),
+          }]),
+          allowSystemInMessages: true,
           tools: opts.subTools,
           stopWhen: stepCountIs(maxSteps + 1),
-          prepareStep: ({ stepNumber }) => ({
-            activeTools: stepNumber >= maxSteps ? [] : Object.keys(opts.subTools).filter((name) => name !== "web_search" || !opts.searchBudget || opts.searchBudget.remaining > 0),
-            ...(stepNumber >= maxSteps ? { toolChoice: "none" as const } : {}),
-          }),
+          // Same as the parent loop: a constant tool list keeps the prefix cached; the last step forbids calls.
+          prepareStep: ({ stepNumber }) => (stepNumber >= maxSteps ? { toolChoice: "none" as const } : {}),
           maxOutputTokens: model.maxOutput,
           abortSignal: opts.signal,
           onStepEnd: (step) => {

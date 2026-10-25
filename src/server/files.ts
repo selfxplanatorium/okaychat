@@ -11,7 +11,7 @@ import { assertStorage, QuotaError } from "./quota.js";
 
 export const MAX_BYTES = 25 * 1024 * 1024;
 // Keep huge documents from blowing the context window in one attachment.
-const MAX_CHARS = 400_000;
+export const MAX_CHARS = 400_000;
 
 export async function extract(name: string, type: string, data: Uint8Array): Promise<{ text: string; pages?: number }> {
   const lower = name.toLowerCase();

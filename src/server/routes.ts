@@ -105,6 +105,7 @@ const settingsPatch = z.object({
     .refine((value) => Object.keys(value).length <= 500, "too many models").optional(),
   systemPrompt: z.string().max(50_000).optional(),
   autoCompactAt: z.number().min(0).max(1).optional(),
+  trimBeforeCompact: z.boolean().optional(),
   webTools: z.boolean().optional(),
   artifacts: z.boolean().optional(),
   generativeUI: z.boolean().optional(),

@@ -108,8 +108,8 @@ menu item is shown only when the preference is on and the chat is not temporary.
 
 ### Caching
 
-The index is dynamic current-turn context, inserted before the latest user message alongside retrieved
-memories. It never enters `systemPrompt()` and never rewrites earlier messages. Adding, editing or
+The index is current-turn context, inserted before the user message alongside retrieved
+memories and replayed verbatim in later turns (`turn_context`). It never enters `systemPrompt()` and never rewrites earlier messages. Adding, editing or
 loading a skill leaves the system prefix byte-identical, including when an approval continuation
 creates a skill. Bodies arrive only as tool results. Tool schema order stays deterministic.
 See `prompt-caching.md`.

@@ -50,7 +50,7 @@ x-opencode-client: <app name>
 promptCacheKey: <affinity>            # OpenAI prompt_cache_key, max 64 chars
 ```
 
-The affinity id routes all requests of a conversation to the same backend so the provider prefix cache hits. okaychat uses the thread id (root thread id for forks) as affinity and `User-Agent: okaychat/<version>`.
+The affinity id routes requests to the backend holding the prefix cache. Measured 2026-10-23: `x-opencode-session` picks the upstream for DeepSeek (a new value can land on a different upstream with a different tokenizer and 0 cached tokens), and `prompt_cache_key` alone partitions the GPT cache. okaychat sends one hashed per-account value (`cacheAffinity()` in `llm.ts`) for all of them, so every chat of an account shares the cached tool and system prefix, plus `User-Agent: okaychat/<version>`. A request without `x-opencode-session` is rejected with `MissingSessionID`.
 
 ## Limits
 

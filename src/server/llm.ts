@@ -5,6 +5,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { JSONValue, LanguageModel, ModelMessage } from "ai";
 import type { ModelInfo, ReasoningEffort } from "../shared/types.js";
 import type { Connection } from "./catalog/providers.js";
+import { sha256 } from "./crypto.js";
 import { USER_AGENT } from "./env.js";
 import { publicFetch } from "./public-fetch.js";
 
@@ -13,15 +14,19 @@ type ProviderOptions = Record<string, Record<string, JSONValue>>;
 export interface ModelHandle {
   model: LanguageModel;
   providerOptions: ProviderOptions;
-  /** Rewrites messages to place cache breakpoints for formats that need them. */
-  markCache: (system: string | undefined, messages: ModelMessage[]) => { system?: ModelMessage; messages: ModelMessage[] };
+  /**
+   * Builds the request messages with cache breakpoints for formats that need them. `system[0]` is the part
+   * shared by every chat of the account, `system[1]` the chat's own context. See docs/research/prompt-caching.md.
+   */
+  markCache: (system: string[], messages: ModelMessage[]) => ModelMessage[];
 }
 
 const isOpencode = (providerId: string) => providerId === "opencode-go" || providerId === "opencode";
 
 /**
- * Headers that route all turns of a thread to the same backend so prefix caches hit.
- * See docs/research/opencode-go.md.
+ * Headers that route requests to the backend holding the prefix cache. OpenCode Go picks the upstream by
+ * `x-opencode-session`, so it is per account, not per chat: every chat of an account then shares the
+ * cached tool and system prefix. See docs/research/prompt-caching.md.
  */
 function affinityHeaders(providerId: string, affinity: string): Record<string, string> {
   const headers: Record<string, string> = { "User-Agent": USER_AGENT };
@@ -33,17 +38,19 @@ function affinityHeaders(providerId: string, affinity: string): Record<string, s
   return headers;
 }
 
-export function createModel(info: ModelInfo, conn: Connection, opts: { affinity: string; effort?: ReasoningEffort }): ModelHandle {
-  const headers = affinityHeaders(info.providerId, opts.affinity);
+/** Stable per-account routing and cache key. Hashed so the account id never leaves the server. */
+export const cacheAffinity = (userId: string) => `okc-${sha256(`cache:${userId}`).slice(0, 32)}`;
+
+export function createModel(info: ModelInfo, conn: Connection, opts: { userId: string; effort?: ReasoningEffort }): ModelHandle {
+  const affinity = cacheAffinity(opts.userId);
+  const headers = affinityHeaders(info.providerId, affinity);
   const apiKey = conn.apiKey ?? "not-needed";
   const baseURL = info.baseURL;
   const fetch = conn.guarded ? publicFetch : undefined;
-  const cacheKey = opts.affinity.slice(0, 64);
+  // OpenAI-style caches are partitioned by prompt_cache_key: a per-chat key made every new chat start cold.
+  const cacheKey = affinity;
   const effort = opts.effort && info.reasoning && (!info.reasoningEfforts || info.reasoningEfforts.includes(opts.effort)) ? opts.effort : undefined;
-  const passthrough = (system: string | undefined, messages: ModelMessage[]) => ({
-    system: system ? ({ role: "system", content: system } as ModelMessage) : undefined,
-    messages,
-  });
+  const passthrough = (system: string[], messages: ModelMessage[]) => [...systemMessages(system), ...messages];
 
   switch (info.format) {
     case "openai-responses": {
@@ -53,7 +60,12 @@ export function createModel(info: ModelInfo, conn: Connection, opts: { affinity:
         openai.reasoningEffort = effort;
         openai.reasoningSummary = "auto";
       }
-      return { model: provider.responses(info.id), providerOptions: { openai }, markCache: passthrough };
+      // GPT-5.6+ cache only at breakpoints; the implicit one sits at the end of the conversation. An explicit
+      // one after the shared system part lets new chats and changed chat context reuse tools + system.
+      const markCache = EXPLICIT_BREAKPOINTS.test(info.id)
+        ? (system: string[], messages: ModelMessage[]) => [...systemMessages(system, OPENAI_BREAKPOINT), ...messages]
+        : passthrough;
+      return { model: provider.responses(info.id), providerOptions: { openai }, markCache };
     }
     case "anthropic": {
       const provider = createAnthropic({ apiKey, baseURL, headers, fetch });
@@ -100,20 +112,26 @@ function effortBudget(effort: ReasoningEffort): number {
 }
 
 const EPHEMERAL = { anthropic: { cacheControl: { type: "ephemeral" } } } as const;
+const OPENAI_BREAKPOINT = { openai: { promptCacheBreakpoint: { mode: "explicit" } } } as const;
+/** OpenAI models that cache only at breakpoints (GPT-5.6 and later). */
+const EXPLICIT_BREAKPOINTS = /^gpt-(5\.([6-9]|\d{2,})|[6-9]|\d{2,})(\b|[.-])/;
+
+/** The shared part first, optionally marked as a cache breakpoint; then the chat's own context. */
+function systemMessages(system: string[], breakpoint?: ModelMessage["providerOptions"]): ModelMessage[] {
+  return system.filter((text) => text.trim()).map((content, index) =>
+    ({ role: "system", content, ...(index === 0 && breakpoint ? { providerOptions: breakpoint } : {}) }) as ModelMessage);
+}
 
 /**
- * Anthropic caches only at explicit breakpoints (max 4). Mark the system prompt (covers tools + system)
- * and the last message (moves forward each turn). See docs/research/prompt-caching.md.
+ * Anthropic caches only at explicit breakpoints (max 4). Mark the shared system part (covers tools + it,
+ * reused by every chat) and the last message (moves forward each step). See docs/research/prompt-caching.md.
  */
-function anthropicBreakpoints(system: string | undefined, messages: ModelMessage[]) {
+function anthropicBreakpoints(system: string[], messages: ModelMessage[]): ModelMessage[] {
   const out = [...messages];
   const lastIndex = out.length - 1;
   const last = out[lastIndex];
   if (last && last.role !== "system") {
     out[lastIndex] = { ...last, providerOptions: { ...last.providerOptions, ...EPHEMERAL } } as ModelMessage;
   }
-  return {
-    system: system ? ({ role: "system", content: system, providerOptions: EPHEMERAL } as ModelMessage) : undefined,
-    messages: out,
-  };
+  return [...systemMessages(system, EPHEMERAL), ...out];
 }

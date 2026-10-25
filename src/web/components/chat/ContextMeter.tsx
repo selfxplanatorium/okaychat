@@ -1,5 +1,5 @@
 import { useAui, useAuiState } from "@assistant-ui/react";
-import { ChevronDownIcon, Loader2Icon, ShrinkIcon } from "lucide-react";
+import { ChevronDownIcon, Loader2Icon, ScissorsIcon, ShrinkIcon } from "lucide-react";
 import { useState } from "react";
 import type { CompactionState } from "@shared/types";
 import { Button } from "@/components/ui/button";
@@ -47,7 +47,7 @@ export function ContextMeter() {
   const running = useAuiState((s) => s.thread.isRunning);
   const aui = useAui();
   const refresh = useThreadMetaStore((s) => s.refresh);
-  const [compacting, setCompacting] = useState(false);
+  const [compacting, setCompacting] = useState<"summary" | "trim" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const window = model?.context ?? usage?.window ?? 0;
@@ -58,7 +58,7 @@ export function ContextMeter() {
 
   const compactNow = async () => {
     if (!threadId || !model) return;
-    setCompacting(true);
+    setCompacting("summary");
     setError(null);
     try {
       const messages = aui.thread.getState().messages.map((m) => ({
@@ -72,7 +72,22 @@ export function ContextMeter() {
     } catch (e) {
       setError((e as Error).message);
     } finally {
-      setCompacting(false);
+      setCompacting(null);
+    }
+  };
+
+  const trimNow = async () => {
+    const messageId = aui.thread.getState().messages.at(-1)?.id;
+    if (!threadId || !messageId) return;
+    setCompacting("trim");
+    setError(null);
+    try {
+      await api<CompactionState>(`/threads/${threadId}/trim`, { method: "POST", json: { messageId } });
+      await refresh(threadId);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCompacting(null);
     }
   };
 
@@ -111,16 +126,33 @@ export function ContextMeter() {
           <dt>Auto-compact</dt>
           <dd className="text-foreground text-right">{autoCompactAt > 0 ? `at ${Math.round(autoCompactAt * 100)}%` : "Off"}</dd>
         </dl>
-        {meta?.compaction && (
-          <p className="text-muted-foreground mt-2 text-xs">
-            Compacted from {formatTokens(meta.compaction.tokensBefore)} tokens on {new Date(meta.compaction.createdAt).toLocaleString()}.
+        {meta?.compaction?.summary && (
+          <p className="text-muted-foreground animate-fade-in mt-2 text-xs">
+            Compacted from {formatTokens(meta.compaction.tokensBefore ?? 0)} tokens on {new Date(meta.compaction.createdAt ?? 0).toLocaleString()}.
           </p>
         )}
-        {error && <p className="text-error mt-2 text-xs">{error}</p>}
-        {!privacy.temporary && <Button size="sm" variant="outline" className="mt-3 w-full" disabled={!threadId || running || compacting} onClick={compactNow}>
-          {compacting ? <Loader2Icon className="animate-spin" /> : <ShrinkIcon />}
-          {compacting ? "Summarizing…" : "Compact now"}
-        </Button>}
+        {meta?.compaction?.trim && (
+          <p className="text-muted-foreground animate-fade-in mt-2 text-xs">
+            Trimmed from about {formatTokens(meta.compaction.trim.tokensBefore)} to {formatTokens(meta.compaction.trim.tokensAfter)} tokens on {new Date(meta.compaction.trim.createdAt).toLocaleString()}.
+          </p>
+        )}
+        {error && <p className="text-error animate-fade-in mt-2 text-xs">{error}</p>}
+        {!privacy.temporary && (
+          <>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <Button size="sm" variant="outline" disabled={!threadId || running || !!compacting} onClick={trimNow} title="Keep every message's text, drop earlier reasoning, tool results, and file contents">
+                {/* The scissors stay mounted so the click's snip plays; they keep snipping while the trim runs. */}
+                <ScissorsIcon className={cn(compacting === "trim" && "icon-snipping")} />
+                Trim
+              </Button>
+              <Button size="sm" variant="outline" disabled={!threadId || running || !!compacting} onClick={compactNow} title="Replace earlier messages with a summary">
+                {compacting === "summary" ? <Loader2Icon className="animate-spin" /> : <ShrinkIcon />}
+                {compacting === "summary" ? "Summarizing…" : "Summarize"}
+              </Button>
+            </div>
+            <p className="text-muted-foreground mt-2 text-xs">Both rewrite earlier history, so the next reply is sent without the prompt cache once and costs more.</p>
+          </>
+        )}
       </PopoverContent>
     </Popover>
   );
@@ -150,18 +182,29 @@ export function MessageMeta() {
   );
 }
 
-/** Divider after the message where the conversation was compacted. */
+/** Divider after the message where the conversation was compacted or trimmed. */
 export function CompactionMarker() {
   const messageId = useAuiState((s) => s.message.id);
   const meta = useThreadMeta();
   const [open, setOpen] = useState(false);
-  if (!meta?.compaction || meta.compaction.boundaryMessageId !== messageId) return null;
+  const trim = meta?.compaction?.trim;
+  if (trim?.throughMessageId === messageId) {
+    return (
+      <div className="text-muted-foreground animate-fade-in my-2 flex items-center gap-3 px-2 text-xs">
+        <span className="bg-border h-px flex-1" />
+        <ScissorsIcon className="size-3.5" />
+        Earlier reasoning, tool results, and files trimmed (about {formatTokens(trim.tokensBefore)} to {formatTokens(trim.tokensAfter)} tokens)
+        <span className="bg-border h-px flex-1" />
+      </div>
+    );
+  }
+  if (!meta?.compaction?.summary || meta.compaction.boundaryMessageId !== messageId) return null;
   return (
     <div className="text-muted-foreground animate-fade-in my-2 px-2 text-xs">
       <button type="button" onClick={() => setOpen(!open)} className="hover:text-foreground flex w-full items-center gap-3 transition-colors duration-(--motion-fast) ease-out-quart">
         <span className="bg-border h-px flex-1" />
         <ShrinkIcon className="size-3.5" />
-        Earlier messages summarized ({formatTokens(meta.compaction.tokensBefore)} tokens)
+        Earlier messages summarized ({formatTokens(meta.compaction.tokensBefore ?? 0)} tokens)
         <ChevronDownIcon className={cn("size-3.5 transition-transform duration-(--motion-base) ease-out-expo", open && "rotate-180")} />
         <span className="bg-border h-px flex-1" />
       </button>

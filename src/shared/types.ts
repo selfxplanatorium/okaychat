@@ -93,6 +93,8 @@ export interface UserSettings {
   systemPrompt: string;
   /** Fraction of the context window that triggers automatic compaction. 0 disables. */
   autoCompactAt: number;
+  /** Auto-compaction first drops reasoning, tool results, and file contents from earlier messages, and summarizes only if that is not enough. */
+  trimBeforeCompact?: boolean;
   /** Max agent steps (tool round trips) per turn. */
   maxSteps: number;
   /** Max built-in web searches per reply, shared with sub-agents. 0 disables searching. */
@@ -148,10 +150,22 @@ export interface AssistantMetadata {
 }
 
 export interface CompactionState {
-  /** Messages up to and including this id are replaced by the summary. */
-  boundaryMessageId: string;
-  summary: string;
+  /** Messages up to and including this id are replaced by the summary. Absent when the chat is only trimmed. */
+  boundaryMessageId?: string;
+  summary?: string;
+  tokensBefore?: number;
+  createdAt?: number;
+  /** Messages after the summary, up to and including `throughMessageId`, are sent as text only. */
+  trim?: TrimState;
+}
+
+export interface TrimState {
+  throughMessageId: string;
+  /** Newest message when trimming. Replies before it report the untrimmed size. */
+  lastMessageId: string;
+  /** Estimated context before and after trimming. */
   tokensBefore: number;
+  tokensAfter: number;
   createdAt: number;
 }
 
