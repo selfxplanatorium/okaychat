@@ -2,6 +2,7 @@ import path from "node:path";
 import { statSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { storeInlineAttachments } from "./attachment-storage.js";
+import { resultPaths } from "./sandbox-paths.js";
 import { env } from "./env.js";
 
 export const db = new DatabaseSync(path.join(env.dataDir, "okaychat.db"));
@@ -360,6 +361,86 @@ const migrations: Array<string | (() => void)> = [
     SELECT 'prompt:temporary', value FROM server_settings WHERE key = 'prompt:anonymous';
   DELETE FROM server_settings WHERE key = 'prompt:anonymous';
   `,
+  // Admins share MCP servers with every user. Each viewer keeps their own switch, tool toggles, and OAuth tokens.
+  `
+  ALTER TABLE mcp_servers ADD COLUMN shared INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE mcp_server_users (
+    server_id TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    disabled_tools TEXT NOT NULL DEFAULT '[]',
+    oauth_enc TEXT,
+    PRIMARY KEY (server_id, user_id)
+  );
+  `,
+  // The memory/skills context sent beside each user message, replayed verbatim in later turns so the
+  // conversation prefix stays byte-identical for provider caches. Memory text is encrypted and dropped
+  // when the account's memory revision changes.
+  `
+  CREATE TABLE turn_context (
+    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    message_id TEXT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    memory_enc TEXT,
+    memory_revision INTEGER NOT NULL DEFAULT 0,
+    skills TEXT,
+    PRIMARY KEY (thread_id, message_id)
+  );
+  CREATE INDEX turn_context_user ON turn_context(user_id);
+  `,
+  // The date moved from the system prompt into each turn's context, so midnight no longer invalidates a chat.
+  `ALTER TABLE turn_context ADD COLUMN date TEXT;`,
+  // Admin-defined user groups, and who may use a shared provider connection or MCP server. A resource without
+  // a share_audiences row is shared with everyone; with one, only with the listed users and groups.
+  `
+  CREATE TABLE user_groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE user_group_members (
+    group_id TEXT NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (group_id, user_id)
+  );
+  CREATE INDEX user_group_members_user ON user_group_members(user_id);
+  CREATE TABLE share_audiences (
+    kind TEXT NOT NULL CHECK (kind IN ('provider', 'mcp')),
+    resource_id TEXT NOT NULL,
+    PRIMARY KEY (kind, resource_id)
+  );
+  CREATE TABLE share_users (
+    kind TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (kind, resource_id, user_id),
+    FOREIGN KEY (kind, resource_id) REFERENCES share_audiences(kind, resource_id) ON DELETE CASCADE
+  );
+  CREATE TABLE share_groups (
+    kind TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    group_id TEXT NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+    PRIMARY KEY (kind, resource_id, group_id),
+    FOREIGN KEY (kind, resource_id) REFERENCES share_audiences(kind, resource_id) ON DELETE CASCADE
+  );
+  `,
+  // thread_mode 'new' starts a chat per run. thread_attached marks a chat the user picked, which the schedule never recreates.
+  `
+  ALTER TABLE schedules ADD COLUMN thread_mode TEXT NOT NULL DEFAULT 'same';
+  ALTER TABLE schedules ADD COLUMN thread_attached INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE schedules ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE SET NULL;
+  `,
+  // Package installs (pip --user, uv, npm) used to land in the workspace HOME and were stored as outputs.
+  () => {
+    const rows = db.prepare("SELECT id, thread_id, path FROM sandbox_files").all() as Array<{ id: string; thread_id: string; path: string }>;
+    const byThread = new Map<string, typeof rows>();
+    for (const row of rows) byThread.set(row.thread_id, [...(byThread.get(row.thread_id) ?? []), row]);
+    const drop = db.prepare("DELETE FROM sandbox_files WHERE id = ?");
+    for (const list of byThread.values()) {
+      const keep = resultPaths(list.map((r) => r.path));
+      for (const row of list) if (!keep.has(row.path)) drop.run(row.id);
+    }
+  },
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
