@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { McpServerInfo, Me, ModelInfo, Project, ProviderInfo, StorageInfo, UserSettings } from "@shared/types";
+import type { McpPromptInfo, McpServerInfo, Me, ModelInfo, Project, ProviderInfo, StorageInfo, UserSettings } from "@shared/types";
 import { api, prefetch } from "@/lib/api";
 
 interface DataState {
@@ -8,6 +8,7 @@ interface DataState {
   providers: ProviderInfo[];
   models: ModelInfo[];
   mcp: Array<McpServerInfo & { authorizationUrl?: string }>;
+  mcpPrompts: McpPromptInfo[];
   loaded: boolean;
   /** Model chosen in the composer of a chat that has no thread yet. Falls back to the project/account default. */
   selectedModel: string | null;
@@ -23,6 +24,7 @@ interface DataState {
   load: () => Promise<void>;
   refreshProviders: () => Promise<void>;
   refreshMcp: () => Promise<void>;
+  refreshMcpPrompts: () => Promise<void>;
   refreshStorage: () => Promise<void>;
   updateSettings: (patch: Partial<UserSettings>) => Promise<void>;
   /** Picks the model for a chat. Without a thread id it applies to the new chat being written. */
@@ -34,6 +36,7 @@ interface DataState {
 
 const SELECTED_KEY = "okaychat:selected-model";
 const PROJECT_KEY = "okaychat:active-project";
+let promptRequest = 0;
 
 export const useData = create<DataState>((set, get) => ({
   me: null,
@@ -41,6 +44,7 @@ export const useData = create<DataState>((set, get) => ({
   providers: [],
   models: [],
   mcp: [],
+  mcpPrompts: [],
   loaded: false,
   storage: null,
   // A previous chat's composer choice must not override the account default on reload.
@@ -60,6 +64,9 @@ export const useData = create<DataState>((set, get) => ({
     set({ projects, ...(active && !projects.some((p) => p.id === active) ? { activeProject: null } : {}) });
   },
   load: async () => {
+    set({ mcpPrompts: [] });
+    // Discovery connects MCP servers, so it must not hold up the chat's startup data.
+    void get().refreshMcpPrompts();
     const [me, settings, providers, models, mcp, projects, storage] = await Promise.all([
       api<Me>("/me"),
       api<UserSettings>("/settings"),
@@ -76,7 +83,16 @@ export const useData = create<DataState>((set, get) => ({
     const [providers, models] = await Promise.all([api<ProviderInfo[]>("/providers"), api<ModelInfo[]>("/models")]);
     set({ providers, models });
   },
-  refreshMcp: async () => set({ mcp: await api<McpServerInfo[]>("/mcp") }),
+  refreshMcp: async () => {
+    set({ mcp: await api<McpServerInfo[]>("/mcp"), mcpPrompts: [] });
+    void get().refreshMcpPrompts();
+  },
+  refreshMcpPrompts: async () => {
+    const request = ++promptRequest;
+    const mcpPrompts = await api<McpPromptInfo[]>("/mcp/prompts").catch(() => []);
+    // A settings change or account switch can supersede an in-flight discovery.
+    if (request === promptRequest) set({ mcpPrompts });
+  },
   refreshStorage: async () => set({ storage: await api<StorageInfo>("/storage") }),
   updateSettings: async (patch) => {
     set({ settings: { ...get().settings!, ...patch } });

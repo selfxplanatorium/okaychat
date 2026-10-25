@@ -38,6 +38,8 @@ import {
 } from "./collapsible-root";
 import { collapsePanel } from "./surfaces";
 import { Button } from "@/components/ui/button";
+import { elicitationOf, McpElicitationCard } from "@/components/chat/McpElicitation";
+import { McpAppCard, mcpAppOf } from "@/components/chat/McpApp";
 import { Textarea } from "@/components/ui/textarea";
 
 const ANIMATION_DURATION = 200;
@@ -302,6 +304,8 @@ function ToolFallbackResult({
   result?: unknown;
 }) {
   if (result === undefined) return null;
+  // MCP tools that return images send `{ text, images }`; the images are saved copies on our origin.
+  const withImages = toolResultImages(result);
 
   return (
     <div
@@ -313,10 +317,38 @@ function ToolFallbackResult({
         Result:
       </p>
       <pre className="aui-tool-fallback-result-content bg-muted/50 text-foreground/90 mt-1 rounded-md p-2.5 text-xs break-words whitespace-pre-wrap">
-        {formatUnknownValue(result, 2)}
+        {withImages ? withImages.text : formatUnknownValue(result, 2)}
       </pre>
+      {withImages && withImages.images.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {withImages.images.map((image) => (
+            <a key={image.id} href={image.url} target="_blank" rel="noreferrer">
+              <img
+                src={image.url}
+                alt=""
+                width={image.width ?? undefined}
+                height={image.height ?? undefined}
+                className="h-auto max-h-80 w-auto max-w-full rounded-lg border"
+              />
+            </a>
+          ))}
+        </div>
+      )}
     </div>
   );
+}
+
+type ToolResultImage = { id: string; url: string; width?: number | null; height?: number | null };
+
+function toolResultImages(result: unknown): { text: string; images: ToolResultImage[] } | null {
+  if (!result || typeof result !== "object") return null;
+  const { text, images } = result as { text?: unknown; images?: unknown };
+  if (typeof text !== "string" || !Array.isArray(images)) return null;
+  const safe = images.filter(
+    (image): image is ToolResultImage =>
+      typeof image?.id === "string" && typeof image?.url === "string" && image.url.startsWith("/api/images/"),
+  );
+  return { text, images: safe };
 }
 
 function ToolFallbackError({
@@ -1212,6 +1244,7 @@ function ToolFallbackApprovalImpl({
 
 const ToolFallbackImpl: ToolCallMessagePartComponent = ({
   toolName,
+  args,
   argsText,
   result,
   status,
@@ -1224,17 +1257,19 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
 }) => {
   const isCancelled =
     status?.type === "incomplete" && status.reason === "cancelled";
+  // An MCP server waiting for the user's input streams its form as a preliminary result.
+  const elicitation = status?.type === "running" ? elicitationOf(result) : null;
   const isRequiresAction = status?.type === "requires-action";
+  const needsUser = isRequiresAction || (!!elicitation && !elicitation.answered);
   const shouldRenderApproval =
     approval != null ||
     (isRequiresAction && offersInterruptAction(status, approval, interrupt));
 
-  const [open, setOpen] = useState(isRequiresAction);
-  const [prevRequiresAction, setPrevRequiresAction] =
-    useState(isRequiresAction);
-  if (isRequiresAction !== prevRequiresAction) {
-    setPrevRequiresAction(isRequiresAction);
-    if (isRequiresAction) setOpen(true);
+  const [open, setOpen] = useState(needsUser);
+  const [prevNeedsUser, setPrevNeedsUser] = useState(needsUser);
+  if (needsUser !== prevNeedsUser) {
+    setPrevNeedsUser(needsUser);
+    if (needsUser) setOpen(true);
   }
   const approvalHadFocusRef = useRef(false);
   const approvalElementRef = useRef<HTMLDivElement | null>(null);
@@ -1261,6 +1296,12 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
       triggerRef.current?.focus({ preventScroll: true });
     }
   }, [approval, isRequiresAction, status?.type]);
+
+  // MCP App results render the server's own UI instead of the collapsed call.
+  const mcpApp = status?.type === "complete" ? mcpAppOf(result) : null;
+  if (mcpApp) {
+    return <McpAppCard app={mcpApp.app} toolName={toolName} input={args} result={mcpApp.result} />;
+  }
 
   return (
     <ToolFallbackRoot open={open} onOpenChange={setOpen}>
@@ -1305,7 +1346,11 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
             }}
           />
         )}
-        <ToolFallbackResult result={result} />
+        {elicitation ? (
+          <McpElicitationCard key={elicitation.id} elicitation={elicitation} />
+        ) : (
+          <ToolFallbackResult result={result} />
+        )}
       </ToolFallbackContent>
     </ToolFallbackRoot>
   );

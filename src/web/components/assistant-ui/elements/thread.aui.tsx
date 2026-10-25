@@ -76,6 +76,7 @@ import {
   type PropsWithChildren,
 } from "react";
 import { CopyFeedbackIcon } from "@/components/assistant-ui/elements/surfaces";
+import { mcpAppOf } from "@/components/chat/McpApp";
 
 export type ThreadGroupPart = MessagePrimitive.GroupedParts.GroupPart;
 
@@ -193,9 +194,20 @@ const resultKey = (part: GroupablePart): string | undefined => {
     case "generate_image":
       return `image:${part.toolCallId}`;
     default:
-      return undefined;
+      // Each MCP App call is its own result, like a generated image.
+      return mcpAppOf(part.result) ? `app:${part.toolCallId}` : undefined;
   }
 };
+
+/** MCP App cards stay out of the work log, like artifact cards. Tool names are dynamic, so this checks the result. */
+const withMcpApps =
+  (base: GroupBy): GroupBy =>
+  (part, context) =>
+    part.type === "tool-call" && mcpAppOf(part.result) ? [] : base(part, context);
+
+// Built once: a new grouping function on every render made each message regroup its parts whenever it rendered.
+const taskAwareMcpGroupBy = withMcpApps(taskAwareGroupBy);
+const messageMcpGroupBy = withMcpApps(messageGroupBy);
 
 /**
  * Folds a finished reply's work into one collapsed group: reasoning, tool
@@ -902,7 +914,7 @@ const AssistantMessage: FC = () => {
     TaskGroup: TaskGroupComponent,
     MessageMeta,
   } = useContext(ThreadComponentsContext);
-  const baseGroupBy = TaskGroupComponent ? taskAwareGroupBy : messageGroupBy;
+  const baseGroupBy = TaskGroupComponent ? taskAwareMcpGroupBy : messageMcpGroupBy;
   const parts = useAuiState((s) => s.message.parts);
   // Live replies show every step; a finished one shows only its outcome.
   const finished = useAuiState((s) => s.message.status?.type === "complete");

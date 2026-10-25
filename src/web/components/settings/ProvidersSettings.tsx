@@ -7,6 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
+import { AudienceButton } from "./Audience";
 import { SettingsPage, SettingsSection } from "./SettingsUI";
 
 export const OPENCODE_GO_CONSOLE = "https://opencode.ai/console";
@@ -100,6 +101,17 @@ function ProviderRow({ provider, index, expanded, onToggle }: { provider: Provid
         </button>
         {provider.connected && !provider.shared && (
           <>
+            {base === "/admin/providers" && (
+              <AudienceButton
+                audience={provider.audience}
+                title={`Who can use ${provider.name}`}
+                description="Users outside this audience do not see the server key. Their own key for this provider still works."
+                onSave={async (audience) => {
+                  await api(`${base}/${provider.id}/access`, { method: "PUT", json: audience });
+                  await refresh();
+                }}
+              />
+            )}
             <Switch
               checked={provider.enabled}
               aria-label={`Enable ${provider.name}`}

@@ -8,6 +8,7 @@ import { requireAdmin, signupAllowed, type AppEnv } from "./auth.js";
 import { deleteConnection, listProviders, saveConnection } from "./catalog/providers.js";
 import { hashPassword, newId } from "./crypto.js";
 import { db } from "./db.js";
+import { createGroup, deleteGroup, listGroups, setAudience, updateGroup } from "./groups.js";
 import { listPrompts, MAX_PROMPT_CHARS, setPrompt } from "./prompts.js";
 import { storageUsedSql } from "./quota.js";
 
@@ -32,6 +33,10 @@ const providerInput = z.object({
   name: z.string().max(60).optional(),
   enabled: z.boolean().optional(),
 });
+
+const ids = z.array(z.string().max(100)).max(10_000);
+const groupInput = z.object({ name: z.string().trim().min(1).max(60), userIds: ids.optional() });
+export const audienceInput = z.object({ mode: z.enum(["all", "selected"]), userIds: ids.default([]), groupIds: ids.default([]) });
 
 export const adminRoutes = new Hono<AppEnv>()
   .use("/admin/*", requireAdmin)
@@ -109,6 +114,29 @@ export const adminRoutes = new Hono<AppEnv>()
     const body = providerInput.safeParse(await c.req.json());
     if (!body.success) return c.json({ error: body.error.issues[0]?.message }, 400);
     saveConnection(null, c.req.param("id"), body.data);
+    return c.json({ ok: true });
+  })
+  .put("/admin/providers/:id/access", async (c) => {
+    const body = audienceInput.safeParse(await c.req.json());
+    if (!body.success) return c.json({ error: body.error.issues[0]?.message }, 400);
+    const id = c.req.param("id");
+    if (!db.prepare("SELECT 1 FROM shared_connections WHERE provider_id = ?").get(id)) return c.json({ error: "Not found" }, 404);
+    setAudience("provider", id, body.data);
+    return c.json({ ok: true });
+  })
+  .get("/admin/groups", (c) => c.json(listGroups()))
+  .post("/admin/groups", async (c) => {
+    const body = groupInput.safeParse(await c.req.json());
+    if (!body.success) return c.json({ error: body.error.issues[0]?.message }, 400);
+    return c.json(createGroup(body.data.name, body.data.userIds));
+  })
+  .patch("/admin/groups/:id", async (c) => {
+    const body = groupInput.partial().safeParse(await c.req.json());
+    if (!body.success) return c.json({ error: body.error.issues[0]?.message }, 400);
+    return c.json(updateGroup(c.req.param("id"), body.data));
+  })
+  .delete("/admin/groups/:id", (c) => {
+    deleteGroup(c.req.param("id"));
     return c.json({ ok: true });
   })
   .delete("/admin/providers/:id", (c) => {

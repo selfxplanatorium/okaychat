@@ -26,7 +26,7 @@ import { toolsForUser } from "./mcp/manager.js";
 import { enabledImageServices, imageTools } from "./tools/image.js";
 import { SandboxTurn, sandboxConfigured, sandboxTools } from "./tools/sandbox.js";
 import { subagentTools } from "./tools/subagent.js";
-import { injectScreenshots } from "./tools/screenshots.js";
+import { injectScreenshots, injectToolImages, type ToolImage } from "./tools/screenshots.js";
 import type { VisualShot } from "./documents/visual.js";
 import { webTools } from "./tools/web.js";
 import { SearchBudget, searchesInCurrentTurn, agentStepsInCurrentTurn } from "./tools/search-budget.js";
@@ -85,6 +85,8 @@ export interface TurnOptions {
   temporaryPersonalization?: boolean;
   /** Per-chat composer toggle; absent falls back to the account setting. */
   webSearch?: boolean;
+  /** Someone watches the stream and can answer MCP elicitation forms. Absent for scheduled runs. */
+  interactive?: boolean;
   signal?: AbortSignal;
 }
 
@@ -120,7 +122,13 @@ export async function turnStream(opts: TurnOptions) {
         writer.write({ type: "data-compaction", data: { status: "done", boundaryMessageId: compaction.boundaryMessageId, tokensBefore: compaction.tokensBefore }, transient: true });
       }
 
-      const mcp = model.toolCall && !temporary ? await toolsForUser(user.id) : { tools: {}, instructions: [], servers: [] };
+      // MCP images reach the model once, appended by prepareStep like view_artifact screenshots.
+      const toolImages = new Map<string, ToolImage[]>();
+      const injectedToolImages = new Set<string>();
+      const canViewImages = model.inputModalities.includes("image");
+      const mcp = model.toolCall && !temporary
+        ? await toolsForUser(user.id, { threadId, images: canViewImages ? toolImages : undefined, interactive: opts.interactive === true })
+        : { tools: {}, subTools: {}, instructions: [], servers: [] };
       const searchBudget = new SearchBudget(settings.maxSearches, searchesInCurrentTurn(uiMessages));
       const remainingSteps = Math.max(0, settings.maxSteps - agentStepsInCurrentTurn(uiMessages));
       const builtInWeb = model.toolCall && settings.webTools ? webTools({ searchBudget, search: opts.webSearch ?? true }) : {};
@@ -136,7 +144,7 @@ export async function turnStream(opts: TurnOptions) {
         ...builtInWeb,
         ...skills.subTools,
         // Sub-agents run unattended, so they get no tool that waits for approval.
-        ...Object.fromEntries(Object.entries(mcp.tools).filter(([, t]) => !t.needsApproval)),
+        ...mcp.subTools,
       };
       const subagentModels = model.toolCall && settings.subagents && !temporary ? await allowedSubagentModels(user.id, settings, model.ref) : [];
       const useArtifacts = model.toolCall && settings.artifacts && !temporary;
@@ -190,7 +198,7 @@ export async function turnStream(opts: TurnOptions) {
         // allowance through the client's automatic tool-result continuation.
         stopWhen: stepCountIs(remainingSteps + 1),
         prepareStep: ({ stepNumber, messages: stepMessages }) => {
-          const withShots = injectScreenshots(stepMessages, shots, injectedShots);
+          const withShots = injectToolImages(injectScreenshots(stepMessages, shots, injectedShots), toolImages, injectedToolImages);
           return {
             ...(withShots !== stepMessages ? { messages: withShots } : {}),
             activeTools: stepNumber >= remainingSteps ? [] : Object.keys(tools).filter((name) => name !== "web_search" || searchBudget.remaining > 0),
@@ -316,6 +324,7 @@ export const chatRoutes = new Hono<AppEnv>()
         uiMessages: parsed.data.messages as UIMessage[],
         clientTools: parsed.data.tools as FrontendTools | undefined,
         clientSystem: parsed.data.system,
+        interactive: true,
         signal: controller.signal,
       });
       runs.set(streamId, { userId: user.id, controller });

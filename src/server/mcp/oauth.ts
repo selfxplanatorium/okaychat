@@ -29,7 +29,7 @@ export function takePending(state: string): { userId: string; serverId: string }
 }
 
 /**
- * Per (user, server) OAuth storage, encrypted in mcp_servers.oauth_enc.
+ * Per (user, server) OAuth storage, encrypted (see readOAuth: owners in mcp_servers, viewers of a shared server in mcp_server_users).
  * `redirectToAuthorization` cannot open a browser on a server, so it records the URL for the UI to open.
  */
 export class StoredOAuthProvider implements OAuthClientProvider {
@@ -42,10 +42,10 @@ export class StoredOAuthProvider implements OAuthClientProvider {
   ) {}
 
   private read(): Stored {
-    return readOAuth<Stored>(this.serverId) ?? {};
+    return readOAuth<Stored>(this.userId, this.serverId) ?? {};
   }
   private write(patch: Partial<Stored>) {
-    writeOAuth(this.serverId, { ...this.read(), ...patch });
+    writeOAuth(this.userId, this.serverId, { ...this.read(), ...patch });
   }
 
   get redirectUrl() {
@@ -108,7 +108,7 @@ export class StoredOAuthProvider implements OAuthClientProvider {
   }
   invalidateCredentials(scope: "all" | "client" | "tokens" | "verifier", context?: { tokens: OAuthTokens }) {
     const current = this.read();
-    if (scope === "all") return writeOAuth(this.serverId, null);
+    if (scope === "all") return writeOAuth(this.userId, this.serverId, null);
     if (scope === "client") return this.write({ client: undefined, dynamic: undefined });
     if (scope === "verifier") return this.write({ verifier: undefined });
     // Only drop the generation that failed, so a concurrent refresh is kept.

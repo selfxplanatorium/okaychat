@@ -2,6 +2,7 @@ import { HTTPException } from "hono/http-exception";
 import type { ModelInfo, ProviderConnectionInput, ProviderInfo } from "../../shared/types.js";
 import { decrypt, encrypt } from "../crypto.js";
 import { db } from "../db.js";
+import { audienceIncludes, clearAudience, getAudience } from "../groups.js";
 import { USER_AGENT } from "../env.js";
 import { publicFetch } from "../public-fetch.js";
 import { getCatalog, isChatModelId, isSupportedProvider, resolveRoute, toModelInfo, unknownModel, type RawProvider } from "./models-dev.js";
@@ -42,11 +43,16 @@ export const mayUsePrivateHosts = (userId: string) =>
 /** A user id, or null for the server-wide connections an admin shares with every user. */
 export type ConnectionScope = string | null;
 
-function readScope(scope: ConnectionScope): Map<string, Connection> {
+/** `viewer` limits the server-wide scope to connections whose audience includes that user. */
+function readScope(scope: ConnectionScope, viewer?: string): Map<string, Connection> {
   const guarded = scope !== null && !mayUsePrivateHosts(scope);
   const rows = (
     scope === null
-      ? db.prepare("SELECT provider_id, api_key_enc, base_url, config_json, enabled FROM shared_connections").all()
+      ? viewer === undefined
+        ? db.prepare("SELECT provider_id, api_key_enc, base_url, config_json, enabled FROM shared_connections").all()
+        : db
+            .prepare(`SELECT provider_id, api_key_enc, base_url, config_json, enabled FROM shared_connections WHERE ${audienceIncludes("provider", "provider_id")}`)
+            .all(viewer, viewer)
       : db.prepare("SELECT provider_id, api_key_enc, base_url, config_json, enabled FROM provider_connections WHERE user_id = ?").all(scope)
   ) as unknown as ConnectionRow[];
   return new Map(
@@ -70,7 +76,7 @@ function readScope(scope: ConnectionScope): Map<string, Connection> {
 
 /** What a user can use: server-wide connections, overridden by the user's own for the same provider. */
 function readConnections(userId: string): Map<string, Connection> {
-  const shared = [...readScope(null)].filter(([, c]) => c.enabled);
+  const shared = [...readScope(null, userId)].filter(([, c]) => c.enabled);
   return new Map([...shared, ...readScope(userId)]);
 }
 
@@ -121,8 +127,10 @@ const originOf = (url: string | undefined) => {
 };
 
 export function deleteConnection(scope: ConnectionScope, providerId: string) {
-  if (scope === null) db.prepare("DELETE FROM shared_connections WHERE provider_id = ?").run(providerId);
-  else db.prepare("DELETE FROM provider_connections WHERE user_id = ? AND provider_id = ?").run(scope, providerId);
+  if (scope === null) {
+    db.prepare("DELETE FROM shared_connections WHERE provider_id = ?").run(providerId);
+    clearAudience("provider", providerId);
+  } else db.prepare("DELETE FROM provider_connections WHERE user_id = ? AND provider_id = ?").run(scope, providerId);
 }
 
 const isCustom = (id: string) => id.startsWith("custom-");
@@ -155,6 +163,7 @@ export async function listProviders(scope: ConnectionScope): Promise<ProviderInf
       shared: scope !== null && !!conn?.shared,
       baseURL: conn?.baseURL ?? provider.api,
       modelCount: Object.keys(provider.models).length,
+      ...(scope === null && conn ? { audience: getAudience("provider", provider.id) } : {}),
     });
   }
   for (const conn of connections.values()) {
@@ -170,6 +179,7 @@ export async function listProviders(scope: ConnectionScope): Promise<ProviderInf
       shared: scope !== null && !!conn.shared,
       baseURL: conn.baseURL,
       modelCount: 0,
+      ...(scope === null ? { audience: getAudience("provider", conn.providerId) } : {}),
     });
   }
   const rank = (p: ProviderInfo) => (p.primary ? PRIMARY.indexOf(p.id) : PRIMARY.length);

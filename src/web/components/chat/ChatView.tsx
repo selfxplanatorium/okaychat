@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Thread } from "@/components/assistant-ui/elements/thread.aui";
 import { CompactionMarker, ContextMeter, MessageMeta } from "./ContextMeter";
-import { MobileComposerMenu, SearchToggle } from "./ComposerControls";
+import { McpPromptsButton, MobileComposerMenu, SearchToggle } from "./ComposerControls";
 import { EffortPicker, ModelPicker } from "./ModelPicker";
 import { BranchedFromBanner, BranchMenu, PendingBranchRun } from "./branch";
 import { pickWelcomeLine } from "./welcome-lines";
@@ -56,6 +56,7 @@ function ComposerToolbar() {
         <EffortPicker />
       </div>
       <SearchToggle />
+      <McpPromptsButton />
       <ContextMeter />
     </>
   );

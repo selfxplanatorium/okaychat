@@ -62,12 +62,15 @@ const RELAY_FLAGS = [
 
 mkdirSync(IMAGE_DIR, { recursive: true });
 
-export interface GeneratedImage {
+export interface StoredImage {
   id: string;
   url: string;
   mime: ImageMime;
   width: number | null;
   height: number | null;
+}
+
+export interface GeneratedImage extends StoredImage {
   service: string;
   model: string | null;
 }
@@ -287,26 +290,36 @@ export async function generateImage(opts: { userId: string; threadId: string; se
   const buf = opts.service.def.credential === "codex"
     ? await generateWithCodex(opts.userId, opts.prompt, references, opts.signal)
     : await generateWithApi(opts.service, opts.prompt, references, opts.signal);
+  const stored = await storeImage(opts.userId, opts.threadId, buf, opts.prompt);
+  if (!stored) throw new Error(`${opts.service.def.name} did not return a PNG, JPEG, WebP, or GIF image.`);
+  return { ...stored, service: opts.service.def.name, model: opts.service.model };
+}
+
+/**
+ * Saves a raster image to the thread's images (Library, quota, thread deletion). Returns null when the
+ * bytes are not PNG, JPEG, WebP, or GIF. `label` is the prompt column: the request or the image's source.
+ */
+export async function storeImage(userId: string, threadId: string, buf: Buffer, label: string): Promise<StoredImage | null> {
   const mime = sniff(buf);
-  if (!mime) throw new Error(`${opts.service.def.name} did not return a PNG, JPEG, WebP, or GIF image.`);
+  if (!mime) return null;
   // The model sees the quota message; nothing is written before the check.
-  assertStorage(opts.userId, buf.length);
+  assertStorage(userId, buf.length);
   const size = dimensions(buf, mime);
   const id = newId("img");
-  mkdirSync(path.join(IMAGE_DIR, opts.userId), { recursive: true });
-  await writeFile(imagePath(opts.userId, id), buf);
+  mkdirSync(path.join(IMAGE_DIR, userId), { recursive: true });
+  await writeFile(imagePath(userId, id), buf);
   db.prepare("INSERT INTO images (id, user_id, thread_id, prompt, width, height, size, mime, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
     id,
-    opts.userId,
-    opts.threadId,
-    opts.prompt,
+    userId,
+    threadId,
+    label,
     size?.width ?? null,
     size?.height ?? null,
     buf.length,
     mime,
     Date.now(),
   );
-  return { id, url: `/api/images/${id}`, mime, width: size?.width ?? null, height: size?.height ?? null, service: opts.service.def.name, model: opts.service.model };
+  return { id, url: `/api/images/${id}`, mime, width: size?.width ?? null, height: size?.height ?? null };
 }
 
 /** Generated images belong to their thread. Called when a thread is deleted. */

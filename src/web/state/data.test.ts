@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
-import { DEFAULT_USER_SETTINGS, type ModelInfo, type Project } from "../../shared/types.js";
+import { DEFAULT_USER_SETTINGS, type McpPromptInfo, type ModelInfo, type Project } from "../../shared/types.js";
 
 const storage = new Map<string, string>([["okaychat:selected-model", "p/deepseek"]]);
 Object.defineProperty(globalThis, "localStorage", { value: {
@@ -65,5 +65,30 @@ test("each chat keeps its own model when another chat or the new chat picks one"
     assert.deepEqual(patches, [["/api/threads/b", { modelRef: "p/project" }]]);
     useData.getState().rememberThreadModels({ b: "p/deepseek" });
     assert.equal(getActiveModel("b")?.ref, "p/project");
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("a superseded discovery cannot restore prompts from an old MCP configuration", async () => {
+  const originalFetch = globalThis.fetch;
+  const pending: Array<(response: Response) => void> = [];
+  globalThis.fetch = () => new Promise<Response>((resolve) => pending.push(resolve));
+  try {
+    const oldDiscovery = useData.getState().refreshMcpPrompts();
+    const newDiscovery = useData.getState().refreshMcpPrompts();
+    pending[1]!(Response.json([]));
+    await newDiscovery;
+    pending[0]!(Response.json([{ serverId: "old", server: "Old server", name: "old-prompt", arguments: [] }]));
+    await oldDiscovery;
+    assert.deepEqual(useData.getState().mcpPrompts, []);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("prompt discovery failures remove previously available prompts", async () => {
+  const originalFetch = globalThis.fetch;
+  useData.setState({ mcpPrompts: [{ serverId: "server", server: "Server", name: "prompt", arguments: [] }] as McpPromptInfo[] });
+  globalThis.fetch = async () => { throw new Error("Server unavailable"); };
+  try {
+    await useData.getState().refreshMcpPrompts();
+    assert.deepEqual(useData.getState().mcpPrompts, []);
   } finally { globalThis.fetch = originalFetch; }
 });

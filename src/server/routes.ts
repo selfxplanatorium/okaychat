@@ -3,18 +3,20 @@ import { accountRoutes } from "./account.js";
 import { memoryRoutes } from "./memory.js";
 import { auth as mcpAuth } from "@ai-sdk/mcp";
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { McpServerConfig, UserSettings } from "../shared/types.js";
 import { requireUser, type AppEnv } from "./auth.js";
 import { newId } from "./crypto.js";
 import { deleteConnection, listModels, listProviders, mayUsePrivateHosts, saveConnection } from "./catalog/providers.js";
-import { adminRoutes } from "./admin.js";
+import { adminRoutes, audienceInput } from "./admin.js";
 import { artifactRoutes } from "./artifacts.js";
 import { chatRoutes } from "./chat.js";
 import { exportRoutes } from "./export.js";
 import { fileRoutes } from "./files.js";
 import { fontRoutes } from "./fonts.js";
 import { libraryRoutes } from "./library.js";
+import { clearAudience, setAudience } from "./groups.js";
 import { getProject, projectRoutes } from "./projects.js";
 import { scheduleRoutes } from "./schedules.js";
 import { searchRoutes } from "./search.js";
@@ -24,7 +26,22 @@ import { deleteThreadImages, imageRoutes } from "./tools/image.js";
 import { deleteSandboxWorkspace, sandboxRoutes } from "./tools/sandbox.js";
 import { env } from "./env.js";
 import { assertPublicHost, BlockedAddressError } from "./public-fetch.js";
-import { callbackUrl, disconnectServer, mcpFetch, notePublicOrigin, serverInfo, testServer } from "./mcp/manager.js";
+import {
+  AppCallNeedsConfirmation,
+  callbackUrl,
+  callToolFromApp,
+  disconnectServer,
+  disconnectServerEverywhere,
+  getPromptText,
+  listPrompts,
+  mcpFetch,
+  notePublicOrigin,
+  readAppResource,
+  readResourceFromApp,
+  serverInfo,
+  testServer,
+} from "./mcp/manager.js";
+import { answerElicitation } from "./mcp/elicitation.js";
 import { StoredOAuthProvider, takePending } from "./mcp/oauth.js";
 import * as mcpStore from "./mcp/store.js";
 import { storageUsed, userStorageLimit } from "./quota.js";
@@ -43,6 +60,9 @@ const mcpInput = z.object({
   name: z.string().trim().min(1).max(40).regex(/^[\w .-]+$/, "Letters, numbers, spaces, dot, dash"),
   transport: z.enum(["http", "sse", "stdio"]),
   enabled: z.boolean().default(true),
+  shared: z.boolean().default(false),
+  // Who a shared server is for. Omitted on update keeps the current audience.
+  audience: audienceInput.optional(),
   config: z.object({
     url: z.string().url().optional(),
     headers: z.record(z.string(), z.string()).optional(),
@@ -216,19 +236,84 @@ const api = new Hono<AppEnv>()
   })
 
   // MCP servers
-  .get("/mcp", (c) => c.json(mcpStore.listServers(c.get("user").id).map(serverInfo)))
+  .get("/mcp", (c) => c.json(mcpStore.visibleServers(c.get("user").id).map(serverInfo)))
+  // Before the `/mcp/:id` routes, which would shadow it.
+  .get("/mcp/prompts", async (c) => c.json(await listPrompts(c.get("user").id)))
+  // The user's answer to a form an MCP server opened during a tool call.
+  .post("/mcp/elicitations/:id", async (c) => {
+    const parsed = z
+      .object({
+        action: z.enum(["accept", "decline", "cancel"]),
+        content: z.record(z.string().max(200), z.union([z.string().max(20_000), z.number(), z.boolean(), z.array(z.string().max(2000)).max(100)])).optional(),
+      })
+      .safeParse(await c.req.json());
+    if (!parsed.success) return c.json({ error: "Invalid answer" }, 400);
+    try {
+      if (!answerElicitation(c.get("user").id, c.req.param("id"), parsed.data)) return c.json({ error: "This request is no longer waiting." }, 404);
+    } catch (error) {
+      return c.json({ error: (error as Error).message }, 400);
+    }
+    return c.json({ ok: true });
+  })
+  // MCP Apps: the card's HTML, and the requests its bridge forwards. All run on the user's own connection.
+  .post("/mcp/:id/app/resource", async (c) => {
+    const parsed = z.object({ uri: z.string().min(1).max(2000) }).safeParse(await c.req.json());
+    if (!parsed.success) return c.json({ error: "Invalid resource" }, 400);
+    try {
+      return c.json(await readAppResource(c.get("user").id, c.req.param("id"), parsed.data.uri));
+    } catch (error) {
+      throw new HTTPException(400, { message: (error as Error).message });
+    }
+  })
+  .post("/mcp/:id/app/call", async (c) => {
+    const parsed = z
+      .object({ name: z.string().min(1).max(200), arguments: z.record(z.string(), z.unknown()).default({}), confirmed: z.boolean().default(false) })
+      .safeParse(await c.req.json());
+    if (!parsed.success) return c.json({ error: "Invalid tool call" }, 400);
+    try {
+      return c.json(await callToolFromApp(c.get("user").id, c.req.param("id"), parsed.data.name, parsed.data.arguments, parsed.data.confirmed));
+    } catch (error) {
+      if (error instanceof AppCallNeedsConfirmation) return c.json({ error: error.message, needsConfirmation: true }, 409);
+      throw new HTTPException(400, { message: (error as Error).message });
+    }
+  })
+  .post("/mcp/:id/app/read", async (c) => {
+    const parsed = z.object({ uri: z.string().min(1).max(2000) }).safeParse(await c.req.json());
+    if (!parsed.success) return c.json({ error: "Invalid resource" }, 400);
+    try {
+      return c.json(await readResourceFromApp(c.get("user").id, c.req.param("id"), parsed.data.uri));
+    } catch (error) {
+      throw new HTTPException(400, { message: (error as Error).message });
+    }
+  })
+  .post("/mcp/:id/prompts", async (c) => {
+    const parsed = z
+      .object({ name: z.string().min(1).max(200), arguments: z.record(z.string().max(200), z.string().max(20_000)).default({}) })
+      .safeParse(await c.req.json());
+    if (!parsed.success) return c.json({ error: "Invalid prompt request" }, 400);
+    try {
+      return c.json({ text: await getPromptText(c.get("user").id, c.req.param("id"), parsed.data.name, parsed.data.arguments) });
+    } catch (error) {
+      throw new HTTPException(400, { message: (error as Error).message });
+    }
+  })
   .post("/mcp", async (c) => {
     const user = c.get("user");
     const body = mcpInput.safeParse(await c.req.json());
     if (!body.success) return c.json({ error: body.error.issues[0]?.message }, 400);
     // stdio servers run as the server process. Only admins may add them.
     if (body.data.transport === "stdio" && user.role !== "admin") return c.json({ error: "Only admins can add stdio servers." }, 403);
+    if (body.data.shared && user.role !== "admin") return c.json({ error: "Only admins can share servers." }, 403);
     const blocked = await privateUrlError(user.id, body.data.transport === "stdio" ? undefined : body.data.config.url);
     if (blocked) return c.json({ error: blocked }, 400);
+    if (mcpStore.listSharedServers(user.id).some((s) => s.name.toLowerCase() === body.data.name.toLowerCase())) {
+      return c.json({ error: "An admin shares a server with that name. Pick another name." }, 400);
+    }
     // Every enabled server holds a live connection from this process.
     if (mcpStore.listServers(user.id).length >= 30) return c.json({ error: "You have the maximum of 30 MCP servers. Remove one first." }, 409);
     try {
       const id = mcpStore.createServer(user.id, body.data);
+      if (body.data.shared && body.data.audience) setAudience("mcp", id, body.data.audience);
       return c.json(await testServer(user.id, id));
     } catch (error) {
       return c.json({ error: String((error as Error).message).includes("UNIQUE") ? "A server with that name exists." : (error as Error).message }, 400);
@@ -241,6 +326,7 @@ const api = new Hono<AppEnv>()
     const prev = mcpStore.getServer(user.id, c.req.param("id"));
     if (!prev) return c.json({ error: "Not found" }, 404);
     if (body.data.transport === "stdio" && user.role !== "admin") return c.json({ error: "Only admins can add stdio servers." }, 403);
+    if (body.data.shared && user.role !== "admin") return c.json({ error: "Only admins can share servers." }, 403);
     const blocked = await privateUrlError(user.id, body.data.transport === "stdio" ? undefined : body.data.config.url);
     if (blocked) return c.json({ error: blocked }, 400);
     // Stored header values and OAuth tokens belong to the old server. They must not follow a new origin.
@@ -254,22 +340,36 @@ const api = new Hono<AppEnv>()
       env: mergeSecrets(body.data.config.env, prev.config.env),
     };
     mcpStore.updateServer(user.id, prev.id, { ...body.data, config });
-    if (moved) mcpStore.writeOAuth(prev.id, null);
-    await disconnectServer(user.id, prev.id);
+    if (!body.data.shared) clearAudience("mcp", prev.id);
+    else if (body.data.audience) setAudience("mcp", prev.id, body.data.audience);
+    if (moved) {
+      mcpStore.writeOAuth(user.id, prev.id, null);
+      mcpStore.clearSharedOAuth(prev.id);
+    }
+    // Users of a shared server reconnect with the new settings, or lose it when it is no longer shared.
+    await disconnectServerEverywhere(prev.id);
     return c.json(body.data.enabled ? await testServer(user.id, prev.id) : serverInfo(mcpStore.getServer(user.id, prev.id)!));
   })
+  // The parts of a server each user controls, including on servers an admin shares with them.
   .patch("/mcp/:id/tools", async (c) => {
     const user = c.get("user");
-    const parsed = z.object({ disabledTools: z.array(z.string().max(200)).max(1000) }).safeParse(await c.req.json());
+    const parsed = z
+      .object({ enabled: z.boolean().optional(), disabledTools: z.array(z.string().max(200)).max(1000).optional() })
+      .safeParse(await c.req.json());
     if (!parsed.success) return c.json({ error: "Invalid tool list" }, 400);
-    if (!mcpStore.getServer(user.id, c.req.param("id"))) return c.json({ error: "Not found" }, 404);
-    mcpStore.updateServer(user.id, c.req.param("id"), { disabledTools: parsed.data.disabledTools });
-    return c.json(serverInfo(mcpStore.getServer(user.id, c.req.param("id"))!));
+    const server = mcpStore.getVisibleServer(user.id, c.req.param("id"));
+    if (!server) return c.json({ error: "Not found" }, 404);
+    if (server.ownerId === user.id) mcpStore.updateServer(user.id, server.id, parsed.data);
+    else mcpStore.updateSharedPrefs(user.id, server.id, parsed.data);
+    if (parsed.data.enabled === false) await disconnectServer(user.id, server.id);
+    if (parsed.data.enabled === true) return c.json(await testServer(user.id, server.id));
+    return c.json(serverInfo(mcpStore.getVisibleServer(user.id, server.id)!));
   })
   .post("/mcp/:id/test", async (c) => c.json(await testServer(c.get("user").id, c.req.param("id"))))
   .delete("/mcp/:id", async (c) => {
     const user = c.get("user");
-    await disconnectServer(user.id, c.req.param("id"));
+    if (!mcpStore.getServer(user.id, c.req.param("id"))) return c.json({ error: "Not found" }, 404);
+    await disconnectServerEverywhere(c.req.param("id"));
     mcpStore.deleteServer(user.id, c.req.param("id"));
     return c.json({ ok: true });
   })
@@ -299,13 +399,13 @@ export const mcpOAuthCallback = new Hono().get("/", async (c) => {
     c.html(`<!doctype html><meta charset="utf-8"><title>okaychat</title><body style="font-family:system-ui;padding:2rem">
       <p>${escapeHtml(message)}</p><script>window.opener?.postMessage({type:"okaychat:mcp-oauth"},location.origin);setTimeout(()=>window.close(),1200)</script></body>`);
   if (!pending) return page("This authorization link expired. Close this tab and click Authorize again.");
-  const server = mcpStore.getServer(pending.userId, pending.serverId);
+  const server = mcpStore.getVisibleServer(pending.userId, pending.serverId);
   if (!server?.config.url) return page("MCP server not found.");
   const provider = new StoredOAuthProvider(pending.userId, pending.serverId, callbackUrl(pending.userId));
   try {
     await mcpAuth(provider, {
       serverUrl: server.config.url,
-      fetchFn: mcpFetch(pending.userId),
+      fetchFn: mcpFetch(server.ownerId),
       authorizationCode: c.req.query("code"),
       callbackState: state,
       callbackIssuer: c.req.query("iss"),

@@ -1,6 +1,6 @@
 import { ChevronRightIcon, KeyRoundIcon, Loader2Icon, PencilIcon, PlusIcon, RefreshCwIcon, TrashIcon } from "lucide-react";
 import { useEffect, useState, type CSSProperties } from "react";
-import type { McpApproval, McpServerConfig, McpServerInfo, McpTransport } from "@shared/types";
+import type { McpApproval, McpServerConfig, McpServerInfo, McpTransport, ShareAudience } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
+import { AudienceButton, EVERYONE } from "./Audience";
 import { SettingsPage, SettingsSection } from "./SettingsUI";
 
 type ServerView = McpServerInfo & { authorizationUrl?: string };
@@ -52,6 +53,8 @@ function ServerForm({ initial, onDone }: { initial?: ServerView; onDone: () => v
   const [env, setEnv] = useState(toLines(initial?.config.env));
   const [timeout, setTimeoutSec] = useState(String((initial?.config.timeoutMs ?? 120_000) / 1000));
   const [approval, setApproval] = useState<McpApproval>(initial?.config.approval ?? "destructive");
+  const [shared, setShared] = useState(initial?.shared ?? false);
+  const [audience, setAudience] = useState<ShareAudience>(initial?.audience ?? EVERYONE);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,7 +67,7 @@ function ServerForm({ initial, onDone }: { initial?: ServerView; onDone: () => v
         ? { command: cmd, args, env: fromLines(env, "="), timeoutMs: Number(timeout) * 1000, approval }
         : { url, headers: fromLines(headers, ":"), timeoutMs: Number(timeout) * 1000, approval };
     try {
-      const body = { name, transport, enabled: initial?.enabled ?? true, config };
+      const body = { name, transport, enabled: initial?.enabled ?? true, shared, ...(shared ? { audience } : {}), config };
       if (initial) await api(`/mcp/${initial.id}`, { method: "PUT", json: body });
       else await api("/mcp", { method: "POST", json: body });
       await refresh();
@@ -134,6 +137,29 @@ function ServerForm({ initial, onDone }: { initial?: ServerView; onDone: () => v
           ]}
         />
       </label>
+      {isAdmin && (
+        <label className="flex items-start gap-3 text-xs">
+          <Switch className="mt-0.5" checked={shared} onCheckedChange={setShared} aria-label="Share with other users" />
+          <span>
+            <span className="font-medium">Share with other users</span>
+            <span className="text-muted-foreground block">
+              Everyone you share it with can switch it on for themselves. They use the headers{transport === "stdio" ? " and environment" : ""} you set here, so leave
+              personal tokens out unless everyone may act as you. OAuth servers ask each user to authorize with their own account.
+            </span>
+          </span>
+        </label>
+      )}
+      {isAdmin && shared && (
+        <div className="flex items-center gap-2 pl-12 text-xs">
+          <span className="text-muted-foreground">Shared with</span>
+          <AudienceButton
+            audience={audience}
+            title={`Who can use ${name || "this server"}`}
+            description="Only these users see the server and can switch it on. Saved with the server."
+            onSave={setAudience}
+          />
+        </div>
+      )}
       {error && <p className="text-error settings-error text-xs">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onDone}>
@@ -174,6 +200,11 @@ function ServerRow({ server, index }: { server: ServerView; index: number }) {
           <ChevronRightIcon className={cn("text-muted-foreground size-4 transition-transform duration-(--motion-fast) ease-out-quart", open && "rotate-90")} />
           <span className={cn("size-2 shrink-0 rounded-full transition-colors duration-(--motion-base)", status.dot)} />
           <span className="truncate text-sm font-medium">{server.name}</span>
+          {(server.shared || server.sharedWithMe) && (
+            <span className="bg-muted text-muted-foreground shrink-0 rounded px-1.5 py-px text-[10px] font-medium">
+              {server.sharedWithMe ? "Shared by admin" : "Shared"}
+            </span>
+          )}
           <span className="text-muted-foreground truncate text-xs">
             {server.transport} · {status.label}
             {server.tools.length ? ` · ${server.tools.filter((t) => t.enabled).length}/${server.tools.length} tools` : ""}
@@ -192,19 +223,21 @@ function ServerRow({ server, index }: { server: ServerView; index: number }) {
         <Button size="icon-sm" variant="ghost" aria-label="Reconnect" disabled={busy} onClick={() => act(() => api(`/mcp/${server.id}/test`, { method: "POST" }))}>
           <RefreshCwIcon className={cn(busy && "animate-spin")} />
         </Button>
-        <Button size="icon-sm" variant="ghost" aria-label="Edit" onClick={() => setEditing(true)}>
-          <PencilIcon />
-        </Button>
+        {!server.sharedWithMe && (
+          <Button size="icon-sm" variant="ghost" aria-label="Edit" onClick={() => setEditing(true)}>
+            <PencilIcon />
+          </Button>
+        )}
         <Switch
           checked={server.enabled}
           aria-label={`Enable ${server.name}`}
-          onCheckedChange={(enabled) =>
-            act(() => api(`/mcp/${server.id}`, { method: "PUT", json: { name: server.name, transport: server.transport, enabled, config: server.config } }))
-          }
+          onCheckedChange={(enabled) => act(() => api(`/mcp/${server.id}/tools`, { method: "PATCH", json: { enabled } }))}
         />
-        <Button size="icon-sm" variant="ghost" aria-label="Delete" onClick={() => act(() => api(`/mcp/${server.id}`, { method: "DELETE" }))}>
-          <TrashIcon />
-        </Button>
+        {!server.sharedWithMe && (
+          <Button size="icon-sm" variant="ghost" aria-label="Delete" onClick={() => act(() => api(`/mcp/${server.id}`, { method: "DELETE" }))}>
+            <TrashIcon />
+          </Button>
+        )}
       </div>
       {server.error && server.status === "error" && <p className="text-error animate-fade-in mt-2 ml-10 text-xs">{server.error}</p>}
       {open && (

@@ -1,6 +1,6 @@
 import { HardDriveIcon, KeyRoundIcon, Loader2Icon, PencilIcon, PlusIcon, TrashIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
-import type { AdminPrompt, AdminUser, ProviderInfo, StorageInfo } from "@shared/types";
+import type { AdminPrompt, AdminUser, ProviderInfo, StorageInfo, UserGroup } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { api, formatBytes, formatCost } from "@/lib/api";
 import { useData } from "@/state/data";
+import { Checklist, invalidateDirectory, useDirectory } from "./Audience";
 import { ProviderLists, ProviderScopeProvider } from "./ProvidersSettings";
 import { SettingsPage, SettingsRow, SettingsSection } from "./SettingsUI";
 
@@ -154,7 +155,10 @@ function Users({ defaultLimit }: { defaultLimit: number | null }) {
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [edit, setEdit] = useState<UserEdit | null>(null);
-  const refresh = useCallback(() => api<AdminUser[]>("/admin/users").then(setUsers), []);
+  const refresh = useCallback(() => {
+    invalidateDirectory();
+    return api<AdminUser[]>("/admin/users").then(setUsers);
+  }, []);
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -235,6 +239,132 @@ function Users({ defaultLimit }: { defaultLimit: number | null }) {
         </div>
       ))}
       <UserEditDialog edit={edit} onClose={() => setEdit(null)} onSaved={() => void refresh()} />
+    </SettingsSection>
+  );
+}
+
+function GroupDialog({ group, onClose }: { group: UserGroup | "new" | null; onClose: () => void }) {
+  const { users } = useDirectory();
+  const [name, setName] = useState("");
+  const [members, setMembers] = useState<ReadonlySet<string>>(new Set());
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // Keep the last group while the dialog animates out.
+  const [shown, setShown] = useState(group);
+  if (group && group !== shown) {
+    setShown(group);
+    setName(group === "new" ? "" : group.name);
+    setMembers(new Set(group === "new" ? [] : group.userIds));
+    setError(null);
+  }
+  const isNew = shown === "new";
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const json = { name, userIds: [...members] };
+      if (isNew) await api("/admin/groups", { method: "POST", json });
+      else if (shown) await api(`/admin/groups/${shown.id}`, { method: "PATCH", json });
+      invalidateDirectory();
+      onClose();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={group !== null} onOpenChange={(next) => !next && !busy && onClose()}>
+      <DialogContent showCloseButton={false} className="sm:max-w-md">
+        <form
+          className="grid gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void save();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle className="text-base">{isNew ? "New group" : "Edit group"}</DialogTitle>
+            <DialogDescription>Share providers and MCP servers with a group instead of every user.</DialogDescription>
+          </DialogHeader>
+          <Input aria-label="Group name" placeholder="Name, e.g. Engineering" value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
+          <Checklist
+            label="Members"
+            filter={users.length > 8}
+            items={users.map((u) => ({ id: u.id, label: u.name, hint: u.email }))}
+            selected={members}
+            onToggle={(id) =>
+              setMembers((s) => {
+                const next = new Set(s);
+                if (!next.delete(id)) next.add(id);
+                return next;
+              })
+            }
+          />
+          {error && <p role="alert" className="text-error settings-error text-xs">{error}</p>}
+          <DialogFooter>
+            <DialogClose type="button" disabled={busy} render={<Button variant="outline" />}>
+              Cancel
+            </DialogClose>
+            <Button type="submit" disabled={busy || !name.trim()}>
+              {busy && <Loader2Icon className="animate-spin" />} {isNew ? "Create group" : "Save"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function Groups() {
+  const { groups } = useDirectory();
+  const [editing, setEditing] = useState<UserGroup | "new" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <SettingsSection
+      title="Groups"
+      description="Named sets of users. Give a server-wide provider or a shared MCP server to groups or single users instead of everyone."
+      action={
+        <Button size="sm" variant="outline" onClick={() => setEditing("new")}>
+          <PlusIcon /> New group
+        </Button>
+      }
+    >
+      {error && <p className="text-error settings-error px-4 pt-2 text-xs">{error}</p>}
+      {groups.length === 0 && <p className="text-muted-foreground px-4 py-3 text-sm">No groups yet.</p>}
+      {groups.map((g, index) => (
+        <div key={g.id} className="stagger animate-rise-in flex items-center gap-3 px-4 py-3" style={{ "--i": index } as CSSProperties}>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium">{g.name}</p>
+            <p className="text-muted-foreground truncate text-xs">
+              {g.userIds.length} {g.userIds.length === 1 ? "member" : "members"}
+            </p>
+          </div>
+          <Button size="icon-sm" variant="ghost" aria-label={`Edit ${g.name}`} onClick={() => setEditing(g)}>
+            <PencilIcon />
+          </Button>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label={`Delete ${g.name}`}
+            onClick={async () => {
+              if (!confirm(`Delete the group ${g.name}? Members lose what was shared only through it.`)) return;
+              setError(null);
+              try {
+                await api(`/admin/groups/${g.id}`, { method: "DELETE" });
+                invalidateDirectory();
+              } catch (e) {
+                setError((e as Error).message);
+              }
+            }}
+          >
+            <TrashIcon />
+          </Button>
+        </div>
+      ))}
+      <GroupDialog group={editing} onClose={() => setEditing(null)} />
     </SettingsSection>
   );
 }
@@ -335,7 +465,7 @@ export function AdminSettings() {
   }, []);
 
   return (
-    <SettingsPage title="Admin" description="Manage who can use this server, the system prompts, and which provider keys everyone shares.">
+    <SettingsPage title="Admin" description="Manage who can use this server, user groups, the system prompts, and which provider keys you share.">
       <SettingsSection title="Access">
         <SettingsRow
           label="Open sign-up"
@@ -352,9 +482,12 @@ export function AdminSettings() {
         />
       </SettingsSection>
       <Users defaultLimit={defaultLimit} />
+      <Groups />
       <SystemPrompts />
       <h2 className="mt-2 text-sm font-medium">Server-wide providers</h2>
-      <p className="text-muted-foreground -mt-2 text-xs">Every user can use these keys. A user's own key for the same provider takes precedence. Usage is still tracked per user.</p>
+      <p className="text-muted-foreground -mt-2 text-xs">
+        Shared with everyone unless you limit a key to groups or users. A user's own key for the same provider takes precedence. Usage is still tracked per user.
+      </p>
       <ProviderScopeProvider base="/admin/providers" providers={providers} refresh={refreshProviders}>
         <ProviderLists />
       </ProviderScopeProvider>

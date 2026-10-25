@@ -425,5 +425,33 @@ Per-server policy in `config.approval` (Settings → MCP servers → edit): `des
 
 - `destructive` asks when a tool declares `annotations.destructiveHint: true`, or `readOnlyHint: false` without `destructiveHint: false`. MCP's spec defaults treat an unannotated tool as possibly destructive. Following that literally would prompt for almost every tool, so unannotated tools run without asking. Pick `always` for servers you do not trust.
 - The server sets AI SDK `needsApproval` on the `dynamicTool`. `streamText` stops with a `tool-approval-request`. The client shows Allow / Deny (assistant-ui `ToolFallback`), then `sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses` resends, and `streamText` runs or skips the call. Denied calls persist as `output-denied`.
-- The "N tool calls" group opens itself while a call waits for approval (`thread.aui.tsx`), or the prompt would be hidden.
+- The work-log group opens itself while a call waits for approval (`thread.aui.tsx`), or the prompt would be hidden.
 - MCP tools are `dynamic-tool` parts in UI messages, not `tool-<name>`.
+
+## Beyond tools (added 2026-10-23)
+
+Built to match LibreChat and Open WebUI. `src/server/mcp/manager.test.ts` drives each feature against a fake Streamable HTTP server.
+
+### Image results
+
+`presentResult()` decodes `image` content parts (max 8 per result, 10 MB each), sniffs the bytes, and saves PNG/JPEG/WebP/GIF through `storeImage()` (`tools/image.ts`): same `images` table as generated images, so quota, Library, and chat deletion apply. Other formats (SVG) are dropped with a note. The tool output becomes `{ text, images }`; the card renders the saved copies. The model only sees text; vision models get the images once through `injectToolImages()` (the `view_artifact` path), capped at 8 per reply. Embedded binary resources become a size note, never base64 text.
+
+### Resources
+
+Every connected server whose `initialize` capabilities include `resources` adds to one shared pair: `mcp_list_resources({ server, cursor? })` (resources plus URI templates) and `mcp_read_resource({ server, uri })` (text capped at 100k chars, image blobs through the image path). One pair keeps the tool block small and stable for caching.
+
+### Prompts
+
+`GET /api/mcp/prompts` lists prompts from servers with the `prompts` capability; `POST /api/mcp/:id/prompts` renders one to text. The composer's Prompts button (desktop) and the plus-menu submenu (touch) appear only when at least one prompt is available. Discovery starts alongside startup data without blocking chat loading, and refreshes after MCP settings changes and when an available prompt menu opens. This connects enabled servers in the background; loading, empty, and failed discovery keep the option hidden. Superseded discovery responses are ignored. Arguments open a dialog; the result is inserted after any typed text, never sent.
+
+### Elicitation
+
+The client advertises `capabilities.elicitation = {}` (form mode). `@ai-sdk/mcp` does not tell which call a request belongs to, so the handler uses the newest in-flight call of that (user, server) entry. MCP tool `execute` is an async generator (`runWithElicitation`): it yields `{ elicitation }` as a preliminary output, the tool card renders the form (`McpElicitation.tsx`), the answer goes to `POST /api/mcp/elicitations/:id`, and the call resumes. The call timeout is our own `PausableTimeout` (no `options.timeout`), paused while the form is open, because the SDK cannot reset a request timeout. AI SDK v7 has no `experimental_context`, so `toolsForUser()` builds tools twice: interactive ones for the chat (`interactive: true` only from `/api/chat`) and `subTools` for sub-agents, which decline. Scheduled runs are non-interactive too.
+
+### MCP Apps
+
+The client advertises `mcpAppClientCapabilities`. A tool with `_meta.ui.resourceUri` (`ui://`) returns `{ text, images, app: { serverId, resourceUri }, result }` (the call result without images, capped at 256 KB because it is stored with the message). `_meta.ui.visibility: ["app"]` tools are hidden from the model and callable only from the app. The card (`McpApp.tsx`) does not use assistant-ui's `McpAppRenderer`: that one loads its frame from the hosted `*.auiusercontent.com` shim. Ours is a null-origin `srcdoc` iframe with a CSP from the resource's declared domains and a small JSON-RPC bridge (`ui/initialize`, tool input/result notifications, `tools/call`, `resources/read`, `ui/open-link`, `ui/message` into the composer, size changes, theme changes). App calls go through `POST /api/mcp/:id/app/{resource,call,read}` on the user's own connection; tools that would need approval return 409 until the user allows them in the card. `thread.aui.tsx` keeps app cards out of the work-log group and gives each a `resultKey`.
+
+### Shared servers
+
+An admin's server with `shared = 1` appears for every user in its audience (`listSharedServers`, joined on the owner still being admin; audiences in `groups.ts`: everyone, or chosen groups and users). Viewers get their own switch and tool toggles (`mcp_server_users`) and their own OAuth tokens (`readOAuth`/`writeOAuth` pick the table by ownership); the owner's URL, headers, env, and approval policy apply. Network rules and stdio permission follow `ownerId`; saved images and connections follow `userId`. A user's own server with the same name hides the shared one. Owner edits, unsharing, and deletion close every user's connection (`disconnectServerEverywhere`).

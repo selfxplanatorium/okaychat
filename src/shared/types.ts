@@ -51,6 +51,21 @@ export interface ProviderInfo {
   shared: boolean;
   baseURL?: string;
   modelCount: number;
+  /** Admin listing only: who may use the server-wide connection. */
+  audience?: ShareAudience;
+}
+
+/** Who may use something an admin shares: every user, or only the listed users and members of the listed groups. */
+export interface ShareAudience {
+  mode: "all" | "selected";
+  userIds: string[];
+  groupIds: string[];
+}
+
+export interface UserGroup {
+  id: string;
+  name: string;
+  userIds: string[];
 }
 
 export interface ProviderConnectionInput {
@@ -188,11 +203,46 @@ export interface McpServerInfo {
   name: string;
   transport: McpTransport;
   enabled: boolean;
+  /** The owner (an admin) shares it with other users. */
+  shared: boolean;
+  /** The owner's view of a shared server: who it is shared with. */
+  audience?: ShareAudience;
+  /** Someone else's shared server: the viewer can switch it and its tools, and authorize, but not edit it. */
+  sharedWithMe: boolean;
   status: McpStatus;
   error?: string;
   tools: McpToolInfo[];
-  /** Config with secrets masked. */
+  /** Config with secrets masked. Shared servers show viewers only the URL, timeout, and approval policy. */
   config: McpServerConfig;
+}
+
+/** One input in an MCP elicitation form. Servers may only ask for flat primitive values. */
+export type McpElicitationField = { name: string; title?: string; description?: string; required: boolean } & (
+  | { type: "string"; format?: string; minLength?: number; maxLength?: number; default?: string }
+  | { type: "number" | "integer"; minimum?: number; maximum?: number; default?: number }
+  | { type: "boolean"; default?: boolean }
+  | { type: "select"; options: Array<{ value: string; label: string }>; default?: string }
+  | { type: "multiselect"; options: Array<{ value: string; label: string }>; default?: string[] }
+);
+
+/** An MCP server asking the user for input while one of its tools runs. Shown in that tool's card. */
+export interface McpElicitation {
+  id: string;
+  server: string;
+  message: string;
+  fields: McpElicitationField[];
+  /** Set once the user answered, so the card shows the outcome instead of the form. */
+  answered?: "accept" | "decline" | "cancel";
+}
+
+/** A prompt template an MCP server offers; the composer fills it in as the user's message. */
+export interface McpPromptInfo {
+  serverId: string;
+  server: string;
+  name: string;
+  title?: string;
+  description?: string;
+  arguments: Array<{ name: string; description?: string; required?: boolean }>;
 }
 
 export interface UsageRow {
