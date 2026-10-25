@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, BarChart3Icon, BlocksIcon, BrainIcon, CalendarClockIcon, ChevronLeftIcon, ChevronRightIcon, FolderIcon, KeyRoundIcon, ShieldIcon, PaletteIcon, SlidersHorizontalIcon, UserRoundIcon } from "lucide-react";
+import { ArrowLeftIcon, BarChart3Icon, BlocksIcon, BrainIcon, CalendarClockIcon, ChevronLeftIcon, ChevronRightIcon, FolderIcon, KeyboardIcon, KeyRoundIcon, ShieldIcon, PaletteIcon, SlidersHorizontalIcon, UserRoundIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from "react";
 import { Link } from "wouter";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,7 @@ import { ScheduleSettings } from "./ScheduleSettings";
 import { UsageSettings } from "./UsageSettings";
 import { AccountSettings } from "./AccountSettings";
 import { MemorySettings } from "./MemorySettings";
+import { KeyboardSettings } from "./KeyboardSettings";
 
 const SECTIONS: Array<{ id: string; label: string; icon: ComponentType<{ className?: string }>; component: ComponentType; admin?: boolean }> = [
   { id: "general", label: "General", icon: SlidersHorizontalIcon, component: GeneralSettings },
@@ -24,6 +25,7 @@ const SECTIONS: Array<{ id: string; label: string; icon: ComponentType<{ classNa
   { id: "schedules", label: "Scheduled", icon: CalendarClockIcon, component: ScheduleSettings },
   { id: "usage", label: "Usage", icon: BarChart3Icon, component: UsageSettings },
   { id: "appearance", label: "Appearance", icon: PaletteIcon, component: AppearanceSettings },
+  { id: "keyboard", label: "Keyboard", icon: KeyboardIcon, component: KeyboardSettings },
   { id: "admin", label: "Admin", icon: ShieldIcon, component: AdminSettings, admin: true },
 ];
 

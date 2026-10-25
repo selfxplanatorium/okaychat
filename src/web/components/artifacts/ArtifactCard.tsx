@@ -62,6 +62,7 @@ export function ArtifactCard({ args, result, status, action }: { args: unknown; 
 
   return (
     <button
+      data-command="artifact.open"
       type="button"
       disabled={running || !r?.id || !threadId}
       onClick={() => r && threadId && show(threadId, r.id, r.version)}

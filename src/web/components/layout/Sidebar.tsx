@@ -1,5 +1,6 @@
 import { useAui, useAuiState } from "@assistant-ui/react";
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
+import { useCommand, useKeyboardDialog, useShortcutProps } from "@/keyboard/registry";
 import { SIDEBAR_ITEMS } from "@shared/types";
 import { useChatPrivacyStore } from "@/state/chat-privacy";
 import { ChatSearch } from "./ChatSearch";
@@ -18,19 +19,14 @@ import { GlideHighlight } from "./GlideHighlight";
 
 export function Sidebar({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const aui = useAui();
-  const [searchOpen, setSearchOpen] = useState(false);
+  const searchOpen = useKeyboardDialog((s) => s.open === "search");
+  const toggleDialog = useKeyboardDialog((s) => s.toggle);
+  const setSearchOpen = (open: boolean) => open !== searchOpen && toggleDialog("search");
   const visibleItems = useData((s) => s.settings?.sidebarItems) ?? SIDEBAR_ITEMS;
   const empty = useAuiState((s) => s.thread.isEmpty);
-  useEffect(() => {
-    const keydown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setSearchOpen((value) => !value);
-      }
-    };
-    window.addEventListener("keydown", keydown);
-    return () => window.removeEventListener("keydown", keydown);
-  }, []);
+  useCommand("app.search", () => toggleDialog("search"));
+  const searchHint = useShortcutProps("app.search", "Search chats");
+  const closeHint = useShortcutProps("app.toggleSidebar", "Close sidebar");
   const me = useData((s) => s.me);
   const panelRef = useRef<HTMLDivElement>(null);
   const [location, navigate] = useLocation();
@@ -57,13 +53,14 @@ export function Sidebar({ open, onToggle }: { open: boolean; onToggle: () => voi
               <Brand />
             </Link>
             <div className="flex items-center gap-1">
-            <button type="button" onClick={() => setSearchOpen(true)} aria-label="Search chats" title="Search chats (Ctrl/⌘ K)" className="text-sidebar-muted-foreground hover:bg-sidebar-row-hover focus-visible:outline-ring rounded-lg p-1.5 pointer-coarse:p-2.5">
+            <button type="button" onClick={() => setSearchOpen(true)} aria-label="Search chats" {...searchHint} className="text-sidebar-muted-foreground hover:bg-sidebar-row-hover focus-visible:outline-ring rounded-lg p-1.5 pointer-coarse:p-2.5">
               <SearchIcon className="size-4" />
             </button>
             <button
               type="button"
               onClick={onToggle}
               aria-label="Close sidebar"
+              {...closeHint}
               className="text-sidebar-muted-foreground hover:bg-sidebar-row-hover rounded-lg p-1.5 pointer-coarse:p-2.5 transition-colors duration-(--motion-fast) ease-out-quart"
             >
               <PanelLeftIcon className="size-4" />
@@ -83,7 +80,13 @@ export function Sidebar({ open, onToggle }: { open: boolean; onToggle: () => voi
               { id: "plugins", label: "Plugins", href: "/plugins", icon: PuzzleIcon },
               { id: "projects", label: "Projects", href: "/projects", icon: FolderIcon },
             ] as const).filter((item) => visibleItems.includes(item.id)).map((item) => (
-              <Link key={item.id} data-glide href={item.href} aria-current={location === item.href ? "page" : undefined} className={cn(rowClass, location === item.href && "bg-sidebar-row-hover")}>
+              <Link
+                key={item.id}
+                data-glide
+                href={item.href}
+                aria-current={location === item.href ? "page" : undefined}
+                className={cn(rowClass, location === item.href && "bg-sidebar-row-hover")}
+              >
                 <item.icon className="size-4 shrink-0" /> {item.label}
               </Link>
             ))}
@@ -95,6 +98,21 @@ export function Sidebar({ open, onToggle }: { open: boolean; onToggle: () => voi
             onScroll={(event) => {
               const list = event.currentTarget;
               list.style.setProperty("--chat-list-fade", `${Math.min(24, Math.max(0, list.scrollTop))}px`);
+            }}
+            // Arrows move between chats, like a list. Rows are focusable one by one, so Tab still walks them too.
+            onKeyDown={(event) => {
+              if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+              const rows = [...event.currentTarget.querySelectorAll<HTMLElement>("[data-slot=aui_thread-list-item-trigger], [data-slot=aui_thread-list-item-select]")];
+              const index = rows.indexOf(event.target as HTMLElement);
+              if (index === -1) return;
+              const next =
+                event.key === "ArrowDown" ? rows[index + 1] :
+                event.key === "ArrowUp" ? rows[index - 1] :
+                event.key === "Home" ? rows[0] :
+                event.key === "End" ? rows.at(-1) : undefined;
+              if (!next) return;
+              event.preventDefault();
+              next.focus();
             }}
             // Only opening a chat leaves the current page. Row menus are portaled, but their clicks still bubble here.
             onClick={(event) => {

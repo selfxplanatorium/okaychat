@@ -6,6 +6,7 @@ import type { ThreadSummary } from "@shared/types";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import { useData } from "@/state/data";
+import { dialogReturnFocus } from "@/keyboard/registry";
 
 type Hit = { threadId: string; title: string | null; messageId: string; snippet: string };
 
@@ -73,7 +74,7 @@ export function ChatSearch({ open, onOpenChange }: { open: boolean; onOpenChange
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-xl" showCloseButton={false}>
+      <DialogContent className="gap-0 overflow-hidden p-0 sm:max-w-xl" showCloseButton={false} finalFocus={dialogReturnFocus}>
         <DialogTitle className="sr-only">Search chats</DialogTitle>
         <DialogDescription className="sr-only">Search chat titles and messages across all projects. Use arrow keys to choose a chat and Enter to open it.</DialogDescription>
         <div className="border-border flex items-center gap-3 border-b px-5 py-4">

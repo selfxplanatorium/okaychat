@@ -15,7 +15,8 @@ import { cn } from "@/lib/utils";
 import { useAppearance } from "@/state/appearance";
 import { getActiveModel, useData } from "@/state/data";
 import { chatPrivacyFor, useChatPrivacy, useChatPrivacyStore } from "@/state/chat-privacy";
-import { useThreadMeta, useThreadMetaStore } from "@/state/thread-meta";
+import { useCurrentThreadId, useThreadMeta, useThreadMetaStore } from "@/state/thread-meta";
+import { runCommand, useCommand } from "@/keyboard/registry";
 
 const MODES = [
   { mode: "light", label: "Light", Icon: SunIcon },
@@ -101,9 +102,10 @@ export function ChatPrivacyMenu() {
     try {
       const previous = aui.threadListItem.getState();
       await aui.threads.switchToNewThread();
-      const next = aui.threadListItem.getState();
-      useChatPrivacyStore.getState().set(next.id, { temporary, personalized: !temporary });
-      if (previous.id !== next.id && chatPrivacyFor(previous).temporary) await aui.threads.item({ id: previous.id }).delete();
+      // The item scope lags one render behind a switch away from a stored chat; the thread list does not.
+      const nextId = aui.threads.getState().mainThreadId;
+      useChatPrivacyStore.getState().set(nextId, { temporary, personalized: !temporary });
+      if (previous.id !== nextId && chatPrivacyFor(previous).temporary) await aui.threads.item({ id: previous.id }).delete();
       setOpen(false);
       setGhostOpen(false);
     } catch (cause) {
@@ -140,6 +142,16 @@ export function ChatPrivacyMenu() {
 
   // A started temporary chat has content worth keeping, so the ghost asks instead of discarding it.
   const asks = privacy.temporary && started;
+  useCommand("nav.temporaryChat", () => {
+    if (busy || running) return false;
+    if (asks) {
+      setError(null);
+      setGhostOpen(true);
+      return;
+    }
+    // From the keyboard the next step is typing, so focus goes to the new chat's message box.
+    void changeChat(!privacy.temporary).then(() => runCommand("chat.focusComposer"));
+  });
   const ghostLabel = asks ? "Save or end temporary chat" : privacy.temporary ? "End temporary chat" : "Start temporary chat";
 
   return (
@@ -170,7 +182,7 @@ export function ChatPrivacyMenu() {
         </Popover>
       )}
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger className="surface-glass text-muted-foreground hover:text-foreground relative z-20 inline-flex size-8 pointer-coarse:size-10 items-center justify-center rounded-lg border transition-colors duration-(--motion-fast)" aria-label="Chat options">
+        <PopoverTrigger data-command="chat.options" className="surface-glass text-muted-foreground hover:text-foreground relative z-20 inline-flex size-8 pointer-coarse:size-10 items-center justify-center rounded-lg border transition-colors duration-(--motion-fast)" aria-label="Chat options">
           <MoreHorizontalIcon className="size-4" />
         </PopoverTrigger>
         <PopoverContent align="end" className="w-80 max-w-[calc(100vw-1rem)] p-4">

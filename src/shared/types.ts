@@ -80,7 +80,18 @@ export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "
 export const SIDEBAR_ITEMS = ["newChat", "scheduled", "library", "plugins", "projects"] as const;
 export type SidebarItem = (typeof SIDEBAR_ITEMS)[number];
 
+/** Per-account keyboard preferences. Absent fields fall back to the defaults in `src/web/keyboard/commands.ts`. */
+export interface KeyboardSettings {
+  /** Command id → key combos. A present key replaces that command's defaults; an empty list unbinds it. */
+  bindings?: Record<string, string[]>;
+  /** Which key sends a message. The other one (or Shift+Enter) inserts a new line. */
+  sendWith?: "enter" | "modEnter";
+  /** Shortcuts without Ctrl/⌘/Alt (message navigation, "?"). Off for people who trigger them by accident. */
+  singleKeys?: boolean;
+}
+
 export interface UserSettings {
+  keyboard?: KeyboardSettings;
   /** Visible sidebar shortcuts; omitted for older accounts to show all. */
   sidebarItems?: SidebarItem[];
   /** Synced appearance; absent until the first device migrates its local preferences. */

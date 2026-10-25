@@ -26,6 +26,7 @@ import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-ic
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { useData } from "@/state/data";
 import {
   ActionBarMorePrimitive,
   ActionBarPrimitive,
@@ -73,6 +74,7 @@ import {
   useState,
   type ComponentType,
   type FC,
+  type FocusEvent,
   type PropsWithChildren,
 } from "react";
 import { CopyFeedbackIcon } from "@/components/assistant-ui/elements/surfaces";
@@ -260,11 +262,35 @@ const MessageBaselineContext = createContext<{ current: number | null }>({
 
 const MessageEnteringContext = createContext(false);
 
+/**
+ * Messages are focus stops for keyboard navigation (`message.*` commands). The action bar of an older
+ * message only mounts on hover, so focus counts as hovering, also when the pointer leaves meanwhile.
+ */
+const useMessageFocus = () => {
+  const aui = useAui();
+  const hovering = useAuiState((s) => s.message.isHovering);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!hovering && ref.current?.contains(document.activeElement)) aui.message().setIsHovering(true);
+  }, [hovering, aui]);
+  return {
+    ref,
+    tabIndex: -1,
+    "data-message-root": "",
+    onFocus: () => aui.message().setIsHovering(true),
+    // Menus opened from the bar are portaled, but hold the bar open themselves (its interaction lock).
+    onBlur: (event: FocusEvent<HTMLDivElement>) => {
+      const el = event.currentTarget;
+      if (!el.contains(event.relatedTarget as Node | null) && !el.matches(":hover")) aui.message().setIsHovering(false);
+    },
+  };
+};
+
 const CopyActionButton: FC<{ className?: string }> = ({ className }) => {
   const copied = useAuiState((s) => s.message.isCopied);
   return (
     <ActionBarPrimitive.Copy asChild>
-      <TooltipIconButton tooltip="Copy" className={className}>
+      <TooltipIconButton tooltip="Copy" command="message.copy" className={className}>
         <CopyFeedbackIcon copied={copied} />
       </TooltipIconButton>
     </ActionBarPrimitive.Copy>
@@ -658,6 +684,7 @@ const ThreadScrollToBottom: FC = () => {
     <ThreadPrimitive.ScrollToBottom asChild>
       <TooltipIconButton
         tooltip="Scroll to bottom"
+        command="chat.scrollBottom"
         variant="outline"
         className="aui-thread-scroll-to-bottom dark:border-border dark:bg-background dark:hover:bg-accent absolute -top-12 z-10 self-center rounded-full p-4 transition-[opacity,translate] duration-(--motion-base) ease-out-quart disabled:pointer-events-none disabled:translate-y-2 disabled:opacity-0 disabled:duration-(--motion-fast) disabled:ease-in-quart"
       >
@@ -714,7 +741,12 @@ const ThreadSuggestionItem: FC = () => {
 // Touch devices open the keyboard on focus, which would cover half the screen on every chat switch.
 const finePointer = typeof window !== "undefined" && window.matchMedia("(pointer: fine)").matches;
 
+/** Keyboard settings choose Enter or Ctrl/⌘+Enter to send; the other key types a new line. */
+const useSubmitMode = () =>
+  useData((s) => s.settings?.keyboard?.sendWith) === "modEnter" ? "ctrlEnter" : "enter";
+
 const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
+  const submitMode = useSubmitMode();
   return (
     <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
       <ComposerPrimitive.AttachmentDropzone asChild>
@@ -727,6 +759,7 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
             placeholder="Send a message..."
             className="aui-composer-input caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base leading-6 outline-none"
             rows={1}
+            submitMode={submitMode}
             autoFocus={autoFocus && finePointer}
             enterKeyHint="send"
             aria-label="Message input"
@@ -765,6 +798,7 @@ const ComposerAction: FC = () => {
             <ComposerPrimitive.Dictate asChild>
               <TooltipIconButton
                 tooltip="Voice input"
+                command="composer.dictate"
                 side="bottom"
                 type="button"
                 variant="ghost"
@@ -780,6 +814,7 @@ const ComposerAction: FC = () => {
             <ComposerPrimitive.StopDictation asChild>
               <TooltipIconButton
                 tooltip="Stop dictation"
+                command="composer.dictate"
                 side="bottom"
                 type="button"
                 variant="ghost"
@@ -933,12 +968,15 @@ const AssistantMessage: FC = () => {
   // Keep the action bar inside the contained root's paint box, then cancel its reserved space in flow.
   const ACTION_BAR_HEIGHT = `min-h-7.5 ${ACTION_BAR_PT}`;
 
+  const focus = useMessageFocus();
+
   return (
     <MessagePrimitive.Root
+      {...focus}
       data-slot="aui_assistant-message-root"
       data-role="assistant"
       className={cn(
-        "relative -mb-7.5 pb-7.5 [contain-intrinsic-size:auto_200px] [content-visibility:auto]",
+        "relative -mb-7.5 pb-7.5 [contain-intrinsic-size:auto_200px] [content-visibility:auto] rounded-xl outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring/60",
         entering && "chat-message-in-soft",
       )}
     >
@@ -1051,7 +1089,7 @@ const AssistantActionBar: FC = () => {
       <CopyActionButton />
       {BranchAction && <BranchAction />}
       <ActionBarPrimitive.Reload asChild>
-        <TooltipIconButton tooltip="Retry">
+        <TooltipIconButton tooltip="Retry" command="message.retry">
           <RefreshCwIcon />
         </TooltipIconButton>
       </ActionBarPrimitive.Reload>
@@ -1093,6 +1131,7 @@ const AssistantActionBar: FC = () => {
         <ActionBarMorePrimitive.Trigger asChild>
           <TooltipIconButton
             tooltip="More"
+            command="message.more"
             className="data-[state=open]:bg-accent"
           >
             <MoreHorizontalIcon />
@@ -1145,14 +1184,18 @@ const UserImagePart: ImageMessagePartComponent = (part) => (
 
 const UserMessage: FC = () => {
   const entering = useContext(MessageEnteringContext);
+  const focus = useMessageFocus();
   return (
     <MessagePrimitive.Root
+      {...focus}
       data-slot="aui_user-message-root"
       className={cn(
         // Inset the measured anchor without changing message spacing. The
         // reserve stops short turns below the mobile header's 5rem fade.
         // Negative margin preserves the spacing between messages. The reserve
         // overlaps the previous assistant footer, so only children take the pointer.
+        // The root carries a tall top reserve, so focus is drawn on the bubble instead.
+        "outline-none focus-visible:[&_.aui-user-message-content]:outline-2 focus-visible:[&_.aui-user-message-content]:outline-offset-2 focus-visible:[&_.aui-user-message-content]:outline-ring/60",
         "pointer-events-none [&>*]:pointer-events-auto -mt-24 grid auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 pt-24 md:-mt-[3em] md:pt-[3em] [contain-intrinsic-size:auto_200px] [content-visibility:auto] [&:where(>*)]:col-start-2",
         // Sent messages come up from the composer they left.
         entering && "chat-message-in",
@@ -1187,6 +1230,7 @@ const UserRetryButton: FC = () => {
   return (
     <TooltipIconButton
       tooltip="Retry"
+      command="message.retry"
       onClick={() => aui.thread.startRun({ parentId: aui.message.getState().id })}
     >
       <RefreshCwIcon />
@@ -1205,7 +1249,7 @@ const UserActionBar: FC = () => {
       <UserRetryButton />
       {BranchAction && <BranchAction />}
       <ActionBarPrimitive.Edit asChild>
-        <TooltipIconButton tooltip="Edit" className="aui-user-action-edit">
+        <TooltipIconButton tooltip="Edit" command="message.edit" className="aui-user-action-edit">
           <SquarePenIcon />
         </TooltipIconButton>
       </ActionBarPrimitive.Edit>
@@ -1215,6 +1259,7 @@ const UserActionBar: FC = () => {
 };
 
 const EditComposer: FC = () => {
+  const submitMode = useSubmitMode();
   return (
     <MessagePrimitive.Root
       data-slot="aui_edit-composer-wrapper"
@@ -1223,6 +1268,7 @@ const EditComposer: FC = () => {
       <ComposerPrimitive.Root className="aui-edit-composer-root depth-composer ms-auto flex w-full max-w-[85%] cursor-text flex-col rounded-(--composer-radius) border bg-(--composer-bg) transition-[border-color,box-shadow] duration-(--motion-base) ease-out-quart">
         <ComposerPrimitive.Input
           className="aui-edit-composer-input text-foreground min-h-14 w-full resize-none bg-transparent px-4 pt-3 pb-1 text-base outline-none"
+          submitMode={submitMode}
           autoFocus
         />
         <div className="aui-edit-composer-footer mx-2.5 mb-2.5 flex items-center gap-1.5 self-end">

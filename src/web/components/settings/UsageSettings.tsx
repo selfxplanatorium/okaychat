@@ -83,12 +83,13 @@ export function UsageSettings() {
         <div className="flex h-40 items-end gap-1 px-4 pt-4 pb-2">
           {rows.length === 0 && <p className="text-muted-foreground animate-fade-in m-auto text-sm">No usage in this range.</p>}
           {rows.map((r, index) => (
-            <div key={r.key} className="group relative flex h-full flex-1 flex-col justify-end">
+            // Focusable, so the per-day figure is reachable without a pointer too.
+            <div key={r.key} tabIndex={0} aria-label={`${r.key}: ${formatCost(r.cost)}, ${r.requests} requests`} className="group relative flex h-full flex-1 flex-col justify-end rounded-t outline-none focus-visible:ring-1 focus-visible:ring-ring">
               <div
                 className="bg-primary/80 group-hover:bg-primary settings-bar min-h-px rounded-t transition-colors duration-(--motion-fast)"
                 style={{ height: `${(r.cost / maxCost) * 100}%`, "--i": index } as CSSProperties}
               />
-              <div className="dropdown-glass pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 rounded-md border px-2 py-1 text-xs whitespace-nowrap group-hover:block group-hover:animate-fade-in">
+              <div className="dropdown-glass pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 rounded-md border px-2 py-1 text-xs whitespace-nowrap group-hover:block group-hover:animate-fade-in group-focus-visible:block">
                 {r.key}: {formatCost(r.cost)} · {r.requests} req
               </div>
             </div>

@@ -1,6 +1,7 @@
 // Ported from T3Code (MIT, Copyright (c) 2026 T3 Tools Inc.). Source: apps/web/src/components/ui/tooltip.tsx
 // Scroll-dismiss tracking and the desktop titlebar offset are left out.
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
+import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -64,4 +65,18 @@ function TooltipContent({
   );
 }
 
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider };
+// Icon buttons are everywhere (several per message, two per code block). A tooltip root per button made a long
+// chat mount hundreds of tooltip states, so every icon button is a trigger of this one shared tooltip.
+type SharedTooltip = { tooltip: ReactNode; side: "top" | "bottom" | "left" | "right" };
+const sharedTooltip = TooltipPrimitive.createHandle<SharedTooltip>();
+
+/** Renders the shared icon-button tooltip. Mounted once at the app root. */
+function SharedTooltipHost() {
+  return (
+    <TooltipPrimitive.Root handle={sharedTooltip}>
+      {({ payload }) => (payload ? <TooltipContent side={payload.side}>{payload.tooltip}</TooltipContent> : null)}
+    </TooltipPrimitive.Root>
+  );
+}
+
+export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider, SharedTooltipHost, sharedTooltip };

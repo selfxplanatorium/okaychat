@@ -101,6 +101,7 @@ export function BranchMenu() {
                       variant="ghost"
                       size="icon"
                       aria-label="Branch off"
+                      data-command="message.branch"
                       className="aui-button-icon data-popup-open:bg-accent size-6 p-1 pointer-coarse:size-9 pointer-coarse:p-2"
                     />
                   }

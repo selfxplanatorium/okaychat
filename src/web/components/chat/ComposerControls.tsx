@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 import { useChatModel } from "@/state/thread-meta";
 import { useChatSearch } from "@/state/chat-search";
+import { useCommand } from "@/keyboard/registry";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSubmenuRoot, MenuSubmenuTrigger, MenuTrigger } from "@/components/ui/menu";
 import { EFFORT_LABELS, useEffortChoices } from "./ModelPicker";
 
@@ -20,6 +21,8 @@ export function SearchToggle() {
   const { enabled, toggle } = useChatSearch();
   const active = useChatModel();
   const webTools = useData((s) => s.settings?.webTools ?? true);
+  // Registered here, not as a click target: on phones the toggle lives in the plus menu.
+  useCommand("composer.search", toggle, !!active?.toolCall && webTools);
   if (!active?.toolCall || !webTools) return null;
   return (
     <button
@@ -157,7 +160,7 @@ export function McpPromptsButton() {
   return (
     <>
       <Menu onOpenChange={(open) => open && void load()}>
-        <MenuTrigger aria-label="MCP prompts" className={cn(triggerClass, "max-sm:hidden pointer-coarse:hidden")}>
+        <MenuTrigger aria-label="MCP prompts" data-command="composer.prompts" className={cn(triggerClass, "max-sm:hidden pointer-coarse:hidden")}>
           <SquareSlashIcon className="size-3.5" />
           Prompts
         </MenuTrigger>

@@ -71,7 +71,7 @@ export const CodeBlock = memo(function CodeBlock({ code, language = "", actions 
           >
             <WrapTextIcon aria-hidden />
           </TooltipIconButton>
-          <TooltipIconButton tooltip="Copy code" onClick={() => { if (code && !isCopied) void copyToClipboard(code); }}>
+          <TooltipIconButton tooltip="Copy code" data-command="code.copy" onClick={() => { if (code && !isCopied) void copyToClipboard(code); }}>
             <CopyFeedbackIcon copied={isCopied} />
           </TooltipIconButton>
         </div>

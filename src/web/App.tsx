@@ -2,7 +2,7 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { AppLoading } from "@/components/AppLoading";
 import { AuthScreen } from "@/components/AuthScreen";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { SharedTooltipHost, TooltipProvider } from "@/components/ui/tooltip";
 import { api, prefetch } from "@/lib/api";
 import { preloadable } from "@/lib/preloadable";
 import { useApplyAppearance } from "@/state/appearance";
@@ -20,8 +20,12 @@ export function App() {
   const [location] = useLocation();
   // Shared chats are public: no auth check, no app shell.
   const share = location.match(/^\/share\/([\w-]+)$/);
-  if (share) return <Suspense fallback={<AppLoading />}><SharePage token={share[1]!} /></Suspense>;
-  return <AuthedApp />;
+  return (
+    <>
+      {share ? <Suspense fallback={<AppLoading />}><SharePage token={share[1]!} /></Suspense> : <AuthedApp />}
+      <SharedTooltipHost />
+    </>
+  );
 }
 
 function AuthedApp() {

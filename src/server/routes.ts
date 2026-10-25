@@ -94,6 +94,12 @@ const clientId = z.string().min(1).max(200);
 const settingsPatch = z.object({
   // Checked against the known values in updateSettings.
   sidebarItems: z.array(z.string()).max(50).optional(),
+  keyboard: z.object({
+    bindings: z.record(z.string().regex(/^[a-z][a-zA-Z0-9.]{0,63}$/), z.array(z.string().min(1).max(48).regex(/^[\x21-\x7e]+$/)).max(4))
+      .refine((value) => Object.keys(value).length <= 200, "too many commands").optional(),
+    sendWith: z.enum(["enter", "modEnter"]).optional(),
+    singleKeys: z.boolean().optional(),
+  }).strict().optional(),
   maxSteps: z.number().optional(),
   maxSearches: z.number().optional(),
   imageServices: z.record(z.string(), z.unknown()).optional(),

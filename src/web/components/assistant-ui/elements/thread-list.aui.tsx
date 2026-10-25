@@ -57,6 +57,7 @@ import { DeleteChatDialog } from "@/components/chat/DeleteChatDialog";
 import { SelectionCheck, useSelectionKeys } from "@/components/ui/selection";
 import { batchError, runBatch } from "@/lib/selection";
 import { useThreadSelection } from "@/state/thread-selection";
+import { runCommand, useCommand } from "@/keyboard/registry";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ContextMenu } from "@base-ui/react/context-menu";
 import {
@@ -742,6 +743,7 @@ const ThreadListItemMenu: FC<{
   const [confirmDelete, setConfirmDelete] = useState(false);
   // Rename and the dialogs take focus themselves; returning it to the trigger would blur the rename field.
   const keepFocusRef = useRef(false);
+  const rowRef = useRef<HTMLDivElement>(null);
 
   // A chat created in this session has no metadata yet; it lives in the project that was active then.
   const projectId =
@@ -778,20 +780,46 @@ const ThreadListItemMenu: FC<{
     fn();
   };
 
+  // The current chat's row answers the chat commands, so they work from anywhere in the app.
+  const isMain = useAuiState((s) => s.threads.mainThreadId === s.threadListItem.id);
+  const reveal = () => {
+    if (document.querySelector(".shell-sidebar")?.getAttribute("data-open") !== "true") runCommand("nav.chatList");
+  };
+  useCommand("chat.rename", () => {
+    reveal();
+    requestAnimationFrame(withFocus(onRename));
+  }, isMain && !disabled);
+  useCommand("chat.pin", () => void update({ pinned: !pinned }), isMain);
+  useCommand("chat.archive", () => void Promise.resolve().then(() => aui.threadListItem.archive()).catch(() => {}), isMain);
+  useCommand("chat.delete", () => setConfirmDelete(true), isMain);
+  useCommand("chat.menu", () => {
+    reveal();
+    // Base UI opens a context menu from the contextmenu event, the same one Shift+F10 sends.
+    requestAnimationFrame(() => {
+      const row = document.querySelector<HTMLElement>("[data-slot=aui_thread-list-item][data-active]");
+      if (!row) return;
+      const rect = row.getBoundingClientRect();
+      row.querySelector<HTMLElement>("[data-slot=aui_thread-list-item-trigger]")?.focus();
+      row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: rect.left + 16, clientY: rect.bottom }));
+    });
+  }, isMain && !disabled);
+
   return (
     <>
       <ContextMenu.Root disabled={disabled}>
-        <ContextMenu.Trigger render={row} />
+        <ContextMenu.Trigger ref={rowRef} render={row} />
         <MenuContent
           side="bottom"
           align="start"
           sideOffset={2}
           data-slot="aui_thread-list-item-more-content"
           className="max-w-[calc(100vw-1rem)] min-w-48"
-          finalFocus={() => {
+          finalFocus={(closeType) => {
             const keep = keepFocusRef.current;
             keepFocusRef.current = false;
-            return !keep;
+            if (keep) return false;
+            // A context menu has no trigger to return to; after a keyboard close the row takes focus back.
+            return (closeType === "keyboard" && rowRef.current?.querySelector<HTMLElement>("[data-slot=aui_thread-list-item-trigger]")) || true;
           }}
         >
           <MenuItem onClick={withFocus(() => useThreadSelection.getState().start(aui.threadListItem.getState().id))}>

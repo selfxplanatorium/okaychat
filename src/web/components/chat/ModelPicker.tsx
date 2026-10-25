@@ -83,11 +83,12 @@ export function ModelPicker() {
       <PopoverTrigger
         className="group hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 pointer-coarse:h-9 max-w-56 min-w-0 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart"
         aria-label="Choose model"
+        data-command="composer.model"
       >
         <TextSwap value={active?.name ?? "Choose model"} className="truncate" />
         <ChevronDownIcon className="size-3 shrink-0 transition-transform duration-(--motion-base) ease-out-expo group-aria-expanded:rotate-180" />
       </PopoverTrigger>
-      <PopoverContent side="top" className="flex max-h-[min(32rem,70dvh)] w-[min(26rem,calc(100vw-1rem))] flex-col p-0">
+      <PopoverContent data-slot="model-picker" side="top" className="flex max-h-[min(32rem,70dvh)] w-[min(26rem,calc(100vw-1rem))] flex-col p-0">
         <div className="flex items-center gap-2 border-b px-3 py-2">
           <SearchIcon className="text-muted-foreground size-4" />
           <input
@@ -95,6 +96,14 @@ export function ModelPicker() {
             autoFocus={window.matchMedia("(pointer: fine)").matches}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== "ArrowDown" && e.key !== "Enter") return;
+              const first = e.currentTarget.closest("[data-slot=model-picker]")?.querySelector<HTMLElement>("[role=option]");
+              if (!first) return;
+              e.preventDefault();
+              if (e.key === "Enter") first.click();
+              else first.focus();
+            }}
             placeholder="Search models"
             className="placeholder:text-muted-foreground h-7 pointer-coarse:h-9 min-w-0 flex-1 bg-transparent text-sm outline-none"
           />
@@ -111,16 +120,38 @@ export function ModelPicker() {
                   key={`${group.id}:${m.ref}`}
                   role="option"
                   aria-selected={m.ref === active?.ref}
+                  aria-keyshortcuts="F"
                   tabIndex={0}
                   onClick={() => {
                     selectModel(m.ref, threadId);
                     setOpen(false);
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
                       selectModel(m.ref, threadId);
                       setOpen(false);
+                      return;
                     }
+                    if (e.key.toLowerCase() === "f" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                      e.preventDefault();
+                      void toggleFavorite(m.ref);
+                      return;
+                    }
+                    // Arrows walk the options; up from the first one returns to the search field.
+                    const picker = e.currentTarget.closest("[data-slot=model-picker]");
+                    const options = [...(picker?.querySelectorAll<HTMLElement>("[role=option]") ?? [])];
+                    const index = options.indexOf(e.currentTarget);
+                    const next =
+                      e.key === "ArrowDown" ? options[index + 1] :
+                      e.key === "ArrowUp" ? options[index - 1] ?? picker?.querySelector<HTMLElement>("input") :
+                      e.key === "Home" ? options[0] :
+                      e.key === "End" ? options.at(-1) : undefined;
+                    if (!next) return;
+                    e.preventDefault();
+                    next.focus();
+                    next.scrollIntoView({ block: "nearest" });
                   }}
                   className="group hover:bg-accent focus-visible:bg-accent flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 pointer-coarse:py-2.5 active:bg-accent outline-none transition-colors duration-(--motion-fast) ease-out-quart"
                 >
@@ -138,12 +169,13 @@ export function ModelPicker() {
                   <button
                     type="button"
                     aria-label={favorites.includes(m.ref) ? "Unfavorite" : "Favorite"}
+                    tabIndex={-1}
                     onClick={(e) => {
                       e.stopPropagation();
                       void toggleFavorite(m.ref);
                     }}
                     className={cn(
-                      "text-muted-foreground hover:text-foreground rounded p-1 pointer-coarse:p-2.5 opacity-0 pointer-coarse:opacity-60 transition-[opacity,color] duration-(--motion-fast) ease-out-quart group-hover:opacity-100",
+                      "text-muted-foreground hover:text-foreground rounded p-1 pointer-coarse:p-2.5 opacity-0 pointer-coarse:opacity-60 transition-[opacity,color] duration-(--motion-fast) ease-out-quart group-hover:opacity-100 group-focus-visible:opacity-100",
                       favorites.includes(m.ref) && "text-warning opacity-100 pointer-coarse:opacity-100",
                     )}
                   >
@@ -190,7 +222,7 @@ export function EffortPicker() {
   const instant = current === "none";
   return (
     <Menu>
-      <MenuTrigger className="hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 shrink-0 pointer-coarse:h-9 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart">
+      <MenuTrigger data-command="composer.effort" aria-label={`Reasoning effort: ${current ? EFFORT_LABELS[current] : "Default"}`} className="hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 shrink-0 pointer-coarse:h-9 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart">
         {instant ? <ZapIcon className="size-3.5" /> : <BrainIcon className="size-3.5" />}
         <TextSwap value={current ? EFFORT_LABELS[current] : "Default"} />
       </MenuTrigger>

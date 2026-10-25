@@ -265,6 +265,7 @@ export const ComposerAddAttachment: FC<{ className?: string }> = ({ className })
       render={
         <TooltipIconButton
           tooltip="Add Attachment"
+          command="composer.attach"
           side="bottom"
           variant="ghost"
           size="icon"

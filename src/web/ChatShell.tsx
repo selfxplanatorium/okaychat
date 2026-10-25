@@ -16,6 +16,8 @@ import { preloadable } from "@/lib/preloadable";
 import { takePreloadedData, useData } from "@/state/data";
 import { loadInstalledFonts } from "@/state/fonts";
 import { useChatPrivacyStore } from "@/state/chat-privacy";
+import { KeyboardShortcuts } from "@/keyboard/KeyboardShortcuts";
+import { useCommand, useShortcutProps } from "@/keyboard/registry";
 
 // Settings (theme editor, font discovery, VS Code import) are not needed to chat.
 const NavigationPage = preloadable(() => import("@/components/layout/NavigationPage").then((m) => m.NavigationPage));
@@ -24,6 +26,8 @@ const SettingsLayout = preloadable(() => import("@/components/settings/SettingsL
 function ChatHeader({ sidebarOpen, onToggle }: { sidebarOpen: boolean; onToggle: () => void }) {
   const aui = useAui();
   const [, navigate] = useLocation();
+  const sidebarHint = useShortcutProps("app.toggleSidebar", "Open sidebar");
+  const newChatHint = useShortcutProps("nav.newChat", "New chat");
   if (sidebarOpen) return null;
   return (
     <div className="shell-chat-header absolute top-2 left-2 flex gap-1">
@@ -31,6 +35,7 @@ function ChatHeader({ sidebarOpen, onToggle }: { sidebarOpen: boolean; onToggle:
         type="button"
         onClick={onToggle}
         aria-label="Open sidebar"
+        {...sidebarHint}
         className="surface-glass text-muted-foreground hover:text-foreground relative z-20 rounded-lg border p-1.5 pointer-coarse:p-2.5 transition-colors duration-(--motion-fast) ease-out-quart"
       >
         <PanelLeftIcon className="size-4" />
@@ -38,6 +43,7 @@ function ChatHeader({ sidebarOpen, onToggle }: { sidebarOpen: boolean; onToggle:
       <button
         type="button"
         aria-label="New chat"
+        {...newChatHint}
         onClick={async () => {
           await aui.threads.switchToNewThread();
           useChatPrivacyStore.getState().set(aui.threadListItem.getState().id, { temporary: false, personalized: true });
@@ -82,6 +88,16 @@ export function Shell({ userId }: { userId: string }) {
     closeOnMobile();
   }, [location, closeOnMobile]);
   useDrawerSwipe(sidebarOpen, setSidebarOpen, loaded && !inSettings);
+  useCommand("app.toggleSidebar", () => setSidebarOpen((open) => !open), !inSettings);
+  useCommand("nav.chatList", () => {
+    setSidebarOpen(true);
+    // The rail is mounted while closed, so its rows exist; focus waits for the opening frame.
+    requestAnimationFrame(() => {
+      const rows = document.querySelectorAll<HTMLElement>("[data-slot=aui_thread-list-item-trigger], [data-slot=aui_thread-list-item-select]");
+      const active = document.querySelector<HTMLElement>("[data-slot=aui_thread-list-item][data-active] [data-slot=aui_thread-list-item-trigger]");
+      (active ?? rows[0])?.focus();
+    });
+  }, !inSettings);
 
   const reload = useCallback(() => {
     setLoadError(null);
@@ -120,6 +136,7 @@ export function Shell({ userId }: { userId: string }) {
 
   return (
     <RuntimeProvider>
+      <KeyboardShortcuts />
       {/* No fill mode: a held opacity animation makes this a backdrop root, which leaves the sticky
           composer's blur misplaced while the thread scrolls on mobile Chrome. */}
       <div className="animate-[fade-in_var(--motion-base)_var(--ease-out-quart)] bg-background safe-top safe-x flex h-full">

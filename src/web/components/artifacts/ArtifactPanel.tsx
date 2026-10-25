@@ -260,7 +260,7 @@ function ArtifactPanelBody({
           >
             <DownloadIcon />
           </TooltipIconButton>
-          <TooltipIconButton tooltip="Close" onClick={onClose}>
+          <TooltipIconButton tooltip="Close" command="chat.artifact" onClick={onClose}>
             <XIcon />
           </TooltipIconButton>
         </header>
