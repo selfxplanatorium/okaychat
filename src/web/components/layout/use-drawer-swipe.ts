@@ -1,17 +1,31 @@
 import { useEffect, useRef } from "react";
 import { flushSync } from "react-dom";
 
-/** Distance from the left screen edge that starts an open gesture. */
-const EDGE = 28;
 /** Movement before a touch counts as a horizontal drag rather than a scroll. */
 const SLOP = 8;
 /** px/ms. A flick faster than this decides the direction regardless of distance. */
 const FLICK = 0.35;
 const MOBILE = "(max-width: 767px)";
 
+/** Touches that belong to the element under the finger, not to the drawer. */
+const OWN_GESTURE = 'input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="slider"], [role="dialog"], [role="menu"], [role="listbox"], .shell-artifact, [data-no-drawer-swipe]';
+
+/** True when something under the finger would scroll left, so a swipe right is its scroll. */
+function scrollsLeft(target: Element | null) {
+  for (let el = target; el && el !== document.body; el = el.parentElement) {
+    if (el.scrollLeft > 0 && el.scrollWidth > el.clientWidth) {
+      const overflow = getComputedStyle(el).overflowX;
+      if (overflow === "auto" || overflow === "scroll") return true;
+    }
+  }
+  return false;
+}
+
 /**
- * Phone drawer gestures: swipe in from the left edge to open, swipe the open
- * drawer (or its backdrop) left to close. The drawer follows the finger, then
+ * Phone drawer gestures: swipe right anywhere on the page to open, like a native
+ * app, and swipe the open drawer (or its backdrop) left to close. Fields, open
+ * popups, the artifact panel, and content that can still scroll left keep their
+ * own touches. The drawer follows the finger, then
  * settles by flick velocity or by whether it passed halfway. During the drag
  * inline styles override the open/closed classes; on release React commits the
  * new state first, then the inline styles are dropped so the class transition
@@ -50,8 +64,12 @@ export function useDrawerSwipe(open: boolean, setOpen: (open: boolean) => void, 
       const touch = event.touches[0]!;
       const { drawer, scrim } = parts();
       if (!drawer) return;
-      const target = event.target as Node;
-      if (state.current.open ? !drawer.contains(target) && !scrim?.contains(target) : touch.clientX > EDGE) return;
+      const target = event.target as Element;
+      if (state.current.open) {
+        if (!drawer.contains(target) && !scrim?.contains(target)) return;
+      } else if (target.closest?.(OWN_GESTURE) || scrollsLeft(target) || !document.getSelection()?.isCollapsed) {
+        return;
+      }
       gesture = { x: touch.clientX, y: touch.clientY, width: drawer.offsetWidth, dragging: false, lastX: touch.clientX, lastT: event.timeStamp, velocity: 0, offset: 0 };
     };
 
@@ -62,8 +80,9 @@ export function useDrawerSwipe(open: boolean, setOpen: (open: boolean) => void, 
       const dy = touch.clientY - gesture.y;
       if (!gesture.dragging) {
         if (Math.abs(dx) < SLOP && Math.abs(dy) < SLOP) return;
-        // Vertical movement is a scroll; the wrong direction is not this gesture.
-        if (Math.abs(dy) > Math.abs(dx) || (state.current.open ? dx > 0 : dx < 0)) {
+        // Vertical movement is a scroll; the wrong direction is not this gesture. A move
+        // that is no longer cancelable means the browser already started scrolling.
+        if (Math.abs(dy) > Math.abs(dx) || (state.current.open ? dx > 0 : dx < 0) || !event.cancelable) {
           gesture = null;
           return;
         }
@@ -88,15 +107,16 @@ export function useDrawerSwipe(open: boolean, setOpen: (open: boolean) => void, 
       release();
     };
 
-    document.addEventListener("touchstart", onStart, { passive: true });
-    document.addEventListener("touchmove", onMove, { passive: false });
-    document.addEventListener("touchend", onEnd);
-    document.addEventListener("touchcancel", onEnd);
+    // Capture phase: Base UI's context-menu trigger (thread rows) stops touchstart from bubbling.
+    document.addEventListener("touchstart", onStart, { passive: true, capture: true });
+    document.addEventListener("touchmove", onMove, { passive: false, capture: true });
+    document.addEventListener("touchend", onEnd, true);
+    document.addEventListener("touchcancel", onEnd, true);
     return () => {
-      document.removeEventListener("touchstart", onStart);
-      document.removeEventListener("touchmove", onMove);
-      document.removeEventListener("touchend", onEnd);
-      document.removeEventListener("touchcancel", onEnd);
+      document.removeEventListener("touchstart", onStart, true);
+      document.removeEventListener("touchmove", onMove, true);
+      document.removeEventListener("touchend", onEnd, true);
+      document.removeEventListener("touchcancel", onEnd, true);
       release();
     };
   }, [enabled]);

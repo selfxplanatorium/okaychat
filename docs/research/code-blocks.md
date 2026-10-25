@@ -23,6 +23,11 @@ the foreground, supporting light, dark, and custom themes without a fixed
 syntax palette. Copy always uses the original source, independent of markup
 and visual wrapping.
 
+The artifact panel's Code view reuses this through `useHighlightedCode()` and
+the `aui-code-block` class, with its own wrap toggle in the panel header. Its
+grammar comes from the artifact: `language` for code, TSX for React, Markdown,
+JSON for XLSX sources, and XML for HTML, SVG, PDF, and DOCX sources.
+
 ## Wrapping and scrolling
 
 `useAppearance().wordWrap` is already account-synced through `/api/appearance`,

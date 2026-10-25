@@ -1,6 +1,7 @@
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "./scroll-area";
+import { useSmoothHeight } from "./smooth-height";
 
 const Menu = MenuPrimitive.Root;
 const MenuTrigger = MenuPrimitive.Trigger;
@@ -25,10 +26,12 @@ function MenuContent({
   ...props
 }: MenuPrimitive.Popup.Props &
   Pick<MenuPrimitive.Positioner.Props, "side" | "align" | "sideOffset" | "alignOffset" | "anchor">) {
+  const smoothHeight = useSmoothHeight();
   return (
     <MenuPrimitive.Portal>
       <MenuPrimitive.Positioner side={side} align={align} sideOffset={sideOffset} alignOffset={alignOffset} anchor={anchor} className="isolate z-50">
         <MenuPrimitive.Popup
+          ref={smoothHeight}
           className={cn(
             "dropdown-glass text-popover-foreground flex max-h-(--available-height) min-w-40 origin-(--transform-origin) flex-col overflow-hidden rounded-xl border depth-float outline-none",
             "translate-x-0 translate-y-0 scale-100 transition-[opacity,scale,translate] duration-[var(--motion-base)] ease-out-expo",

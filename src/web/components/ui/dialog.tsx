@@ -5,10 +5,26 @@ import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { XIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { useBackClose } from "@/hooks/use-back-close";
 import { cn } from "@/lib/utils";
 
-function Dialog({ ...props }: DialogPrimitive.Root.Props) {
-  return <DialogPrimitive.Root data-slot="dialog" {...props} />;
+// Back closes the dialog on touch devices, as it would in a native app.
+function Dialog({ actionsRef, onOpenChange, ...props }: DialogPrimitive.Root.Props) {
+  const ownActions = React.useRef<DialogPrimitive.Root.Actions>(null);
+  const actions = actionsRef ?? ownActions;
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(props.defaultOpen ?? false);
+  useBackClose(props.open ?? uncontrolledOpen, () => actions.current?.close(), "(pointer: coarse)");
+  return (
+    <DialogPrimitive.Root
+      data-slot="dialog"
+      actionsRef={actions}
+      onOpenChange={(open, details) => {
+        setUncontrolledOpen(open);
+        onOpenChange?.(open, details);
+      }}
+      {...props}
+    />
+  );
 }
 
 function DialogTrigger({ ...props }: DialogPrimitive.Trigger.Props) {

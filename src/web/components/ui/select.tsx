@@ -2,6 +2,7 @@ import { Select as SelectPrimitive } from "@base-ui/react/select";
 import { CheckIcon, ChevronsUpDownIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "./scroll-area";
+import { useSmoothHeight } from "./smooth-height";
 
 export interface SelectOption<T extends string> {
   value: T;
@@ -29,6 +30,7 @@ export function Select<T extends string>({
   "aria-label"?: string;
 }) {
   const current = options.find((o) => o.value === value);
+  const smoothHeight = useSmoothHeight();
   return (
     <SelectPrimitive.Root
       disabled={disabled}
@@ -49,6 +51,7 @@ export function Select<T extends string>({
       <SelectPrimitive.Portal>
         <SelectPrimitive.Positioner sideOffset={6} alignItemWithTrigger={false} className="isolate z-50">
           <SelectPrimitive.Popup
+            ref={smoothHeight}
             className={cn(
               "dropdown-glass text-popover-foreground flex max-h-80 min-w-(--anchor-width) origin-(--transform-origin) flex-col overflow-hidden rounded-xl border depth-float outline-none",
               "translate-x-0 translate-y-0 scale-100 transition-[opacity,scale,translate] duration-[var(--motion-base)] ease-out-expo",

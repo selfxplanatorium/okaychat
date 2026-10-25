@@ -25,6 +25,7 @@ import {
 import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useSmoothHeight } from "@/components/ui/smooth-height";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 import {
@@ -929,10 +930,13 @@ const useSubmitMode = () =>
 
 const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
   const submitMode = useSubmitMode();
+  // The composer sits on the bottom edge, so it grows upward with the typed line held in place.
+  const smoothHeight = useSmoothHeight({ pin: "bottom" });
   return (
     <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
       <ComposerPrimitive.AttachmentDropzone asChild>
         <div
+          ref={smoothHeight}
           data-slot="aui_composer-shell"
           className="depth-composer data-[dragging=true]:border-ring flex w-full cursor-text flex-col gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) [backdrop-filter:blur(var(--glass-blur))_saturate(var(--glass-saturation))] transition-[border-color,box-shadow] duration-(--motion-base) ease-out-quart data-[dragging=true]:border-dashed data-[dragging=true]:bg-[color-mix(in_oklab,var(--color-accent)_50%,var(--color-background))]"
         >

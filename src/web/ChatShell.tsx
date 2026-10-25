@@ -7,6 +7,7 @@ import { ArtifactPanel } from "@/components/artifacts/ArtifactPanel";
 import { ChatView } from "@/components/chat/ChatView";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { useDrawerSwipe } from "@/components/layout/use-drawer-swipe";
+import { useBackClose } from "@/hooks/use-back-close";
 import { Onboarding } from "@/components/Onboarding";
 import { ChatPrivacyMenu } from "@/components/chat/ChatPrivacyMenu";
 import { StorageNotice } from "@/components/StorageNotice";
@@ -98,6 +99,7 @@ export function Shell({ userId }: { userId: string }) {
       (active ?? rows[0])?.focus();
     });
   }, !inSettings);
+  useBackClose(sidebarOpen && !inSettings, () => setSidebarOpen(false), "(max-width: 767px)");
 
   const reload = useCallback(() => {
     setLoadError(null);

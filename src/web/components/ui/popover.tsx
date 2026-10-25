@@ -1,5 +1,6 @@
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import { cn } from "@/lib/utils";
+import { useSmoothHeight } from "./smooth-height";
 
 const Popover = PopoverPrimitive.Root;
 const PopoverTrigger = PopoverPrimitive.Trigger;
@@ -13,10 +14,12 @@ function PopoverContent({
   children,
   ...props
 }: PopoverPrimitive.Popup.Props & Pick<PopoverPrimitive.Positioner.Props, "side" | "align" | "sideOffset">) {
+  const smoothHeight = useSmoothHeight();
   return (
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Positioner data-slot="popover-positioner" side={side} align={align} sideOffset={sideOffset} className="isolate z-50">
         <PopoverPrimitive.Popup
+          ref={smoothHeight}
           className={cn(
             "dropdown-glass text-popover-foreground origin-(--transform-origin) rounded-xl border p-1.5 depth-float outline-none",
             "translate-x-0 translate-y-0 scale-100 transition-[opacity,scale,translate] duration-[var(--motion-base)] ease-out-expo",

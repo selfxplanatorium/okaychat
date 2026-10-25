@@ -1,14 +1,16 @@
-import { CheckIcon, CodeIcon, CopyIcon, DownloadIcon, EyeIcon, FileSpreadsheetIcon, FileTextIcon, Loader2Icon, RotateCwIcon, XIcon } from "lucide-react";
+import { CheckIcon, CodeIcon, CopyIcon, DownloadIcon, EyeIcon, FileSpreadsheetIcon, FileTextIcon, Loader2Icon, RotateCwIcon, WrapTextIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { ArtifactVersion, DocumentArtifactKind } from "@shared/types";
 import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
+import { useHighlightedCode } from "@/components/ui/code-block";
 import { SimpleMarkdown } from "@/components/ui/simple-markdown";
 import { Select } from "@/components/ui/select";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { motionAllowed } from "@/state/appearance";
+import { motionAllowed, useAppearance } from "@/state/appearance";
 import { useArtifactPanel } from "@/state/artifacts";
+import { useBackClose } from "@/hooks/use-back-close";
 import { useCurrentThreadId } from "@/state/thread-meta";
 import { DocumentPreview } from "./DocumentPreview";
 import { artifactFilename, FRAME_SANDBOX, frameDocument } from "./frame";
@@ -58,10 +60,37 @@ async function downloadFile(name: string, url: string) {
 
 const isDocument = (kind: ArtifactVersion["kind"]): kind is DocumentArtifactKind => kind === "pdf" || kind === "docx" || kind === "xlsx";
 
-function ResizeHandle({ onResize }: { onResize: (width: number) => void }) {
+// highlight.js grammar for each artifact's source. PDF/DOCX sources are HTML, XLSX sources JSON.
+function sourceLanguage(version: ArtifactVersion): string {
+  switch (version.kind) {
+    case "code": return version.language ?? "";
+    case "react": return "tsx";
+    case "markdown": return "markdown";
+    case "xlsx": return "json";
+    default: return "xml";
+  }
+}
+
+function ArtifactSource({ version, wrap }: { version: ArtifactVersion; wrap: boolean }) {
+  const html = useHighlightedCode(version.content, sourceLanguage(version));
+  // aui-code-block supplies the wrap rules and token colors shared with chat code blocks.
+  return (
+    <div className="aui-code-block h-full" data-wrap={wrap}>
+      <pre className="h-full overflow-auto p-4 font-mono text-xs leading-relaxed">
+        {html === null ? <code>{version.content}</code> : (
+          // highlight() escapes source text; only its generated token spans become markup.
+          <code className="hljs" dangerouslySetInnerHTML={{ __html: html }} />
+        )}
+      </pre>
+    </div>
+  );
+}
+
+function ResizeHandle({ width, onResize }: { width: number; onResize: (width: number) => void }) {
+  const clamp = (w: number) => Math.round(Math.min(window.innerWidth * 0.75, Math.max(320, w)));
   const onPointerDown = (e: ReactPointerEvent) => {
     e.preventDefault();
-    const move = (ev: PointerEvent) => onResize(Math.min(window.innerWidth * 0.75, Math.max(320, window.innerWidth - ev.clientX)));
+    const move = (ev: PointerEvent) => onResize(clamp(window.innerWidth - ev.clientX));
     const up = () => {
       document.body.style.removeProperty("cursor");
       document.querySelectorAll("iframe").forEach((f) => f.style.removeProperty("pointer-events"));
@@ -74,7 +103,79 @@ function ResizeHandle({ onResize }: { onResize: (width: number) => void }) {
     addEventListener("pointermove", move);
     addEventListener("pointerup", up);
   };
-  return <div onPointerDown={onPointerDown} className="hover:bg-primary/40 absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize transition-colors duration-(--motion-fast) max-md:hidden" aria-hidden />;
+  // A focusable separator, so arrow keys resize the panel too (Shift for bigger steps).
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize panel"
+      aria-valuenow={width}
+      tabIndex={0}
+      onPointerDown={onPointerDown}
+      onKeyDown={(e) => {
+        const step = e.shiftKey ? 80 : 20;
+        const next = e.key === "ArrowLeft" ? width + step : e.key === "ArrowRight" ? width - step : null;
+        if (next === null) return;
+        e.preventDefault();
+        onResize(clamp(next));
+      }}
+      className="hover:bg-primary/40 focus-visible:bg-primary/40 absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize outline-none transition-colors duration-(--motion-fast) max-md:hidden"
+    />
+  );
+}
+
+/**
+ * Phones: the full-screen panel closes with a swipe right from its left edge, like
+ * a pushed screen in a native app. A strip catches the touch because the preview
+ * iframe would swallow it. The panel follows the finger and, on release, slides
+ * the rest of the way out or back with the class transition.
+ */
+function EdgeSwipeClose({ onClose }: { onClose: () => void }) {
+  const drag = useRef<{ x: number; lastX: number; lastT: number; velocity: number; dx: number } | null>(null);
+  const panel = (el: Element) => el.closest<HTMLElement>(".shell-artifact-inner");
+  return (
+    <div
+      aria-hidden
+      className="absolute inset-y-0 left-0 z-20 w-5 touch-none md:hidden"
+      onPointerDown={(event) => {
+        event.currentTarget.setPointerCapture(event.pointerId);
+        drag.current = { x: event.clientX, lastX: event.clientX, lastT: event.timeStamp, velocity: 0, dx: 0 };
+      }}
+      onPointerMove={(event) => {
+        const d = drag.current;
+        const el = panel(event.currentTarget);
+        if (!d || !el) return;
+        const dt = event.timeStamp - d.lastT;
+        if (dt > 0) d.velocity = (event.clientX - d.lastX) / dt;
+        d.lastX = event.clientX;
+        d.lastT = event.timeStamp;
+        d.dx = Math.max(0, event.clientX - d.x);
+        el.style.transition = "none";
+        el.style.transform = `translateX(${d.dx}px)`;
+      }}
+      onPointerUp={(event) => {
+        const d = drag.current;
+        drag.current = null;
+        const el = panel(event.currentTarget);
+        if (!d || !el) return;
+        el.style.removeProperty("transition");
+        if (d.velocity > 0.35 || (d.velocity > -0.35 && d.dx > el.offsetWidth / 2)) {
+          // Held until the slide ends, when the closed class has the same position.
+          el.style.transform = "translateX(100%)";
+          el.addEventListener("transitionend", () => el.style.removeProperty("transform"), { once: true });
+          onClose();
+        } else {
+          el.style.removeProperty("transform");
+        }
+      }}
+      onPointerCancel={(event) => {
+        drag.current = null;
+        const el = panel(event.currentTarget);
+        el?.style.removeProperty("transition");
+        el?.style.removeProperty("transform");
+      }}
+    />
+  );
 }
 
 /** Side panel for the artifact selected in the open thread. */
@@ -83,6 +184,8 @@ export function ArtifactPanel() {
   const close = useArtifactPanel((s) => s.close);
   const threadId = useCurrentThreadId();
   const visible = !!open && open.threadId === threadId;
+  // On phones the panel covers the chat, so back closes it.
+  useBackClose(visible, close, "(max-width: 767px)");
   // A closed panel stays mounted until its slide-out ends; another thread's
   // artifact is hidden immediately instead of animating in the wrong thread.
   const lastOpen = useRef<OpenArtifact | null>(null);
@@ -150,6 +253,9 @@ function ArtifactPanelBody({
   const [view, setView] = useState<"preview" | "code">("preview");
   const [width, setWidth] = useState(() => Number(localStorage.getItem(WIDTH_KEY)) || Math.round(window.innerWidth * 0.45));
   const [reloadKey, setReloadKey] = useState(0);
+  const defaultWrap = useAppearance((s) => s.wordWrap);
+  const [wrapOverride, setWrapOverride] = useState<boolean | null>(null);
+  const wrap = wrapOverride ?? defaultWrap;
   // Mount closed, then reveal on the next frame so the width and slide animate.
   const [revealed, setRevealed] = useState(() => open && !enter);
   const { isCopied, copyToClipboard } = useCopyToClipboard();
@@ -200,7 +306,8 @@ function ArtifactPanelBody({
     >
       {/* Fixed width inside: the panel's own content never reflows while the shell width animates. */}
       <div className="shell-artifact-inner flex h-full w-full shrink-0 flex-col border-l md:w-(--artifact-width)">
-        <ResizeHandle onResize={resize} />
+        <ResizeHandle width={width} onResize={resize} />
+        <EdgeSwipeClose onClose={onClose} />
         <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium">{current?.title ?? id}</p>
@@ -240,6 +347,17 @@ function ArtifactPanelBody({
               ))}
             </div>
           )}
+          {showCode && (
+            <TooltipIconButton
+              tooltip={wrap ? "Disable line wrapping" : "Enable line wrapping"}
+              aria-label="Wrap code"
+              aria-pressed={wrap}
+              className="aria-pressed:bg-accent aria-pressed:text-accent-foreground"
+              onClick={() => setWrapOverride(!wrap)}
+            >
+              <WrapTextIcon />
+            </TooltipIconButton>
+          )}
           {(doc || docKind === "docx") && view === "preview" && (
             <TooltipIconButton tooltip="Reload" onClick={() => setReloadKey((k) => k + 1)}>
               <RotateCwIcon />
@@ -272,7 +390,7 @@ function ArtifactPanelBody({
               <Loader2Icon className="size-5 animate-spin" />
             </div>
           ) : showCode ? (
-            <pre className="h-full overflow-auto p-4 font-mono text-xs leading-relaxed">{current.content}</pre>
+            <ArtifactSource version={current} wrap={wrap} />
           ) : docKind ? (
             <DocumentPreview
               key={`${current.version}-${reloadKey}`}
