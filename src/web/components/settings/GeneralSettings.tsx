@@ -15,10 +15,10 @@ export function GeneralSettings() {
   const models = useData((s) => s.models);
   const update = useData((s) => s.updateSettings);
   const [prompt, setPrompt] = useState(settings?.systemPrompt ?? "");
-  const [sandbox, setSandbox] = useState<{ configured: boolean; reachable: boolean } | null>(null);
+  const [sandbox, setSandbox] = useState<{ configured: boolean; reachable: boolean; error?: string } | null>(null);
   useEffect(() => setPrompt(settings?.systemPrompt ?? ""), [settings?.systemPrompt]);
   useEffect(() => {
-    api<{ configured: boolean; reachable: boolean }>("/sandbox").then(setSandbox, () => setSandbox({ configured: false, reachable: false }));
+    api<{ configured: boolean; reachable: boolean; error?: string }>("/sandbox").then(setSandbox, () => setSandbox({ configured: false, reachable: false }));
   }, []);
   if (!settings) return null;
 
@@ -150,8 +150,10 @@ export function GeneralSettings() {
               : !sandbox.configured
               ? "Not set up on this server. An admin can add the sandbox container (see docker-compose.yml)."
               : sandbox && !sandbox.reachable
-                ? "The sandbox container is configured but not reachable right now."
-                : "Lets models run Python and Bash in a private sandbox for each chat, with files that persist between runs."}</span>
+                ? sandbox.error
+                  ? `The sandbox refuses to run code: ${sandbox.error}`
+                  : "The sandbox container is configured but not reachable right now."
+                : "Lets models run Python and Bash in a private, offline sandbox for each chat, with files that persist between runs."}</span>
           }
           control={<Switch checked={settings.codeExecution && !!sandbox?.configured} disabled={!sandbox?.configured} onCheckedChange={(codeExecution) => update({ codeExecution })} aria-label="Code execution" aria-describedby="code-execution-description" />}
         />

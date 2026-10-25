@@ -2,19 +2,27 @@
 """okaychat code sandbox: runs model-written Python and Bash for the app over a small HTTP API.
 
 One container serves every user. Isolation inside it comes from these rules (docs/research/code-sandbox.md):
+- Every run starts inside bubblewrap with its own user, network, IPC, UTS, and mount namespaces. The
+  network namespace has only its own loopback, so run code reaches nothing: not the internet, DNS, the app,
+  this runner's port, or another run's listeners and abstract sockets. The mount namespace shows the read-only
+  system, the run's own workspace, and private /tmp and /dev/shm, never other workspaces. A seccomp filter
+  (inner.bpf) keeps run code from creating namespaces, mounting, or opening non-namespaced socket families.
 - Each workspace (one per chat) is a 0700 directory owned by its own unprivileged uid, so runs cannot
   read each other's files, and RLIMIT_NPROC counts only that workspace's processes.
 - Runs in a workspace are serialized. After each run every process of its uid is killed, so nothing
   survives into the next run or races a file download.
 - Per-run limits: wall time, CPU, address space, file size, open files, processes, output size, and a
-  workspace size watchdog.
+  workspace size watchdog that also counts the run's temporary files.
 - The runner is the only root process. Children get a fixed environment without the API token.
+- If the namespaces cannot be created, the runner refuses every run (fail closed) and /health says why.
 """
 
+import errno
 import hmac
 import json
 import os
 import re
+import secrets
 import shutil
 import signal
 import subprocess
@@ -39,8 +47,20 @@ OUTPUT_TAIL = 16 * 1024
 MAX_UPLOAD = 50 * 1024 * 1024
 MAX_LISTED = 500
 UID_MIN, UID_MAX = 20000, 29999
+PROBE_UID = 19999  # Runs the startup isolation check; never a workspace user.
+# How long a run may wait for an earlier run in the same chat, and for a free slot.
+LOCK_WAIT = MAX_TIMEOUT + 30
+SLOT_WAIT = 30
+CONVERT_TIMEOUT = int(os.environ.get("SANDBOX_CONVERT_TIMEOUT", "120"))
+CANCEL_TTL = 15 * 60
+INNER_SECCOMP = os.environ.get("SANDBOX_SECCOMP", "/opt/sandbox/inner.bpf")
+# Formats the app may hand to /convert. LibreOffice Impress turns them into a PDF for visual checks.
+CONVERTIBLE = {".pptx", ".ppt", ".pps", ".ppsx", ".odp"}
 PRIVATE = ".okaychat"  # Script, tmp, and caches. Counted toward the size limit, hidden from listings.
 HIDDEN = {PRIVATE, ".cache"}
+# Installed packages and build caches, not results: never listed as outputs, so they stay out of the chat and
+# the Library. Directories starting with a dot (.local, .venv, .npm) are skipped too; dotfiles themselves are not.
+DEPENDENCY_DIRS = {"node_modules", "__pycache__", "site-packages", "dist-packages", "venv"}
 WS_RE = re.compile(r"^[a-f0-9]{16,64}$")
 
 uid_lock = threading.Lock()
@@ -48,7 +68,13 @@ used_uids: set[int] = set()
 ws_locks: dict[str, threading.Lock] = {}
 ws_locks_guard = threading.Lock()
 run_slots = threading.BoundedSemaphore(CONCURRENCY)
-cancelled: set[str] = set()
+# Jobs are named by the app, so a cancel that arrives before its run (or while it queues) still applies.
+jobs_guard = threading.Lock()
+queued: dict[str, str] = {}  # job id -> workspace, from arrival until the job ends
+running: dict[str, str] = {}  # workspace -> job id of the run holding its processes
+cancelled_jobs: dict[str, float] = {}  # job id -> expiry
+# Set at startup when bubblewrap cannot build a run's namespaces. Every run is refused while it is set.
+isolation_error: str | None = "isolation check has not run yet"
 
 
 class Failure(Exception):
@@ -98,10 +124,10 @@ def private_dir(path: str, uid: int) -> str:
     except FileNotFoundError:
         os.mkdir(private, 0o700)
         os.chown(private, uid, uid, follow_symlinks=False)
-    tmp = os.path.join(private, "tmp")
-    if not os.path.lexists(tmp):
-        os.mkdir(tmp, 0o700)
-        os.chown(tmp, uid, uid, follow_symlinks=False)
+    home = os.path.join(private, "home")
+    if not os.path.lexists(home):
+        os.mkdir(home, 0o700)
+        os.chown(home, uid, uid, follow_symlinks=False)
     return private
 
 
@@ -197,11 +223,15 @@ def workspace_bytes(path: str) -> int:
 
 
 def visible(rel: str) -> bool:
-    return rel.split("/", 1)[0] not in HIDDEN
+    dirs = rel.split("/")[:-1]
+    return rel.split("/", 1)[0] not in HIDDEN and not any(d.startswith(".") or d in DEPENDENCY_DIRS for d in dirs)
 
 
 def snapshot(path: str) -> dict[str, tuple[int, int]]:
-    return {rel: (size, mtime) for rel, size, mtime in walk(path) if visible(rel)}
+    files = {rel: (size, mtime) for rel, size, mtime in walk(path) if visible(rel)}
+    # A virtualenv can have any name; its pyvenv.cfg marks it.
+    envs = [rel[: -len("pyvenv.cfg")] for rel in files if rel.endswith("/pyvenv.cfg")]
+    return {rel: v for rel, v in files.items() if not any(rel.startswith(env) for env in envs)}
 
 
 class Capture:
@@ -240,9 +270,13 @@ def pump(stream, capture: Capture) -> None:
 def child_env(path: str) -> dict[str, str]:
     private = os.path.join(path, PRIVATE)
     return {
-        "PATH": "/usr/local/bin:/usr/bin:/bin",
-        "HOME": path,
-        "TMPDIR": os.path.join(private, "tmp"),
+        # Tools installed with pip or uv land in ~/.local/bin.
+        "PATH": f"{os.path.join(private, 'home', '.local', 'bin')}:/usr/local/bin:/usr/bin:/bin",
+        # Not the workspace: pip --user, uv, and npm install under HOME, and those files are not results.
+        "HOME": os.path.join(private, "home"),
+        # /tmp and /dev/shm are the run's own directories, deleted when it ends. The soffice wrapper keeps each
+        # LibreOffice profile there too.
+        "TMPDIR": "/tmp",
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
         "TERM": "dumb",
@@ -251,106 +285,325 @@ def child_env(path: str) -> dict[str, str]:
         "XDG_CACHE_HOME": os.path.join(private, "cache"),
         "PIP_DISABLE_PIP_VERSION_CHECK": "1",
         "PYTHONUNBUFFERED": "1",
-        # Numeric libraries otherwise start one thread per host core and hit the process limit.
+        # Numeric libraries and Tesseract otherwise start one thread per host core and hit the process limit.
         "OMP_NUM_THREADS": "2",
+        "OMP_THREAD_LIMIT": "2",
         "OPENBLAS_NUM_THREADS": "2",
         "MKL_NUM_THREADS": "2",
+        "NUMEXPR_MAX_THREADS": "2",
+        # Each glibc arena reserves address space, which counts against the per-process limit.
+        "MALLOC_ARENA_MAX": "2",
     }
 
 
-def run(ws: str, language: str, code: str, timeout: int) -> dict:
+def feed(stream, data: bytes) -> None:
+    try:
+        stream.write(data)
+    except (BrokenPipeError, OSError):
+        pass
+    finally:
+        try:
+            stream.close()
+        except OSError:
+            pass
+
+
+def run_dir(path: str, uid: int) -> str:
+    """A fresh per-run directory under the private area: the run's /tmp and /dev/shm. It counts toward the
+    workspace size limit and is deleted when the run ends, however it ends."""
+    base = os.path.join(private_dir(path, uid), "run")
+    shutil.rmtree(base, ignore_errors=True)
+    if os.path.lexists(base):
+        os.unlink(base)
+    for sub in ("", "tmp", "shm"):
+        full = os.path.join(base, sub)
+        os.mkdir(full, 0o700)
+        os.chown(full, uid, uid, follow_symlinks=False)
+    return base
+
+
+def data_fd(text: str) -> int:
+    fd = os.memfd_create("okaychat", 0)
+    os.write(fd, text.encode())
+    os.lseek(fd, 0, os.SEEK_SET)
+    return fd
+
+
+def jail(path: str, base: str, uid: int, command: list[str], fds: list[int]) -> list[str]:
+    """Wraps a command in bubblewrap. Appends the descriptors it hands over to `fds`; bubblewrap reads and closes
+    them before the command starts, so the command inherits only stdin, stdout, and stderr."""
+    seccomp = os.open(INNER_SECCOMP, os.O_RDONLY)
+    with open("/etc/passwd", encoding="utf-8") as f:
+        passwd = f.read() + f"sandbox:x:{uid}:{uid}:sandbox:{os.path.join(path, PRIVATE, 'home')}:/bin/bash\n"
+    with open("/etc/group", encoding="utf-8") as f:
+        group = f.read() + f"sandbox:x:{uid}:\n"
+    passwd_fd, group_fd = data_fd(passwd), data_fd(group)
+    args = [
+        "--unshare-user", "--unshare-net", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try",
+        "--die-with-parent", "--new-session", "--cap-drop", "ALL",
+        "--ro-bind", "/usr", "/usr",
+        # Host AppArmor profiles attach by executable path (Ubuntu confines /usr/bin/gs and /usr/bin/qpdf to home
+        # directories). The run sees /usr/bin and /usr/sbin as symlinks into a second mount of the same files, so
+        # every executable runs from /usr/lib/okaychat-exec and no such profile matches. See exec-view.py.
+        "--ro-bind", "/usr/bin", "/usr/lib/okaychat-exec/bin", "--ro-bind", "/usr/sbin", "/usr/lib/okaychat-exec/sbin",
+        "--ro-bind", "/opt/sandbox/exec-view/bin", "/usr/bin", "--ro-bind", "/opt/sandbox/exec-view/sbin", "/usr/sbin",
+        "--symlink", "usr/bin", "/bin", "--symlink", "usr/sbin", "/sbin",
+        "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib64", "/lib64",
+        "--ro-bind", "/etc", "/etc",
+        "--ro-bind-data", str(passwd_fd), "/etc/passwd", "--ro-bind-data", str(group_fd), "/etc/group",
+        "--ro-bind", "/var/cache/fontconfig", "/var/cache/fontconfig",
+        "--ro-bind", "/opt/sandbox", "/opt/sandbox",
+        # A fresh procfs needs a fully visible /proc, which Docker's masked paths rule out. The container's /proc
+        # shows other runs' pids and command lines, never their environment, memory, or files. For the same reason
+        # there is no pid namespace: its pids would not match this /proc, and it would hide nothing.
+        "--ro-bind", "/proc", "/proc",
+        "--dev", "/dev",
+        "--bind", os.path.join(base, "tmp"), "/tmp", "--symlink", "/tmp", "/var/tmp",
+        "--bind", os.path.join(base, "shm"), "/dev/shm",
+        "--bind", path, path,
+        # The jail's own root is a tmpfs; nothing outside the workspace, /tmp, and /dev/shm may be written.
+        "--remount-ro", "/",
+        "--chdir", path,
+        "--seccomp", str(seccomp),
+    ]
+    # Every process's command line is visible to other runs (the shared /proc), so bubblewrap reads its options,
+    # which name this workspace, from a descriptor. The command itself carries no paths or user data.
+    args_fd = data_fd("".join(f"{arg}\0" for arg in args))
+    fds += [seccomp, passwd_fd, group_fd, args_fd]
+    return ["bwrap", "--args", str(args_fd), "--", *command]
+
+
+def limits(timeout: int, fsize: int) -> list[str]:
+    # prlimit runs as the workspace user and lowers its own limits before exec; bubblewrap and the run inherit them.
+    return [
+        "prlimit",
+        f"--as={MEMORY_MB * 1024 * 1024}",
+        f"--cpu={timeout + 5}",
+        f"--nproc={MAX_PROCS}",
+        f"--fsize={fsize}",
+        "--nofile=256",
+        "--core=0",
+        "--",
+    ]
+
+
+def cancelled(job: str) -> bool:
+    with jobs_guard:
+        return job in cancelled_jobs
+
+
+def cancel(ws: str, job: str | None) -> None:
+    """Marks the job (or every job of the workspace) cancelled and kills it if it is running. A marked job that
+    has not started yet never starts."""
+    with jobs_guard:
+        now = time.monotonic()
+        for name, expiry in list(cancelled_jobs.items()):
+            if expiry < now:
+                del cancelled_jobs[name]
+        targets = [job] if job else [name for name, owner in queued.items() if owner == ws]
+        for name in targets:
+            cancelled_jobs[name] = now + CANCEL_TTL
+        victim = running.get(ws)
+    if victim is not None and victim in targets:
+        try:
+            kill_uid(os.lstat(ws_path(ws)).st_uid)
+        except FileNotFoundError:
+            pass
+
+
+def wait_for(acquire, job: str, seconds: float, busy: str) -> None:
+    """Waits for a lock or slot in short steps, so a cancelled job stops queueing at once."""
+    deadline = time.monotonic() + seconds
+    while not acquire(timeout=0.25):
+        if cancelled(job):
+            raise Cancelled()
+        if time.monotonic() >= deadline:
+            raise Failure(503, busy)
+
+
+class Cancelled(Exception):
+    pass
+
+
+def execute(ws: str, path: str, uid: int, job: str, command: list[str], timeout: int, watch_limit: int, stdin: bytes | None = None, env: dict[str, str] | None = None) -> dict:
+    """Runs one command in a fresh jail as the workspace user. The caller holds the workspace lock and a slot."""
+    if isolation_error and ws != "probe":
+        raise Failure(503, f"run isolation is unavailable, so no code runs: {isolation_error}")
+    base = run_dir(path, uid)
+    # A workspace already over the limit may still run, so code can delete files; it only may not grow.
+    allowed = max(watch_limit, workspace_bytes(path))
+    fds: list[int] = []
+    out, err = Capture(), Capture()
+    started = time.monotonic()
+    with jobs_guard:
+        running[ws] = job
+    try:
+        argv = limits(timeout, watch_limit) + jail(path, base, uid, command, fds)
+        proc = subprocess.Popen(
+            argv,
+            cwd=path,
+            env={**child_env(path), **(env or {})},
+            user=uid,
+            group=uid,
+            extra_groups=[],
+            start_new_session=True,
+            stdin=subprocess.DEVNULL if stdin is None else subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            close_fds=True,
+            pass_fds=fds,
+        )
+        for fd in fds:
+            os.close(fd)
+        fds.clear()
+        readers = [threading.Thread(target=pump, args=(proc.stdout, out), daemon=True), threading.Thread(target=pump, args=(proc.stderr, err), daemon=True)]
+        if stdin is not None:
+            readers.append(threading.Thread(target=feed, args=(proc.stdin, stdin), daemon=True))
+        for r in readers:
+            r.start()
+        reason = None
+        deadline = started + timeout
+        next_size_check = started + 2
+        while proc.poll() is None:
+            now = time.monotonic()
+            if cancelled(job):
+                reason = "cancelled"
+                break
+            if now >= deadline:
+                reason = f"timed out after {timeout} s"
+                break
+            if now >= next_size_check:
+                next_size_check = now + 2
+                if workspace_bytes(path) > allowed:
+                    reason = f"stopped: workspace exceeded {WORKSPACE_MB} MB"
+                    break
+            time.sleep(0.05)
+        # Everything the run started dies with it, including background processes.
+        kill_uid(uid)
+        proc.wait()
+        for r in readers:
+            r.join(timeout=5)
+    finally:
+        for fd in fds:
+            os.close(fd)
+        with jobs_guard:
+            running.pop(ws, None)
+        kill_uid(uid)
+        clean_shared_tmp(uid)
+    code_ = proc.returncode
+    if reason is None and cancelled(job):
+        reason = "cancelled"
+    elif reason is None and code_ is not None and (code_ < 0 or code_ - 128 in LIMIT_SIGNALS):
+        # bubblewrap passes a child's death by signal on as exit status 128 + signal, like a shell.
+        sig = -code_ if code_ < 0 else code_ - 128
+        reason = LIMIT_SIGNALS.get(sig, f"signal {sig}")
+    stderr = err.text()
+    # bubblewrap reports its own setup failures before the command starts; nothing of the run executed.
+    if code_ == 1 and stderr.startswith("bwrap: ") and not out.head:
+        raise Failure(503, f"run isolation failed, so the code did not run: {stderr.strip()}")
+    return {"exitCode": code_, "stdout": out.text(), "stderr": stderr, "stopped": reason, "durationMs": round((time.monotonic() - started) * 1000), "base": base}
+
+
+LIMIT_SIGNALS = {signal.SIGXCPU: "CPU time limit", signal.SIGXFSZ: "file size limit", signal.SIGKILL: "killed (likely out of memory)"}
+
+
+def admitted(ws: str, job: str | None, work) -> dict:
+    """Queues a job for its workspace and a slot, then runs `work(path, uid, job)` with both held."""
+    job = job or secrets.token_hex(12)
+    with jobs_guard:
+        queued[job] = ws
+    lock = ws_lock(ws)
+    try:
+        wait_for(lock.acquire, job, LOCK_WAIT, "another run in this chat is still going; try again")
+        try:
+            wait_for(run_slots.acquire, job, SLOT_WAIT, "the sandbox is busy; try again")
+            try:
+                if cancelled(job):
+                    raise Cancelled()
+                path, uid = ensure_workspace(ws)
+                return work(path, uid, job)
+            finally:
+                run_slots.release()
+        finally:
+            lock.release()
+    finally:
+        with jobs_guard:
+            queued.pop(job, None)
+
+
+def run(ws: str, language: str, code: str, timeout: int, job: str | None = None) -> dict:
     if language not in ("python", "bash"):
         raise Failure(400, "language must be python or bash")
     timeout = max(1, min(int(timeout), MAX_TIMEOUT))
-    if not run_slots.acquire(timeout=30):
-        raise Failure(503, "the sandbox is busy; try again")
-    try:
-        with ws_lock(ws):
-            path, uid = ensure_workspace(ws)
-            limit = WORKSPACE_MB * 1024 * 1024
-            if workspace_bytes(path) > limit:
-                raise Failure(409, f"workspace is over {WORKSPACE_MB} MB; delete files before running more code")
-            cancelled.discard(ws)
-            os.utime(path)
-            before = snapshot(path)
-            script = os.path.join(private_dir(path, uid), "main.py" if language == "python" else "main.sh")
-            write_owned(script, code.encode("utf-8"), uid)
-            interpreter = ["python3", script] if language == "python" else ["bash", script]
-            # prlimit runs as the workspace user and lowers its own limits before exec.
-            command = [
-                "prlimit",
-                f"--as={MEMORY_MB * 1024 * 1024}",
-                f"--cpu={timeout + 5}",
-                f"--nproc={MAX_PROCS}",
-                f"--fsize={limit}",
-                "--nofile=256",
-                "--core=0",
-                "--",
-                *interpreter,
-            ]
-            started = time.monotonic()
-            proc = subprocess.Popen(
-                command,
-                cwd=path,
-                env=child_env(path),
-                user=uid,
-                group=uid,
-                extra_groups=[],
-                start_new_session=True,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                close_fds=True,
-            )
-            out, err = Capture(), Capture()
-            readers = [threading.Thread(target=pump, args=(proc.stdout, out), daemon=True), threading.Thread(target=pump, args=(proc.stderr, err), daemon=True)]
-            for r in readers:
-                r.start()
-            reason = None
-            deadline = started + timeout
-            next_size_check = started + 2
-            while proc.poll() is None:
-                now = time.monotonic()
-                if now >= deadline:
-                    reason = f"timed out after {timeout} s"
-                    break
-                if now >= next_size_check:
-                    next_size_check = now + 2
-                    if workspace_bytes(path) > limit:
-                        reason = f"stopped: workspace exceeded {WORKSPACE_MB} MB"
-                        break
-                time.sleep(0.05)
-            # Everything the run started dies with it, including background processes.
-            kill_uid(uid)
-            proc.wait()
-            for r in readers:
-                r.join(timeout=5)
-            clean_shared_tmp(uid)
+
+    def work(path: str, uid: int, job: str) -> dict:
+        limit = WORKSPACE_MB * 1024 * 1024
+        os.utime(path)
+        before = snapshot(path)
+        script = os.path.join(private_dir(path, uid), "main.py" if language == "python" else "main.sh")
+        write_owned(script, code.encode("utf-8"), uid)
+        # Relative to the working directory, so the command line other runs can see does not name the workspace.
+        relative = os.path.join(PRIVATE, os.path.basename(script))
+        interpreter = ["python3", relative] if language == "python" else ["bash", relative]
+        try:
+            result = execute(ws, path, uid, job, interpreter, timeout, limit)
+        finally:
+            shutil.rmtree(os.path.join(path, PRIVATE, "run"), ignore_errors=True)
             os.utime(path)  # Idle retention starts when a run finishes, even after long runs.
-            after = snapshot(path)
-            changed = [
-                {"path": rel, "size": size}
-                for rel, (size, mtime) in sorted(after.items())
-                if before.get(rel) != (size, mtime)
-            ]
-            deleted = sorted(set(before) - set(after))
-            code_ = proc.returncode
-            if reason is None and ws in cancelled:
-                reason = "cancelled"
-            elif reason is None and code_ is not None and code_ < 0:
-                sig = -code_
-                reason = {signal.SIGXCPU: "CPU time limit", signal.SIGXFSZ: "file size limit", signal.SIGKILL: "killed (likely out of memory)"}.get(sig, f"signal {sig}")
-            return {
-                "exitCode": code_,
-                "stdout": out.text(),
-                "stderr": err.text(),
-                "stopped": reason,
-                "durationMs": round((time.monotonic() - started) * 1000),
-                "files": changed[:MAX_LISTED],
-                "deleted": deleted[:MAX_LISTED],
-            }
-    finally:
-        run_slots.release()
+        result.pop("base")
+        after = snapshot(path)
+        result["files"] = [
+            {"path": rel, "size": size}
+            for rel, (size, mtime) in sorted(after.items())
+            if before.get(rel) != (size, mtime)
+        ][:MAX_LISTED]
+        result["deleted"] = sorted(set(before) - set(after))[:MAX_LISTED]
+        return result
+
+    try:
+        return admitted(ws, job, work)
+    except Cancelled:
+        return {"exitCode": None, "stdout": "", "stderr": "", "stopped": "cancelled before it started", "durationMs": 0, "files": [], "deleted": []}
+
+
+def convert(ws: str, name: str, data: bytes, job: str | None = None) -> bytes:
+    """Turns a presentation into a PDF with LibreOffice, inside the same jail as a run. Input and output live in
+    the run's private /tmp, so nothing appears among the chat's files."""
+    ext = os.path.splitext(os.path.basename(name))[1]
+    if ext.lower() not in CONVERTIBLE:
+        raise Failure(400, f"only {', '.join(sorted(CONVERTIBLE))} files can be converted")
+
+    def work(path: str, uid: int, job: str) -> bytes:
+        limit = WORKSPACE_MB * 1024 * 1024
+        if workspace_bytes(path) + len(data) > limit:
+            raise Failure(409, f"the chat's sandbox workspace is over {WORKSPACE_MB} MB; delete files with run_code first")
+        os.utime(path)
+        try:
+            # The input arrives on stdin: execute() creates the run directory, so nothing can be staged before it.
+            # A fixed file name: other runs can see this command line, and the user's file name is not theirs to see.
+            source = "input" + ext.lower()
+            command = ["sh", "-c", 'mkdir -p /tmp/out && cat > "/tmp/$SOURCE" && exec soffice --headless --norestore --nolockcheck --convert-to pdf --outdir /tmp/out "/tmp/$SOURCE"']
+            result = execute(ws, path, uid, job, command, CONVERT_TIMEOUT, limit, data, env={"SOURCE": source})
+            if result["stopped"]:
+                raise Failure(422, f"conversion {result['stopped']}")
+            out = os.path.join(result["base"], "tmp", "out", "input.pdf")
+            try:
+                fd = os.open(out, os.O_RDONLY | os.O_NOFOLLOW)
+            except OSError:
+                detail = (result["stderr"] or result["stdout"]).strip()[-500:]
+                raise Failure(422, f"LibreOffice could not convert the file{': ' + detail if detail else ''}")
+            with os.fdopen(fd, "rb") as f:
+                if os.fstat(f.fileno()).st_size > MAX_UPLOAD:
+                    raise Failure(413, "the converted PDF is over 50 MB")
+                return f.read()
+        finally:
+            shutil.rmtree(os.path.join(path, PRIVATE, "run"), ignore_errors=True)
+            os.utime(path)
+
+    try:
+        return admitted(ws, job, work)
+    except Cancelled:
+        raise Failure(409, "the conversion was cancelled")
 
 
 def split_path(rel: str) -> list[str]:
@@ -439,6 +692,74 @@ def idle_loop() -> None:
         time.sleep(max(15.0, min(IDLE_MINUTES * 60 / 4, 300)))
 
 
+def job_id(value) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", value):
+        raise Failure(400, "invalid job id")
+    return value
+
+
+PROBE = r"""
+import errno, json, os, socket
+r = {"ifaces": sorted(l.split(":")[0].strip() for l in open("/proc/self/net/dev").readlines()[2:])}
+status = dict(l.split(":", 1) for l in open("/proc/self/status") if ":" in l)
+for key in ("CapEff", "CapPrm", "CapAmb", "NoNewPrivs", "Seccomp"):
+    r[key] = status[key].strip()
+def attempt(name, fn):
+    try:
+        fn()
+        r[name] = "allowed"
+    except OSError as e:
+        r[name] = errno.errorcode.get(e.errno, str(e.errno))
+attempt("inet", lambda: socket.create_connection(("192.0.2.1", 80), timeout=2))
+attempt("runner", lambda: socket.create_connection(("127.0.0.1", int(os.environ["PROBE_PORT"])), timeout=2))
+attempt("userns", lambda: os.unshare(os.CLONE_NEWUSER))
+attempt("packet", lambda: socket.socket(socket.AF_PACKET, socket.SOCK_RAW))
+attempt("vsock", lambda: socket.socket(40, socket.SOCK_STREAM))
+r["fds"] = sorted(int(fd) for fd in os.listdir("/proc/self/fd"))
+print(json.dumps(r))
+"""
+# What the probe must see. Anything else means the jail is not what the runner thinks it is.
+PROBE_EXPECT = {"ifaces": ["lo"], "CapEff": "0000000000000000", "CapPrm": "0000000000000000", "CapAmb": "0000000000000000",
+                "NoNewPrivs": "1", "Seccomp": "2", "inet": "ENETUNREACH", "runner": "ECONNREFUSED", "userns": "EPERM",
+                "packet": "EAFNOSUPPORT", "vsock": "EAFNOSUPPORT"}
+
+
+def check_isolation() -> str | None:
+    """Starts one jailed process and checks from inside that it has no network, no capabilities, and the inner
+    seccomp filter. Returns why isolation is unavailable, or None."""
+    for name in ("bin", "sbin"):
+        # Files Docker mounts in at run time (docker-init with `init: true`) are not part of the image's view.
+        real = {e for e in os.listdir(f"/usr/{name}") if not os.path.ismount(f"/usr/{name}/{e}")}
+        if not real <= set(os.listdir(f"/opt/sandbox/exec-view/{name}")):
+            return f"/opt/sandbox/exec-view/{name} does not match /usr/{name}; rebuild the image (exec-view.py must run after every package install)"
+    path = os.path.join(ROOT, ".isolation-probe")
+    shutil.rmtree(path, ignore_errors=True)
+    os.mkdir(path, 0o700)
+    os.chown(path, PROBE_UID, PROBE_UID)
+    os.chdir("/")
+    try:
+        result = execute("probe", path, PROBE_UID, secrets.token_hex(8), ["python3", "-I", "-c", PROBE], 30, WORKSPACE_MB * 1024 * 1024, env={"PROBE_PORT": str(PORT)})
+    except Failure as e:
+        return str(e)
+    except OSError as e:
+        return f"{type(e).__name__}: {e}"
+    finally:
+        kill_uid(PROBE_UID)
+        shutil.rmtree(path, ignore_errors=True)
+    if result["exitCode"] != 0:
+        return f"the probe exited with {result['exitCode']}: {(result['stderr'] or result['stdout']).strip()[-400:]}"
+    try:
+        seen = json.loads(result["stdout"])
+    except ValueError:
+        return "the probe printed no result"
+    wrong = {k: seen.get(k) for k, v in PROBE_EXPECT.items() if seen.get(k) != v}
+    if seen.get("fds") != [0, 1, 2, 3]:  # 3 is the probe's own listing of /proc/self/fd.
+        wrong["fds"] = seen.get("fds")
+    return f"unexpected result inside the jail: {json.dumps(wrong)}" if wrong else None
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -467,7 +788,9 @@ class Handler(BaseHTTPRequestHandler):
         parts = [p for p in url.path.split("/") if p]
         try:
             if method == "GET" and parts == ["health"]:
-                return self.json(200, {"ok": True})
+                if isolation_error:
+                    return self.json(503, {"ok": False, "error": f"run isolation is unavailable: {isolation_error}"})
+                return self.json(200, {"ok": True, "isolation": "bubblewrap"})
             supplied = self.headers.get("Authorization", "").removeprefix("Bearer ")
             if not TOKEN or not hmac.compare_digest(supplied.encode(), TOKEN.encode()):
                 raise Failure(401, "unauthorized")
@@ -478,13 +801,15 @@ class Handler(BaseHTTPRequestHandler):
             action = parts[2] if len(parts) > 2 else None
             if method == "POST" and action == "run":
                 req = json.loads(self.body(2 * 1024 * 1024) or b"{}")
-                return self.json(200, run(ws, req.get("language", ""), str(req.get("code", "")), req.get("timeout", 60)))
+                return self.json(200, run(ws, req.get("language", ""), str(req.get("code", "")), req.get("timeout", 60), job_id(req.get("job"))))
             if method == "POST" and action == "cancel":
                 # No lock: the run holding it sees its process exit and finishes normally.
-                if os.path.isdir(ws_path(ws)):
-                    cancelled.add(ws)
-                    kill_uid(os.lstat(ws_path(ws)).st_uid)
+                req = json.loads(self.body(4096) or b"{}")
+                cancel(ws, job_id(req.get("job")))
                 return self.json(200, {"ok": True})
+            if method == "POST" and action == "convert" and "name" in query:
+                pdf = convert(ws, query["name"], self.body(MAX_UPLOAD), job_id(query.get("job")))
+                return self.reply(200, pdf, "application/pdf")
             if method == "GET" and action == "files" and "path" in query:
                 return self.reply(200, read_file(ws, query["path"]), "application/octet-stream")
             if method == "GET" and action == "files":
@@ -529,8 +854,15 @@ def main() -> None:
                 used_uids.add(os.stat(os.path.join(ROOT, name)).st_uid)
         except OSError:
             pass
+    # The server answers before the check finishes, but refuses runs until it passes. A failed check never
+    # falls back to running code without the jail.
+    server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    global isolation_error
+    isolation_error = check_isolation()
+    if isolation_error:
+        print(f"okaychat sandbox: run isolation is unavailable, refusing all runs: {isolation_error}. See docs/research/code-sandbox.md (seccomp profile sandbox/seccomp.json, apparmor=unconfined).", flush=True)
     threading.Thread(target=idle_loop, daemon=True).start()
-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    server.serve_forever()
 
 
 if __name__ == "__main__":

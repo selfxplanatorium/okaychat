@@ -8,14 +8,15 @@ import { db } from "../db.js";
 import { env } from "../env.js";
 import { assertStorage, QuotaError } from "../quota.js";
 import { getThread } from "../threads.js";
+import { resultPaths } from "../sandbox-paths.js";
 
 // run_code executes model-written Python and Bash in the sandbox container (sandbox/runner.py). Each chat
 // has its own workspace; the container wipes idle workspaces, so every produced file is copied into
 // `sandbox_files` right after the run and the app serves it from SQLite. See docs/research/code-sandbox.md.
 
 const MAX_TIMEOUT_S = 300;
-// The runner refuses to serve files over 50 MB, so larger outputs cannot be copied out. They keep the
-// direct sandbox URL, which dies with the workspace.
+// The runner transfers at most 50 MiB per file in either direction. Larger outputs can be neither stored nor
+// downloaded, so they get no link, only a size message for the model.
 const RUNNER_MAX_FILE = 50 * 1024 * 1024;
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i;
 const TYPES: Record<string, string> = {
@@ -26,11 +27,15 @@ const TYPES: Record<string, string> = {
 };
 
 const DESCRIPTION = `Run Python 3.12 or Bash in this chat's private Linux sandbox and get stdout, stderr, the exit code, and the files the run created or changed.
-Use it for calculations, data analysis, file conversion, charts, and checking code by running it.
-- The working directory persists between calls in this chat, but only for about 30 minutes after the last call; produced files are saved to the chat's storage automatically, so links keep working. Variables do not persist: each call is a new process, so save intermediate results to files.
-- Preinstalled: numpy, pandas, scipy, matplotlib, sympy, scikit-learn, pillow, openpyxl, python-docx, pypdf, requests, beautifulsoup4, lxml, pyyaml, tabulate; CLI tools curl, jq, sqlite3, git, zip, unzip, ripgrep. Internet access may be blocked, so do not rely on installing packages.
+Use it for calculations, data analysis, charts, file conversion, OCR, media processing, and checking code by running it.
+- No network: runs cannot reach the internet, DNS, or any other service, so nothing can be downloaded or installed. Use what is preinstalled.
+- Preinstalled Python: numpy, pandas, scipy, scikit-learn, sympy, matplotlib, pillow (+ pillow-heif for HEIC), openpyxl, python-docx, python-pptx, reportlab, pypdf, pdfplumber, ocrmypdf, csvkit, requests, beautifulsoup4, lxml, pyyaml, tabulate.
+- Preinstalled CLI: ffmpeg/ffprobe, LibreOffice (soffice --headless --convert-to), pandoc, poppler (pdftotext, pdfinfo, pdftoppm), qpdf, ghostscript, tesseract (eng, ita) and ocrmypdf, rsvg-convert, graphviz (dot), exiftool, 7z, zip/unzip, xz, zstd, bsdtar, jq, sqlite3, git, ripgrep, fd, tree, bc, curl (no network). Fonts: DejaVu, Liberation, Noto (Latin, Greek, Cyrillic and more, color emoji; no full CJK). \`cat /opt/sandbox/TOOLS.md\` lists versions and tips.
+- 2 CPUs and about 2 GB of memory are shared by all runs; pass thread limits such as \`ffmpeg -threads 2\` or \`ocrmypdf --jobs 2\`.
+- The working directory persists between calls in this chat, but only for about 30 minutes after the last call; produced files are saved to the chat's storage automatically, so links keep working. Variables do not persist: each call is a new process, so save intermediate results to files. /tmp is private to each call and emptied when it ends.
 - A file the user attached carries a \`file_id\` in its <attachment> header. Pass it in \`input_files\` to copy the file into the working directory under its name.
-- Images the run writes (png, jpg, gif, webp, svg) are shown to the user, and every created file gets a download link. Save charts with plt.savefig instead of plt.show. Do not paste file contents back unless asked.
+- Images the run writes (png, jpg, gif, webp, svg) are shown to the user, and every created file up to 50 MB gets a download link; larger files cannot be saved, so split or compress them. Save charts with plt.savefig instead of plt.show. Do not paste file contents back unless asked.
+- To check how a PDF, DOCX, XLSX, or PPTX output looks, pass its fileId to import_document, then view_artifact.
 - Processes started in the background are stopped when the call ends.
 - The last call in your reply that writes files decides what the user keeps: files first created earlier in the same reply that it does not write again are deleted when you answer. Make that final call write every file the user should get.`;
 
@@ -45,7 +50,7 @@ interface RunnerResult {
   stderr: string;
   stopped: string | null;
   durationMs: number;
-  files: Array<{ path: string; size: number; storedUrl?: string; fileId?: string }>;
+  files: Array<{ path: string; size: number; storedUrl?: string; fileId?: string; tooLarge?: boolean }>;
   deleted: string[];
 }
 
@@ -53,6 +58,8 @@ export interface RunCodeResult extends Omit<RunnerResult, "files"> {
   language: "python" | "bash";
   files: Array<{ path: string; size: number; url: string; image: boolean; fileId?: string }>;
   inputs: string[];
+  /** Outputs over the 50 MiB transfer limit. They have no link: they can be neither stored nor downloaded. */
+  tooLarge?: Array<{ path: string; size: number }>;
   /** Set when produced files could not all be saved to the user's storage. */
   storageWarning?: string;
 }
@@ -107,16 +114,19 @@ export class SandboxTurn {
   }
 }
 
+const megabytes = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
+
 /**
  * Saves a run's produced files into the user's storage (same SQLite bytes as other user files) before
  * the sandbox wipes the workspace. Rewriting a file replaces its stored copy instead of piling up
- * versions. Best effort: a file that cannot be stored keeps its direct sandbox URL.
+ * versions. Best effort: a file that cannot be stored for another reason keeps its direct sandbox URL,
+ * which works while the workspace lives. Files over the transfer limit are marked `tooLarge`.
  */
 async function storeOutputs(userId: string, threadId: string, ws: string, files: RunnerResult["files"], turn?: SandboxTurn): Promise<string | undefined> {
   let warning: string | undefined;
   for (const file of files) {
     if (file.size > RUNNER_MAX_FILE) {
-      warning ??= `Some files over 50 MB could not be saved to chat storage and only live in the sandbox until it is wiped.`;
+      file.tooLarge = true;
       continue;
     }
     try {
@@ -128,9 +138,15 @@ async function storeOutputs(userId: string, threadId: string, ws: string, files:
         const { done, value } = await reader.read();
         if (done) break;
         size += value.byteLength;
-        if (size > RUNNER_MAX_FILE) { await reader.cancel(); throw new Error("Output exceeds 50 MB"); }
+        if (size > RUNNER_MAX_FILE) {
+          await reader.cancel();
+          file.tooLarge = true;
+          file.size = size;
+          break;
+        }
         chunks.push(value);
       }
+      if (file.tooLarge) continue;
       const data = Buffer.concat(chunks, size);
       const previous = db.prepare("SELECT length(data) AS size FROM sandbox_files WHERE user_id = ? AND thread_id = ? AND path = ?")
         .get(userId, threadId, file.path) as { size: number } | undefined;
@@ -163,31 +179,69 @@ export async function runCode(opts: { userId: string; threadId: string; language
   const inputs = await copyInputs(opts.userId, ws, opts.inputFiles ?? []);
   opts.signal?.throwIfAborted();
   const timeout = Math.min(opts.timeoutS ?? 60, MAX_TIMEOUT_S);
+  // The job id lets a cancel reach the run even while it still queues, or before its request arrives.
+  const job = newId("job");
   // Stop in the chat kills the run's processes. Without this the run would continue until its timeout.
-  const cancel = () => void call(`/workspaces/${ws}/cancel`, { method: "POST" }).catch(() => {});
+  const cancel = () =>
+    void call(`/workspaces/${ws}/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job }) }).catch(() => {});
   opts.signal?.addEventListener("abort", cancel, { once: true });
   try {
-    const res = await call(
-      `/workspaces/${ws}/run`,
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ language: opts.language, code: opts.code, timeout }) },
-      // Queueing for a free slot can take up to 30 s on the runner.
-      (timeout + 45) * 1000,
-    );
+    let res: Response;
+    try {
+      res = await call(
+        `/workspaces/${ws}/run`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ language: opts.language, code: opts.code, timeout, job }) },
+        // Queueing for a free slot can take up to 30 s on the runner.
+        (timeout + 45) * 1000,
+      );
+    } catch (error) {
+      // Giving up on the answer must also stop the run, or it would start or keep running unseen.
+      cancel();
+      throw error;
+    }
     const result = (await res.json()) as RunnerResult;
+    const results = resultPaths(result.files.map((f) => f.path));
+    result.files = result.files.filter((f) => results.has(f.path));
     // The sandbox wipes idle workspaces, so produced files move into the user's storage right away.
     const storageWarning = await storeOutputs(opts.userId, opts.threadId, ws, result.files, opts.turn);
     const stored = result.files.flatMap((f) => (f.fileId ? [f.fileId] : []));
     if (opts.turn && stored.length) opts.turn.lastFiles = stored;
     const base = `/api/sandbox/${encodeURIComponent(opts.threadId)}/files?path=`;
+    const tooLarge = result.files.filter((f) => f.tooLarge).map((f) => ({ path: f.path, size: f.size }));
+    const sizeWarning = tooLarge.length
+      ? `Not saved and not downloadable, over the 50 MB limit per file: ${tooLarge.map((f) => `${f.path} (${megabytes(f.size)})`).join(", ")}. Make them smaller (compress, lower the resolution or bitrate, or split them into parts under 50 MB) in another run.`
+      : undefined;
+    const warning = [sizeWarning, storageWarning].filter(Boolean).join(" ");
     return {
       ...result,
       language: opts.language,
       inputs,
-      files: result.files.map((f) => ({ ...f, url: f.storedUrl ?? `${base}${encodeURIComponent(f.path)}&v=${Date.now().toString(36)}`, image: IMAGE.test(f.path) })),
-      ...(storageWarning ? { storageWarning } : {}),
+      files: result.files
+        .filter((f) => !f.tooLarge)
+        .map(({ tooLarge: _, ...f }) => ({ ...f, url: f.storedUrl ?? `${base}${encodeURIComponent(f.path)}&v=${Date.now().toString(36)}`, image: IMAGE.test(f.path) })),
+      ...(tooLarge.length ? { tooLarge } : {}),
+      ...(warning ? { storageWarning: warning } : {}),
     };
   } finally {
     opts.signal?.removeEventListener("abort", cancel);
+  }
+}
+
+/**
+ * Converts a presentation to PDF with the sandbox's LibreOffice, in the chat's workspace jail. The bytes come
+ * from the caller (already ownership-checked) and the PDF never appears among the chat's files.
+ */
+export async function convertToPdf(userId: string, threadId: string, name: string, data: Uint8Array, signal?: AbortSignal): Promise<Uint8Array> {
+  if (!sandboxConfigured()) throw new Error("Converting presentations needs the code sandbox, which this server does not have.");
+  if (data.byteLength > RUNNER_MAX_FILE) throw new Error(`\`${name}\` is ${megabytes(data.byteLength)}; files over 50 MB cannot be converted.`);
+  const ws = workspaceId(userId, threadId);
+  const job = newId("job");
+  try {
+    const res = await call(`/workspaces/${ws}/convert?name=${encodeURIComponent(path.basename(name))}&job=${job}`, { method: "POST", body: Buffer.from(data) }, 180_000, signal);
+    return new Uint8Array(await res.arrayBuffer());
+  } catch (error) {
+    void call(`/workspaces/${ws}/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job }) }).catch(() => {});
+    throw error;
   }
 }
 
@@ -220,6 +274,7 @@ export function sandboxTools(userId: string, threadId: string, signal?: AbortSig
           files: output.files.map((f) => ({ path: f.path, size: f.size, ...(f.fileId ? { fileId: f.fileId } : {}) })),
           ...(output.deleted.length ? { deleted: output.deleted } : {}),
           ...(output.inputs.length ? { inputs: output.inputs } : {}),
+          ...(output.tooLarge?.length ? { tooLarge: output.tooLarge } : {}),
           ...(output.storageWarning ? { storageWarning: output.storageWarning } : {}),
         },
       }),
@@ -240,8 +295,12 @@ const downloadHeaders = (name: string, mime: string, preview = false) => ({
 export const sandboxRoutes = new Hono<AppEnv>()
   .get("/sandbox", async (c) => {
     if (!sandboxConfigured()) return c.json({ configured: false, reachable: false });
-    const reachable = await fetch(`${env.sandboxUrl}/health`, { signal: AbortSignal.timeout(3000) }).then((r) => r.ok, () => false);
-    return c.json({ configured: true, reachable });
+    // An unhealthy runner answers with the reason, for example that run isolation could not be set up.
+    const health = await fetch(`${env.sandboxUrl}/health`, { signal: AbortSignal.timeout(3000) }).then(
+      async (r) => ({ reachable: r.ok, error: r.ok ? undefined : ((await r.json().catch(() => ({}))) as { error?: string }).error }),
+      () => ({ reachable: false, error: undefined }),
+    );
+    return c.json({ configured: true, ...health });
   })
   .get("/sandbox/:threadId/files", async (c) => {
     const user = c.get("user");

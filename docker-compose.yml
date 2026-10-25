@@ -38,6 +38,7 @@ services:
       - ./docker/searxng/settings.yml:/etc/searxng/settings.yml:ro
 
   # Runs model-written code for run_code. It holds no app secrets or data, and only the app can reach it.
+  # Every run gets its own network namespace with nothing but loopback, so run code has no network at all.
   # See docs/research/code-sandbox.md.
   sandbox:
     build: ./sandbox
@@ -48,21 +49,25 @@ services:
       SANDBOX_IDLE_MINUTES: ${SANDBOX_IDLE_MINUTES:-30}
     volumes:
       - okaychat-sandbox:/work
-    # The internal network has no route out: code cannot reach the internet, SearXNG, or the host.
-    # For internet access, add a second, non-internal network here.
     networks: [sandbox]
     init: true
     read_only: true
     tmpfs:
-      - /tmp:size=256m,mode=1777
+      - /tmp:size=64m,mode=1777
     cap_drop: [ALL]
     # Only what the runner needs to create workspaces and switch each run to its workspace user.
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETUID, SETGID, KILL]
     security_opt:
       - no-new-privileges:true
+      # Docker's default profile plus the namespace calls bubblewrap needs to build each run's jail. Runs
+      # themselves get a stricter filter (sandbox/seccomp/inner.c) that denies those calls again.
+      - seccomp=./sandbox/seccomp.json
+      # Docker's default AppArmor profile forbids the mounts that build a run's private filesystem view.
+      - apparmor=unconfined
     pids_limit: 512
     mem_limit: 2g
     cpus: 2
+
   # Chromium for PDFs, document previews, and the model's visual checks, and Scrapling for web_fetch's fallback.
   # No app data, provider keys, or OKAYCHAT_SECRET; a firewall in its own network namespace lets only its
   # egress proxy out, to public addresses. See docs/research/browser-worker.md.
@@ -91,6 +96,7 @@ services:
     cpus: 2
 
 networks:
+  # The internal network has no route out. Run code could not use it anyway: it has no network interface.
   sandbox:
     internal: true
   # Not internal: the worker's egress proxy reaches public web pages and the artifact CDNs through it.

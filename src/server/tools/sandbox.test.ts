@@ -10,13 +10,29 @@ import { Hono } from "hono";
 // A fake runner stands in for sandbox/runner.py. The runner's own isolation is checked against the real
 // container (docs/research/code-sandbox.md); these tests cover what the app sends and exposes.
 const calls: Array<{ method: string; url: string; auth: string | undefined; body: Buffer }> = [];
+async function received(suffix: string) {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const call = calls.find((c) => c.url.endsWith(suffix));
+    if (call) return call;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail(`The runner did not receive ${suffix}`);
+}
+// What the fake /run reports, and how it behaves; reset before each test.
+let runFiles: Array<{ path: string; size: number }> = [];
+let runMode: "answer" | "hang" | "drop" = "answer";
 const runner = createServer(async (req: IncomingMessage, res) => {
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(chunk as Buffer);
   calls.push({ method: req.method!, url: req.url!, auth: req.headers.authorization, body: Buffer.concat(chunks) });
   res.setHeader("Content-Type", "application/json");
   if (req.url!.endsWith("/run")) {
-    return res.end(JSON.stringify({ exitCode: 0, stdout: "42\n", stderr: "", stopped: null, durationMs: 12, files: [{ path: "out/plot.png", size: 10 }], deleted: [] }));
+    if (runMode === "drop") return req.socket.destroy();
+    const answer = () => res.end(JSON.stringify({ exitCode: 0, stdout: "42\n", stderr: "", stopped: runMode === "hang" ? "cancelled" : null, durationMs: 12, files: runFiles, deleted: [] }));
+    // A hanging run answers once the app cancels it, as the real runner does.
+    if (runMode === "hang") return void setTimeout(answer, 300);
+    return answer();
   }
   if (req.method === "GET" && req.url!.includes("/files?path=")) return res.end("<svg onload=alert(1)>");
   res.end(JSON.stringify({ ok: true }));
@@ -46,6 +62,8 @@ after(() => {
 });
 beforeEach(() => {
   calls.length = 0;
+  runFiles = [{ path: "out/plot.png", size: 10 }];
+  runMode = "answer";
   db.exec("DELETE FROM uploads; DELETE FROM sandbox_files; DELETE FROM threads;");
   ensureThread("alice", "thr_alice");
 });
@@ -66,7 +84,9 @@ test("run_code authenticates, copies the owner's uploads, and hides download URL
   assert.ok(calls.every((c) => c.auth === `Bearer ${TOKEN}`));
   assert.equal(calls[0]!.url, `/workspaces/${ws}/files?path=data.csv`);
   assert.equal(calls[0]!.body.toString(), "a,b\n1,2\n");
-  assert.deepEqual(JSON.parse(calls[1]!.body.toString()), { language: "python", code: "print(42)", timeout: 60 });
+  const { job, ...run } = JSON.parse(calls[1]!.body.toString());
+  assert.deepEqual(run, { language: "python", code: "print(42)", timeout: 60 });
+  assert.match(job, /^job_[\w-]{16}$/);
   assert.match(output.files[0].url, /^\/api\/sandbox\/thr_alice\/stored\?path=out%2Fplot\.png&v=/);
   // The fake runner answers any download with its SVG body.
   const stored = db.prepare("SELECT size FROM sandbox_files WHERE user_id = 'alice' AND thread_id = 'thr_alice' AND path = 'out/plot.png'").get() as { size: number } | undefined;
@@ -164,4 +184,40 @@ test("a finished turn keeps only the last file-writing run's new files", () => {
   const left = db.prepare("SELECT id FROM sandbox_files WHERE user_id = 'alice' AND id LIKE 'sf_%' ORDER BY id").all().map((r) => (r as { id: string }).id);
   assert.ok(left.includes("sf_old") && left.includes("sf_final"));
   assert.ok(!left.includes("sf_scratch") && !left.includes("sf_draft"));
+});
+
+test("an output over the 50 MB transfer limit gets a size message instead of a dead link", async () => {
+  runFiles = [{ path: "video.mp4", size: 73 * 1024 * 1024 }, { path: "out/plot.png", size: 10 }];
+  const tool = sandboxTools("alice", "thr_alice").run_code!;
+  const output = await tool.execute!({ language: "bash", code: "make" }, { toolCallId: "big", messages: [] });
+  assert.deepEqual(output.files.map((f) => f.path), ["out/plot.png"]);
+  assert.deepEqual(output.tooLarge, [{ path: "video.mp4", size: 73 * 1024 * 1024 }]);
+  assert.match(output.storageWarning ?? "", /video\.mp4 \(73\.0 MB\).*50 MB/);
+  // The oversized file is never downloaded from the runner.
+  assert.ok(!calls.some((c) => c.url.includes("video.mp4")));
+  const modelView = JSON.stringify(await tool.toModelOutput!({ toolCallId: "big", input: {}, output }));
+  assert.match(modelView, /"tooLarge":\[\{"path":"video.mp4"/);
+  assert.doesNotMatch(modelView, /api\/sandbox/);
+});
+
+test("stopping the chat cancels exactly the run's job, even while it queues", async () => {
+  runMode = "hang";
+  const controller = new AbortController();
+  const tool = sandboxTools("alice", "thr_alice", controller.signal).run_code!;
+  const pending = tool.execute!({ language: "bash", code: "sleep 100" }, { toolCallId: "stop", messages: [] });
+  const run = await received("/run");
+  controller.abort();
+  const output = await pending;
+  assert.equal(output.stopped, "cancelled");
+  const cancel = await received("/cancel");
+  assert.equal(JSON.parse(cancel.body.toString()).job, JSON.parse(run.body.toString()).job);
+});
+
+test("a run whose answer never arrives is cancelled too", async () => {
+  runMode = "drop";
+  const tool = sandboxTools("alice", "thr_alice").run_code!;
+  await assert.rejects(async () => tool.execute!({ language: "bash", code: "x" }, { toolCallId: "drop", messages: [] }), /not reachable/);
+  const run = await received("/run");
+  const cancel = await received("/cancel");
+  assert.equal(JSON.parse(cancel.body.toString()).job, JSON.parse(run.body.toString()).job);
 });

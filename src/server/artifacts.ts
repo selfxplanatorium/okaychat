@@ -11,6 +11,7 @@ import { htmlToPdf, pageFurniture, printDocument, rendererAvailable } from "./do
 import { screenshotArtifact, type VisualShot } from "./documents/visual.js";
 import { createXlsx, editXlsx, previewXlsx, readXlsx, workbookSpec, xlsxOp } from "./documents/xlsx.js";
 import { assertStorage } from "./quota.js";
+import { convertToPdf } from "./tools/sandbox.js";
 import { MAX_SHOTS_PER_TURN } from "./tools/screenshots.js";
 import { getThread } from "./threads.js";
 
@@ -176,14 +177,25 @@ function createDocument(threadId: string, turn: Set<string>, input: { id: string
   return saveVersion(threadId, { id: key, title, kind: input.kind, language: null, content: input.source, data: input.data }, turn);
 }
 
-function uploadedBytes(userId: string, ref: { fileId?: string; name?: string }): { name: string; mime: string; data: Uint8Array } {
+/**
+ * The bytes behind an import: an attachment (uploads) or a saved run_code output (sandbox_files), both only
+ * the caller's own, the same rule run_code's input_files applies. A name only ever matches attachments.
+ */
+function sourceBytes(userId: string, ref: { fileId?: string; name?: string }): { name: string; data: Uint8Array } {
   const row = (
     ref.fileId
-      ? db.prepare("SELECT name, mime, data FROM uploads WHERE id = ? AND user_id = ?").get(ref.fileId, userId)
-      : db.prepare("SELECT name, mime, data FROM uploads WHERE user_id = ? AND name = ? ORDER BY created_at DESC LIMIT 1").get(userId, ref.name ?? "")
-  ) as { name: string; mime: string; data: Uint8Array } | undefined;
-  if (!row) throw new Error("That attached file is no longer available. Ask the user to attach it again.");
-  return { name: row.name, mime: row.mime, data: new Uint8Array(row.data) };
+      ? (db.prepare("SELECT name, data FROM uploads WHERE id = ? AND user_id = ?").get(ref.fileId, userId) ??
+        db.prepare("SELECT path AS name, data FROM sandbox_files WHERE id = ? AND user_id = ?").get(ref.fileId, userId))
+      : db.prepare("SELECT name, data FROM uploads WHERE user_id = ? AND name = ? ORDER BY created_at DESC LIMIT 1").get(userId, ref.name ?? "")
+  ) as { name: string; data: Uint8Array } | undefined;
+  if (!row) {
+    throw new Error(
+      ref.fileId?.startsWith("sbf_")
+        ? "That sandbox output is no longer saved. Run the code again and import the new fileId."
+        : "That attached file is no longer available. Ask the user to attach it again.",
+    );
+  }
+  return { name: row.name.split("/").pop() || row.name, data: new Uint8Array(row.data) };
 }
 
 function kindOfUpload(name: string): DocumentArtifactKind | null {
@@ -193,6 +205,9 @@ function kindOfUpload(name: string): DocumentArtifactKind | null {
   if (lower.endsWith(".xlsx") || lower.endsWith(".xlsm")) return "xlsx";
   return null;
 }
+
+/** Presentations have no artifact kind of their own; they are imported as the PDF LibreOffice makes of them. */
+const PRESENTATION = /\.(pptx|ppt|pps|ppsx|odp)$/i;
 
 export interface ArtifactToolOptions {
   /** Per-turn screenshots, keyed by tool call id, injected into the next model step by chat.ts. */
@@ -226,6 +241,8 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
   const shots = visual.shots;
   // Artifact ids saved in this turn. A tool set lives for one request; continuations pass the earlier ids.
   const turn = new Set<string>(visual.savedThisTurn);
+  // A retried import of the same file under the same id returns the first copy instead of storing another.
+  const imported = new Map<string, ArtifactToolResult>();
   return {
     create_artifact: tool({
       description: "Create an artifact shown in a side panel. See the Artifacts section of the system prompt for when to use it.",
@@ -381,19 +398,29 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
       : {}),
     import_document: tool({
       description:
-        "Copy a file the user attached into this chat as an editable document artifact. Use the attachment's file_id, or its filename when the header has none.",
+        "Copy a file into this chat as an editable document artifact: an attachment (its file_id, or its filename when the header has none) or a run_code output (its fileId). PDF, DOCX, and XLSX keep their format; PPTX, PPT, and ODP presentations are converted to PDF. Then view_artifact can show it.",
       inputSchema: z.object({
-        file_id: z.string().optional().describe("The attachment's file_id"),
+        file_id: z.string().optional().describe("The attachment's file_id, or a run_code output's fileId"),
         name: z.string().optional().describe("The attachment's filename, used when there is no file_id"),
         id: z.string().describe("Short kebab-case id for the artifact"),
         title: z.string().describe("Human-readable title; also the download filename"),
       }),
-      execute: async ({ file_id, name, id, title }) => {
+      execute: async ({ file_id, name, id, title }, { abortSignal }) => {
         if (!file_id && !name) throw new Error("Pass the attachment's file_id or name.");
-        const upload = uploadedBytes(userId, { fileId: file_id, name });
-        const kind = kindOfUpload(upload.name);
-        if (!kind) throw new Error(`Attachments can be imported as pdf, docx, or xlsx. \`${upload.name}\` is none of those.`);
-        return createDocument(threadId, turn, { id, title, kind, source: "", data: upload.data });
+        const key = `${file_id ?? `name:${name}`}\u0000${slug(id)}`;
+        const previous = imported.get(key);
+        if (previous && latestArtifact(threadId, previous.id)?.version === previous.version) return previous;
+        const source = sourceBytes(userId, { fileId: file_id, name });
+        let kind = kindOfUpload(source.name);
+        let data = source.data;
+        if (!kind && PRESENTATION.test(source.name)) {
+          data = await convertToPdf(userId, threadId, source.name, source.data, abortSignal);
+          kind = "pdf";
+        }
+        if (!kind) throw new Error(`Files can be imported as pdf, docx, or xlsx, and presentations as pdf. \`${source.name}\` is none of those.`);
+        const result = createDocument(threadId, turn, { id, title, kind, source: "", data });
+        imported.set(key, result);
+        return result;
       },
     }),
   };

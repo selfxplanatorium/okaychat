@@ -1,0 +1,53 @@
+# Integration-test deployment: the real docker-compose.yml plus this override, under its own project name,
+# image tags, host port, volumes, and subnets. Paths are relative to the repository root (the first file's
+# directory). Never used for a real deployment. test/integration/run.sh drives it:
+#   docker compose -p okaychat-it --env-file <generated> -f docker-compose.yml -f test/integration/compose.it.yml up -d
+# Images are built beforehand with the IT tag, so nothing here rebuilds or retags okaychat:latest.
+services:
+  okaychat:
+    image: okaychat:${IT_TAG:?}
+    build: !reset null
+    ports: !override
+      - "127.0.0.1:${IT_APP_PORT:?}:8787"
+
+  sandbox:
+    image: okaychat-sandbox:${IT_TAG:?}
+    build: !reset null
+
+  browser:
+    image: okaychat-browser:${IT_TAG:?}
+    build: !reset null
+    # A name that resolves to a private address, as a rebinding attacker's would.
+    extra_hosts:
+      - "rebind.okaychat.test:10.231.1.50"
+
+  # Controlled destination on every network. It counts what reaches it.
+  fixture:
+    image: python:3.12-slim-bookworm@sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70
+    command: ["python3", "-u", "/fixture.py"]
+    volumes:
+      - ./test/integration/fixture.py:/fixture.py:ro
+    networks:
+      browser: { ipv4_address: 10.231.1.50 }
+      sandbox: { ipv4_address: 10.231.2.50 }
+      default: { ipv4_address: 10.231.3.50 }
+
+  # Runs the API-level suites from inside the networks, like the app does.
+  tester:
+    image: python:3.12-slim-bookworm@sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70
+    command: ["sleep", "infinity"]
+    environment:
+      SANDBOX_TOKEN: ${OKAYCHAT_SANDBOX_TOKEN:?}
+    volumes:
+      - ./test/integration:/tests:ro
+      - ${IT_SHARE:?}:/share
+      - okaychat-browser-token:/run/okaychat-browser:ro
+    networks: [browser, sandbox, default]
+
+networks:
+  default:
+    ipam: { config: [{ subnet: 10.231.3.0/24 }] }
+  browser:
+    ipam: { config: [{ subnet: 10.231.1.0/24 }] }
+  sandbox:
+    ipam: { config: [{ subnet: 10.231.2.0/24 }] }

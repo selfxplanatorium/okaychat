@@ -1,0 +1,12 @@
+#!/bin/sh
+# okaychat sandbox: every LibreOffice process gets its own fresh profile in the run's private /tmp, so two
+# conversions never share a profile lock and nothing a document changed in a profile survives the call.
+# The image's okaychat.xcd defaults (no macros, no link updates) apply to every profile.
+case " $* " in
+  *" -env:UserInstallation="*) exec /usr/lib/libreoffice/program/soffice "$@" ;;
+esac
+profile=$(mktemp -d "${TMPDIR:-/tmp}/libreoffice-profile.XXXXXX") || exit 1
+/usr/lib/libreoffice/program/soffice "-env:UserInstallation=file://$profile" "$@"
+status=$?
+rm -rf "$profile"
+exit $status

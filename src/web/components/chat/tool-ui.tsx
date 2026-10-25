@@ -169,9 +169,13 @@ type RunCodeResult = {
   stopped: string | null;
   durationMs: number;
   files: Array<{ path: string; size: number; url: string; image: boolean }>;
+  tooLarge?: Array<{ path: string; size: number }>;
 };
 
 const formatBytes = (n: number) => (n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 ** 2).toFixed(1)} MB`);
+
+/** A run can write many files; past this many the chips collapse behind a toggle. */
+const FILES_SHOWN = 12;
 
 function RunCodeCard({ args, result, running }: { args: unknown; result: unknown; running: boolean }) {
   const a = (args ?? {}) as { language?: "python" | "bash"; code?: string };
@@ -189,6 +193,7 @@ function RunCodeCard({ args, result, running }: { args: unknown; result: unknown
           ? `Ran ${lang} · ${seconds}`
           : `${lang} exited with ${r.exitCode} · ${seconds}`;
   const images = r?.files.filter((f) => f.image) ?? [];
+  const [allFiles, setAllFiles] = useState(false);
   return (
     <div className="my-2">
       <ToolShell icon={<SquareTerminalIcon className="size-4" />} running={running} error={failed && typeof result === "string" ? result : undefined} label={label}>
@@ -204,15 +209,25 @@ function RunCodeCard({ args, result, running }: { args: unknown; result: unknown
       ))}
       {r && r.files.length > 0 && (
         <div className="ml-6 flex flex-wrap gap-1.5">
-          {r.files.map((f) => (
+          {(allFiles ? r.files : r.files.slice(0, FILES_SHOWN)).map((f) => (
             <a key={f.path} href={f.url} download={f.path.split("/").pop()} className="hover:bg-muted/60 text-muted-foreground hover:text-foreground flex max-w-full items-center gap-1.5 rounded-lg border px-2 py-1 text-xs transition-colors duration-(--motion-fast) ease-out-quart">
               <DownloadIcon className="size-3.5 shrink-0" />
               <span className="truncate">{f.path}</span>
               <span className="shrink-0 opacity-70">{formatBytes(f.size)}</span>
             </a>
           ))}
+          {r.files.length > FILES_SHOWN && (
+            <button type="button" onClick={() => setAllFiles(!allFiles)} className="hover:bg-muted/60 text-muted-foreground hover:text-foreground rounded-lg border px-2 py-1 text-xs transition-colors duration-(--motion-fast) ease-out-quart">
+              {allFiles ? "Show fewer" : `Show ${r.files.length - FILES_SHOWN} more`}
+            </button>
+          )}
         </div>
       )}
+      {r?.tooLarge?.length ? (
+        <p className="text-muted-foreground ml-6 mt-1.5 text-xs">
+          Not saved, over the 50 MB limit: {r.tooLarge.map((f) => `${f.path} (${formatBytes(f.size)})`).join(", ")}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -247,7 +262,7 @@ function GeneratedImage({ args, result, running }: { args: unknown; result: unkn
         href={image.url}
         download={`${image.id}.${image.mime?.split("/")[1]?.replace("jpeg", "jpg") ?? "png"}`}
         aria-label="Download image"
-        className="surface-glass text-muted-foreground hover:text-foreground absolute top-2 right-2 rounded-lg border p-1.5 opacity-0 transition-opacity duration-(--motion-fast) ease-out-quart group-hover/img:opacity-100"
+        className="surface-glass text-muted-foreground hover:text-foreground absolute top-2 right-2 rounded-lg border p-1.5 opacity-0 transition-opacity duration-(--motion-fast) ease-out-quart group-hover/img:opacity-100 focus-visible:opacity-100"
       >
         <DownloadIcon className="size-4" />
       </a>

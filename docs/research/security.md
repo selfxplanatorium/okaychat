@@ -9,7 +9,7 @@ Defended against:
 - Other accounts on the same server. Every row is owned by a user and every route checks it.
 - Anyone on the internet without an account. Only `/api/auth`, `/api/health`, the MCP OAuth callback, and share links (random 256-bit tokens) are reachable without a session.
 - Content the model reads: web pages, files, MCP results, past chats. It can steer the model (prompt injection), so model-chosen actions are bounded: no access to the server's network, no data leaving rendered HTML, approval for persistent writes after outside content.
-- Model-written code and markup. It runs in the sandbox container, in opaque-origin frames with a CSP, or in a locked-down Chromium context.
+- Model-written code and markup. Code runs in the sandbox container, in a per-run jail with no network. Markup runs in opaque-origin frames with a CSP, or in a fresh Chromium context in the browser worker container.
 - A copied database file. Provider keys, MCP secrets, and memory are AES-256-GCM encrypted with `OKAYCHAT_SECRET`.
 
 Not defended against: an admin (who controls the server), anyone who can run code in the app container or read its environment, or a provider/MCP server you chose to trust with your data.
@@ -35,7 +35,7 @@ Not defended against: an admin (who controls the server), anyone who can run cod
 | Shared MCP servers | Admin-owned; viewers never see headers, env, or command; per-user OAuth tokens; a demoted admin's servers stop being shared | `mcp/store.ts` |
 | Server rendering | Separate container. Offline by default (only the document and staged files); HTML/React previews may load from the artifact CDNs through the egress proxy. WebSocket/WebRTC/service-worker blocks, DNS limited to the CDNs, timeouts that close the job's context | `src/browser/render.ts` |
 | Office files | ZIP expansion bounded before any parser runs | `documents/zip-bounds.ts` |
-| Code execution | Separate container, internal-only network, no secrets, per-chat uid, dropped capabilities, read-only root | `sandbox/`, `docker-compose.yml` |
+| Code execution | Separate container with no secrets. Each run in bubblewrap: own network namespace (loopback only), mount namespace (only its workspace, private `/tmp` and `/dev/shm`), IPC namespaces, inner seccomp filter, no capabilities; per-chat uid; read-only root; fails closed when the jail cannot be built | `sandbox/`, `docker-compose.yml`, `docs/research/code-sandbox.md` |
 | Persistent writes | Skill installs always need approval; memory writes need approval after outside content | `skills.ts`, `memory.ts` |
 | Resource abuse | Storage quota (including message text), 4 concurrent turns, 50 schedules, 30 MCP servers | `quota.ts`, `chat.ts`, `schedules.ts`, `routes.ts` |
 | Container | App drops root to `node` after fixing `/data` ownership | `docker-entrypoint.sh` |
@@ -59,5 +59,5 @@ Not defended against: an admin (who controls the server), anyone who can run cod
 1. Serve over HTTPS behind a reverse proxy and set `OKAYCHAT_PUBLIC_URL`.
 2. Keep `OKAYCHAT_ALLOW_SIGNUP=false` unless strangers should register; add users from Admin.
 3. Back up `OKAYCHAT_SECRET` separately from the data volume.
-4. Rebuild images when Dependabot updates base images, Chromium, or Scrapling.
+4. Rebuild images when Dependabot updates base images, Chromium, or Scrapling. Debian security updates (FFmpeg, LibreOffice, Ghostscript, poppler in the sandbox) arrive only with a rebuild.
 5. Give admin rights only to people who may run code on the server (stdio MCP servers run as the app).

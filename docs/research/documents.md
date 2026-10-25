@@ -107,6 +107,9 @@ Non-vision models do not get the tool. Without a browser worker (`OKAYCHAT_BROWS
 the text tools keep working. Blocked requests (a missing image, a non-CDN script) come back in `pageErrors` with
 the reason.
 
+Run outputs: `import_document` accepts a run_code output's `fileId`; PPTX/PPT/ODP become PDF through LibreOffice in
+the sandbox (`docs/research/code-sandbox.md`), so the same page shots work for slides.
+
 ## Chromium lifecycle and isolation
 
 Chromium runs only in the browser worker container (`src/browser/render.ts`); the app calls it through

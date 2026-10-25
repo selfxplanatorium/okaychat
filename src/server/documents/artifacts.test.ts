@@ -97,6 +97,25 @@ test("import_document copies an upload and refuses unknown formats", async () =>
   await assert.rejects(run("import_document", { id: "x", title: "x" }), /file_id or name/);
 });
 
+test("import_document takes the caller's own run_code outputs by fileId, never another account's", async () => {
+  db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)").run("usr_docs_other", "other@example.test", "Other", "x", "user", Date.now());
+  db.prepare("INSERT INTO threads (id, user_id, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run("thr_docs_other", "usr_docs_other", "Other", "regular", Date.now(), Date.now());
+  const insert = db.prepare("INSERT INTO sandbox_files (id, user_id, thread_id, path, mime, data, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+  const pdf = Buffer.from("%PDF-1.4 fake");
+  insert.run("sbf_mine", USER, THREAD, "out/report.pdf", "application/pdf", pdf, pdf.byteLength, Date.now());
+  insert.run("sbf_theirs", "usr_docs_other", "thr_docs_other", "secret.pdf", "application/pdf", pdf, pdf.byteLength, Date.now());
+  insert.run("sbf_notes", USER, THREAD, "notes.txt", "text/plain", Buffer.from("x"), 1, Date.now());
+  const imported = await run("import_document", { file_id: "sbf_mine", id: "report", title: "Report" });
+  assert.equal(imported.kind, "pdf");
+  assert.deepEqual(Buffer.from(artifactData(THREAD, "report")!), pdf);
+  await assert.rejects(run("import_document", { file_id: "sbf_theirs", id: "stolen", title: "x" }), /no longer saved/);
+  await assert.rejects(run("import_document", { file_id: "sbf_notes", id: "notes", title: "x" }), /notes\.txt/);
+  // Without a sandbox there is no LibreOffice to turn a presentation into a PDF.
+  insert.run("sbf_deck", USER, THREAD, "deck.pptx", "application/octet-stream", Buffer.from("PK"), 2, Date.now());
+  await assert.rejects(run("import_document", { file_id: "sbf_deck", id: "deck", title: "Deck" }), /needs the code sandbox/);
+  assert.equal(artifactVersions(THREAD, "deck").length, 0);
+});
+
 test("view_artifact is offered only to vision models and stores one screenshot per call", { skip: !worker.available && "Chromium is not installed" }, async () => {
   const blind = artifactTools(THREAD, USER, { canViewImages: false });
   assert.equal(blind.view_artifact, undefined);
