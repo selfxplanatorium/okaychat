@@ -1,16 +1,17 @@
 import { ActionBarMorePrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import type { ThreadSummary } from "@shared/types";
 import { ChevronRightIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Menu, MenuContent, MenuItem, MenuSubmenuRoot, MenuSubmenuTrigger, MenuTrigger } from "@/components/ui/menu";
+import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
+import { Popover, PopoverContent } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 import { isTemporaryChat } from "@/state/chat-privacy";
 import { useThreadMeta } from "@/state/thread-meta";
-import { useModelGroups } from "./ModelPicker";
+import { ModelList } from "./ModelPicker";
 
 export function BranchIcon({ className }: { className?: string }) {
   return (
@@ -63,8 +64,11 @@ export function BranchMenu() {
   const aui = useAui();
   const role = useAuiState((s) => s.message.role);
   const temporary = useAuiState((s) => isTemporaryChat(s.threadListItem.remoteId ?? s.threadListItem.id));
-  const groups = useModelGroups();
+  const hasModels = useData((s) => s.models.length > 0);
   const [open, setOpen] = useState(false);
+  // The searchable model list opens in its own popover once the menu closes, anchored to the same button.
+  const [picking, setPicking] = useState(false);
+  const anchor = useRef<HTMLSpanElement>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (!error) return;
@@ -88,9 +92,9 @@ export function BranchMenu() {
   };
 
   return (
-    <span className="relative inline-flex">
+    <span ref={anchor} className="relative inline-flex">
       {/* Only for its interaction lock: a hover-revealed action bar stays mounted while the menu or an error shows. */}
-      <ActionBarMorePrimitive.Root open={open || !!error} onOpenChange={setOpen}>
+      <ActionBarMorePrimitive.Root open={open || picking || !!error} onOpenChange={setOpen}>
         <Menu open={open} onOpenChange={(next) => setOpen(next)}>
           <Tooltip>
             <TooltipTrigger
@@ -117,31 +121,31 @@ export function BranchMenu() {
               <BranchIcon />
               Branch off
             </MenuItem>
-            {groups.length > 0 && (
-              <div className="text-muted-foreground flex items-center gap-2 px-2.5 py-1.5 text-xs" role="presentation">
-                <span className="bg-border h-px flex-1" />
-                or switch model
-                <span className="bg-border h-px flex-1" />
-              </div>
+            {hasModels && (
+              <MenuItem onClick={() => setPicking(true)}>
+                <span className="min-w-0 flex-1 truncate">Switch model…</span>
+                <ChevronRightIcon className="text-muted-foreground ms-auto" />
+              </MenuItem>
             )}
-            {groups.map((group) => (
-              <MenuSubmenuRoot key={group.id}>
-                <MenuSubmenuTrigger>
-                  <span className="min-w-0 flex-1 truncate">{group.label}</span>
-                  <ChevronRightIcon className="text-muted-foreground ms-auto" />
-                </MenuSubmenuTrigger>
-                <MenuContent side="right" align="start" className="max-h-[min(24rem,var(--available-height))] max-w-[calc(100vw-1rem)]">
-                  {group.models.map((m) => (
-                    <MenuItem key={m.ref} onClick={() => branch(m.ref)}>
-                      <span className="min-w-0 truncate">{m.name}</span>
-                    </MenuItem>
-                  ))}
-                </MenuContent>
-              </MenuSubmenuRoot>
-            ))}
           </MenuContent>
         </Menu>
       </ActionBarMorePrimitive.Root>
+      <Popover open={picking} onOpenChange={setPicking}>
+        <PopoverContent
+          anchor={anchor}
+          align={role === "user" ? "end" : "start"}
+          className="flex max-h-[min(22rem,60dvh)] w-[min(20rem,calc(100vw-1rem))] flex-col p-0"
+        >
+          <ModelList
+            compact
+            value={null}
+            onSelect={(ref) => {
+              setPicking(false);
+              branch(ref);
+            }}
+          />
+        </PopoverContent>
+      </Popover>
       {error && (
         <span role="alert" className={cn("text-destructive absolute top-full mt-1 w-max max-w-64 text-xs", role === "user" ? "end-0" : "start-0")}>
           {error}

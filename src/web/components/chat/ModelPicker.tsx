@@ -1,4 +1,4 @@
-import { BrainIcon, CheckIcon, ChevronDownIcon, EyeIcon, SearchIcon, StarIcon, WrenchIcon, ZapIcon } from "lucide-react";
+import { BrainIcon, CheckIcon, ChevronDownIcon, ChevronsUpDownIcon, EyeIcon, SearchIcon, StarIcon, WrenchIcon, ZapIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import type { ModelInfo, ReasoningEffort } from "@shared/types";
@@ -30,14 +30,14 @@ function Capabilities({ model }: { model: ModelInfo }) {
   );
 }
 
-/** Favorites first, then connected providers with OpenCode Go leading. Shared by the composer picker and the branch menu. */
-export function useModelGroups(query = "") {
+/** Favorites first, then connected providers with OpenCode Go leading. Shared by every model picker. */
+export function useModelGroups(query = "", filter?: (m: ModelInfo) => boolean) {
   const models = useData((s) => s.models);
   const providers = useData((s) => s.providers);
   const favorites = useData((s) => s.settings?.favoriteModels ?? []);
   return useMemo(() => {
     const q = query.trim().toLowerCase();
-    const match = (m: ModelInfo) => !q || `${m.name} ${m.id} ${m.providerId}`.toLowerCase().includes(q);
+    const match = (m: ModelInfo) => (!filter || filter(m)) && (!q || `${m.name} ${m.id} ${m.providerId}`.toLowerCase().includes(q));
     const providerName = (id: string) => providers.find((p) => p.id === id)?.name ?? id;
     const byProvider = new Map<string, ModelInfo[]>();
     for (const m of models.filter(match)) byProvider.set(m.providerId, [...(byProvider.get(m.providerId) ?? []), m]);
@@ -51,24 +51,179 @@ export function useModelGroups(query = "") {
         models: list.sort((a, b) => Number(b.free) - Number(a.free) || (b.releaseDate ?? "").localeCompare(a.releaseDate ?? "")),
       })),
     ];
-  }, [models, providers, favorites, query]);
+  }, [models, providers, favorites, query, filter]);
+}
+
+/** A non-model choice listed above the models, e.g. "Same as chat model". */
+export interface ModelChoice {
+  value: string;
+  label: string;
+}
+
+/**
+ * Search field and provider-grouped options. `compact` drops the context/price line for pickers outside the composer.
+ * Arrows walk the options, Enter picks, F toggles a favorite.
+ */
+export function ModelList({
+  value,
+  onSelect,
+  filter,
+  choices = [],
+  compact = false,
+}: {
+  value: string | null | undefined;
+  onSelect: (value: string) => void;
+  filter?: (m: ModelInfo) => boolean;
+  choices?: ModelChoice[];
+  compact?: boolean;
+}) {
+  const favorites = useData((s) => s.settings?.favoriteModels ?? []);
+  const updateSettings = useData((s) => s.updateSettings);
+  const [query, setQuery] = useState("");
+  const groups = useModelGroups(query, filter);
+  const q = query.trim().toLowerCase();
+  const shownChoices = choices.filter((c) => !q || c.label.toLowerCase().includes(q));
+
+  const toggleFavorite = (ref: string) =>
+    updateSettings({ favoriteModels: favorites.includes(ref) ? favorites.filter((f) => f !== ref) : [...favorites, ref] });
+
+  const optionKeys = (e: React.KeyboardEvent<HTMLDivElement>, pick: () => void, ref?: string) => {
+    if (e.target !== e.currentTarget) return;
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      pick();
+      return;
+    }
+    if (ref && e.key.toLowerCase() === "f" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      void toggleFavorite(ref);
+      return;
+    }
+    // Up from the first option returns to the search field.
+    const picker = e.currentTarget.closest("[data-slot=model-picker]");
+    const options = [...(picker?.querySelectorAll<HTMLElement>("[role=option]") ?? [])];
+    const index = options.indexOf(e.currentTarget);
+    const next =
+      e.key === "ArrowDown" ? options[index + 1] :
+      e.key === "ArrowUp" ? options[index - 1] ?? picker?.querySelector<HTMLElement>("input") :
+      e.key === "Home" ? options[0] :
+      e.key === "End" ? options.at(-1) : undefined;
+    if (!next) return;
+    e.preventDefault();
+    next.focus();
+    next.scrollIntoView({ block: "nearest" });
+  };
+
+  const optionClass = cn(
+    "group hover:bg-accent focus-visible:bg-accent active:bg-accent flex cursor-pointer items-center gap-2 rounded-lg px-2 outline-none transition-colors duration-(--motion-fast) ease-out-quart",
+    compact ? "py-1 pointer-coarse:py-2" : "py-1.5 pointer-coarse:py-2.5",
+  );
+  const check = (selected: boolean) => (
+    <CheckIcon className={cn("size-3.5 shrink-0 transition-opacity duration-(--motion-fast) ease-out-quart", selected ? "opacity-100" : "opacity-0")} />
+  );
+
+  return (
+    <div data-slot="model-picker" className="flex min-h-0 flex-1 flex-col">
+      <div className={cn("flex items-center gap-2 border-b px-3", compact ? "py-1.5" : "py-2")}>
+        <SearchIcon className="text-muted-foreground size-4" />
+        <input
+          // Touch: focusing opens the keyboard over the list people came to scroll.
+          autoFocus={window.matchMedia("(pointer: fine)").matches}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== "ArrowDown" && e.key !== "Enter") return;
+            const first = e.currentTarget.closest("[data-slot=model-picker]")?.querySelector<HTMLElement>("[role=option]");
+            if (!first) return;
+            e.preventDefault();
+            if (e.key === "Enter") first.click();
+            else first.focus();
+          }}
+          placeholder="Search models"
+          className="placeholder:text-muted-foreground h-7 pointer-coarse:h-9 min-w-0 flex-1 bg-transparent text-sm outline-none"
+        />
+      </div>
+      <ScrollArea className="flex-1" viewportClassName="p-1">
+        {shownChoices.length > 0 && (
+          <div className="mb-1">
+            {shownChoices.map((c) => (
+              <div
+                key={c.value}
+                role="option"
+                aria-selected={c.value === (value ?? "")}
+                tabIndex={0}
+                onClick={() => onSelect(c.value)}
+                onKeyDown={(e) => optionKeys(e, () => onSelect(c.value))}
+                className={cn(optionClass, "text-sm")}
+              >
+                {check(c.value === (value ?? ""))}
+                <span className="truncate">{c.label}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {groups.map((group) => (
+          <div key={group.id} className="mb-1">
+            <div className="text-muted-foreground flex items-center gap-2 px-2 pt-2 pb-1 text-xs font-medium">
+              {group.label}
+              {group.id === OPENCODE_GO && <span className="bg-primary/10 text-primary rounded px-1.5 text-[10px]">Primary</span>}
+            </div>
+            {group.models.map((m) => (
+              <div
+                key={`${group.id}:${m.ref}`}
+                role="option"
+                aria-selected={m.ref === value}
+                aria-keyshortcuts="F"
+                tabIndex={0}
+                onClick={() => onSelect(m.ref)}
+                onKeyDown={(e) => optionKeys(e, () => onSelect(m.ref), m.ref)}
+                className={optionClass}
+              >
+                {check(m.ref === value)}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 text-sm">
+                    <span className="truncate">{m.name}</span>
+                    <Capabilities model={m} />
+                  </div>
+                  {!compact && (
+                    <div className="text-muted-foreground flex gap-2 text-[11px] tabular-nums">
+                      <span>{formatTokens(m.context)} ctx</span>
+                      {price(m) && <span>{price(m)}</span>}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  aria-label={favorites.includes(m.ref) ? "Unfavorite" : "Favorite"}
+                  tabIndex={-1}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void toggleFavorite(m.ref);
+                  }}
+                  className={cn(
+                    "text-muted-foreground hover:text-foreground rounded p-1 pointer-coarse:p-2.5 opacity-0 pointer-coarse:opacity-60 transition-[opacity,color] duration-(--motion-fast) ease-out-quart group-hover:opacity-100 group-focus-visible:opacity-100",
+                    favorites.includes(m.ref) && "text-warning opacity-100 pointer-coarse:opacity-100",
+                  )}
+                >
+                  <StarIcon className={cn("size-3.5", favorites.includes(m.ref) && "fill-current")} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ))}
+        {groups.length === 0 && shownChoices.length === 0 && <p className="text-muted-foreground px-3 py-6 text-center text-sm">No models match.</p>}
+      </ScrollArea>
+    </div>
+  );
 }
 
 export function ModelPicker() {
   const models = useData((s) => s.models);
-  const favorites = useData((s) => s.settings?.favoriteModels ?? []);
-  const updateSettings = useData((s) => s.updateSettings);
   const selectModel = useData((s) => s.selectModel);
   const active = useChatModel();
   const threadId = useCurrentThreadId();
-  const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [, navigate] = useLocation();
-
-  const groups = useModelGroups(query);
-
-  const toggleFavorite = (ref: string) =>
-    updateSettings({ favoriteModels: favorites.includes(ref) ? favorites.filter((f) => f !== ref) : [...favorites, ref] });
 
   if (models.length === 0) {
     return (
@@ -88,105 +243,70 @@ export function ModelPicker() {
         <TextSwap value={active?.name ?? "Choose model"} className="truncate" />
         <ChevronDownIcon className="size-3 shrink-0 transition-transform duration-(--motion-base) ease-out-expo group-aria-expanded:rotate-180" />
       </PopoverTrigger>
-      <PopoverContent data-slot="model-picker" side="top" className="flex max-h-[min(32rem,70dvh)] w-[min(26rem,calc(100vw-1rem))] flex-col p-0">
-        <div className="flex items-center gap-2 border-b px-3 py-2">
-          <SearchIcon className="text-muted-foreground size-4" />
-          <input
-            // Touch: focusing opens the keyboard over the list people came to scroll.
-            autoFocus={window.matchMedia("(pointer: fine)").matches}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key !== "ArrowDown" && e.key !== "Enter") return;
-              const first = e.currentTarget.closest("[data-slot=model-picker]")?.querySelector<HTMLElement>("[role=option]");
-              if (!first) return;
-              e.preventDefault();
-              if (e.key === "Enter") first.click();
-              else first.focus();
-            }}
-            placeholder="Search models"
-            className="placeholder:text-muted-foreground h-7 pointer-coarse:h-9 min-w-0 flex-1 bg-transparent text-sm outline-none"
-          />
-        </div>
-        <ScrollArea className="flex-1" viewportClassName="p-1">
-          {groups.map((group) => (
-            <div key={group.id} className="mb-1">
-              <div className="text-muted-foreground flex items-center gap-2 px-2 pt-2 pb-1 text-xs font-medium">
-                {group.label}
-                {group.id === OPENCODE_GO && <span className="bg-primary/10 text-primary rounded px-1.5 text-[10px]">Primary</span>}
-              </div>
-              {group.models.map((m) => (
-                <div
-                  key={`${group.id}:${m.ref}`}
-                  role="option"
-                  aria-selected={m.ref === active?.ref}
-                  aria-keyshortcuts="F"
-                  tabIndex={0}
-                  onClick={() => {
-                    selectModel(m.ref, threadId);
-                    setOpen(false);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.target !== e.currentTarget) return;
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      selectModel(m.ref, threadId);
-                      setOpen(false);
-                      return;
-                    }
-                    if (e.key.toLowerCase() === "f" && !e.ctrlKey && !e.metaKey && !e.altKey) {
-                      e.preventDefault();
-                      void toggleFavorite(m.ref);
-                      return;
-                    }
-                    // Arrows walk the options; up from the first one returns to the search field.
-                    const picker = e.currentTarget.closest("[data-slot=model-picker]");
-                    const options = [...(picker?.querySelectorAll<HTMLElement>("[role=option]") ?? [])];
-                    const index = options.indexOf(e.currentTarget);
-                    const next =
-                      e.key === "ArrowDown" ? options[index + 1] :
-                      e.key === "ArrowUp" ? options[index - 1] ?? picker?.querySelector<HTMLElement>("input") :
-                      e.key === "Home" ? options[0] :
-                      e.key === "End" ? options.at(-1) : undefined;
-                    if (!next) return;
-                    e.preventDefault();
-                    next.focus();
-                    next.scrollIntoView({ block: "nearest" });
-                  }}
-                  className="group hover:bg-accent focus-visible:bg-accent flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 pointer-coarse:py-2.5 active:bg-accent outline-none transition-colors duration-(--motion-fast) ease-out-quart"
-                >
-                  <CheckIcon className={cn("size-3.5 shrink-0 transition-opacity duration-(--motion-fast) ease-out-quart", m.ref === active?.ref ? "opacity-100" : "opacity-0")} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5 text-sm">
-                      <span className="truncate">{m.name}</span>
-                      <Capabilities model={m} />
-                    </div>
-                    <div className="text-muted-foreground flex gap-2 text-[11px] tabular-nums">
-                      <span>{formatTokens(m.context)} ctx</span>
-                      {price(m) && <span>{price(m)}</span>}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    aria-label={favorites.includes(m.ref) ? "Unfavorite" : "Favorite"}
-                    tabIndex={-1}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void toggleFavorite(m.ref);
-                    }}
-                    className={cn(
-                      "text-muted-foreground hover:text-foreground rounded p-1 pointer-coarse:p-2.5 opacity-0 pointer-coarse:opacity-60 transition-[opacity,color] duration-(--motion-fast) ease-out-quart group-hover:opacity-100 group-focus-visible:opacity-100",
-                      favorites.includes(m.ref) && "text-warning opacity-100 pointer-coarse:opacity-100",
-                    )}
-                  >
-                    <StarIcon className={cn("size-3.5", favorites.includes(m.ref) && "fill-current")} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          ))}
-          {groups.length === 0 && <p className="text-muted-foreground px-3 py-6 text-center text-sm">No models match.</p>}
-        </ScrollArea>
+      <PopoverContent side="top" className="flex max-h-[min(32rem,70dvh)] w-[min(26rem,calc(100vw-1rem))] flex-col p-0">
+        <ModelList
+          value={active?.ref}
+          onSelect={(ref) => {
+            selectModel(ref, threadId);
+            setOpen(false);
+          }}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** Form-field model picker for settings: a select-style trigger opening the compact searchable list. */
+export function ModelSelect({
+  value,
+  onValueChange,
+  choices,
+  filter,
+  className,
+  "aria-label": ariaLabel,
+}: {
+  value: string | null | undefined;
+  onValueChange: (value: string) => void;
+  choices?: ModelChoice[];
+  filter?: (m: ModelInfo) => boolean;
+  className?: string;
+  "aria-label"?: string;
+}) {
+  const models = useData((s) => s.models);
+  const [open, setOpen] = useState(false);
+  const model = models.find((m) => m.ref === value);
+  const choice = choices?.find((c) => c.value === (value ?? ""));
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        aria-label={ariaLabel}
+        className={cn(
+          "bg-muted/60 hover:bg-muted aria-expanded:bg-muted focus-visible:ring-ring/50 inline-flex h-8 w-full min-w-0 items-center justify-between gap-2 rounded-lg border px-2.5 text-sm transition-[color,background-color,border-color,box-shadow] duration-(--motion-fast) ease-out-quart outline-none focus-visible:ring-2",
+          className,
+        )}
+      >
+        {model ? (
+          // The provider is secondary, so it is the part that gives way when the trigger is narrow.
+          <span className="flex min-w-0 items-baseline">
+            <span className="min-w-0 truncate">{model.name}</span>
+            <span className="text-muted-foreground shrink-0 whitespace-pre">{` · ${model.providerId}`}</span>
+          </span>
+        ) : (
+          <span className={cn("truncate", !choice && "text-muted-foreground")}>{choice?.label ?? (value || "Choose model")}</span>
+        )}
+        <ChevronsUpDownIcon className="text-muted-foreground size-3.5 shrink-0" />
+      </PopoverTrigger>
+      <PopoverContent className="flex max-h-[min(22rem,60dvh)] w-[max(var(--anchor-width),min(20rem,calc(100vw-1rem)))] flex-col p-0">
+        <ModelList
+          compact
+          value={value}
+          choices={choices}
+          filter={filter}
+          onSelect={(v) => {
+            onValueChange(v);
+            setOpen(false);
+          }}
+        />
       </PopoverContent>
     </Popover>
   );
