@@ -83,8 +83,14 @@ import {
   type RefObject,
 } from "react";
 import { CopyFeedbackIcon } from "@/components/assistant-ui/elements/surfaces";
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { useLongPaste } from "@/components/chat/long-paste";
+import { parseAttachmentText, splitUserMessage, typedText } from "@/runtime/message-attachments";
 import { mcpAppOf } from "@/components/chat/McpApp";
+import { DictationSend, ReadAloudAutoPlay, useDictateLabel, useSendDictation, VoiceNotice } from "@/speech/ChatVoice";
+import { useSpeech } from "@/speech/store";
 import { useThreadSync, type ThreadSync } from "@/state/thread-sync";
+import { DictationWaveform } from "@/speech/Waveform";
 
 export type ThreadGroupPart = MessagePrimitive.GroupedParts.GroupPart;
 
@@ -945,6 +951,7 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
   const submitMode = useSubmitMode();
   // The composer sits on the bottom edge, so it grows upward with the typed line held in place.
   const smoothHeight = useSmoothHeight({ pin: "bottom" });
+  const longPaste = useLongPaste();
   return (
     <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
       <ComposerPrimitive.AttachmentDropzone asChild>
@@ -954,7 +961,9 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
           className="depth-composer data-[dragging=true]:border-ring flex w-full cursor-text flex-col gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) [backdrop-filter:blur(var(--glass-blur))_saturate(var(--glass-saturation))] transition-[border-color,box-shadow] duration-(--motion-base) ease-out-quart data-[dragging=true]:border-dashed data-[dragging=true]:bg-[color-mix(in_oklab,var(--color-accent)_50%,var(--color-background))]"
         >
           <ComposerAttachments />
+          {longPaste.notice}
           <ComposerPrimitive.Input
+            {...longPaste.inputProps}
             placeholder="Send a message..."
             className="aui-composer-input caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base leading-6 outline-none"
             rows={1}
@@ -964,9 +973,12 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
             aria-label="Message input"
           />
           <SyncNotice sync={sync} />
+          <VoiceNotice />
           <ComposerAction blocked={!!sync} />
         </div>
       </ComposerPrimitive.AttachmentDropzone>
+      <DictationSend />
+      <ReadAloudAutoPlay />
     </ComposerPrimitive.Root>
   );
 };
@@ -984,7 +996,16 @@ const ComposerAction: FC<{ blocked: boolean }> = ({ blocked }) => {
   const showSend = !canCancel || (hasVoice && !submitting);
   const showStop = canCancel && (!hasVoice || submitting);
 
+  const dictating = useAuiState((s) => s.composer.dictation != null);
+  // While dictating, send stays available even with an empty composer: it stops, then sends the transcript.
+  const canSendDictation = useAuiState(
+    (s) => !s.thread.isDisabled && s.composer.submission === undefined && !(s.thread.isRunning && !s.thread.capabilities.queue),
+  );
+  const sendPending = useSpeech((s) => s.sendAfterDictation);
+  const sendDictation = useSendDictation();
+
   const { ComposerToolbar } = useContext(ThreadComponentsContext);
+  const dictateLabel = useDictateLabel();
 
   return (
     <div className="aui-composer-action-wrapper relative flex items-center justify-between gap-2">
@@ -997,7 +1018,7 @@ const ComposerAction: FC<{ blocked: boolean }> = ({ blocked }) => {
           <AuiIf condition={(s) => s.composer.dictation == null}>
             <ComposerPrimitive.Dictate asChild>
               <TooltipIconButton
-                tooltip="Voice input"
+                tooltip={dictateLabel}
                 command="composer.dictate"
                 side="bottom"
                 type="button"
@@ -1011,6 +1032,7 @@ const ComposerAction: FC<{ blocked: boolean }> = ({ blocked }) => {
             </ComposerPrimitive.Dictate>
           </AuiIf>
           <AuiIf condition={(s) => s.composer.dictation != null}>
+            <DictationWaveform className="h-6 w-20 sm:w-28" />
             <ComposerPrimitive.StopDictation asChild>
               <TooltipIconButton
                 tooltip="Stop dictation"
@@ -1040,7 +1062,21 @@ const ComposerAction: FC<{ blocked: boolean }> = ({ blocked }) => {
                   "pointer-events-none scale-50 opacity-0 delay-150 duration-(--motion-fast) ease-in-quart",
             )}
           >
-            {blocked ? (
+            {dictating ? (
+              <TooltipIconButton
+                tooltip="Send recording"
+                side="bottom"
+                type="button"
+                variant="default"
+                size="icon"
+                disabled={!canSendDictation || sendPending || blocked}
+                onClick={sendDictation}
+                className="aui-composer-send size-7 pointer-coarse:size-9 rounded-[0.6rem] pointer-coarse:rounded-xl disabled:scale-[0.86] disabled:saturate-[0.4]"
+                aria-label="Stop recording and send"
+              >
+                <ArrowUpIcon className="aui-composer-send-icon size-4" />
+              </TooltipIconButton>
+            ) : blocked ? (
               <TooltipIconButton
                 tooltip="Loading the latest messages"
                 side="bottom"
@@ -1419,14 +1455,14 @@ const AssistantActionBar: FC = () => {
       <AuiIf condition={(s) => s.thread.capabilities.speech}>
         <AuiIf condition={(s) => s.message.speech == null}>
           <ActionBarPrimitive.Speak asChild>
-            <TooltipIconButton tooltip="Read aloud">
+            <TooltipIconButton tooltip="Read aloud" command="message.readAloud">
               <Volume2Icon />
             </TooltipIconButton>
           </ActionBarPrimitive.Speak>
         </AuiIf>
         <AuiIf condition={(s) => s.message.speech != null}>
           <ActionBarPrimitive.StopSpeaking asChild>
-            <TooltipIconButton tooltip="Stop reading">
+            <TooltipIconButton tooltip="Stop reading" command="message.readAloud">
               <VolumeXIcon />
             </TooltipIconButton>
           </ActionBarPrimitive.StopSpeaking>
@@ -1487,6 +1523,10 @@ const UserImagePart: ImageMessagePartComponent = (part) => (
   </div>
 );
 
+/** Typed text renders as Markdown; attachment parts render as tiles above the bubble instead. */
+const UserText: TextMessagePartComponent = ({ text }) =>
+  parseAttachmentText(text) ? null : <MarkdownText lineBreaks />;
+
 const UserMessage: FC = () => {
   const entering = useContext(MessageEnteringContext);
   const focus = useMessageFocus();
@@ -1512,7 +1552,7 @@ const UserMessage: FC = () => {
       <div className="aui-user-message-content-wrapper relative col-start-2 min-w-0">
         <div className="aui-user-message-content peer depth-bubble text-foreground rounded-(--composer-radius) rounded-ee-md px-4 py-2 wrap-break-word empty:hidden">
           <MessagePrimitive.Parts
-            components={{ File: UserFilePart, Image: UserImagePart }}
+            components={{ Text: UserText, File: UserFilePart, Image: UserImagePart }}
           />
         </div>
       </div>
@@ -1561,22 +1601,66 @@ const UserActionBar: FC = () => {
           <SquarePenIcon />
         </TooltipIconButton>
       </ActionBarPrimitive.Edit>
-      <CopyActionButton />
+      <UserCopyButton />
     </ActionBarPrimitive.Root>
   );
+};
+
+/** Copies only what the user typed; the built-in copy would include every attachment's full text. */
+const UserCopyButton: FC = () => {
+  const content = useAuiState((s) => s.message.content);
+  const text = useMemo(() => typedText(content as Parameters<typeof typedText>[0]), [content]);
+  const { isCopied, copyToClipboard } = useCopyToClipboard();
+  if (!text) return null;
+  return (
+    <TooltipIconButton tooltip="Copy" command="message.copy" onClick={() => copyToClipboard(text)}>
+      <CopyFeedbackIcon copied={isCopied} />
+    </TooltipIconButton>
+  );
+};
+
+/**
+ * The edit composer starts with every text part joined, attachment markup included, and drops text attachments
+ * on send. Restores the typed text and turns attachment parts back into attachments, which resend unchanged.
+ */
+const EditComposerRestore: FC = () => {
+  const aui = useAui();
+  // Once per edit: StrictMode re-runs effects, and a second pass would add every attachment twice.
+  const restored = useRef(false);
+  useLayoutEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    const message = aui.message.getState();
+    if (message.role !== "user") return;
+    const content = message.content as Parameters<typeof splitUserMessage>[0];
+    if (!content.some((part) => part.type === "text" && parseAttachmentText(part.text))) return;
+    const { text, attachments } = splitUserMessage(content, message.attachments);
+    aui.composer.setText(text);
+    void aui.composer.clearAttachments().then(() =>
+      Promise.all(attachments.map((attachment) => aui.composer.addAttachment(attachment))),
+    );
+  }, [aui]);
+  return null;
 };
 
 const EditComposer: FC = () => {
   // An edit opened before a sync fell back to stale must not save either.
   const sync = useThreadSync();
   const submitMode = useSubmitMode();
+  const longPaste = useLongPaste();
   return (
     <MessagePrimitive.Root
       data-slot="aui_edit-composer-wrapper"
       className="chat-edit-in flex flex-col px-2 [contain-intrinsic-size:auto_200px] [content-visibility:auto]"
     >
       <ComposerPrimitive.Root className="aui-edit-composer-root depth-composer ms-auto flex w-full max-w-[85%] cursor-text flex-col rounded-(--composer-radius) border bg-(--composer-bg) transition-[border-color,box-shadow] duration-(--motion-base) ease-out-quart">
+        <EditComposerRestore />
+        <div className="px-2.5 pt-2.5 has-[>.aui-composer-attachments:empty]:hidden">
+          <ComposerAttachments />
+        </div>
+        {longPaste.notice && <div className="px-1.5 pt-2">{longPaste.notice}</div>}
         <ComposerPrimitive.Input
+          {...longPaste.inputProps}
           className="aui-edit-composer-input text-foreground min-h-14 w-full resize-none bg-transparent px-4 pt-3 pb-1 text-base outline-none"
           submitMode={sync ? "none" : submitMode}
           autoFocus

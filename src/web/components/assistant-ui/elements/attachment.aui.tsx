@@ -2,6 +2,7 @@
 
 import {
   type PropsWithChildren,
+  useMemo,
   useState,
   type FC,
   isValidElement,
@@ -10,6 +11,7 @@ import {
   XIcon,
   PlusIcon,
   FileText,
+  FileAudioIcon,
   Loader2Icon,
   AlertCircleIcon,
 } from "lucide-react";
@@ -36,6 +38,7 @@ import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
 import { useAttachmentSrc } from "@/hooks/use-attachment-src";
 import { cn } from "@/lib/utils";
+import { attachmentPreview, textAttachments } from "@/runtime/message-attachments";
 
 type AttachmentPreviewProps = {
   src: string;
@@ -111,6 +114,37 @@ const AttachmentThumb: FC<{ src: string | undefined }> = ({ src }) => {
   );
 };
 
+/** File extension as a short type label, or the attachment kind when the name has none. */
+const kindLabel = (name: string, fallback: string) => {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 && dot < name.length - 1 ? name.slice(dot + 1).toUpperCase() : fallback;
+};
+
+/** Non-image files show their name and type, so a sent message tells which files went with it. */
+const FileChipBody: FC<{ name: string; contentType: string; kind: string; removable?: boolean }> = ({
+  name,
+  contentType,
+  kind,
+  removable,
+}) => {
+  const Icon = contentType.startsWith("audio/") ? FileAudioIcon : FileText;
+  return (
+    // A removable chip keeps its text clear of the corner remove button.
+    <div className={cn("aui-attachment-chip flex h-full min-w-0 items-center gap-2.5 ps-2.5", removable ? "pe-8" : "pe-3.5")}>
+      <div className="bg-background/70 flex size-9 shrink-0 items-center justify-center rounded-md">
+        <Icon className="text-muted-foreground size-5 stroke-[1.5]" />
+      </div>
+      <div className="flex min-w-0 flex-col text-start leading-tight">
+        <span className="text-foreground truncate text-sm">{name}</span>
+        <span className="text-muted-foreground truncate text-xs">{kindLabel(name, kind)}</span>
+      </div>
+    </div>
+  );
+};
+
+const tileClass =
+  "aui-attachment-tile bg-muted hover:after:bg-foreground/10 focus-visible:ring-ring/50 relative overflow-hidden rounded-[calc(var(--composer-radius,1rem)-var(--composer-padding,8px))] transition-transform outline-none after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:ring-1 after:ring-black/10 after:transition-colors after:ring-inset focus-visible:ring-1 motion-reduce:transition-none dark:after:ring-white/10";
+
 const AttachmentUI: FC = () => {
   const aui = useAui();
   const isComposer = aui.attachment.source !== "message";
@@ -118,6 +152,7 @@ const AttachmentUI: FC = () => {
 
   const isImage = useAuiState((s) => s.attachment.type === "image");
   const name = useAuiState((s) => s.attachment.name);
+  const contentType = useAuiState((s) => s.attachment.contentType ?? "");
   const typeLabel = useAuiState((s) => {
     const type = s.attachment.type;
     switch (type) {
@@ -172,7 +207,8 @@ const AttachmentUI: FC = () => {
               render={
                 <div
                   className={cn(
-                    "aui-attachment-tile bg-muted hover:after:bg-foreground/10 focus-visible:ring-ring/50 relative size-14 overflow-hidden rounded-[calc(var(--composer-radius,1rem)-var(--composer-padding,8px))] transition-transform outline-none after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:ring-1 after:ring-black/10 after:transition-colors after:ring-inset focus-visible:ring-1 motion-reduce:transition-none dark:after:ring-white/10",
+                    tileClass,
+                    isImage ? "size-14" : "h-14 w-max max-w-60",
                     src
                       ? "cursor-zoom-in active:scale-[0.96]"
                       : "cursor-default",
@@ -191,7 +227,11 @@ const AttachmentUI: FC = () => {
                 />
               }
             >
-              <AttachmentThumb src={src} />
+              {isImage ? (
+                <AttachmentThumb src={src} />
+              ) : (
+                <FileChipBody name={name} contentType={contentType} kind={typeLabel} removable={isComposer} />
+              )}
               {isUploading && (
                 <div
                   aria-hidden="true"
@@ -239,12 +279,65 @@ const AttachmentRemove: FC<{ name: string }> = ({ name }) => {
   );
 };
 
+/** A text attachment of a sent message (text files, pasted text, extracted documents, transcripts). Opens its text. */
+const TextAttachmentTile: FC<{ name: string; body: string }> = ({ name, body }) => {
+  const preview = attachmentPreview(body);
+  const lines = preview ? preview.split("\n").length : 0;
+  const chip = (
+    <FileChipBody
+      name={name}
+      contentType=""
+      kind="File"
+    />
+  );
+  if (!preview)
+    return (
+      <div role="group" aria-label={`File attachment ${name}`} className={cn(tileClass, "h-14 w-max max-w-60 cursor-default")}>
+        {chip}
+      </div>
+    );
+  return (
+    <Dialog>
+      <DialogTrigger
+        render={
+          <button
+            type="button"
+            aria-label={`Open ${name}`}
+            title={`${name} · ${lines} ${lines === 1 ? "line" : "lines"}`}
+            className={cn(tileClass, "h-14 w-max max-w-60 cursor-pointer active:scale-[0.96]")}
+          />
+        }
+      >
+        {chip}
+      </DialogTrigger>
+      <DialogContent className="flex max-h-[85dvh] flex-col gap-3 p-4 sm:max-w-3xl">
+        <DialogTitle className="truncate pe-8 text-base">{name}</DialogTitle>
+        <pre className="bg-muted/60 min-h-0 flex-1 overflow-auto rounded-md p-3 font-mono text-xs leading-5 whitespace-pre-wrap wrap-break-word">
+          {preview}
+        </pre>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+/** Text attachments live in the message content as `<attachment>` parts; only file parts arrive as attachments. */
+const MessageTextAttachments: FC = () => {
+  const content = useAuiState((s) => s.message.content);
+  const attachments = useAuiState((s) => s.message.attachments);
+  const items = useMemo(
+    () => (content ? textAttachments(content as Parameters<typeof textAttachments>[0], attachments) : []),
+    [content, attachments],
+  );
+  return items.map((item) => <TextAttachmentTile key={item.key} name={item.name} body={item.body} />);
+};
+
 export const UserMessageAttachments: FC = () => {
   return (
-    <div className="aui-user-message-attachments-end col-span-full col-start-1 row-start-1 flex w-full flex-row justify-end gap-2 empty:hidden">
+    <div className="aui-user-message-attachments-end col-span-full col-start-1 row-start-1 flex w-full flex-row flex-wrap justify-end gap-2 empty:hidden">
       <MessagePrimitive.Attachments>
         {() => <AttachmentUI />}
       </MessagePrimitive.Attachments>
+      <MessageTextAttachments />
     </div>
   );
 };

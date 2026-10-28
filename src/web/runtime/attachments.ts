@@ -1,6 +1,7 @@
 import { SimpleImageAttachmentAdapter, SimpleTextAttachmentAdapter, type AttachmentAdapter } from "@assistant-ui/react";
 import { generateId } from "ai";
 import { api } from "../lib/api";
+import { BINARY_NOTE } from "./message-attachments";
 
 const CODE_EXTENSIONS =
   ".txt,.md,.mdx,.csv,.tsv,.json,.jsonl,.yaml,.yml,.toml,.xml,.html,.css,.scss,.js,.jsx,.ts,.tsx,.mjs,.cjs,.py,.rb,.go,.rs,.java,.kt,.swift,.c,.h,.cpp,.hpp,.cs,.php,.sh,.bash,.zsh,.sql,.graphql,.proto,.ini,.env,.log,.r,.lua,.dart,.vue,.svelte,.tex";
@@ -132,7 +133,42 @@ export class BinaryAttachmentAdapter implements AttachmentAdapter {
     form.append("file", attachment.file);
     const { fileId } = await api<{ fileId: string }>("/files/store", { method: "POST", body: form, signal: options?.signal });
     return { ...attachment, status: { type: "complete" as const }, content: [
-      { type: "text" as const, text: `<attachment name="${attachment.name.replaceAll('"', "'")}" file_id="${fileId}">Original bytes are available through file_id.</attachment>` },
+      { type: "text" as const, text: `<attachment name="${attachment.name.replaceAll('"', "'")}" file_id="${fileId}">${BINARY_NOTE}</attachment>` },
+    ] };
+  }
+  async remove() {}
+}
+
+/**
+ * Audio files are transcribed by the account's speech engine (or the first server engine that is ready), so any
+ * model can read them. The original is kept like other attachments, except in temporary chats.
+ */
+export class AudioAttachmentAdapter implements AttachmentAdapter {
+  accept = "audio/*,.mp3,.wav,.m4a,.ogg,.oga,.opus,.flac,.weba,.aac";
+  constructor(private readonly temporary: () => boolean) {}
+  async add({ file }: { file: File }) {
+    return { id: generateId(), type: "document" as const, name: file.name, contentType: file.type, file,
+      status: { type: "requires-action" as const, reason: "composer-send" as const } };
+  }
+  async send(attachment: Parameters<AttachmentAdapter["send"]>[0], options?: { signal?: AbortSignal }) {
+    if (attachment.file.size > 25 * 1024 * 1024) throw new Error("Audio files are limited to 25 MB");
+    const name = attachment.name.replaceAll('"', "'");
+    const form = new FormData();
+    form.append("file", attachment.file, attachment.name);
+    form.append("purpose", "file");
+    const transcript = (await api<{ text: string }>("/speech/transcribe", { method: "POST", body: form, signal: options?.signal }).catch((error: Error) => {
+      if (options?.signal?.aborted) throw error;
+      throw new Error(`Could not transcribe ${attachment.name}: ${error.message}`);
+    })).text;
+    let fileId: string | undefined;
+    if (!this.temporary()) {
+      const store = new FormData();
+      store.append("file", attachment.file);
+      fileId = (await api<{ fileId: string }>("/files/store", { method: "POST", body: store, signal: options?.signal })).fileId;
+    }
+    const header = fileId ? `<attachment name="${name}" file_id="${fileId}">` : `<attachment name="${name}">`;
+    return { ...attachment, status: { type: "complete" as const }, content: [
+      { type: "text" as const, text: `${header}\n<transcript>\n${transcript || "(no speech recognized)"}\n</transcript>\n</attachment>` },
     ] };
   }
   async remove() {}

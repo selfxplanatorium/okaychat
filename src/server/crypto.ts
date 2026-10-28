@@ -20,6 +20,22 @@ export function decrypt(value: string): string {
   return Buffer.concat([decipher.update(Buffer.from(data, "base64")), decipher.final()]).toString("utf8");
 }
 
+/** Binary variant for blobs (retained recordings): version byte, IV, tag, ciphertext. */
+export function encryptBytes(plain: Uint8Array): Buffer {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const data = Buffer.concat([cipher.update(plain), cipher.final()]);
+  return Buffer.concat([Buffer.from([1]), iv, cipher.getAuthTag(), data]);
+}
+
+export function decryptBytes(value: Uint8Array): Buffer {
+  const buf = Buffer.from(value);
+  if (buf[0] !== 1 || buf.length < 29) throw new Error("Unsupported ciphertext");
+  const decipher = createDecipheriv("aes-256-gcm", key, buf.subarray(1, 13));
+  decipher.setAuthTag(buf.subarray(13, 29));
+  return Buffer.concat([decipher.update(buf.subarray(29)), decipher.final()]);
+}
+
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16);
   const hash = await scryptAsync(password, salt, 64);

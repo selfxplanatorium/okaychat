@@ -6,8 +6,6 @@ import {
   CompositeAttachmentAdapter,
   useAui,
   useRemoteThreadListRuntime,
-  WebSpeechDictationAdapter,
-  WebSpeechSynthesisAdapter,
   type RemoteThreadListAdapter,
   type ThreadHistoryAdapter,
 } from "@assistant-ui/react";
@@ -20,32 +18,12 @@ import { toolkit, widgetHelperRenders } from "@/components/chat/tool-ui";
 import { WidgetInstructions, widgets } from "@/components/genui/toolkit";
 import { getActiveModel, selectedThreadKey, threadsPath, useData } from "@/state/data";
 import { useChatModel } from "@/state/thread-meta";
-import { StoredImageAttachmentAdapter, DocumentAttachmentAdapter, CodeAttachmentAdapter, BinaryAttachmentAdapter } from "./attachments";
+import { StoredImageAttachmentAdapter, AudioAttachmentAdapter, DocumentAttachmentAdapter, CodeAttachmentAdapter, BinaryAttachmentAdapter } from "./attachments";
 import { chatPrivacyFor, isTemporaryChat, useChatPrivacy, useChatPrivacyStore } from "@/state/chat-privacy";
+import { useVoiceAdapters } from "@/speech/adapters";
 import { chatSearchFor, useChatSearch, useChatSearchStore } from "@/state/chat-search";
 import { dropThread, readThread, writeThread } from "./threadCache";
 import { setThreadSync, useThreadSyncStore } from "@/state/thread-sync";
-
-/** Reads the answer, not its Markdown: code blocks, link targets, and formatting marks are dropped. */
-class SpokenTextAdapter extends WebSpeechSynthesisAdapter {
-  override speak(text: string) {
-    const plain = text
-      .replace(/```[\s\S]*?```/g, " (code omitted) ")
-      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-      .replace(/https?:\/\/\S+/g, "")
-      .replace(/^#+\s*/gm, "")
-      .replace(/[*_`~>|]/g, "")
-      .replace(/\$\$?[^$]*\$\$?/g, " (formula) ");
-    return super.speak(plain);
-  }
-}
-
-// Browser speech: no server or keys. Recognition needs a secure context (HTTPS or localhost) and, in Chrome,
-// sends audio to Google. Both are left out where the browser lacks them, which hides their buttons.
-const voiceAdapters = {
-  ...(WebSpeechDictationAdapter.isSupported() && window.isSecureContext ? { dictation: new WebSpeechDictationAdapter({ language: navigator.language }) } : {}),
-  ...("speechSynthesis" in window ? { speech: new SpokenTextAdapter() } : {}),
-};
 
 /** Thread metadata the sidebar reads from `threadListItem.custom`. */
 export type ThreadCustom = { pinned: boolean; projectId: string | null };
@@ -255,6 +233,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
       new StoredImageAttachmentAdapter(() => chatPrivacyFor(aui.threadListItem.getState()).temporary),
       new DocumentAttachmentAdapter(() => chatPrivacyFor(aui.threadListItem.getState()).temporary),
       new CodeAttachmentAdapter(() => chatPrivacyFor(aui.threadListItem.getState()).temporary),
+      new AudioAttachmentAdapter(() => chatPrivacyFor(aui.threadListItem.getState()).temporary),
       new BinaryAttachmentAdapter(() => chatPrivacyFor(aui.threadListItem.getState()).temporary),
     ]), [aui]);
     return useMemo(() => ({ history, attachments: threadAttachments }), [history, threadAttachments]);
@@ -356,7 +335,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       useChatRuntime({
         // eslint-disable-next-line react-hooks/rules-of-hooks
         transport: useThreadTransport(),
-        adapters: { ...voiceAdapters },
+        // eslint-disable-next-line react-hooks/rules-of-hooks
+        adapters: useVoiceAdapters(),
         onFinish: () => { void useData.getState().refreshStorage().catch(() => {}); },
         // Browser-executed tools (generative UI) and tool approvals resolve locally; this sends them back to finish the turn.
         sendAutomaticallyWhen: (options) => lastAssistantMessageIsCompleteWithToolCalls(options) || lastAssistantMessageIsCompleteWithApprovalResponses(options),

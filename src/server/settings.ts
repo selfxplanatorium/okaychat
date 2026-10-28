@@ -2,6 +2,7 @@ import { imageServiceDef } from "../shared/image-services.js";
 import { DEFAULT_USER_SETTINGS, SIDEBAR_ITEMS, type UserSettings } from "../shared/types.js";
 import { HTTPException } from "hono/http-exception";
 import { db } from "./db.js";
+import { validSpeechSettings } from "./speech/config.js";
 
 export function getSettings(userId: string): UserSettings {
   const row = db.prepare("SELECT json FROM user_settings WHERE user_id = ?").get(userId) as { json: string } | undefined;
@@ -12,6 +13,7 @@ export function getSettings(userId: string): UserSettings {
   }
   if (settings.sidebarItems !== undefined && !validSidebarItems(settings.sidebarItems)) delete settings.sidebarItems;
   if (settings.imageServices !== undefined && !validImageServices(settings.imageServices)) delete settings.imageServices;
+  if (settings.speech !== undefined && !validSpeechSettings(settings.speech)) delete settings.speech;
   return settings;
 }
 
@@ -26,6 +28,9 @@ export function updateSettings(userId: string, patch: Partial<UserSettings>): Us
   }
   if (Object.hasOwn(patch, "imageServices") && !validImageServices(patch.imageServices)) {
     throw new HTTPException(400, { message: "imageServices must map known image services to { enabled, model }" });
+  }
+  if (Object.hasOwn(patch, "speech") && !validSpeechSettings(patch.speech)) {
+    throw new HTTPException(400, { message: "speech has an unknown engine or value" });
   }
   const next = { ...getSettings(userId), ...patch };
   db.prepare(

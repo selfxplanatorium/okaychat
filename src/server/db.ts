@@ -443,6 +443,21 @@ const migrations: Array<string | (() => void)> = [
       for (const row of list) if (!keep.has(row.path)) drop.run(row.id);
     }
   },
+  // Recordings kept for an admin-set retention period (encrypted, purged by speech/retention.ts). Off by default.
+  `
+  CREATE TABLE speech_recordings (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    engine TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    audio_enc BLOB NOT NULL,
+    transcript_enc TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX speech_recordings_created ON speech_recordings(created_at);
+  CREATE INDEX speech_recordings_user ON speech_recordings(user_id);
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

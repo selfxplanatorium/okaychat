@@ -19,6 +19,7 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       // Rewind to just before the inline-file migration (15), undoing the later threads.pinned (16), images.mime (17), threads.branched_from (18), memory v2 (19), and messages.bytes changes.
       for (const table of ["share_groups", "share_users", "share_audiences", "user_group_members", "user_groups"]) db.exec("DROP TABLE " + table);
       db.exec("DROP TABLE turn_context");
+      db.exec("DROP TABLE speech_recordings");
       db.exec("DROP TABLE mcp_server_users");
       db.exec("ALTER TABLE mcp_servers DROP COLUMN shared");
       db.exec("DROP TABLE memory_summaries");

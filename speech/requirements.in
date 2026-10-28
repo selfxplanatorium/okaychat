@@ -1,0 +1,4 @@
+faster-whisper==1.2.1
+piper-tts==1.8.0
+# av 19 dropped the metadata_errors argument faster-whisper 1.2.1 passes to av.open.
+av<19

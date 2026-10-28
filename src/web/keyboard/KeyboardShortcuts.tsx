@@ -110,6 +110,13 @@ export function KeyboardShortcuts() {
   useCommand("chat.retryLast", () => messageAction("message.retry", lastMessage("assistant")), inChat);
   useCommand("chat.editLast", () => messageAction("message.edit", lastMessage("user")), inChat);
   useCommand("chat.copyLast", () => messageAction("message.copy", lastMessage("assistant")), inChat);
+  useCommand("chat.readLast", () => {
+    const last = aui.thread().getState().messages.findLast((m) => m.role === "assistant");
+    if (!last || !aui.thread().getState().capabilities.speech) return false;
+    const message = aui.thread().message({ id: last.id });
+    if (message.getState().speech) message.stopSpeaking();
+    else message.speak();
+  }, inChat);
   useCommand("chat.copyLastCode", () => {
     const target = messages().map((m) => commandTarget("code.copy", m)).filter(Boolean).at(-1);
     if (!target) return false;

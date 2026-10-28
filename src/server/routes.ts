@@ -22,6 +22,8 @@ import { scheduleRoutes } from "./schedules.js";
 import { searchRoutes } from "./search.js";
 import { shareRoutes } from "./shares.js";
 import { skillRoutes } from "./skills.js";
+import { speechSettingsSchema } from "./speech/config.js";
+import { speechRoutes } from "./speech/routes.js";
 import { deleteThreadImages, imageRoutes } from "./tools/image.js";
 import { deleteSandboxWorkspace, sandboxRoutes } from "./tools/sandbox.js";
 import { env } from "./env.js";
@@ -103,6 +105,7 @@ const settingsPatch = z.object({
   maxSteps: z.number().optional(),
   maxSearches: z.number().optional(),
   imageServices: z.record(z.string(), z.unknown()).optional(),
+  speech: speechSettingsSchema.optional(),
   defaultModel: modelRef.nullable().optional(),
   utilityModel: modelRef.nullable().optional(),
   subagentModel: modelRef.nullable().optional(),
@@ -112,6 +115,7 @@ const settingsPatch = z.object({
   systemPrompt: z.string().max(50_000).optional(),
   autoCompactAt: z.number().min(0).max(1).optional(),
   trimBeforeCompact: z.boolean().optional(),
+  onboardingSkipped: z.boolean().optional(),
   webTools: z.boolean().optional(),
   artifacts: z.boolean().optional(),
   generativeUI: z.boolean().optional(),
@@ -386,6 +390,7 @@ const api = new Hono<AppEnv>()
   .route("/", libraryRoutes)
   .route("/", artifactRoutes)
   .route("/", imageRoutes)
+  .route("/", speechRoutes)
   .route("/", sandboxRoutes)
   .route("/", scheduleRoutes)
   .route("/", projectRoutes)

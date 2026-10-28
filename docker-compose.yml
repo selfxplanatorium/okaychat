@@ -19,14 +19,18 @@ services:
       OKAYCHAT_BROWSER_URL: http://browser:8080
       # The app generates the worker's token here on first start; only the worker also mounts this volume.
       OKAYCHAT_BROWSER_TOKEN_FILE: /run/okaychat-browser/token
+      OKAYCHAT_SPEECH_URL: http://speech:8080
+      OKAYCHAT_SPEECH_TOKEN_FILE: /run/okaychat-speech/token
     volumes:
       - okaychat-data:/data
       - okaychat-browser-token:/run/okaychat-browser
-    networks: [default, sandbox, browser]
+      - okaychat-speech-token:/run/okaychat-speech
+    networks: [default, sandbox, browser, speech]
     depends_on:
       - searxng
       - sandbox
       - browser
+      - speech
 
   # Private metasearch for the web_search tool. No keys, not exposed outside the compose network.
   searxng:
@@ -95,14 +99,44 @@ services:
     mem_limit: 1536m
     cpus: 2
 
+  # Local speech: Piper (read aloud, the default voice) and Whisper (speech to text) on the CPU. Each engine runs
+  # in a child process started on first use and stopped after SPEECH_IDLE_MINUTES, so an idle worker holds about
+  # 50 MB. Models download from Hugging Face on first use into okaychat-speech. Audio and text stay in memory.
+  # No app data or secrets. See docs/implementation/speech.md.
+  speech:
+    build: ./speech
+    image: okaychat-speech:latest
+    restart: unless-stopped
+    environment:
+      SPEECH_TOKEN_FILE: /run/okaychat-speech/token
+      SPEECH_IDLE_MINUTES: ${SPEECH_IDLE_MINUTES:-5}
+    volumes:
+      - okaychat-speech:/models
+      - okaychat-speech-token:/run/okaychat-speech:ro
+    networks: [speech]
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2
+
 networks:
   # The internal network has no route out. Run code could not use it anyway: it has no network interface.
   sandbox:
     internal: true
   # Not internal: the worker's egress proxy reaches public web pages and the artifact CDNs through it.
   browser:
+  # Not internal: the speech worker downloads models from Hugging Face.
+  speech:
 
 volumes:
   okaychat-data:
   okaychat-sandbox:
   okaychat-browser-token:
+  okaychat-speech:
+  okaychat-speech-token:

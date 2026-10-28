@@ -16,6 +16,8 @@ import { env } from "./env.js";
 import { startMemoryWorker } from "./memory-learn.js";
 import { api, mcpOAuthCallback } from "./routes.js";
 import { publicShareRoutes } from "./shares.js";
+import { startRecordingPurge } from "./speech/config.js";
+import { speechToken, speechWorkerConfigured } from "./speech/worker.js";
 
 const app = new Hono();
 app.use("/api/*", logger());
@@ -77,5 +79,8 @@ void warmCatalog().catch(() => {});
 serve({ fetch: app.fetch, port: env.port, hostname: env.host }, (info) => {
   console.log(`okaychat listening on http://${env.host}:${info.port}`);
   startMemoryWorker();
+  startRecordingPurge();
+  // The worker reads this file; writing it at start lets the worker authenticate before the first request.
+  if (speechWorkerConfigured()) speechToken();
   probeRenderer();
 });

@@ -11,6 +11,7 @@ import { api, formatBytes, formatCost } from "@/lib/api";
 import { useData } from "@/state/data";
 import { Checklist, invalidateDirectory, useDirectory } from "./Audience";
 import { ProviderLists, ProviderScopeProvider } from "./ProvidersSettings";
+import { AdminVoiceSettings } from "./AdminVoiceSettings";
 import { SettingsPage, SettingsRow, SettingsSection } from "./SettingsUI";
 
 function NewUserForm({ onDone }: { onDone: () => void }) {
@@ -484,6 +485,7 @@ export function AdminSettings() {
       <Users defaultLimit={defaultLimit} />
       <Groups />
       <SystemPrompts />
+      <AdminVoiceSettings />
       <h2 className="mt-2 text-sm font-medium">Server-wide providers</h2>
       <p className="text-muted-foreground -mt-2 text-xs">
         Shared with everyone unless you limit a key to groups or users. A user's own key for the same provider takes precedence. Usage is still tracked per user.

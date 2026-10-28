@@ -1,5 +1,6 @@
 import type { UserAppearance } from "./appearance.js";
 import type { ImageServiceSettings } from "./image-services.js";
+import type { SpeechSettings } from "./speech.js";
 import type { Spec } from "generative-frame/spec";
 
 // Types shared by server and web. Keep free of runtime imports.
@@ -97,6 +98,8 @@ export interface UserSettings {
   sidebarItems?: SidebarItem[];
   /** Synced appearance; absent until the first device migrates its local preferences. */
   appearance?: UserAppearance;
+  /** The user dismissed the first-run provider screen and explores without a connection. */
+  onboardingSkipped?: boolean;
   defaultModel?: string | null;
   /** Used for titles and compaction summaries. Falls back to the chat model. */
   utilityModel?: string | null;
@@ -125,6 +128,8 @@ export interface UserSettings {
   subagentModel?: string | null;
   /** Image generation services switched off and image models chosen per service. */
   imageServices?: ImageServiceSettings;
+  /** Speech to text and read aloud. */
+  speech?: SpeechSettings;
 }
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
@@ -465,6 +470,7 @@ export type PromptKey =
   | "compaction"
   | "title"
   | "imageRelay"
+  | "speechRealtime"
   | "memory"
   | "memoryExtract"
   | "memorySummary";
