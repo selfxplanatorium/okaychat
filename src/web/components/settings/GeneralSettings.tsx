@@ -1,18 +1,19 @@
 import { useEffect, useState } from "react";
-import { DEFAULT_USER_SETTINGS, SIDEBAR_ITEMS } from "@shared/types";
-import { Select } from "@/components/ui/select";
+import { DEFAULT_USER_SETTINGS, SIDEBAR_ITEMS, type ModelInfo } from "@shared/types";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { useData } from "@/state/data";
+import { ModelSelect } from "../chat/ModelPicker";
 import { ImageServicesSettings } from "./ImageServicesSettings";
 import { SettingsPage, SettingsRow, SettingsSection, SettingsSlider } from "./SettingsUI";
+
+const toolModels = (m: ModelInfo) => m.toolCall;
 
 const SIDEBAR_LABELS = { newChat: "New chat", scheduled: "Scheduled", library: "Library", plugins: "Plugins", projects: "Projects" };
 
 export function GeneralSettings() {
   const settings = useData((s) => s.settings);
-  const models = useData((s) => s.models);
   const update = useData((s) => s.updateSettings);
   const [prompt, setPrompt] = useState(settings?.systemPrompt ?? "");
   const [sandbox, setSandbox] = useState<{ configured: boolean; reachable: boolean; error?: string } | null>(null);
@@ -21,15 +22,6 @@ export function GeneralSettings() {
     api<{ configured: boolean; reachable: boolean; error?: string }>("/sandbox").then(setSandbox, () => setSandbox({ configured: false, reachable: false }));
   }, []);
   if (!settings) return null;
-
-  // The provider id is secondary, so it is the part that gives way when the trigger is narrow.
-  const modelLabel = (m: { name: string; providerId: string }) => (
-    <span className="flex min-w-0 items-baseline">
-      <span className="min-w-0 truncate">{m.name}</span>
-      <span className="text-muted-foreground shrink-0 whitespace-pre">{` · ${m.providerId}`}</span>
-    </span>
-  );
-  const modelOptions = models.map((m) => ({ value: m.ref, label: modelLabel(m) }));
 
   return (
     <SettingsPage title="General">
@@ -50,18 +42,18 @@ export function GeneralSettings() {
         <SettingsRow
           label="Default model"
           description="Used for new chats until you pick another in the composer."
-          control={<Select aria-label="Default model" className="w-full md:w-80" value={settings.defaultModel ?? ""} onValueChange={(v) => update({ defaultModel: v || null })} options={[{ value: "", label: "First available model" }, ...modelOptions]} />}
+          control={<ModelSelect aria-label="Default model" className="w-full md:w-80" value={settings.defaultModel ?? ""} onValueChange={(v) => update({ defaultModel: v || null })} choices={[{ value: "", label: "First available model" }]} />}
         />
         <SettingsRow
           label="Utility model"
           description="Writes chat titles and compaction summaries. A fast, cheap model works best."
           control={
-            <Select
+            <ModelSelect
               className="w-full md:w-80"
               aria-label="Utility model"
               value={settings.utilityModel ?? ""}
               onValueChange={(v) => update({ utilityModel: v || null })}
-              options={[{ value: "", label: "Same as chat model" }, ...modelOptions]}
+              choices={[{ value: "", label: "Same as chat model" }]}
             />
           }
         />
@@ -130,12 +122,13 @@ export function GeneralSettings() {
               label="Sub-agent model"
               description="Default for delegated tasks. The utility model and the chat model are offered too."
               control={
-                <Select
+                <ModelSelect
                   className="w-full md:w-80"
                   aria-label="Sub-agent model"
                   value={settings.subagentModel ?? ""}
                   onValueChange={(v) => update({ subagentModel: v || null })}
-                  options={[{ value: "", label: "Same as utility model" }, { value: "chat", label: "Same as chat model" }, ...models.filter((m) => m.toolCall).map((m) => ({ value: m.ref, label: modelLabel(m) }))]}
+                  choices={[{ value: "", label: "Same as utility model" }, { value: "chat", label: "Same as chat model" }]}
+                  filter={toolModels}
                 />
               }
             />

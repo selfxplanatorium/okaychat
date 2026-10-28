@@ -17,6 +17,88 @@
   transition-timing-function: var(--ease-in-quart);
 }
 
+/*
+ * Floating and docked (Appearance > Sidebar, html[data-sidebar]) are two
+ * resting states of one surface, so switching morphs it: the inset, corners,
+ * fill, and shadow travel together on the drawer curve, and the panel settles
+ * into the window edge or lifts off it. Both shadow lists have the same shape
+ * (inset, outset, outset, inset) so every layer interpolates instead of
+ * snapping; the last one is the docked hairline. Desktop only: the phone
+ * drawer is always edge to edge.
+ */
+@media (width >= 48rem) {
+  .sidebar-surface {
+    --sidebar-morph: calc(var(--panel-animation-duration, 240ms) * 2.25);
+    margin: 0.5rem;
+    width: calc(var(--sidebar-width, 18rem) - 1rem);
+    height: calc(100% - 1rem);
+    border-radius: 1rem;
+    background-color: color-mix(in srgb, var(--sidebar) min(100%, calc(var(--glass-opacity) + 25%)), transparent);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+    box-shadow:
+      var(--depth-highlight),
+      0 0 0 1px var(--depth-line),
+      0 10px 30px -18px color-mix(in srgb, var(--depth-shadow-tint) 35%, transparent),
+      inset -1px 0 0 transparent;
+    transition:
+      opacity var(--panel-animation-duration, 240ms) var(--ease-drawer),
+      transform var(--panel-animation-duration, 240ms) var(--ease-drawer),
+      margin var(--sidebar-morph) var(--ease-drawer),
+      width var(--sidebar-morph) var(--ease-drawer),
+      height var(--sidebar-morph) var(--ease-drawer),
+      border-radius var(--sidebar-morph) var(--ease-drawer),
+      background-color var(--sidebar-morph) var(--ease-drawer),
+      box-shadow var(--sidebar-morph) var(--ease-drawer);
+  }
+  html[data-sidebar="docked"] .sidebar-surface {
+    margin: 0;
+    width: var(--sidebar-width, 18rem);
+    height: 100%;
+    border-radius: 0;
+    background-color: var(--sidebar);
+    box-shadow:
+      inset 0 1px 0 transparent,
+      0 0 0 0 transparent,
+      0 10px 30px -18px transparent,
+      inset -1px 0 0 var(--sidebar-border);
+  }
+}
+/* The edge follows the pointer exactly while resizing. */
+html[data-sidebar-resizing] :is(.shell-sidebar, .sidebar-surface) {
+  transition: none;
+}
+
+/*
+ * Chat and settings share the sidebar surface. Settings sits one level deeper,
+ * so it pushes in from the right while the chat list recedes a shorter
+ * distance to the left, and Back reverses both. The two layers move together
+ * on one curve; the leaving layer fades early and the arriving one fades in
+ * slightly late, so their text never overlaps at full strength.
+ */
+.sidebar-layer {
+  --sidebar-push: calc(var(--panel-animation-duration, 240ms) * 2);
+  transition:
+    transform var(--sidebar-push) var(--ease-drawer),
+    opacity calc(var(--sidebar-push) * 0.7) var(--ease-out-quart) calc(var(--sidebar-push) * 0.15),
+    visibility 0s;
+}
+.sidebar-layer[data-active="false"] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    transform var(--sidebar-push) var(--ease-drawer),
+    opacity calc(var(--sidebar-push) * 0.4) var(--ease-out-quart),
+    visibility 0s linear var(--sidebar-push);
+}
+.sidebar-layer[data-layer="chat"][data-active="false"] {
+  transform: translateX(-24px);
+}
+.sidebar-layer[data-layer="settings"][data-active="false"] {
+  transform: translateX(48px);
+}
+
 /* Mobile backdrop stays mounted so it can fade out instead of disappearing. */
 .shell-scrim {
   transition: opacity var(--panel-animation-duration, 240ms) var(--ease-drawer);
@@ -35,6 +117,13 @@
  */
 .shell-route-in {
   animation: rise-in var(--motion-base) var(--ease-out-expo);
+}
+/* Entering or leaving settings, the page moves the same way as the sidebar layers. */
+.shell-route-in[data-direction="forward"] {
+  animation: slide-in-right calc(var(--panel-animation-duration, 240ms) * 2) var(--ease-drawer);
+}
+.shell-route-in[data-direction="back"] {
+  animation: slide-in-left calc(var(--panel-animation-duration, 240ms) * 2) var(--ease-drawer);
 }
 
 /* The floating chat header waits for the sidebar to mostly collapse first. */

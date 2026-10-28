@@ -3,14 +3,13 @@ import { useRef, useState, type CSSProperties } from "react";
 import type { Project } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { api, formatTokens } from "@/lib/api";
 import { useData } from "@/state/data";
+import { ModelSelect } from "../chat/ModelPicker";
 import { SettingsPage, SettingsSection } from "./SettingsUI";
 
 function ProjectForm({ initial, onDone }: { initial?: Project; onDone: () => void }) {
-  const models = useData((s) => s.models);
   const refresh = useData((s) => s.refreshProjects);
   const [name, setName] = useState(initial?.name ?? "");
   const [instructions, setInstructions] = useState(initial?.instructions ?? "");
@@ -49,11 +48,11 @@ function ProjectForm({ initial, onDone }: { initial?: Project; onDone: () => voi
         onChange={(e) => setInstructions(e.target.value)}
         className="min-h-28"
       />
-      <Select
+      <ModelSelect
         aria-label="Default model"
         value={defaultModel ?? ""}
         onValueChange={(value) => setDefaultModel(value || null)}
-        options={[{ value: "", label: "Use account default model" }, ...models.map((m) => ({ value: m.ref, label: `${m.name} · ${m.providerId}` }))]}
+        choices={[{ value: "", label: "Use account default model" }]}
       />
       {error && <p className="text-error settings-error text-xs">{error}</p>}
       <div className="flex justify-end gap-2">

@@ -8,6 +8,7 @@ import { useData } from "@/state/data";
 /** First run: OpenCode Go is the recommended connection, everything else is one click away. */
 export function Onboarding() {
   const go = useData((s) => s.providers.find((p) => p.id === "opencode-go"));
+  const updateSettings = useData((s) => s.updateSettings);
   return (
     <div className="grid min-h-full place-items-center p-6">
       <div className="animate-rise-in-lg w-full max-w-md">
@@ -40,6 +41,14 @@ export function Onboarding() {
             </Link>
             .
           </div>
+          <button
+            type="button"
+            onClick={() => void updateSettings({ onboardingSkipped: true }).catch(() => {})}
+            className="text-muted-foreground hover:text-foreground stagger animate-rise-in self-start text-sm transition-colors duration-(--motion-fast) ease-out-quart hover:underline"
+            style={{ "--i": 5 } as CSSProperties}
+          >
+            Skip for now and look around
+          </button>
         </div>
       </div>
     </div>

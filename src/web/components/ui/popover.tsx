@@ -11,13 +11,14 @@ function PopoverContent({
   side = "bottom",
   align = "start",
   sideOffset = 6,
+  anchor,
   children,
   ...props
-}: PopoverPrimitive.Popup.Props & Pick<PopoverPrimitive.Positioner.Props, "side" | "align" | "sideOffset">) {
+}: PopoverPrimitive.Popup.Props & Pick<PopoverPrimitive.Positioner.Props, "side" | "align" | "sideOffset" | "anchor">) {
   const smoothHeight = useSmoothHeight();
   return (
     <PopoverPrimitive.Portal>
-      <PopoverPrimitive.Positioner data-slot="popover-positioner" side={side} align={align} sideOffset={sideOffset} className="isolate z-50">
+      <PopoverPrimitive.Positioner data-slot="popover-positioner" side={side} align={align} sideOffset={sideOffset} anchor={anchor} className="isolate z-50">
         <PopoverPrimitive.Popup
           ref={smoothHeight}
           className={cn(

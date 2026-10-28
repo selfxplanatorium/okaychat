@@ -75,11 +75,22 @@ export function Shell({ userId }: { userId: string }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const load = useData((s) => s.load);
   const connected = useData((s) => s.providers.some((p) => p.connected));
+  const onboardingSkipped = useData((s) => s.settings?.onboardingSkipped === true);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
   const [location] = useLocation();
   const inSettings = location.startsWith("/settings");
   const inNavigation = ["/scheduled", "/library", "/plugins", "/projects"].includes(location);
   const route = inSettings ? "settings" : inNavigation ? location : "chat";
+  // The settings layer stays mounted in the sidebar, so it keeps its last section while the chat is shown.
+  const lastSection = useRef<string | undefined>(undefined);
+  if (inSettings) lastSection.current = location.split("/")[2] || undefined;
+  // Direction of the last move into or out of settings, so the page slides with the sidebar layers.
+  const lastRoute = useRef(route);
+  const direction = useRef<"forward" | "back" | undefined>(undefined);
+  if (lastRoute.current !== route) {
+    direction.current = route === "settings" ? "forward" : lastRoute.current === "settings" ? "back" : undefined;
+    lastRoute.current = route;
+  }
 
   // Mobile drawer is an overlay: close it after navigation so the page underneath is visible.
   const closeOnMobile = useCallback(() => {
@@ -134,7 +145,7 @@ export function Shell({ userId }: { userId: string }) {
       </div>
     );
   if (!loaded) return <AppLoading />;
-  if (!connected && !inSettings) return <Onboarding />;
+  if (!connected && !onboardingSkipped && !inSettings) return <Onboarding />;
 
   return (
     <RuntimeProvider>
@@ -143,8 +154,8 @@ export function Shell({ userId }: { userId: string }) {
           composer's blur misplaced while the thread scrolls on mobile Chrome. */}
       <div className="animate-[fade-in_var(--motion-base)_var(--ease-out-quart)] bg-background safe-top safe-x flex h-full">
         <ThreadSwitchWatcher onSwitch={closeOnMobile} />
-        {/* Settings has its own navigation rail. sidebarOpen is kept here, so the sidebar returns in the same state. */}
-        {!inSettings && <Sidebar open={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} />}
+        {/* Settings swaps the sidebar's contents for its rail. sidebarOpen is kept here, so the chat sidebar returns in the same state. */}
+        <Sidebar open={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} settings={inSettings} section={lastSection.current} />
         {/* Always mounted so the backdrop can fade out; pointer events are off while closed. */}
         {!inSettings && (
           <div
@@ -156,7 +167,7 @@ export function Shell({ userId }: { userId: string }) {
         )}
         <div className="relative flex min-w-0 flex-1">
           {/* Keyed by the top-level route: chat and settings crossfade, sections inside settings do not. */}
-          <div key={route} className="shell-route-in relative flex min-w-0 flex-1 flex-col">
+          <div key={route} data-direction={direction.current} className="shell-route-in relative flex min-w-0 flex-1 flex-col">
             <Switch>
               <Route path="/settings/:section">
                 {(p) => (

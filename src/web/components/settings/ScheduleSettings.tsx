@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useActiveModel, useData } from "@/state/data";
+import { ModelSelect } from "../chat/ModelPicker";
 import { SettingsPage, SettingsSection } from "./SettingsUI";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -47,7 +48,6 @@ const targetOf = (s: Schedule): Target => (s.threadMode === "new" ? "new" : s.th
 const when = (t: number | null) => (t ? new Date(t).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
 
 function ScheduleForm({ initial, initialThreadId, onDone }: { initial?: Schedule; initialThreadId?: string; onDone: () => void }) {
-  const models = useData((s) => s.models);
   const projects = useData((s) => s.projects);
   const active = useActiveModel();
   const [title, setTitle] = useState(initial?.title ?? "");
@@ -107,7 +107,7 @@ function ScheduleForm({ initial, initialThreadId, onDone }: { initial?: Schedule
     >
       <Input placeholder="Name (e.g. Morning news brief)" value={title} onChange={(e) => setTitle(e.target.value)} required autoFocus />
       <Textarea placeholder="Prompt, e.g. Search the web for today's top AI news and give me five bullet points with links." value={prompt} onChange={(e) => setPrompt(e.target.value)} className="min-h-24" required />
-      <Select aria-label="Model" value={modelRef} onValueChange={setModelRef} options={models.map((m) => ({ value: m.ref, label: `${m.name} · ${m.providerId}` }))} />
+      <ModelSelect aria-label="Model" value={modelRef} onValueChange={setModelRef} />
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <Select
           aria-label="Repeat"

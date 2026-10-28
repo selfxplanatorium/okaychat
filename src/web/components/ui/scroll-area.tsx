@@ -8,12 +8,13 @@ import { cn } from "@/lib/utils";
 function ScrollArea({
   className,
   viewportClassName,
+  viewportProps,
   children,
   ...props
-}: ScrollAreaPrimitive.Root.Props & { viewportClassName?: string }) {
+}: ScrollAreaPrimitive.Root.Props & { viewportClassName?: string; viewportProps?: Omit<ScrollAreaPrimitive.Viewport.Props, "className"> }) {
   return (
     <ScrollAreaPrimitive.Root className={cn("flex min-h-0 flex-col", className)} {...props}>
-      <ScrollAreaPrimitive.Viewport className={cn("min-h-0 flex-1 overscroll-contain outline-none", viewportClassName)}>
+      <ScrollAreaPrimitive.Viewport {...viewportProps} className={cn("min-h-0 flex-1 overscroll-contain outline-none", viewportClassName)}>
         {children}
       </ScrollAreaPrimitive.Viewport>
       <ScrollAreaPrimitive.Scrollbar
