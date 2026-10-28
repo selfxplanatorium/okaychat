@@ -199,10 +199,12 @@ const threadListAdapter: RemoteThreadListAdapter = {
                       if (aui.thread.getState().isRunning) return afterRun();
                       const shown = shownIds();
                       const ids = serverIds.get(remoteId);
-                      if (shown.every((id) => ids?.has(id)) && !(shown.length === rows.length && rows.every((row, i) => row.id === shown[i]))) {
+                      // A message on screen that the server lacks (its write failed) must not become a parent.
+                      const complete = shown.every((id) => ids?.has(id));
+                      if (complete && !(shown.length === rows.length && rows.every((row, i) => row.id === shown[i]))) {
                         aui.thread.importExternalState(decode(rows));
                       }
-                      setThreadSync(remoteId, null);
+                      setThreadSync(remoteId, complete ? null : "stale");
                     },
                     () => setThreadSync(remoteId, "stale"),
                   );
