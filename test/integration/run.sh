@@ -224,8 +224,9 @@ docker run -d --name okaychat-it-dev-browser -p 127.0.0.1:18792:8080 -e BROWSER_
   --pids-limit 512 --memory 1536m --cpus 2 "okaychat-browser:$IT_TAG" >/dev/null
 sleep 10
 check env OKAYCHAT_IT_SANDBOX_URL=http://127.0.0.1:18790 OKAYCHAT_IT_SANDBOX_TOKEN="$(sed -n 's/^OKAYCHAT_SANDBOX_TOKEN=//p' "$SHARE/it.env")" \
+  OKAYCHAT_IT_SANDBOX_CONTAINER=okaychat-it-dev-sandbox \
   OKAYCHAT_IT_BROWSER_URL=http://127.0.0.1:18792 OKAYCHAT_IT_BROWSER_TOKEN_FILE="$SHARE/browser-token" \
-  node --test --import tsx src/server/sandbox-flow.itest.ts
+  node --test --import tsx src/server/sandbox-flow.itest.ts src/server/sandbox-isolation.itest.ts
 
 step "resources (cgroup peak memory since start, current usage)"
 for service in okaychat sandbox browser; do

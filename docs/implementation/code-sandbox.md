@@ -156,6 +156,46 @@ runs `src/server/sandbox-flow.itest.ts` against the dev-topology containers: out
 does not store a second copy, ownership and quota refusals that store nothing, a 60 MB output reported as too
 large while the small one is kept, turn pruning, and Stop cancelling a run.
 
+### Controlled cross-chat isolation
+
+`src/server/sandbox-isolation.itest.ts` creates two distinct stored chats under one fixture account in a
+temporary app database. Both jobs go through the app's real `runCode()` and hashed workspace routing to a
+real runner container. `run.sh` includes it; to run only this test with an isolated container:
+
+```sh
+test/integration/cross-chat.sh
+# Reuse an already-built okaychat-sandbox:it image:
+test/integration/cross-chat.sh --no-build
+```
+
+The focused script uses a random container name, token, published loopback port, and disposable tmpfs workspace;
+it removes its container on exit. It leaves the dev sandbox and real accounts alone. No model/provider is needed.
+When invoking the Node test directly, set `OKAYCHAT_IT_SANDBOX_URL`, `OKAYCHAT_IT_SANDBOX_TOKEN`, and
+`OKAYCHAT_IT_SANDBOX_CONTAINER` to the same test runner; the controller needs local Docker access.
+
+Chat A creates a random 32-byte canary (0600) in its private directory (0700), keeps its file descriptor and a
+memory buffer open, and serves a filesystem Unix socket. It installs and locally tests a harmless SIGUSR1
+handler. The controller exchanges nonce-tagged, atomically replaced control/status files through `docker exec`,
+targeting only these two known workspaces. This avoids both streamed output and runner file APIs, which wait
+behind an active run's workspace lock. Neither job prints output; private fixtures never become stored outputs.
+
+Each B attempt has a fresh A checkpoint before and after it: 17 local controls verify the canary, socket
+handshake (also through A's own `/proc/<pid>/root`), environment fixture, exact memory buffer, descriptors,
+permissions, and signal handler. B checks only A's supplied PID and start time before and after each operation;
+there is no process scan. Fourteen separate subtests cover opening/listing A's workspace, direct and proc-root
+canary reads, direct and proc-root socket connections, environment, `/proc/<pid>/mem`, `process_vm_readv`,
+descriptor listing/readlink/read, and signal 0/SIGUSR1. No fixture permission is loosened.
+
+On 2026-10-26 (Linux amd64), all 14 passed. Direct workspace open/list, canary read, and socket connect returned
+`ENOENT` while A independently proved the targets existed: evidence of mount isolation, not a deleted target.
+The proc-root paths, environment, proc memory, and descriptor probes returned `EACCES`; `process_vm_readv` and
+both signal probes returned `EPERM`. Missing proc targets, PID reuse, connection refusal, failed local controls,
+and early job exits fail the test rather than counting as isolation. After the probes the controller releases both
+jobs; its `finally` path also cancels both workspaces, awaits both jobs, deletes both workspaces, and verifies the
+original fixture processes and workspace directories are gone. The shell removes the test container even if the
+Node test fails. This is evidence for these access paths on the tested host; PIDs and command lines remain visible
+as described above.
+
 ## Retention
 
 The sandbox is scratch space, never the source of truth:
