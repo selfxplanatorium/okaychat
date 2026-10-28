@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { create } from "zustand";
-import { appearanceSchema, type UserAppearance } from "@shared/appearance";
+import { appearanceSchema, parseAppearancePatch, type UserAppearance } from "@shared/appearance";
 import { api, takePrefetched } from "@/lib/api";
 import { subscribeToCustomThemes } from "@/theme/palette";
 import { appearanceSnapshot, DEFAULT_APPEARANCE, restoreAppearance, useAppearance } from "./appearance";
@@ -31,7 +31,9 @@ export function useSyncAppearance(userId: string | undefined): boolean {
       value = cached ? appearanceSchema.parse(cached.value) : !owner || owner === userId
         ? appearanceSnapshot()
         : { ...DEFAULT_APPEARANCE, theme: "", mode: "system", halves: null, customThemes: [] };
-      pending = cached ? appearanceSchema.partial().parse(cached.pending) : {};
+      const patch = cached ? parseAppearancePatch(cached.pending) : { success: true as const, data: {} };
+      if (!patch.success) throw new Error("Invalid cached appearance patch.");
+      pending = patch.data;
       localStorage.setItem(OWNER_KEY, userId);
     } catch {
       value = { ...DEFAULT_APPEARANCE, theme: "", mode: "system", halves: null, customThemes: [] };

@@ -521,7 +521,7 @@ function TypographySection() {
     >
       <FontRow
         label="Interface font"
-        description="Everything outside code blocks."
+        description="Everything outside code blocks. The size applies to this device only."
         family={s.fontFamilySans}
         defaultLabel={DEFAULT_SANS_FONT_LABEL}
         size={s.fontSizeInterface}
@@ -665,6 +665,18 @@ export function AppearanceSettings() {
                 onValueChange={(chatWidth) => update({ chatWidth })}
               />
             </div>
+          }
+        />
+        <SettingsRow
+          label="Docked sidebar"
+          description="Fill the window edge instead of floating inset with rounded corners. Drag the sidebar's edge to change its width."
+          reset={s.sidebarStyle !== DEFAULT_APPEARANCE.sidebarStyle ? () => reset("sidebarStyle") : null}
+          control={
+            <Switch
+              aria-label="Docked sidebar"
+              checked={s.sidebarStyle === "docked"}
+              onCheckedChange={(checked) => update({ sidebarStyle: checked ? "docked" : "floating" })}
+            />
           }
         />
         <SettingsRow

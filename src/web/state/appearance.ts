@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import type { AppearanceSettings, MotionGroup, UserAppearance } from "@shared/appearance";
+import type { AppearanceSettings, DeviceAppearance, MotionGroup, UserAppearance } from "@shared/appearance";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { applyAppearanceContrast } from "@/theme/contrast";
@@ -40,6 +40,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   panelAnimationDurationMs: DEFAULT_PANEL_ANIMATION_DURATION_MS,
   motionOff: [],
   squareCorners: false,
+  sidebarStyle: "floating",
   chatWidth: DEFAULT_CHAT_WIDTH,
   fontFamilySans: "",
   fontFamilyComposer: "",
@@ -110,10 +111,14 @@ export const useAppearance = create<AppearanceState>()(
   ),
 );
 
+// Per-device settings stay in the local store and never reach the account.
+const DEVICE_KEYS: ReadonlySet<string> = new Set<keyof DeviceAppearance>(["fontSizeInterface"]);
+const SYNCED_KEYS = Object.keys(DEFAULT_APPEARANCE).filter((key) => !DEVICE_KEYS.has(key)) as Array<keyof AppearanceSettings>;
+
 export function appearanceSnapshot(): UserAppearance {
   const s = useAppearance.getState();
   return {
-    ...Object.fromEntries(Object.keys(DEFAULT_APPEARANCE).map((key) => [key, s[key as keyof AppearanceSettings]])) as AppearanceSettings,
+    ...(Object.fromEntries(SYNCED_KEYS.map((key) => [key, s[key]])) as Omit<AppearanceSettings, keyof DeviceAppearance>),
     theme: s.theme,
     mode: s.mode,
     halves: s.halves,
@@ -127,7 +132,9 @@ export function restoreAppearance(value: UserAppearance) {
   if (value.halves) localStorage.setItem(THEME_HALVES_STORAGE_KEY, JSON.stringify(value.halves));
   else localStorage.removeItem(THEME_HALVES_STORAGE_KEY);
   if (JSON.stringify(getCustomThemes()) !== JSON.stringify(value.customThemes)) replaceCustomThemes(value.customThemes);
-  const { customThemes: _themes, ...settings } = value;
+  const { customThemes: _themes, ...rest } = value;
+  // Snapshots stored before the size became per-device still carry it.
+  const settings = Object.fromEntries(Object.entries(rest).filter(([key]) => !DEVICE_KEYS.has(key)));
   useAppearance.setState(settings);
 }
 
@@ -180,6 +187,8 @@ function applySettings(s: AppearanceSettings) {
   if (s.motionOff.length) root.dataset.motionOff = s.motionOff.join(" ");
   else delete root.dataset.motionOff;
   root.dataset.corners = s.squareCorners ? "square" : "round";
+  // shell.css draws both sidebars from this, so a change morphs the panel in place.
+  root.dataset.sidebar = s.sidebarStyle;
 }
 
 /** Mount once at the app root. Keeps the DOM in sync with the store and the OS color scheme. */

@@ -25,8 +25,8 @@ beforeEach(() => db.exec("DELETE FROM user_settings"));
 const appearance: UserAppearance = {
   theme: "test-theme", mode: "dark", halves: { light: "ocean" },
   customThemes: [{ id: "test-theme", label: "Test", appearance: "dark", colors: { canvas: "#112233" }, variants: { light: { canvas: "#eeeeee" } } }],
-  glassOpacity: 80, appearanceContrast: 100, panelAnimationDurationMs: 0, motionOff: [], squareCorners: false, chatWidth: "comfortable",
-  fontFamilySans: "", fontFamilyComposer: "", fontFamilyCode: "", fontSizeInterface: 16, fontSizePrompt: 14, fontSizeCode: 13,
+  glassOpacity: 80, appearanceContrast: 100, panelAnimationDurationMs: 0, motionOff: [], squareCorners: false, sidebarStyle: "floating", chatWidth: "comfortable",
+  fontFamilySans: "", fontFamilyComposer: "", fontFamilyCode: "", fontSizePrompt: 14, fontSizeCode: 13,
   fontSmoothing: true, wordWrap: true, typographyAdvanced: false,
 };
 const request = (method: string, body?: unknown, user = "alice") => app.request("http://app/appearance", {
@@ -51,6 +51,22 @@ test("patches merge changed fields and preserve other settings", async () => {
   updateSettings("alice", { maxSteps: 8 });
   assert.deepEqual(getSettings("alice").appearance, { ...appearance, chatWidth: "wide", fontSizeCode: 15 });
   assert.equal(getSettings("alice").maxSteps, 8);
+});
+
+test("patches leave defaulted fields they do not send", async () => {
+  await request("PUT", { ...appearance, sidebarStyle: "docked", squareCorners: true, motionOff: ["icons"] });
+  await request("PATCH", { chatWidth: "wide" });
+  assert.deepEqual(getSettings("alice").appearance, { ...appearance, sidebarStyle: "docked", squareCorners: true, motionOff: ["icons"], chatWidth: "wide" });
+});
+
+test("the interface size stays on each device", async () => {
+  await request("PUT", { ...appearance, fontSizeInterface: 20 });
+  assert.deepEqual(await (await request("GET")).json(), appearance);
+  // Snapshots saved before the size became per-device still carry it.
+  updateSettings("alice", { appearance: { ...appearance, fontSizeInterface: 20 } as UserAppearance });
+  assert.deepEqual(await (await request("GET")).json(), appearance);
+  await request("PATCH", { fontSizeInterface: 12, chatWidth: "wide" });
+  assert.deepEqual(getSettings("alice").appearance, { ...appearance, chatWidth: "wide" });
 });
 
 test("invalid appearance values cannot corrupt saved preferences", async () => {

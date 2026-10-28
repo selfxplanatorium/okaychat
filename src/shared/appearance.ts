@@ -26,11 +26,11 @@ export const appearanceSchema = z.object({
   // Defaults keep snapshots and caches written before these fields valid.
   motionOff: z.array(z.enum(MOTION_GROUPS)).max(MOTION_GROUPS.length).default([]),
   squareCorners: z.boolean().default(false),
+  sidebarStyle: z.enum(["floating", "docked"]).default("floating"),
   chatWidth: z.enum(["comfortable", "wide", "full"]),
   fontFamilySans: z.string().max(200),
   fontFamilyComposer: z.string().max(200),
   fontFamilyCode: z.string().max(200),
-  fontSizeInterface: z.number().int().min(12).max(20),
   fontSizePrompt: z.number().int().min(12).max(20),
   fontSizeCode: z.number().int().min(10).max(18),
   fontSmoothing: z.boolean(),
@@ -39,4 +39,20 @@ export const appearanceSchema = z.object({
 });
 
 export type UserAppearance = z.infer<typeof appearanceSchema>;
-export type AppearanceSettings = Omit<UserAppearance, "theme" | "mode" | "halves" | "customThemes">;
+
+/**
+ * Parses a partial update. Zod 4 still fills `.default()` fields under `.partial()`, which would reset
+ * fields the sender never touched (the sidebar style flipped back to floating on every edit), so only sent keys survive.
+ */
+export function parseAppearancePatch(input: unknown): { success: true; data: Partial<UserAppearance> } | { success: false } {
+  const parsed = appearanceSchema.partial().safeParse(input);
+  if (!parsed.success || typeof input !== "object" || input === null) return { success: false };
+  const data = Object.fromEntries(Object.entries(parsed.data).filter(([key]) => key in input)) as Partial<UserAppearance>;
+  return { success: true, data };
+}
+/**
+ * Never synced: the interface size scales the whole UI, so a size that suits a desktop is too big on a phone.
+ * Kept only in the device's local appearance store.
+ */
+export type DeviceAppearance = { fontSizeInterface: number };
+export type AppearanceSettings = Omit<UserAppearance, "theme" | "mode" | "halves" | "customThemes"> & DeviceAppearance;
