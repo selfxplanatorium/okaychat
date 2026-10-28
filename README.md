@@ -80,7 +80,7 @@ cp .env.example .env
 npx playwright-core install chromium
 ```
 
-Set `OKAYCHAT_SECRET` in `.env`, then run `npm run dev`. The API listens on `127.0.0.1:8787`, and the local browser worker on `127.0.0.1:8791`. Vite listens on the machine's Tailscale address at port 5173; use its MagicDNS URL. `OKAYCHAT_DEV_HOST` can select another tailnet address. The local worker uses application-level egress checks; use `scripts/dev-browser.sh` for the container's enforced boundaries.
+Set `OKAYCHAT_SECRET` in `.env`, then run `npm run dev`. The API listens on `127.0.0.1:8787`, and the local browser worker on `127.0.0.1:8791`. The dev command configures Tailscale Serve on HTTPS port 5173, proxying to Vite on `127.0.0.1:5173`; use `https://<host>.<tailnet>.ts.net:5173`. Tailscale must be running with HTTPS/Serve enabled and permission for your user to configure Serve. The local worker uses application-level egress checks; use `scripts/dev-browser.sh` for the container's enforced boundaries.
 
 Web search and code execution need their sidecars in development. `.env.example` lists the variables; [AGENTS.md](AGENTS.md#commands) includes the setup commands.
 

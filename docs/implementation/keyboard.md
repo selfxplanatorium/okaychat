@@ -52,7 +52,7 @@ A command runs its newest `useCommand()` handler; a handler may return `false` t
 
 ## Messages
 
-Message roots are `tabIndex=-1` focus stops with `data-message-root`. assistant-ui mounts an older message's action bar only on hover (`autohide="not-last"`, driven by `message.isHovering`), so `useMessageFocus()` sets `isHovering` on focus and holds it while focus stays inside, also when the pointer leaves. Action buttons carry `message.copy`, `message.edit`, `message.retry`, `message.branch`, `message.more`. "Jump to the last message" (`Alt+Shift+J`) enters the list, Escape returns to the message box.
+Message roots are `tabIndex=-1` focus stops with `data-message-root`. assistant-ui mounts an older message's action bar only on hover (`autohide="not-last"`, driven by `message.isHovering`), so `useMessageFocus()` sets `isHovering` on focus and holds it while focus stays inside, also when the pointer leaves. Action buttons carry `message.copy`, `message.edit`, `message.retry`, `message.branch`, `message.readAloud` (when read aloud is on), `message.more`. `chat.readLast` (Alt+Shift+V) reads the last answer aloud or stops it. "Jump to the last message" (`Alt+Shift+J`) enters the list, Escape returns to the message box.
 
 Chat-level actions on the last message (retry, edit, copy, copy code) click those same buttons inside the last message of that role. Copy and retry click without moving focus, so the message box keeps the cursor.
 

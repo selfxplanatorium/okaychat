@@ -10,6 +10,8 @@ The runtime uses `@assistant-ui/react` and `@assistant-ui/ai-sdk`. The maintaine
 
 `useAuiState` selectors must return primitives or stable references to avoid repeated rendering. Tool cards live in `components/chat/tool-ui.tsx`; generative UI uses the browser toolkit documented in `generative-ui.md`.
 
+The context meter uses the latest assistant reply's reported context size. After trimming, it immediately uses `compaction.trim.tokensAfter` until an assistant message after `trim.lastMessageId` reports a new count. Both trim boundaries must be on the current branch and the trim must extend beyond any summary boundary; otherwise its estimate does not apply. Refreshing thread metadata after a manual trim or a completed run updates the meter without rewriting historical message usage.
+
 ## Message cache
 
 `runtime/threadCache.ts` keeps a read-only IndexedDB copy (`okaychat-thread-cache`, one store keyed by thread id, a `savedAt` index) of the raw `GET /threads/:id/messages` rows, never decoded messages. This makes reloads, PWA cold starts, and `/?thread=` deep links paint at once. Switching between chats inside a session is already instant: assistant-ui keeps every loaded thread in memory and never calls `history.load()` for it again, so the cache does not affect it.
@@ -80,6 +82,8 @@ Settings menus contain explicit fallback items with the empty-string UI value: F
 
 Reasoning effort `none` renders as **Instant** with a lightning icon. On coarse pointers the desktop effort and search controls are hidden; the attachment plus button becomes a menu holding Reasoning (submenu), Search, and Attach. The desktop plus button still opens the file picker directly.
 
+Every chat-model choice uses `ModelList` (`components/chat/ModelPicker.tsx`): search, favorites, then providers with OpenCode Go first. The composer shows it full size with context and price; settings, projects, and schedules use `ModelSelect` (select-style trigger, compact rows, optional non-model choices like "Same as chat model"); the branch menu's "Switch model…" opens the compact list anchored to the branch button.
+
 The sub-agent menu also has a separate Same as chat model option, persisted as the reserved `subagentModel: "chat"` value (model refs contain a provider/model separator). It makes the chat model the preferred delegate even when a separate utility model is configured. Following the utility model uses null and inherits its normal chat-model fallback. `subagentModelRefs()` resolves this choice before filtering for tool-capable models.
 
 
@@ -91,6 +95,8 @@ Scheduled (`/scheduled`) and Projects (`/projects`) reuse their settings managem
 
 General settings stores `sidebarItems` per account through the validated settings API. Missing or invalid legacy values show all shortcuts; an empty array hides all five. Search, the account menu, settings, and the chat/project history filter remain accessible. Visibility controls shortcuts, not route access or tool availability.
 
+The sidebar is one panel for chat and settings (`layout/Sidebar.tsx`). Its surface holds two layers: the chat list and the settings rail (`settings/SettingsNav.tsx`, kept light because the settings pages load lazily). Entering settings pushes the rail in from the right while the chat list recedes left, and the page slides the same way (`data-direction` on the route wrapper); Back reverses both. Settings forces the panel open on desktop and hides it on phones, which use the settings index. Appearance > Sidebar (`sidebarStyle` in the appearance preferences, `html[data-sidebar]`) picks `floating` (default, an inset glass panel) or `docked` (full height against the window edge with a hairline). Switching morphs the one surface: margin, size, corners, fill, and shadow transition together, and both shadow lists keep the same shape so each layer interpolates. Motion lives in `motion/shell.css` and scales with the panel animation duration. The width is per device (`layout/sidebar-width.tsx`, `localStorage` `okaychat:sidebar-width`, `--sidebar-width` on `<html>`, default 288 px, 220 to 520 px and at most half the window); the separator on the right edge resizes by drag or arrow keys, double-click restores the default, and transitions are off while dragging.
+
 ## Turn scroll inset
 
 `thread.aui.tsx` keeps `turnAnchor="top"`. On desktop, user message roots have `3em` of top padding and a matching negative top margin. This moves the measured anchor above the bubble without changing spacing between messages. The built-in reserve stops short turns with the bubble `3em` below the scroll viewport's top (48 px at the default font size), including when manually scrolling to the end. Nonempty threads use the same initial top padding. Long assistant replies still scroll to their natural end.
@@ -101,6 +107,14 @@ Attachment adapters live in `runtime/attachments.ts`: images, native/extracted d
 then a binary fallback. Every non-temporary send persists original bytes and propagates quota errors.
 Image/PDF message data URLs remain unchanged; file_id headers link the durable originals. Saving
 temporary messages into normal history also stores inline files, without changing message parts.
+
+The AI SDK converter lifts only `file` parts into message attachments; `<attachment>` text parts stay in the
+user message content. `runtime/message-attachments.ts` separates them for display: the bubble renders only typed
+text (Markdown, single newlines kept as line breaks), text attachments become file tiles that open their text,
+and the user Copy button copies typed text only. The edit composer rebuilds attachments from those parts
+(`EditComposerRestore`), rejoining an image/PDF header to its file, so edits resend them unchanged. Pasting
+2,000+ characters or 30+ lines attaches `Pasted text.txt` with a "Paste inline" undo
+(`components/chat/long-paste.tsx`); Ctrl/⌘+Shift+V always pastes inline.
 
 ## Chat context menu API
 

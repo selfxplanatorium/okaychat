@@ -24,7 +24,7 @@ Status as of 2026-10-26. Update this file when a feature ships or a plan changes
 | Projects | Sidebar → Projects and the project switcher: per-project instructions, pinned files (PDF/DOCX/text, 300k chars total), and default model. New chats join the active project | Project text lives in the second, per-chat system message, so the shared account prefix stays stable |
 | Search | Global spotlight (Ctrl/⌘+K) matches titles and message text through SQLite FTS5, independent of the active project. Selecting a result clears the project filter | `messages_fts` is kept in sync by triggers on `messages`, so every writer is indexed |
 | Sharing | Share button on a chat creates a read-only public link (`/share/<token>`), revocable. Live: shows the current branch. Exposes text, generated images, and artifacts (rendered); hides reasoning, tool inputs, usage, and costs | Public endpoints under `/api/public/shares`, outside the auth middleware |
-| Voice | Mic button (browser speech recognition, in the browser's language) and "Read aloud" on answers (browser speech synthesis, Markdown and code stripped) | No server or keys. Dictation needs HTTPS or localhost, so it is hidden over plain-HTTP origins such as the tailnet dev URL; use `tailscale serve` for HTTPS. Chrome sends dictation audio to Google |
+| Voice | Read aloud (Piper on the server by default, browser, OpenAI, OpenAI Realtime, Azure, ElevenLabs, Mistral, OpenAI-compatible) and speech to text (browser, Whisper on the server, OpenAI, Groq, Mistral, Azure, Deepgram, ElevenLabs, OpenAI-compatible), audio-file transcription, auto-send and auto-play | Read aloud is off until chosen. Recordings are not stored unless an admin sets retention. The microphone needs HTTPS; over plain HTTP the button transcribes a picked or phone-recorded file. See `docs/implementation/speech.md` |
 | Caching | Stable prompt prefix, Anthropic breakpoints, OpenAI `prompt_cache_key`, OpenCode session affinity headers | See `docs/implementation/prompt-caching.md` |
 | Usage | Per message (tokens, cache %, cost, time), per thread, dashboard by day/model/purpose, OpenCode Go 5 h/week/month spend | Cost uses models.dev prices incl. context tiers |
 | Context | Composer ring with fill %, auto-compact threshold marker, thread cost | |
@@ -53,6 +53,8 @@ Status as of 2026-10-26. Update this file when a feature ships or a plan changes
 No planned core items remain. New work can be tracked as a subsequent pass.
 
 ## Known gaps
+
+- Voice calls (continuous spoken conversation with interruption, and Realtime speech-to-speech) are not built yet. Read aloud and dictation are.
 
 - Stream replay is kept in server memory for 15 minutes after the last update. Reload recovery works; pending generations do not survive a server restart.
 
