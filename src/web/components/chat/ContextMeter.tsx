@@ -38,8 +38,8 @@ function Ring({ fraction }: { fraction: number }) {
 /** Context window fill, thread cost, cache hits, and manual compaction. */
 export function ContextMeter() {
   const privacy = useChatPrivacy();
-  const usage = useContextUsage();
   const meta = useThreadMeta();
+  const usage = useContextUsage(meta?.compaction ?? null);
   const model = useChatModel();
   const threadId = useCurrentThreadId();
   const configuredAutoCompactAt = useData((s) => s.settings?.autoCompactAt ?? 0.8);

@@ -1,11 +1,13 @@
 import { useAuiState } from "@assistant-ui/react";
 import { useEffect } from "react";
 import { create } from "zustand";
-import type { AssistantMetadata, CompactionState, ThreadSummary, UsageRow } from "@shared/types";
+import type { CompactionState, ThreadSummary, UsageRow } from "@shared/types";
 import type { ModelInfo } from "@shared/types";
 import { api } from "@/lib/api";
 import { useActiveModel } from "./data";
 import { isTemporaryChat } from "./chat-privacy";
+import { contextUsage } from "./context-usage";
+export { metadataOf } from "./context-usage";
 
 interface ThreadMeta {
   memoryDisabled: boolean;
@@ -60,22 +62,9 @@ export function useThreadMeta(): ThreadMeta | null {
   return useThreadMetaStore((s) => (threadId ? (s.byId[threadId] ?? null) : null));
 }
 
-export const metadataOf = (metadata: unknown): AssistantMetadata =>
-  ((metadata as { custom?: AssistantMetadata } | undefined)?.custom ?? {}) as AssistantMetadata;
-
-function lastContext(messages: readonly { role: string; metadata: unknown }[]): AssistantMetadata | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i]!;
-    if (m.role !== "assistant") continue;
-    const meta = metadataOf(m.metadata);
-    if (meta.contextTokens) return meta;
-  }
-  return null;
-}
-
-/** Context occupied after the newest finished assistant turn. Selectors return primitives to keep renders stable. */
-export function useContextUsage(): { tokens: number; window: number } | null {
-  const tokens = useAuiState((s) => lastContext(s.thread.messages)?.contextTokens ?? 0);
-  const window = useAuiState((s) => lastContext(s.thread.messages)?.contextWindow ?? 0);
-  return tokens ? { tokens, window } : null;
+/** Context after the newest reply or trim. Selectors return primitives to keep renders stable. */
+export function useContextUsage(compaction: CompactionState | null): { tokens: number; window: number } | null {
+  const tokens = useAuiState((s) => contextUsage(s.thread.messages, compaction)?.tokens ?? null);
+  const window = useAuiState((s) => contextUsage(s.thread.messages, compaction)?.window ?? 0);
+  return tokens !== null ? { tokens, window } : null;
 }
