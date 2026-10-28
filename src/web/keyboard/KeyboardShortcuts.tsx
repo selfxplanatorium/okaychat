@@ -3,7 +3,7 @@ import { CommandIcon, SearchIcon } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { api } from "@/lib/api";
+import { signOut } from "@/lib/sign-out";
 import { cn } from "@/lib/utils";
 import { useAppearance } from "@/state/appearance";
 import { useArtifactPanel } from "@/state/artifacts";
@@ -61,9 +61,7 @@ export function KeyboardShortcuts() {
     const { mode, setMode } = useAppearance.getState();
     setMode(mode === "light" ? "system" : mode === "system" ? "dark" : "light");
   });
-  useCommand("app.logout", () => {
-    void api("/auth/logout", { method: "POST" }).then(() => (window.location.href = "/"));
-  });
+  useCommand("app.logout", () => void signOut());
 
   useCommand("nav.newChat", () => {
     void (async () => {

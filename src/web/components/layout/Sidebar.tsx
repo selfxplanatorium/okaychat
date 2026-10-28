@@ -10,7 +10,7 @@ import { ThreadList, ThreadSelectionBar } from "@/components/assistant-ui/elemen
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
 import { AccountAvatar } from "@/components/ui/account-avatar";
 import { ProjectSwitcher } from "./ProjectSwitcher";
-import { api } from "@/lib/api";
+import { signOut } from "@/lib/sign-out";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 import { prefetchLibrary } from "@/state/library-cache";
@@ -142,12 +142,7 @@ export function Sidebar({ open, onToggle }: { open: boolean; onToggle: () => voi
                 <MenuItem onClick={() => navigate("/settings")}>
                   <SettingsIcon /> Settings
                 </MenuItem>
-                <MenuItem
-                  onClick={async () => {
-                    await api("/auth/logout", { method: "POST" });
-                    window.location.href = "/";
-                  }}
-                >
+                <MenuItem onClick={() => void signOut()}>
                   <LogOutIcon /> Log out
                 </MenuItem>
               </MenuContent>

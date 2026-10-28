@@ -50,6 +50,7 @@ import {
 import {
   ArrowDownIcon,
   ArrowUpIcon,
+  CloudOffIcon,
   AudioLinesIcon,
   BrainIcon,
   ChevronDownIcon,
@@ -83,6 +84,7 @@ import {
 } from "react";
 import { CopyFeedbackIcon } from "@/components/assistant-ui/elements/surfaces";
 import { mcpAppOf } from "@/components/chat/McpApp";
+import { useThreadSync, type ThreadSync } from "@/state/thread-sync";
 
 export type ThreadGroupPart = MessagePrimitive.GroupedParts.GroupPart;
 
@@ -928,7 +930,18 @@ const finePointer = typeof window !== "undefined" && window.matchMedia("(pointer
 const useSubmitMode = () =>
   useData((s) => s.settings?.keyboard?.sendWith) === "modEnter" ? "ctrlEnter" : "enter";
 
+/** Shown while a cached copy stays on screen because the server's rows could not replace it; sending stays off until a reload. */
+const SyncNotice: FC<{ sync: ThreadSync | undefined }> = ({ sync }) =>
+  sync === "stale" ? (
+    <div role="status" className="text-muted-foreground flex items-center gap-1.5 px-2.5 text-xs">
+      <CloudOffIcon className="size-3.5 shrink-0" />
+      <span className="truncate">Showing a saved copy that could not be synced. Reload to send.</span>
+    </div>
+  ) : null;
+
 const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
+  // Until the server's rows replace a cached paint, a send would attach the reply to whatever the cache showed.
+  const sync = useThreadSync();
   const submitMode = useSubmitMode();
   // The composer sits on the bottom edge, so it grows upward with the typed line held in place.
   const smoothHeight = useSmoothHeight({ pin: "bottom" });
@@ -945,19 +958,20 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
             placeholder="Send a message..."
             className="aui-composer-input caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base leading-6 outline-none"
             rows={1}
-            submitMode={submitMode}
+            submitMode={sync ? "none" : submitMode}
             autoFocus={autoFocus && finePointer}
             enterKeyHint="send"
             aria-label="Message input"
           />
-          <ComposerAction />
+          <SyncNotice sync={sync} />
+          <ComposerAction blocked={!!sync} />
         </div>
       </ComposerPrimitive.AttachmentDropzone>
     </ComposerPrimitive.Root>
   );
 };
 
-const ComposerAction: FC = () => {
+const ComposerAction: FC<{ blocked: boolean }> = ({ blocked }) => {
   // The stop control only cancels the send while no run it could stop is going.
   const isSending = useAuiState(
     (s) =>
@@ -1026,20 +1040,35 @@ const ComposerAction: FC = () => {
                   "pointer-events-none scale-50 opacity-0 delay-150 duration-(--motion-fast) ease-in-quart",
             )}
           >
-            <ComposerPrimitive.Send asChild>
+            {blocked ? (
               <TooltipIconButton
-                tooltip="Send message"
+                tooltip="Loading the latest messages"
                 side="bottom"
                 type="button"
                 variant="default"
                 size="icon"
-                // Empty composer: the button sits back, then springs forward once there is something to send.
+                disabled
                 className="aui-composer-send size-7 pointer-coarse:size-9 rounded-[0.6rem] pointer-coarse:rounded-xl disabled:scale-[0.86] disabled:saturate-[0.4]"
                 aria-label="Send message"
               >
                 <ArrowUpIcon className="aui-composer-send-icon size-4" />
               </TooltipIconButton>
-            </ComposerPrimitive.Send>
+            ) : (
+              <ComposerPrimitive.Send asChild>
+                <TooltipIconButton
+                  tooltip="Send message"
+                  side="bottom"
+                  type="button"
+                  variant="default"
+                  size="icon"
+                  // Empty composer: the button sits back, then springs forward once there is something to send.
+                  className="aui-composer-send size-7 pointer-coarse:size-9 rounded-[0.6rem] pointer-coarse:rounded-xl disabled:scale-[0.86] disabled:saturate-[0.4]"
+                  aria-label="Send message"
+                >
+                  <ArrowUpIcon className="aui-composer-send-icon size-4" />
+                </TooltipIconButton>
+              </ComposerPrimitive.Send>
+            )}
           </span>
           <span
             inert={!showStop}
@@ -1353,6 +1382,8 @@ const AssistantMessage: FC = () => {
 
 const AssistantActionBar: FC = () => {
   const { BranchAction } = useContext(ThreadComponentsContext);
+  // Like the composer: a rerun from a cached copy would parent on what the cache showed.
+  const sync = useThreadSync();
   return (
     <ActionBarPrimitive.Root
       hideWhenRunning
@@ -1362,7 +1393,7 @@ const AssistantActionBar: FC = () => {
     >
       <CopyActionButton />
       {BranchAction && <BranchAction />}
-      <ActionBarPrimitive.Reload asChild>
+      <ActionBarPrimitive.Reload asChild disabled={!!sync}>
         <TooltipIconButton tooltip="Retry" command="message.retry">
           <RefreshCwIcon />
         </TooltipIconButton>
@@ -1501,10 +1532,12 @@ const UserMessage: FC = () => {
 /** Answers this user message again in the same chat; the old answer stays as a sibling branch. */
 const UserRetryButton: FC = () => {
   const aui = useAui();
+  const sync = useThreadSync();
   return (
     <TooltipIconButton
       tooltip="Retry"
       command="message.retry"
+      disabled={!!sync}
       onClick={() => aui.thread.startRun({ parentId: aui.message.getState().id })}
     >
       <RefreshCwIcon />
@@ -1514,6 +1547,7 @@ const UserRetryButton: FC = () => {
 
 const UserActionBar: FC = () => {
   const { BranchAction } = useContext(ThreadComponentsContext);
+  const sync = useThreadSync();
   return (
     <ActionBarPrimitive.Root
       hideWhenRunning
@@ -1522,7 +1556,7 @@ const UserActionBar: FC = () => {
     >
       <UserRetryButton />
       {BranchAction && <BranchAction />}
-      <ActionBarPrimitive.Edit asChild>
+      <ActionBarPrimitive.Edit asChild disabled={!!sync}>
         <TooltipIconButton tooltip="Edit" command="message.edit" className="aui-user-action-edit">
           <SquarePenIcon />
         </TooltipIconButton>
@@ -1533,6 +1567,8 @@ const UserActionBar: FC = () => {
 };
 
 const EditComposer: FC = () => {
+  // An edit opened before a sync fell back to stale must not save either.
+  const sync = useThreadSync();
   const submitMode = useSubmitMode();
   return (
     <MessagePrimitive.Root
@@ -1542,7 +1578,7 @@ const EditComposer: FC = () => {
       <ComposerPrimitive.Root className="aui-edit-composer-root depth-composer ms-auto flex w-full max-w-[85%] cursor-text flex-col rounded-(--composer-radius) border bg-(--composer-bg) transition-[border-color,box-shadow] duration-(--motion-base) ease-out-quart">
         <ComposerPrimitive.Input
           className="aui-edit-composer-input text-foreground min-h-14 w-full resize-none bg-transparent px-4 pt-3 pb-1 text-base outline-none"
-          submitMode={submitMode}
+          submitMode={sync ? "none" : submitMode}
           autoFocus
         />
         <div className="aui-edit-composer-footer mx-2.5 mb-2.5 flex items-center gap-1.5 self-end">
@@ -1551,7 +1587,7 @@ const EditComposer: FC = () => {
               Cancel
             </Button>
           </ComposerPrimitive.Cancel>
-          <ComposerPrimitive.Send asChild>
+          <ComposerPrimitive.Send asChild disabled={!!sync}>
             <Button size="sm" className="h-8 px-3">
               Update
             </Button>

@@ -16,6 +16,7 @@ import { useAppearance } from "@/state/appearance";
 import { getActiveModel, useData } from "@/state/data";
 import { chatPrivacyFor, useChatPrivacy, useChatPrivacyStore } from "@/state/chat-privacy";
 import { useCurrentThreadId, useThreadMeta, useThreadMetaStore } from "@/state/thread-meta";
+import { useThreadSync } from "@/state/thread-sync";
 import { runCommand, useCommand } from "@/keyboard/registry";
 
 const MODES = [
@@ -71,6 +72,7 @@ export function ChatPrivacyMenu() {
   const privacy = useChatPrivacy();
   const meta = useThreadMeta();
   const running = useAuiState((s) => s.thread.isRunning);
+  const syncing = !!useThreadSync();
   const started = useAuiState((s) => s.thread.messages.length > 0);
   const remoteId = useCurrentThreadId();
   const refresh = useThreadMetaStore((s) => s.refresh);
@@ -220,7 +222,7 @@ export function ChatPrivacyMenu() {
             {skillsEnabled && (
               <button
                 type="button"
-                disabled={busy || running}
+                disabled={busy || running || syncing}
                 onClick={async () => {
                   setBusy(true);
                   setError(null);
