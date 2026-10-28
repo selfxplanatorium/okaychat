@@ -24,7 +24,7 @@ import type { TextMessagePartProps } from "@assistant-ui/react";
 import { CodeBlock } from "@/components/ui/code-block";
 import { InlineMath, MathBlock } from "@/components/ui/math";
 import { MermaidDiagram } from "@/components/ui/mermaid-diagram";
-import { preprocessMarkdown } from "@/lib/markdown-math";
+import { keepLineBreaks, preprocessMarkdown } from "@/lib/markdown-math";
 import { cn } from "@/lib/utils";
 import { safeHref } from "../utils/href";
 import { MarkdownTable } from "./markdown-table";
@@ -32,6 +32,8 @@ import { MarkdownTable } from "./markdown-table";
 type MarkdownTextProps = Partial<TextMessagePartProps> & {
   components?: Parameters<typeof memoizeMarkdownComponents>[0];
   componentsByLanguage?: MarkdownTextPrimitiveProps["componentsByLanguage"];
+  /** Render single newlines as line breaks, as typed text expects. */
+  lineBreaks?: boolean;
 };
 
 const useShallowStable = <T extends Record<string, unknown> | undefined>(
@@ -52,6 +54,8 @@ const useShallowStable = <T extends Record<string, unknown> | undefined>(
 
 const remarkPlugins = [remarkGfm, remarkMath];
 
+const preprocessTyped = (text: string) => keepLineBreaks(preprocessMarkdown(text));
+
 const defaultComponentsByLanguage: NonNullable<
   MarkdownTextPrimitiveProps["componentsByLanguage"]
 > = {
@@ -62,6 +66,7 @@ const defaultComponentsByLanguage: NonNullable<
 const MarkdownTextImpl: FC<MarkdownTextProps> = ({
   components,
   componentsByLanguage,
+  lineBreaks,
 }) => {
   const stableComponents = useShallowStable(components);
   const stableComponentsByLanguage = useShallowStable(componentsByLanguage);
@@ -80,7 +85,7 @@ const MarkdownTextImpl: FC<MarkdownTextProps> = ({
   return (
     <MarkdownTextPrimitive
       remarkPlugins={remarkPlugins}
-      preprocess={preprocessMarkdown}
+      preprocess={lineBreaks ? preprocessTyped : preprocessMarkdown}
       className="aui-md"
       components={markdownComponents}
       componentsByLanguage={markdownComponentsByLanguage}
