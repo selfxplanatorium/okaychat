@@ -106,3 +106,25 @@ test("the provider appears only for a connected login, never as a shared connect
   assert.equal((db.prepare("SELECT api_key_enc FROM provider_connections WHERE provider_id = 'chatgpt'").get() as { api_key_enc: string | null }).api_key_enc, null);
   assert.equal((await listProviders(null)).some((p) => p.id === "chatgpt"), false);
 });
+
+// Cover the factory, not just the normalizer: OpenCode can use either OpenAI wire format.
+test("ChatGPT plan and both OpenCode OpenAI routes accept implicit property-name schemas", async () => {
+  const { createModel } = await import("../llm.js");
+  connect(jwt(3600));
+  const schema = { type: "object" as const, properties: { fields: { type: "object" as const, propertyNames: { enum: ["a", "b"] }, additionalProperties: { type: "number" as const } } } };
+  for (const [providerId, format] of [["chatgpt", "openai-responses"], ["opencode-go", "openai-responses"], ["opencode-go", "openai-chat"]] as const) {
+    const response = { id: "resp_schema", object: "response", created_at: 1, model: "gpt-test", status: "completed", output: [], usage: { input_tokens: 1, output_tokens: 0, total_tokens: 1 } };
+    const calls = mockFetch(() => format === "openai-chat"
+      ? Response.json({ id: "chat_schema", object: "chat.completion", created: 1, model: "gpt-test", choices: [{ index: 0, message: { role: "assistant", content: "Hi" }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } })
+      : providerId === "chatgpt" ? sse({ type: "response.completed", response }) : Response.json(response));
+    const handle = createModel({ ref: `${providerId}/gpt-test`, providerId, id: "gpt-test", name: "Test", format, baseURL: providerId === "chatgpt" ? CHATGPT_BASE_URL : "https://opencode.ai/inference/go/v1", context: 1000, maxOutput: 100, reasoning: false, toolCall: true, attachments: false, inputModalities: ["text"], temperature: false, free: true }, { providerId, apiKey: "test-only", enabled: true }, { userId: "alice" });
+    const model = handle.model;
+    if (typeof model === "string" || model.specificationVersion !== "v4") throw new Error("Expected a v4 model");
+    await model.doGenerate({ prompt: [{ role: "user", content: [{ type: "text", text: "Hello" }] }], tools: [{ type: "function", name: "example", inputSchema: schema }] });
+    assert.equal(calls.length, 1, `${providerId}/${format}`);
+    const tools = calls[0]!.body!.tools as Array<{ parameters?: unknown; function?: { parameters: unknown } }>;
+    const parameters = tools[0]!.parameters ?? tools[0]!.function!.parameters;
+    assert.equal(JSON.stringify(parameters).includes('"enum"'), false);
+    assert.deepEqual(schema.properties.fields.propertyNames, { enum: ["a", "b"] });
+  }
+});

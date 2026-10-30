@@ -2,13 +2,14 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import type { JSONValue, LanguageModel, ModelMessage } from "ai";
+import { wrapLanguageModel, type JSONValue, type LanguageModel, type ModelMessage } from "ai";
 import type { ModelInfo, ReasoningEffort } from "../shared/types.js";
 import { CHATGPT, chatgptFetch } from "./catalog/chatgpt.js";
 import type { Connection } from "./catalog/providers.js";
 import { sha256 } from "./crypto.js";
 import { USER_AGENT } from "./env.js";
 import { publicFetch } from "./public-fetch.js";
+import { openaiToolSchemas } from "./openai-schema.js";
 
 type ProviderOptions = Record<string, Record<string, JSONValue>>;
 
@@ -68,7 +69,7 @@ export function createModel(info: ModelInfo, conn: Connection, opts: { userId: s
       const markCache = !chatgpt && EXPLICIT_BREAKPOINTS.test(info.id)
         ? (system: string[], messages: ModelMessage[]) => [...systemMessages(system, OPENAI_BREAKPOINT), ...messages]
         : passthrough;
-      return { model: provider.responses(info.id), providerOptions: { openai }, markCache };
+      return { model: wrapLanguageModel({ model: provider.responses(info.id), middleware: openaiToolSchemas }), providerOptions: { openai }, markCache };
     }
     case "anthropic": {
       const provider = createAnthropic({ apiKey, baseURL, headers, fetch });
@@ -105,7 +106,7 @@ export function createModel(info: ModelInfo, conn: Connection, opts: { userId: s
       });
       const options: Record<string, JSONValue> = {};
       if (effort) options.reasoningEffort = effort;
-      return { model: provider.chatModel(info.id), providerOptions: { [name]: options }, markCache: passthrough };
+      return { model: wrapLanguageModel({ model: provider.chatModel(info.id), middleware: openaiToolSchemas }), providerOptions: { [name]: options }, markCache: passthrough };
     }
   }
 }

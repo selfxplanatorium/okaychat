@@ -30,3 +30,14 @@ The prefix structure and wire-format cache options are documented in `prompt-cac
 ## Usage display
 
 Go's five-hour, weekly, and monthly views use the app's own recorded costs. They are estimates of recorded spending, not a provider-authoritative remaining quota. Model prices and availability come from the catalogs; account plans and provider limits can change independently of the app.
+
+## Tool schema compatibility
+
+OpenAI Responses and Chat Completions routes (direct, OpenCode, and ChatGPT plan) use the
+`openaiToolSchemas` middleware in `src/server/openai-schema.ts`. It removes `propertyNames` from
+outbound tool schemas before provider conversion. The OpenAI SDK otherwise throws locally for
+valid implicit string constraints such as `anyOf`, `enum`, or `$ref`, blocking the entire turn.
+Only schema positions are visited; literal defaults and properties named `propertyNames` are kept.
+Original tool schemas and validators remain unchanged: built-in Zod validation, MCP-server
+validation, and browser-tool validation still apply as before. Schemas for other wire formats are unchanged. Regression tests exercise both
+streaming and non-streaming requests through the real OpenAI SDK with a mock transport.

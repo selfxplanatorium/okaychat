@@ -14,6 +14,8 @@ The chat connection uses the same per-user Codex login as image generation (`cod
 - `item_reference` items and item `id`s are stripped because nothing is stored server-side.
 - Responses carry plan quota headers (`x-codex-primary-used-percent`, `x-codex-primary-window-minutes` = 300, `x-codex-secondary-*` = weekly, `x-codex-plan-type`). Not used yet.
 
+Tool schemas go through the same OpenAI compatibility middleware as direct and OpenCode connections; see `opencode-go.md` (Tool schema compatibility). This happens before the provider SDK prepares the request, because a fetch adapter is too late to prevent local schema errors.
+
 ## Models
 
 `GET {base}/models?client_version=<cli version>` with the same headers returns `{ models: [...] }`. We keep `visibility: "list"` entries and use `slug`, `display_name`, `context_window`, `input_modalities`, and `supported_reasoning_levels` (efforts outside our `ReasoningEffort`, such as `ultra`, are dropped). The list is cached per user for 15 minutes; a failed fetch keeps the last list.
