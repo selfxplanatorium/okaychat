@@ -26,7 +26,10 @@ after(() => {
 });
 const thread = (id: string, user: string, projectId: string | null, title: string) =>
   db.prepare("INSERT INTO threads (id, user_id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, user, projectId, title, Date.now(), Date.now());
+// Fixture order must not depend on inserts landing in different wall-clock milliseconds.
+let fixtureTime = 0;
 beforeEach(() => {
+  fixtureTime = Date.UTC(2026, 0, 1);
   db.exec("DELETE FROM messages; DELETE FROM artifacts; DELETE FROM images; DELETE FROM uploads; DELETE FROM threads; DELETE FROM projects;");
   db.prepare("INSERT INTO projects (id, user_id, name, created_at) VALUES ('p1', 'alice', 'Atlas', ?)").run(Date.now());
   thread("t1", "alice", "p1", "Atlas chat");
@@ -43,12 +46,12 @@ const message = (threadId: string, id: string, text: string) =>
   );
 
 const upload = (id: string, user: string, name: string, mime: string) =>
-  db.prepare("INSERT INTO uploads (id, user_id, name, mime, data, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, user, name, mime, Buffer.from("bytes"), Date.now());
+  db.prepare("INSERT INTO uploads (id, user_id, name, mime, data, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, user, name, mime, Buffer.from("bytes"), ++fixtureTime);
 
 const image = (id: string, user: string, threadId: string | null, prompt: string) => {
   mkdirSync(path.join(dataDir, "images", user), { recursive: true });
   writeFileSync(imagePath(user, id), Buffer.alloc(42));
-  db.prepare("INSERT INTO images (id, user_id, thread_id, prompt, width, height, size, created_at) VALUES (?, ?, ?, ?, 8, 8, 42, ?)").run(id, user, threadId, prompt, Date.now());
+  db.prepare("INSERT INTO images (id, user_id, thread_id, prompt, width, height, size, created_at) VALUES (?, ?, ?, ?, 8, 8, 42, ?)").run(id, user, threadId, prompt, ++fixtureTime);
 };
 
 const artifact = (threadId: string, id: string, version: number, title: string, kind: string, content: string, data?: Buffer) =>
@@ -61,7 +64,7 @@ const artifact = (threadId: string, id: string, version: number, title: string, 
     content,
     data ?? null,
     data?.byteLength ?? 0,
-    Date.now() + version,
+    ++fixtureTime,
   );
 
 const request = (path: string, user = "alice", method = "GET") => app.request(`http://app${path}`, { method, headers: { cookie: `okaychat_session=${user}` } });
@@ -123,8 +126,8 @@ test("filters: kind, source, thread, project, name search, and date range", asyn
   // LIKE wildcards in the query match literally.
   assert.deepEqual(names(await get("/library?q=repo%_rt")), []);
   assert.deepEqual(names(await get("/library?q=report")), ["report.pdf"]);
-  const yesterday = Date.now() - 86_400_000;
-  assert.deepEqual(names(await get(`/library?from=${Date.now() + 5000}`)), []);
+  const yesterday = fixtureTime - 86_400_000;
+  assert.deepEqual(names(await get(`/library?from=${fixtureTime + 5000}`)), []);
   assert.deepEqual(names(await get(`/library?to=${yesterday}`)), []);
 });
 

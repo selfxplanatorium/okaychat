@@ -67,6 +67,8 @@ The lazy navigation page provides grid/list layouts, filters, debounced search, 
 with a Load more button, previews, download/open-chat actions, and confirmed deletion. Failed requests
 show errors. Deletion refreshes storage usage. Tests exercise ownership of listings, previews, downloads
 and deletes, latest-version selection, name/size pagination, persistence, and quota reclamation.
+Test fixtures use distinct, deterministic creation timestamps so newest-first assertions do not depend
+on wall-clock timing.
 
 ## Archived chats
 
