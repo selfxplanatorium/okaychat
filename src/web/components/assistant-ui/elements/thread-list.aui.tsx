@@ -57,6 +57,7 @@ import { DeleteChatDialog } from "@/components/chat/DeleteChatDialog";
 import { SelectionCheck, useSelectionKeys } from "@/components/ui/selection";
 import { runBatch } from "@/lib/selection";
 import { t, type PlainMessageKey } from "@/i18n";
+import { switchWithHighlight } from "@/components/layout/GlideHighlight";
 import { useThreadSelection } from "@/state/thread-selection";
 import { runCommand, useCommand } from "@/keyboard/registry";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -492,6 +493,7 @@ const ThreadListSkeleton: FC = () => {
 };
 
 export const ThreadListItem: FC = () => {
+  const aui = useAui();
   const id = useAuiState((s) => s.threadListItem.id);
   const selecting = useThreadSelection((s) => s.active);
   const selected = useThreadSelection((s) => s.active && s.ids.has(id));
@@ -551,6 +553,10 @@ export const ThreadListItem: FC = () => {
         <TooltipTrigger delay={800} render={<ThreadListItemPrimitive.Trigger
           ref={triggerRef}
           data-slot="aui_thread-list-item-trigger"
+          onClick={(event) => {
+            event.preventDefault();
+            switchWithHighlight(event.currentTarget, () => aui.threadListItem.switchTo());
+          }}
           className="focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center rounded-md px-2.5 text-start text-sm outline-none pointer-fine:group-hover:pe-9 pointer-fine:group-has-focus-visible:pe-9 focus-visible:ring-1"
         />}>
           {(isRunning || busy) && (

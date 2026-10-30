@@ -235,6 +235,8 @@ html[data-sidebar-resizing] :is(.shell-sidebar, .sidebar-surface) {
   left: 0;
   border-radius: var(--radius-lg);
   pointer-events: none;
+  /* This one moving layer must keep animating while the chat's messages render. */
+  will-change: transform;
   transition:
     opacity var(--motion-fast) var(--ease-out-quart),
     scale var(--motion-base) var(--ease-spring);
