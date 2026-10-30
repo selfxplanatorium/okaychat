@@ -187,10 +187,21 @@ export function MessageMeta() {
 /** Divider after the message where the conversation was compacted or trimmed. */
 export function CompactionMarker() {
   const messageId = useAuiState((s) => s.message.id);
+  const threadId = useCurrentThreadId();
+  // A primitive, so a metadata update re-renders only the marker it concerns, not one per message.
+  const kind = useThreadMetaStore((s) => {
+    const compaction = threadId ? s.byId[threadId]?.compaction : undefined;
+    if (compaction?.trim?.throughMessageId === messageId) return "trim";
+    return compaction?.summary && compaction.boundaryMessageId === messageId ? "summary" : null;
+  });
+  return kind ? <CompactionDivider kind={kind} /> : null;
+}
+
+function CompactionDivider({ kind }: { kind: "trim" | "summary" }) {
   const meta = useThreadMeta();
   const [open, setOpen] = useState(false);
   const trim = meta?.compaction?.trim;
-  if (trim?.throughMessageId === messageId) {
+  if (kind === "trim" && trim) {
     return (
       <div className="text-muted-foreground animate-fade-in my-2 flex items-center gap-3 px-2 text-xs">
         <span className="bg-border h-px flex-1" />
@@ -200,7 +211,7 @@ export function CompactionMarker() {
       </div>
     );
   }
-  if (!meta?.compaction?.summary || meta.compaction.boundaryMessageId !== messageId) return null;
+  if (!meta?.compaction?.summary) return null;
   return (
     <div className="text-muted-foreground animate-fade-in my-2 px-2 text-xs">
       <button type="button" onClick={() => setOpen(!open)} className="hover:text-foreground flex w-full items-center gap-3 transition-colors duration-(--motion-fast) ease-out-quart">

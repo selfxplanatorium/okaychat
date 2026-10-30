@@ -33,8 +33,10 @@ expire after 10 s, so a screen that mounts later never shows old data.
   navigation pages preload when the chat is idle.
 - `AppLoading` (`components/AppLoading.tsx`) is the only startup state. Its label
   fades in after 700 ms, so normal loads show only the themed background.
-- `thread-meta.ts` coalesces refreshes within one frame. Each compaction marker
-  calls `useThreadMeta`, which used to send one `GET /threads/:id` per message.
+- Thread metadata has one refresh owner (`ThreadMetaSync`); the compaction marker under each message
+  only reads it, through a selector that re-renders only the marker the compaction concerns. Each
+  marker used to trigger its own refresh, and slices mounting after the first paint sent 4 to 8
+  `GET /threads/:id` per chat switch. See `assistant-ui.md`.
 
 Production serving: `scripts/compress-web.mjs` writes `.br`/`.gz` copies at build
 time and `serveStatic({ precompressed: true })` sends them.
@@ -86,6 +88,14 @@ Other long-chat costs:
 
 Mounted messages still incur Markdown parsing and assistant-ui state subscriptions. Windowing limits
 that work without removing older messages from runtime history.
+
+Showing a chat again remounts its window, because the thread view is shared between chats; its
+runtime and messages stay in memory, so no request or skeleton is involved. Measured on 2026-10-31
+with a 40-message chat (code block and table per reply), production build, headless Chromium: the
+newest message is on screen 120 to 220 ms after the click, and the whole switch costs 220 to 400 ms of
+script over the window's slices. The first switch to a chat in a session loads its history: with a
+cache entry it paints in 170 to 220 ms; without one it waits for the request (720 ms with 600 ms of
+added latency).
 
 ## Verification
 

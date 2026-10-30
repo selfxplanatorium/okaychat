@@ -18,12 +18,12 @@ import { api, takePrefetched } from "@/lib/api";
 import { toolkit, widgetHelperRenders } from "@/components/chat/tool-ui";
 import { WidgetInstructions, widgets } from "@/components/genui/toolkit";
 import { chatIdFromPath, getActiveModel, selectedThreadKey, threadsPath, useData } from "@/state/data";
-import { useChatModel } from "@/state/thread-meta";
+import { loadThreadDetail, useChatModel } from "@/state/thread-meta";
 import { StoredImageAttachmentAdapter, AudioAttachmentAdapter, DocumentAttachmentAdapter, CodeAttachmentAdapter, BinaryAttachmentAdapter } from "./attachments";
 import { chatPrivacyFor, isTemporaryChat, useChatPrivacy, useChatPrivacyStore } from "@/state/chat-privacy";
 import { useVoiceAdapters } from "@/speech/adapters";
 import { chatSearchFor, useChatSearch, useChatSearchStore } from "@/state/chat-search";
-import { dropThread, readThread, writeThread } from "./threadCache";
+import { dropThread, readThread, sameRows, ServerRows, writeThread } from "./threadCache";
 import { setThreadSync, useThreadSyncStore } from "@/state/thread-sync";
 
 /** Thread metadata the sidebar reads from `threadListItem.custom`. */
@@ -39,6 +39,8 @@ const serverIds = new Map<string, Set<string>>();
 const swapping = new Set<string>();
 // Message writes in flight per chat, so a swap deferred past a run can wait for the run's reply to be stored.
 const writes = new Map<string, Promise<unknown>>();
+// The server's rows per chat as far as this page knows, so acknowledged writes refresh the cache entry.
+const serverRows = new ServerRows<MessageRow>();
 
 type Aui = ReturnType<typeof useAui>;
 
@@ -63,7 +65,25 @@ function tracked<T>(remoteId: string, write: Promise<T>): Promise<T> {
   return write;
 }
 
-const sameIds = (a: MessageRow[], b: MessageRow[]) => a.length === b.length && a.every((row, i) => row.id === b[i]?.id);
+/** Applies a cache decision from `serverRows`: store the rows, drop the entry, or leave it. */
+function cacheRows(remoteId: string, rows: MessageRow[] | null | undefined, activeAt: number | undefined) {
+  if (rows === null) void dropThread(remoteId);
+  else if (rows) void writeThread(remoteId, rows, activeAt);
+}
+
+/** Stores one message. Only a write the server acknowledged reaches the cache. */
+async function saveRow(remoteId: string, row: MessageRow): Promise<void> {
+  // Serialized once, and parsed back for the cache, so the cached content is exactly what the server stored.
+  const body = JSON.stringify(row);
+  serverRows.beginWrite(remoteId);
+  try {
+    await tracked(remoteId, api(`/threads/${remoteId}/messages`, { method: "POST", body, headers: { "Content-Type": "application/json" } }));
+  } catch (error) {
+    cacheRows(remoteId, serverRows.failed(remoteId), undefined);
+    throw error;
+  }
+  cacheRows(remoteId, serverRows.acknowledged(remoteId, JSON.parse(body) as MessageRow), Date.now());
+}
 
 const threadListAdapter: RemoteThreadListAdapter = {
   async list() {
@@ -94,6 +114,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
       return { remoteId, externalId: undefined };
     }
     const thread = await api<ThreadSummary>("/threads", { method: "POST", json: { projectId: useData.getState().activeProject } });
+    serverRows.created(thread.id);
     useChatSearchStore.getState().bind(localId, thread.id);
     bindModel(thread.id);
     return { remoteId: thread.id, externalId: undefined };
@@ -122,7 +143,8 @@ const threadListAdapter: RemoteThreadListAdapter = {
   },
   async fetch(remoteId) {
     if (isTemporaryChat(remoteId)) return { remoteId, status: "regular", title: t("composer.temporaryChat") };
-    const thread = await api<ThreadSummary>(`/threads/${remoteId}`);
+    // Shares the request with the open chat's metadata refresh, which asks for the same response.
+    const thread = await loadThreadDetail(remoteId, { reuse: true });
     if (thread.modelRef) useData.getState().rememberThreadModels({ [thread.id]: thread.modelRef });
     return { remoteId: thread.id, status: thread.status, title: thread.title ?? undefined, lastMessageAt: new Date(thread.updatedAt), custom: threadCustom(thread) };
   },
@@ -154,13 +176,21 @@ const threadListAdapter: RemoteThreadListAdapter = {
             if (!remoteId || isTemporaryChat(remoteId)) return { messages: [] };
             const decode = (rows: MessageRow[]) => ({ messages: rows.map((row) => fmt.decode(row as Parameters<typeof fmt.decode>[0])) });
             const path = `/threads/${remoteId}/messages`;
-            const fetchRows = (request: Promise<MessageRow[]>) => request.then((rows) => {
-              serverIds.set(remoteId, new Set(rows.map((row) => row.id)));
-              void writeThread(remoteId, rows, aui.threadListItem.getState().lastMessageAt?.getTime());
-              return rows;
-            });
-            const network = fetchRows(takePrefetched<MessageRow[]>(path) ?? api<MessageRow[]>(path));
-            const cached = await readThread<MessageRow>(remoteId);
+            const fetchRows = (request: () => Promise<MessageRow[]>) => {
+              const token = serverRows.beginLoad(remoteId);
+              return request().then((rows) => {
+                serverIds.set(remoteId, new Set(rows.map((row) => row.id)));
+                cacheRows(remoteId, serverRows.loaded(remoteId, token, rows), aui.threadListItem.getState().lastMessageAt?.getTime());
+                return rows;
+              });
+            };
+            const prefetched = takePrefetched<MessageRow[]>(path);
+            const network = fetchRows(() => prefetched ?? api<MessageRow[]>(path));
+            // Rows that are already here (a prefetch during startup) win over the cache: no swap, no read-only wait.
+            const cached = await Promise.race([
+              readThread<MessageRow>(remoteId),
+              network.then(() => undefined, () => readThread<MessageRow>(remoteId)),
+            ]);
             if (!cached) return decode(await network);
             setThreadSync(remoteId, "pending");
             const shownIds = () => aui.thread.getState().messages.map((m) => m.id);
@@ -171,7 +201,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
                 if (aui.threadListItem.getState().remoteId !== remoteId) return setThreadSync(remoteId, null);
                 void new Promise((resolve) => setTimeout(resolve))
                   .then(() => writes.get(remoteId))
-                  .then(() => fetchRows(api<MessageRow[]>(path)))
+                  .then(() => fetchRows(() => api<MessageRow[]>(path)))
                   .then(
                     (rows) => {
                       if (aui.threadListItem.getState().remoteId !== remoteId) return setThreadSync(remoteId, null);
@@ -197,7 +227,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
                   swapping.delete(remoteId);
                   if (aui.threadListItem.getState().remoteId !== remoteId) return setThreadSync(remoteId, null);
                   if (aui.thread.getState().isRunning) return afterRun();
-                  if (!sameIds(cached, rows)) aui.thread.importExternalState(decode(rows));
+                  if (!sameRows(cached, rows)) aui.thread.importExternalState(decode(rows));
                   setThreadSync(remoteId, null);
                 });
               },
@@ -208,11 +238,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
           async append(item) {
             const { remoteId } = await aui.threadListItem.initialize();
             if (isTemporaryChat(remoteId) || serverIds.get(remoteId)?.has(fmt.getId(item.message))) return;
-            await tracked(remoteId, api(`/threads/${remoteId}/messages`, {
-              method: "POST",
-              json: { id: fmt.getId(item.message), parent_id: item.parentId, format: fmt.format, content: fmt.encode(item) },
-            }));
-            void dropThread(remoteId);
+            await saveRow(remoteId, { id: fmt.getId(item.message), parent_id: item.parentId, format: fmt.format, content: fmt.encode(item) });
           },
           async update(item, localMessageId) {
             const { remoteId } = await aui.threadListItem.initialize();
@@ -220,11 +246,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
             // The UI blocks edits until the server's rows are on screen; this catches any caller that slips past.
             // Throwing leaves the message unpersisted in assistant-ui, so it is written again on the next settle.
             if (useThreadSyncStore.getState().byId[remoteId]) throw new Error(t("composer.notSynced"));
-            await tracked(remoteId, api(`/threads/${remoteId}/messages`, {
-              method: "POST",
-              json: { id: localMessageId, parent_id: item.parentId, format: fmt.format, content: fmt.encode(item) },
-            }));
-            void dropThread(remoteId);
+            await saveRow(remoteId, { id: localMessageId, parent_id: item.parentId, format: fmt.format, content: fmt.encode(item) });
           },
         }),
       }),

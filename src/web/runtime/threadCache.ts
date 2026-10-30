@@ -1,9 +1,11 @@
-// Read-through cache of raw `GET /threads/:id/messages` rows, so a reload, PWA cold start, or deep link can paint a
-// chat before the server answers. In-session switching never reaches it: assistant-ui keeps loaded threads in memory.
+// Read-through cache of raw `GET /threads/:id/messages` rows, so a reload, PWA cold start, deep link, or the first
+// visit to a chat in a session can paint before the server answers. Chats already opened in this session never reach
+// it: assistant-ui keeps their runtimes in memory.
 //
-// The server stays authoritative. Rows are only written from a successful server response, any successful message
-// write drops the thread's entry instead of patching it, and RuntimeProvider swaps the painted rows for the server's
-// and blocks sending until that load settles, so a reply can never be parented on a cached message.
+// The server stays authoritative. Rows are written from a GET whose answer no write can have overtaken, or from
+// `ServerRows`: the last such GET plus every write the server acknowledged since, stored once none is in flight. A
+// failed or unacknowledged write is never stored. RuntimeProvider swaps the painted rows for the server's and blocks
+// sending until that load settles, so a reply can never be parented on a cached message.
 //
 // Only the newest MAX_ROWS messages of the current branch are kept: enough to fill the screen while the full history
 // loads, and small enough that 30 entries stay cheap. Chats without activity for MAX_AGE_MS are not cached.
@@ -20,8 +22,11 @@ type Row = { id: string; parent_id: string | null };
 type Entry = { rows: Row[]; savedAt: number; activeAt: number };
 
 let db: Promise<IDBDatabase | null> | undefined;
+// Set by sign-out until the page navigates away: a write acknowledged after it must not recreate the database.
+let closed = false;
 
 function openDb(): Promise<IDBDatabase | null> {
+  if (closed) return Promise.resolve(null);
   return (db ??= new Promise((resolve) => {
     try {
       const req = indexedDB.open(DB_NAME, 1);
@@ -58,6 +63,11 @@ function run<T>(mode: IDBTransactionMode, body: (store: IDBObjectStore) => IDBRe
 }
 
 const isRecent = (activeAt: number) => Date.now() - activeAt < MAX_AGE_MS;
+
+/** Opens the database during startup, alongside the messages prefetch, so the first read does not wait for it. */
+export function warmThreadCache(): void {
+  void openDb();
+}
 
 /** The newest message and its ancestors, oldest first, cut to the last MAX_ROWS with the first one made a root. */
 export function branchTail<T extends Row>(rows: T[]): T[] {
@@ -109,6 +119,7 @@ export async function dropThread(threadId: string): Promise<void> {
 
 /** Sign-out: the next account on this browser must not find the previous one's messages. */
 export async function clearThreadCache(): Promise<void> {
+  closed = true;
   const conn = await db?.catch(() => null);
   conn?.close();
   await new Promise<void>((resolve) => {
@@ -122,4 +133,77 @@ export async function clearThreadCache(): Promise<void> {
     }
   });
   db = undefined;
+}
+
+type MessageRow = Row & { format: string; content: unknown };
+
+/** True when the painted cache rows are exactly the server's rows, content included, so no swap is needed. */
+export function sameRows(cached: MessageRow[], rows: MessageRow[]): boolean {
+  return (
+    cached.length === rows.length &&
+    rows.every((row, i) => {
+      const other = cached[i]!;
+      return row.id === other.id && row.parent_id === other.parent_id && row.format === other.format && JSON.stringify(row.content) === JSON.stringify(other.content);
+    })
+  );
+}
+
+/**
+ * What the server holds per chat, as far as this page knows: the rows of the last trustworthy GET plus every write
+ * it acknowledged since, in acknowledgement order (the server orders by write time). Methods that return rows hand
+ * back what the cache may store now; `null` means the chat's entry must go, `undefined` that there is nothing to do.
+ */
+export class ServerRows<R extends MessageRow = MessageRow> {
+  private threads = new Map<string, { rows: R[] | undefined; writes: number; inflight: number }>();
+
+  private state(threadId: string) {
+    let state = this.threads.get(threadId);
+    if (!state) this.threads.set(threadId, (state = { rows: undefined, writes: 0, inflight: 0 }));
+    return state;
+  }
+
+  /** A chat this page just created: the server has no rows for it. */
+  created(threadId: string): void {
+    const state = this.state(threadId);
+    if (state.writes === 0) state.rows = [];
+  }
+
+  /** Call before a GET; pass the token to `loaded`. */
+  beginLoad(threadId: string): number {
+    const state = this.state(threadId);
+    return state.inflight ? -1 : state.writes;
+  }
+
+  /** A GET's rows. Ignored when a write was in flight or started meanwhile: the server may have read before it landed. */
+  loaded(threadId: string, token: number, rows: R[]): R[] | undefined {
+    const state = this.state(threadId);
+    if (token !== state.writes || state.inflight) return undefined;
+    state.rows = rows.slice();
+    return state.rows;
+  }
+
+  beginWrite(threadId: string): void {
+    const state = this.state(threadId);
+    state.writes += 1;
+    state.inflight += 1;
+  }
+
+  /** The server stored `row` (an upsert keeps an existing row's place). Rows come back once no write is in flight. */
+  acknowledged(threadId: string, row: R): R[] | null | undefined {
+    const state = this.state(threadId);
+    state.inflight -= 1;
+    if (!state.rows) return null;
+    const index = state.rows.findIndex((r) => r.id === row.id);
+    if (index === -1) state.rows.push(row);
+    else state.rows[index] = row;
+    return state.inflight ? undefined : state.rows;
+  }
+
+  /** The write may or may not have landed, so nothing is known until the next trustworthy GET. */
+  failed(threadId: string): null {
+    const state = this.state(threadId);
+    state.inflight -= 1;
+    state.rows = undefined;
+    return null;
+  }
 }

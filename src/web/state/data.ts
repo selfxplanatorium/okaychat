@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { McpPromptInfo, McpServerInfo, Me, ModelInfo, Project, ProviderInfo, StorageInfo, UserSettings } from "@shared/types";
 import { api, prefetch } from "@/lib/api";
 import { setLibraryAccount } from "./library-cache";
+import { warmThreadCache } from "@/runtime/threadCache";
 
 interface DataState {
   me: Me | null;
@@ -167,7 +168,10 @@ export function preloadData(userId: string) {
   try {
     const saved = chatIdFromPath(location.pathname) || new URLSearchParams(location.search).get("thread") || sessionStorage.getItem(selectedThreadKey(userId));
     // Same test as isTemporaryChat, which lives with assistant-ui code this entry module must not import.
-    if (saved && !saved.startsWith("tmp_")) prefetch(`/threads/${saved}/messages`);
+    if (saved && !saved.startsWith("tmp_")) {
+      prefetch(`/threads/${saved}/messages`);
+      warmThreadCache();
+    }
   } catch {
     // Session storage may be disabled.
   }

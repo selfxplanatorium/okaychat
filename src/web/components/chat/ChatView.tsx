@@ -9,6 +9,7 @@ import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 import { useChatPrivacy } from "@/state/chat-privacy";
+import { ThreadMetaSync } from "@/state/thread-meta";
 
 function Welcome() {
   const privacy = useChatPrivacy();
@@ -77,5 +78,10 @@ function BeforeMessages() {
 }
 
 export function ChatView() {
-  return <Thread components={{ Welcome, ComposerToolbar, MessageMeta, AfterMessage, BeforeMessages, BranchAction: BranchMenu }} />;
+  return (
+    <>
+      <ThreadMetaSync />
+      <Thread components={{ Welcome, ComposerToolbar, MessageMeta, AfterMessage, BeforeMessages, BranchAction: BranchMenu }} />
+    </>
+  );
 }
