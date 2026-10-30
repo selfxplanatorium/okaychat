@@ -12,7 +12,7 @@ import { api } from "@/lib/api";
 import { batchError, runBatch } from "@/lib/selection";
 import { cn } from "@/lib/utils";
 import { exportThread, type ThreadExportFormat } from "@/lib/thread-export";
-import { useData } from "@/state/data";
+import { showChat, useData } from "@/state/data";
 
 const formatDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { dateStyle: "medium" });
 
@@ -79,8 +79,8 @@ export function ArchivedChats({ tabs }: { tabs: ReactNode }) {
       // The chat may belong to another project than the sidebar filter, so show every chat.
       useData.getState().setActiveProject(null);
       await aui.threads.reload();
-      navigate("/");
-      aui.threads.switchToThread(thread.id);
+      await aui.threads.switchToThread(thread.id);
+      showChat(navigate);
     });
 
   const exportAs = (thread: ThreadSummary, format: ThreadExportFormat) => act(thread, () => exportThread(thread.id, format, thread.title));

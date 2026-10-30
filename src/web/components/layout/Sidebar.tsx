@@ -13,7 +13,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { signOut } from "@/lib/sign-out";
 import { cn } from "@/lib/utils";
-import { useData } from "@/state/data";
+import { showChat, useData } from "@/state/data";
 import { prefetchLibrary } from "@/state/library-cache";
 
 import { SettingsNav } from "@/components/settings/SettingsNav";
@@ -62,7 +62,7 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
         <div className="shell-sidebar-inner sidebar-surface relative h-full shrink-0 overflow-hidden max-md:w-full">
           <div ref={panelRef} data-layer="chat" data-active={!settings} inert={settings} className="sidebar-layer absolute inset-0 flex flex-col">
             <div className="flex h-12 shrink-0 items-center justify-between px-3">
-              <Link href="/" onClick={() => location !== "/" && navigate("/")}>
+              <Link href="/" onClick={(event) => { event.preventDefault(); showChat(navigate); }}>
                 <Brand />
               </Link>
               <div className="flex items-center gap-1">
@@ -85,7 +85,7 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
               {visibleItems.includes("newChat") && <button type="button" data-glide aria-current={location === "/" && empty ? "page" : undefined} className={cn(rowClass, location === "/" && empty && "bg-sidebar-row-hover")} onClick={async () => {
                 await aui.threads.switchToNewThread();
                 useChatPrivacyStore.getState().set(aui.threadListItem.getState().id, { temporary: false, personalized: true });
-                navigate("/");
+                showChat(navigate);
               }}><SquarePenIcon className="size-4 shrink-0" /> New chat</button>}
               {([
                 { id: "scheduled", label: "Scheduled", href: "/scheduled", icon: CalendarClockIcon },
@@ -136,7 +136,7 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
                 }}
                 // Only opening a chat leaves the current page. Row menus are portaled, but their clicks still bubble here.
                 onClick={(event) => {
-                  if (location !== "/" && (event.target as Element).closest?.("[data-slot=aui_thread-list-item-trigger]")) navigate("/");
+                  if ((event.target as Element).closest?.("[data-slot=aui_thread-list-item-trigger]")) showChat(navigate);
                 }}
               >
                 <GlideHighlight />

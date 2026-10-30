@@ -16,7 +16,7 @@ import type { ThreadSummary } from "@shared/types";
 import { api, takePrefetched } from "@/lib/api";
 import { toolkit, widgetHelperRenders } from "@/components/chat/tool-ui";
 import { WidgetInstructions, widgets } from "@/components/genui/toolkit";
-import { getActiveModel, selectedThreadKey, threadsPath, useData } from "@/state/data";
+import { chatIdFromPath, getActiveModel, selectedThreadKey, threadsPath, useData } from "@/state/data";
 import { useChatModel } from "@/state/thread-meta";
 import { StoredImageAttachmentAdapter, AudioAttachmentAdapter, DocumentAttachmentAdapter, CodeAttachmentAdapter, BinaryAttachmentAdapter } from "./attachments";
 import { chatPrivacyFor, isTemporaryChat, useChatPrivacy, useChatPrivacyStore } from "@/state/chat-privacy";
@@ -304,7 +304,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const userId = useData((s) => s.me?.id);
   const selectionKey = selectedThreadKey(userId);
   const [initialThreadId] = useState(() => {
-    // "Open in New Tab" links carry the thread; it wins over this tab's saved selection once, then leaves the URL.
+    // A chat URL wins over this tab's saved selection.
+    const fromPath = chatIdFromPath(location.pathname);
+    if (fromPath && !isTemporaryChat(fromPath)) return fromPath;
+    // Older "Open in New Tab" links carry the thread as a query parameter, which then leaves the URL.
     const url = new URL(location.href);
     const linked = url.searchParams.get("thread");
     if (linked !== null) {

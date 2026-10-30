@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { useAppearance } from "@/state/appearance";
 import { useArtifactPanel } from "@/state/artifacts";
 import { useChatPrivacyStore } from "@/state/chat-privacy";
-import { useData } from "@/state/data";
+import { showChat, useData } from "@/state/data";
 import { useThreadSelection } from "@/state/thread-selection";
 import { COMMAND_GROUPS, COMMANDS } from "./commands";
 import { Kbd } from "./Kbd";
@@ -68,7 +68,7 @@ export function KeyboardShortcuts() {
       await aui.threads.switchToNewThread();
       // The thread list knows the new id at once; the item scope lags a render after leaving a stored chat.
       useChatPrivacyStore.getState().set(aui.threads.getState().mainThreadId, { temporary: false, personalized: true });
-      navigate("/");
+      showChat(navigate);
       requestAnimationFrame(focusComposer);
     })();
   });
@@ -78,7 +78,7 @@ export function KeyboardShortcuts() {
     const current = order.indexOf(aui.threads.getState().mainThreadId);
     const next = order[current === -1 ? (delta > 0 ? 0 : order.length - 1) : Math.max(0, Math.min(order.length - 1, current + delta))];
     if (!next) return false;
-    void Promise.resolve(aui.threads.switchToThread(next)).then(() => navigate("/"));
+    void Promise.resolve(aui.threads.switchToThread(next)).then(() => showChat(navigate));
     return true;
   };
   useCommand("nav.previousChat", () => stepChat(-1));
@@ -99,7 +99,7 @@ export function KeyboardShortcuts() {
   const inChat = !location.startsWith("/settings") && !["/scheduled", "/library", "/plugins", "/projects"].includes(location);
   useCommand("chat.focusComposer", () => {
     if (inChat) return focusComposer();
-    navigate("/");
+    showChat(navigate);
     setTimeout(focusComposer, 50);
   });
   useCommand("chat.focusMessages", () => focusMessage(messages().at(-1)), inChat);

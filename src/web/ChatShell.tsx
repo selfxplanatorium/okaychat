@@ -14,9 +14,9 @@ import { StorageNotice } from "@/components/StorageNotice";
 import { ThemeEditorHost } from "@/components/settings/theme/ThemeEditorHost";
 import { RuntimeProvider } from "@/runtime/RuntimeProvider";
 import { preloadable } from "@/lib/preloadable";
-import { takePreloadedData, useData } from "@/state/data";
+import { chatIdFromPath, chatPath, showChat, takePreloadedData, useData } from "@/state/data";
 import { loadInstalledFonts } from "@/state/fonts";
-import { useChatPrivacyStore } from "@/state/chat-privacy";
+import { isTemporaryChat, useChatPrivacyStore } from "@/state/chat-privacy";
 import { KeyboardShortcuts } from "@/keyboard/KeyboardShortcuts";
 import { useCommand, useShortcutProps } from "@/keyboard/registry";
 
@@ -48,7 +48,7 @@ function ChatHeader({ sidebarOpen, onToggle }: { sidebarOpen: boolean; onToggle:
         onClick={async () => {
           await aui.threads.switchToNewThread();
           useChatPrivacyStore.getState().set(aui.threadListItem.getState().id, { temporary: false, personalized: true });
-          navigate("/");
+          showChat(navigate);
         }}
         className="surface-glass text-muted-foreground hover:text-foreground relative z-20 rounded-lg border p-1.5 pointer-coarse:p-2.5 transition-colors duration-(--motion-fast) ease-out-quart"
       >
@@ -67,6 +67,65 @@ function ThreadSwitchWatcher({ onSwitch }: { onSwitch: () => void }) {
     seen.current = threadId;
     onSwitch();
   }, [threadId, onSwitch]);
+  return null;
+}
+
+/**
+ * Keeps the address bar on the open chat (`/c/<id>`, "/" for a new or temporary chat) and the tab named after it.
+ * The open chat drives the URL; a URL this component did not write (back/forward, a link, a reload) drives the chat.
+ * Switching between chats pushes a history entry, so Back returns to the previous chat.
+ */
+function ChatUrlSync() {
+  const aui = useAui();
+  const [location, navigate] = useLocation();
+  const remoteId = useAuiState((s) => s.threadListItem.remoteId);
+  const title = useAuiState((s) => s.threadListItem.title);
+  const stored = remoteId && !isTemporaryChat(remoteId) ? remoteId : undefined;
+  // The chat a URL asked for, while the runtime switches to it from `from`. Until it arrives, or the user opens a
+  // third chat, the open chat must not rewrite the URL. A ref, so a repeated effect run sees it at once.
+  const pending = useRef<{ id: string; from: string | undefined } | undefined>(undefined);
+  const written = useRef<string | undefined>(undefined);
+  const last = useRef<{ location?: string; stored?: string }>({});
+
+  // Runs after every render: each step compares against the previous run, so repeated runs are no-ops.
+  useEffect(() => {
+    const prev = last.current;
+    last.current = { location, stored };
+    const request = pending.current;
+    if (request) {
+      if (stored === request.from && location === prev.location) return;
+      pending.current = undefined;
+      if (stored === request.id) {
+        written.current = location;
+        return;
+      }
+    }
+
+    const linked = chatIdFromPath(location);
+    if (linked && linked !== stored && location !== prev.location && location !== written.current) {
+      // The runtime's initial thread does not report a chat it cannot open, so the first render switches too.
+      const next = { id: linked, from: stored };
+      pending.current = next;
+      void Promise.resolve(aui.threads.switchToThread(linked)).catch(() => {
+        if (pending.current !== next) return;
+        pending.current = undefined;
+        navigate("/", { replace: true });
+      });
+      return;
+    }
+
+    const target = stored ? chatPath(stored) : "/";
+    written.current = target;
+    if (location === target) return;
+    // Entering the route, a reload, or a new chat receiving its id replaces the entry; a real switch adds one.
+    const push = stored !== prev.stored && prev.stored !== undefined && prev.location === location && location !== "/";
+    navigate(target, { replace: !push });
+  });
+
+  useEffect(() => {
+    document.title = title ? `${title} · okaychat` : "okaychat";
+  }, [title]);
+  useEffect(() => () => void (document.title = "okaychat"), []);
   return null;
 }
 
@@ -197,6 +256,7 @@ export function Shell({ userId }: { userId: string }) {
                 {/* Phones have no header bar, so messages fade out under the floating buttons. A gradient, not a
                     mask on the viewport: a mask makes the scroller a backdrop root and mobile Chrome drops the composer's blur. */}
                 <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 z-10 h-24 bg-linear-to-b from-background from-15% to-transparent md:hidden" />
+                <ChatUrlSync />
                 <ChatHeader sidebarOpen={sidebarOpen} onToggle={() => setSidebarOpen(true)} />
                 <ChatPrivacyMenu />
                 <StorageNotice />

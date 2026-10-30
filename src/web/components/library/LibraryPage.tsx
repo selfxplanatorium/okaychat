@@ -15,7 +15,7 @@ import { BulkDeleteDialog, FloatingSelectionBar, SelectionCheck, SelectModeToggl
 import { api } from "@/lib/api";
 import { batchError, runBatch } from "@/lib/selection";
 import { cn } from "@/lib/utils";
-import { useData } from "@/state/data";
+import { showChat, useData } from "@/state/data";
 import { cachedLibraryPage, DEFAULT_LIBRARY_QUERY, fetchLibraryFirstPage, forgetLibraryPages } from "@/state/library-cache";
 import { ArchivedChats } from "./ArchivedChats";
 
@@ -134,8 +134,8 @@ function OpenChatButton({ threadId }: { threadId: string }) {
       onClick={async () => {
         useData.getState().setActiveProject(null);
         await aui.threads.reload();
-        navigate("/");
-        aui.threads.switchToThread(threadId);
+        await aui.threads.switchToThread(threadId);
+        showChat(navigate);
       }}
     >
       <MessageCircleIcon /> Open chat

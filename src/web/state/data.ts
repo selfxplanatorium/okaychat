@@ -130,6 +130,27 @@ function resolveActiveModel({ models, selectedModel, threadModels, settings, pro
 export const getActiveModel = (threadId?: string | null) => resolveActiveModel(useData.getState(), threadId);
 
 export const selectedThreadKey = (userId: string | undefined) => `okaychat:thread:${userId}`;
+
+/** Every stored chat has its own address. */
+export const chatPath = (threadId: string) => `/c/${encodeURIComponent(threadId)}`;
+export function chatIdFromPath(path: string): string | undefined {
+  const match = path.match(/^\/c\/([^/]+)\/?$/);
+  if (!match) return undefined;
+  try {
+    return decodeURIComponent(match[1]!);
+  } catch {
+    return undefined;
+  }
+}
+/** The chat view is "/" (a new chat) or a chat's own URL. */
+export const isChatRoute = (path: string) => path === "/" || chatIdFromPath(path) !== undefined;
+/**
+ * Shows the chat view from another page. Inside it the URL already follows the open chat, and pushing "/" there
+ * would add a history entry for the same chat.
+ */
+export function showChat(navigate: (to: string) => void) {
+  if (!isChatRoute(location.pathname)) navigate("/");
+}
 export const threadsPath = (project: string | null) => (project ? `/threads?project=${encodeURIComponent(project)}` : "/threads");
 
 let preloaded: { userId: string; promise?: Promise<void> } | undefined;
@@ -142,9 +163,9 @@ export function preloadData(userId: string) {
   const promise = useData.getState().load();
   promise.catch(() => {});
   prefetch(threadsPath(useData.getState().activeProject));
-  // RuntimeProvider restores this tab's selected chat (or a ?thread= link); its messages are needed for the first paint.
+  // RuntimeProvider opens the chat in the URL (or this tab's selected chat); its messages are needed for the first paint.
   try {
-    const saved = new URLSearchParams(location.search).get("thread") || sessionStorage.getItem(selectedThreadKey(userId));
+    const saved = chatIdFromPath(location.pathname) || new URLSearchParams(location.search).get("thread") || sessionStorage.getItem(selectedThreadKey(userId));
     // Same test as isTemporaryChat, which lives with assistant-ui code this entry module must not import.
     if (saved && !saved.startsWith("tmp_")) prefetch(`/threads/${saved}/messages`);
   } catch {

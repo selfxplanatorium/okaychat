@@ -3,7 +3,7 @@ import { CheckIcon, ChevronsUpDownIcon, FolderIcon, LayersIcon, SettingsIcon } f
 import type { CSSProperties } from "react";
 import { useLocation } from "wouter";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
-import { useData } from "@/state/data";
+import { showChat, useData } from "@/state/data";
 
 /** Picks the project the sidebar shows and new chats belong to. */
 export function ProjectSwitcher() {
@@ -17,8 +17,8 @@ export function ProjectSwitcher() {
   const pick = async (id: string | null) => {
     setActive(id);
     await aui.threads.reload();
-    aui.threads.switchToNewThread();
-    navigate("/");
+    await aui.threads.switchToNewThread();
+    showChat(navigate);
   };
 
   const row = (index: number) => ({

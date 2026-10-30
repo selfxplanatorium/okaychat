@@ -5,7 +5,7 @@ import { useLocation } from "wouter";
 import type { ThreadSummary } from "@shared/types";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
-import { useData } from "@/state/data";
+import { showChat, useData } from "@/state/data";
 import { dialogReturnFocus } from "@/keyboard/registry";
 
 type Hit = { threadId: string; title: string | null; messageId: string; snippet: string };
@@ -67,7 +67,7 @@ export function ChatSearch({ open, onOpenChange }: { open: boolean; onOpenChange
         await aui.threads.reload();
       }
       await aui.threads.switchToThread(id);
-      navigate("/");
+      showChat(navigate);
       onOpenChange(false);
     } catch { setError("Could not open this chat. Try again."); }
   };

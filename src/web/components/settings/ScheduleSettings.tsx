@@ -10,7 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { useActiveModel, useData } from "@/state/data";
+import { showChat, useActiveModel, useData } from "@/state/data";
 import { ModelSelect } from "../chat/ModelPicker";
 import { SettingsPage, SettingsSection } from "./SettingsUI";
 
@@ -220,8 +220,8 @@ export function ScheduleSettings() {
 
   const openThread = async (threadId: string) => {
     await aui.threads.reload();
-    navigate("/");
-    aui.threads.switchToThread(threadId);
+    await aui.threads.switchToThread(threadId);
+    showChat(navigate);
   };
 
   return (

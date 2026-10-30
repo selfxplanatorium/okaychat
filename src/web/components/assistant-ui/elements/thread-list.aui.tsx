@@ -48,7 +48,7 @@ import {
   type RefObject,
 } from "react";
 import { isTemporaryChat, useChatPrivacyStore } from "@/state/chat-privacy";
-import { getActiveModel, useData } from "@/state/data";
+import { chatPath, getActiveModel, useData } from "@/state/data";
 import { api } from "@/lib/api";
 import { exportThread } from "@/lib/thread-export";
 import type { ThreadCustom } from "@/runtime/RuntimeProvider";
@@ -855,7 +855,7 @@ const ThreadListItemMenu: FC<{
           <MenuItem
             disabled={!remoteId}
             onClick={() =>
-              window.open(`/?thread=${encodeURIComponent(remoteId!)}`, "_blank", "noopener")
+              window.open(chatPath(remoteId!), "_blank", "noopener")
             }
           >
             <ExternalLinkIcon /> Open in New Tab
