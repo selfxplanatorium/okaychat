@@ -3,6 +3,7 @@ import { memo, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } fr
 
 import { isThemeColor, themeColorToHex, type ThemeColorRole } from "@/theme/palette";
 import { cn } from "@/lib/utils";
+import { t, type PlainMessageKey } from "@/i18n";
 import { hexToHsv, hsvToHex, type HsvColor } from "@/lib/color";
 import { ColorHueSlider, ColorSaturationValuePlane } from "@/components/ui/color-picker";
 import { Input } from "@/components/ui/input";
@@ -33,26 +34,72 @@ function setColorEditing(source: string, active: boolean) {
   document.documentElement.toggleAttribute("data-theme-color-editing", colorEditingSources.size > 0);
 }
 
+const ROLE_LABELS = {
+  canvas: "appearance.roleCanvas",
+  chrome: "appearance.roleChrome",
+  toolbar: "appearance.roleToolbar",
+  toolbarForeground: "appearance.roleToolbarForeground",
+  toolbarBorder: "appearance.roleToolbarBorder",
+  toolbarControl: "appearance.roleToolbarControl",
+  toolbarControlForeground: "appearance.roleToolbarControlForeground",
+  toolbarControlHover: "appearance.roleToolbarControlHover",
+  surface: "appearance.roleSurface",
+  surfaceRaised: "appearance.roleSurfaceRaised",
+  surfaceOverlay: "appearance.roleSurfaceOverlay",
+  text: "appearance.roleText",
+  textMuted: "appearance.roleTextMuted",
+  border: "appearance.roleBorder",
+  input: "appearance.roleInput",
+  focus: "appearance.roleFocus",
+  accent: "appearance.roleAccent",
+  accentForeground: "appearance.roleAccentForeground",
+  secondary: "appearance.roleSecondary",
+  secondaryForeground: "appearance.roleSecondaryForeground",
+  muted: "appearance.roleMuted",
+  mutedForeground: "appearance.roleMutedForeground",
+  placeholder: "appearance.rolePlaceholder",
+  secondaryLabel: "appearance.roleSecondaryLabel",
+  iconMuted: "appearance.roleIconMuted",
+  error: "appearance.roleError",
+  errorForeground: "appearance.roleErrorForeground",
+  errorSurface: "appearance.roleErrorSurface",
+  warning: "appearance.roleWarning",
+  warningForeground: "appearance.roleWarningForeground",
+  warningSurface: "appearance.roleWarningSurface",
+  update: "appearance.roleUpdate",
+  updateForeground: "appearance.roleUpdateForeground",
+  updateSurface: "appearance.roleUpdateSurface",
+  accentSurface: "appearance.roleAccentSurface",
+  accentSurfaceForeground: "appearance.roleAccentSurfaceForeground",
+  messageSurface: "appearance.roleMessageSurface",
+  messageForeground: "appearance.roleMessageForeground",
+  messageAction: "appearance.roleMessageAction",
+  messageActionForeground: "appearance.roleMessageActionForeground",
+  messageActionHover: "appearance.roleMessageActionHover",
+  codeBackground: "appearance.roleCodeBackground",
+  codeForeground: "appearance.roleCodeForeground",
+  searchMatchBackground: "appearance.roleSearchMatchBackground",
+  searchMatchForeground: "appearance.roleSearchMatchForeground",
+  searchMatchActiveBackground: "appearance.roleSearchMatchActiveBackground",
+  searchMatchActiveForeground: "appearance.roleSearchMatchActiveForeground",
+  sidebar: "appearance.roleSidebar",
+  sidebarForeground: "appearance.roleSidebarForeground",
+  sidebarMutedForeground: "appearance.roleSidebarMutedForeground",
+  sidebarControlSurface: "appearance.roleSidebarControlSurface",
+  sidebarRowHover: "appearance.roleSidebarRowHover",
+  sidebarRowActive: "appearance.roleSidebarRowActive",
+  sidebarRowSelected: "appearance.roleSidebarRowSelected",
+  sidebarBorder: "appearance.roleSidebarBorder",
+  terminalBackground: "appearance.roleTerminalBackground",
+  terminalForeground: "appearance.roleTerminalForeground",
+  terminalCursor: "appearance.roleTerminalCursor",
+  terminalSelection: "appearance.roleTerminalSelection",
+  terminalScrollbar: "appearance.roleTerminalScrollbar",
+  terminalScrollbarHover: "appearance.roleTerminalScrollbarHover",
+} as const satisfies Record<ThemeColorRole, PlainMessageKey>;
+
 export function getThemeRoleLabel(role: ThemeColorRole): string {
-  const labels: Partial<Record<ThemeColorRole, string>> = {
-    canvas: "Background",
-    toolbar: "Toolbar background",
-    toolbarForeground: "Toolbar text",
-    toolbarBorder: "Toolbar border",
-    toolbarControl: "Toolbar control",
-    toolbarControlForeground: "Toolbar control text",
-    toolbarControlHover: "Toolbar control hover",
-    accent: "Accent color",
-    errorForeground: "Error text",
-    errorSurface: "Error background",
-    warningForeground: "Warning text",
-    warningSurface: "Warning background",
-    updateForeground: "Update text",
-    updateSurface: "Update background",
-  };
-  const label = labels[role];
-  if (label) return label;
-  return role.replace(/([A-Z])/g, " $1").replace(/^./, (character) => character.toUpperCase());
+  return t(ROLE_LABELS[role]);
 }
 
 function themePickerAlphaSuffix(value: string): string {
@@ -188,7 +235,7 @@ function ThemeColorPickerPanel({
       <div className="flex items-center justify-between border-b border-border/70 px-4 py-3">
         <div className="min-w-0">
           <p className="truncate text-xs font-semibold text-foreground">{label}</p>
-          <p className="text-2xs text-muted-foreground">Choose a color</p>
+          <p className="text-2xs text-muted-foreground">{t("appearance.chooseAColor")}</p>
         </div>
         <span
           className="size-7 shrink-0 rounded-full shadow-sm"
@@ -203,7 +250,7 @@ function ThemeColorPickerPanel({
           onInteractionEnd={flushPendingCommit}
         />
         <ColorHueSlider
-          label={`${label} hue`}
+          label={t("appearance.pickerHue", { name: label })}
           value={hsv.h}
           onChange={(h) => commitHsv({ ...hsv, h })}
           onInteractionEnd={flushPendingCommit}
@@ -219,7 +266,7 @@ function ThemeColorPickerPanel({
                 style={{ backgroundColor: currentColor }}
               />
               <input
-                aria-label={`${label} picker hex value`}
+                aria-label={t("appearance.pickerHexValue", { name: label })}
                 className="h-8 min-w-0 flex-1 bg-transparent font-mono text-xs text-foreground outline-none"
                 onBlur={() => {
                   setIsEditingText(false);
@@ -241,7 +288,7 @@ function ThemeColorPickerPanel({
             </span>
             <span className="flex min-w-0 items-center rounded-lg border border-input bg-background px-2 focus-within:border-ring">
               <input
-                aria-label={`${label} picker RGB value`}
+                aria-label={t("appearance.pickerRgbValue", { name: label })}
                 className="h-8 min-w-0 flex-1 bg-transparent font-mono text-xs text-foreground outline-none"
                 onBlur={() => {
                   setIsEditingText(false);
@@ -284,7 +331,7 @@ function ThemeColorPicker({
             <PopoverTrigger
               render={
                 <button
-                  aria-label={`Choose ${label} color`}
+                  aria-label={t("appearance.chooseColor", { name: label })}
                   className="relative flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-foreground/30 transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-solid focus-visible:-outline-offset-2 focus-visible:outline-ring"
                   onFocus={onInteract}
                   onPointerDown={onInteract}
@@ -299,7 +346,7 @@ function ThemeColorPicker({
             />
           }
         />
-        <TooltipContent side="top">{`Choose ${label} color`}</TooltipContent>
+        <TooltipContent side="top">{t("appearance.chooseColor", { name: label })}</TooltipContent>
       </Tooltip>
       <PopoverContent
         align="end"
@@ -351,7 +398,7 @@ export const ThemeColorField = memo(function ThemeColorField({
         <TooltipTrigger
           render={
             <button
-              aria-label={`${selected ? "Hide" : "Show"} ${label} usage`}
+              aria-label={t(selected ? "appearance.hideUsage" : "appearance.showUsage", { name: label })}
               aria-pressed={selected}
               className="flex min-w-0 flex-1 cursor-pointer items-center rounded-md text-left text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
               onClick={() => onToggleSelected?.(role)}
@@ -361,7 +408,7 @@ export const ThemeColorField = memo(function ThemeColorField({
             </button>
           }
         />
-        <TooltipContent side="top">{`${selected ? "Hide" : "Show"} where ${label} is used`}</TooltipContent>
+        <TooltipContent side="top">{t(selected ? "appearance.hideUsageTooltip" : "appearance.showUsageTooltip", { name: label })}</TooltipContent>
       </Tooltip>
       <div className="ml-auto flex shrink-0 items-center gap-2">
         <ThemeColorPicker
@@ -372,7 +419,7 @@ export const ThemeColorField = memo(function ThemeColorField({
         />
         <Input
           aria-invalid={!isColorValue}
-          aria-label={`${label} hex value`}
+          aria-label={t("appearance.hexValue", { name: label })}
           className="h-8 w-28 shrink-0 font-mono text-xs md:text-xs"
           id={`${role}-hex`}
           onChange={(event) => onChange(role, event.currentTarget.value)}

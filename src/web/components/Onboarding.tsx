@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import { Link } from "wouter";
 import { Brand } from "@/components/layout/Brand";
 import { OPENCODE_GO_CONSOLE, ProviderForm } from "@/components/settings/ProvidersSettings";
+import { t } from "@/i18n";
 import { useData } from "@/state/data";
 
 /** First run: OpenCode Go is the recommended connection, everything else is one click away. */
@@ -17,13 +18,13 @@ export function Onboarding() {
             <Brand />
           </div>
           <div className="stagger animate-rise-in" style={{ "--i": 1 } as CSSProperties}>
-            <h1 className="text-lg font-semibold">Connect OpenCode Go</h1>
+            <h1 className="text-lg font-semibold">{t("shell.onboardingTitle")}</h1>
             <p className="text-muted-foreground mt-1 text-sm">
-              One subscription, many frontier and open models (GLM, Kimi, DeepSeek, Qwen, MiniMax, GPT, Claude Haiku, Gemini) with generous limits and free models. Paste your key to start.
+              {t("shell.onboardingIntro")}
             </p>
           </div>
           <div className="stagger animate-rise-in" style={{ "--i": 2 } as CSSProperties}>
-            {go ? <ProviderForm provider={go} autoFocus /> : <p className="text-muted-foreground text-sm">Loading providers…</p>}
+            {go ? <ProviderForm provider={go} autoFocus /> : <p className="text-muted-foreground text-sm">{t("shell.loadingProviders")}</p>}
           </div>
           <a
             href={OPENCODE_GO_CONSOLE}
@@ -32,12 +33,12 @@ export function Onboarding() {
             className="text-primary stagger animate-rise-in inline-flex items-center gap-1 text-sm transition-colors duration-(--motion-fast) ease-out-quart hover:underline"
             style={{ "--i": 3 } as CSSProperties}
           >
-            Get an OpenCode Go key <ExternalLinkIcon className="size-3.5" />
+            {t("shell.getKey")} <ExternalLinkIcon className="size-3.5" />
           </a>
           <div className="text-muted-foreground border-t pt-4 text-sm stagger animate-rise-in" style={{ "--i": 4 } as CSSProperties}>
-            Using another provider?{" "}
+            {t("shell.otherProvider")}{" "}
             <Link href="/settings/providers" className="text-foreground transition-colors duration-(--motion-fast) ease-out-quart hover:underline">
-              Connect OpenAI, Anthropic, Google, OpenRouter, Ollama, or any of 200+ others
+              {t("shell.otherProviderLink")}
             </Link>
             .
           </div>
@@ -47,7 +48,7 @@ export function Onboarding() {
             className="text-muted-foreground hover:text-foreground stagger animate-rise-in self-start text-sm transition-colors duration-(--motion-fast) ease-out-quart hover:underline"
             style={{ "--i": 5 } as CSSProperties}
           >
-            Skip for now and look around
+            {t("shell.skipOnboarding")}
           </button>
         </div>
       </div>

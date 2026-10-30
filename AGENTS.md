@@ -30,6 +30,7 @@ okaychat is a self-hosted AI chat app meant to replace LibreChat and Open WebUI.
 | Speech | Separate `speech` container (`speech/`): Piper (read aloud) and faster-whisper (speech to text), each in a child process that exits when idle; cloud engines over plain `fetch` | Natural local voices and Whisper without bloating the app; memory only while in use. See `docs/implementation/speech.md` |
 | Images | Codex CLI, AI SDK image providers (`@ai-sdk/xai`, `black-forest-labs`, `fal`, `replicate`, `togetherai` plus openai/google) | Small packages on the same provider-utils. See `docs/implementation/image-generation.md` |
 | Web | `linkedom` + `@mozilla/readability` + `turndown`; SearXNG sidecar for search | Free, no keys. See `docs/implementation/web-search.md` |
+| i18n | Own `t()` on `Intl` (`src/web/i18n/`), English catalog only | Typed keys and plurals without a dependency. See `docs/implementation/i18n.md` |
 | Theming | Port of T3Code appearance settings (MIT) | Required by the product brief |
 | Depth | `theme/depth.css`: lit surfaces, tinted shadows, accent gradients derived from theme tokens | Matches the brand icon. See `docs/implementation/visual-depth.md` |
 
@@ -82,6 +83,7 @@ src/web/
   fonts/              Bundled Liberation TTFs and their CSS (see docs/implementation/bundled-fonts.md)
   state/              zustand stores (data, appearance, fonts, thread meta); appearance-sync.ts handles account cache and outbox
   speech/             Read-aloud and dictation adapters, recorder, Markdown-to-speech text, composer voice effects
+  i18n/               t(), English catalog per area (en/), locale-aware formatters (format.ts), <Trans>, future locales/
   keyboard/           Command catalogue, combo matching, dispatcher, shell-level handlers and the command list (Ctrl/⌘+/)
 speech/               Speech worker container: server.py (stdlib HTTP, Piper/Whisper child processes), Dockerfile, hashed requirements lock
 src/browser/          Browser worker (own container): job server, Playwright renderer and viewers, Scrapling client, egress proxy
@@ -124,6 +126,7 @@ docs/                 Reusable documentation (see below)
 - `docs/implementation/storage-quota.md`: what counts against the per-user storage quota and where it is enforced.
 - `docs/implementation/security.md`: threat model, the controls per area, and the known residual risks. Read before changing auth, outbound requests, rendering, or tool approval.
 - `docs/implementation/mobile-pwa.md`: manifest, service worker, install requirements, safe areas, touch sizing, drawer gestures.
+- `docs/implementation/i18n.md`: the message catalog, `t()`/`<Trans>`, formatters, locale selection, and how to add a language.
 - `docs/implementation/keyboard.md`: shortcuts, the command list, combo matching across layouts, browser conflicts, message focus, and how to add a command.
 
 Keep only current implementation and operating guidance under `docs/implementation/`. Put exploratory research, downloaded upstream source, mockups, prompts, screenshots, and other working files outside the repository. Generated build output belongs in gitignored `dist/` and can be removed between builds.
@@ -185,6 +188,8 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 - Memory transfers use reviewed text/Markdown or okaychat JSON; they do not connect to Claude/ChatGPT accounts. Content is encrypted with `OKAYCHAT_SECRET`. JSON preserves project scope for the same account; unavailable scopes become global only in the review preview, with a warning. Chat deletion does not delete saved memories.
 - Temporary chats use reserved `tmp_` ids and never create a thread, messages, usage records, uploads, artifacts, or memory entries. They have no replay buffer or browser storage checkpoint; reload discards them. `RuntimeProvider` skips history/title APIs and the sidebar hides them. The ghost button in the top-right starts and ends them with personalization off. Once a temporary chat has messages, the ghost offers "Save to history", which copies the current branch into a new stored thread through the normal messages API (no usage is backfilled); optional personalization (in the chat options menu) reads only global memory and custom instructions, never writes memories or includes project context. `DocumentAttachmentAdapter` must use `/files/extract?temporary=1`; its per-thread adapter comes from `unstable_useAdapters` (a global runtime attachment override would silently bypass this). Temporary tools are limited to web search/page reading and optional read-only memory search; persistent tools and compaction are unavailable.
 - `maxSteps` (default 20) and `maxSearches` (default 5) are independent. A turn and all its delegates share ONE `SearchBudget` and the same built-in web tools object; create it before constructing either tool set. Browser-tool continuations recover search counts from current-turn tool history. Page reads do not consume search queries.
+
+- All web UI text comes from `t("namespace.key")` (`src/web/i18n/`); the English files in `i18n/en/` are the source catalog, one namespace per area. Never hardcode visible text, aria labels, placeholders, or web-side error messages, and never build sentences from translated fragments (use `{placeholders}`, plural entries, or `<Trans>`). Numbers, dates, sizes, costs, and lists go through `i18n/format.ts`, not `toLocaleString`/`toFixed`. Keys are literal in code (the test fails on unused keys), and `t()` never runs at module top level: store a `PlainMessageKey` and call `t()` at render. Model-facing text, server error messages, and proper names stay English. See `docs/implementation/i18n.md`.
 
 - Startup requests start in parallel from `App.tsx` once `/auth/status` returns a user. A new startup request belongs there (`prefetch` + `takePrefetched`), not in a mount effect, or it adds a round trip. Lazy routes use `preloadable()`, not bare `React.lazy`, which holds its fallback for up to 300 ms. See `docs/implementation/web-bundle.md`.
 

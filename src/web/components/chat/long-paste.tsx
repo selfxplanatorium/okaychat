@@ -1,4 +1,5 @@
 import { useAui, useAuiState } from "@assistant-ui/react";
+import { t } from "@/i18n";
 import { useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
 
 /** Pasted text this long becomes a text attachment, so it does not flood the composer or the sent bubble. */
@@ -37,8 +38,8 @@ export function useLongPaste(): {
     if (!isLong(text)) return;
     event.preventDefault();
     const names = new Set(aui.composer.getState().attachments.map((a) => a.name));
-    let name = "Pasted text.txt";
-    for (let n = 2; names.has(name); n++) name = `Pasted text ${n}.txt`;
+    let name = t("composer.pastedText");
+    for (let n = 2; names.has(name); n++) name = t("composer.pastedTextN", { n });
     const file = new File([text], name, { type: "text/plain" });
     const input = event.currentTarget;
     setPasted({ file, text, before: input.value, start: input.selectionStart, end: input.selectionEnd, input });
@@ -63,13 +64,13 @@ export function useLongPaste(): {
 
   const notice = attached ? (
     <div role="status" className="text-muted-foreground flex items-center gap-2 px-2.5 text-xs">
-      <span className="min-w-0 truncate">Long text was attached as a file.</span>
+      <span className="min-w-0 truncate">{t("composer.longPasteAttached")}</span>
       <button
         type="button"
         onClick={pasteInline}
         className="text-foreground hover:bg-muted focus-visible:ring-ring/50 shrink-0 rounded px-1.5 py-0.5 font-medium outline-none focus-visible:ring-2 pointer-coarse:py-1.5"
       >
-        Paste inline
+        {t("composer.pasteInline")}
       </button>
     </div>
   ) : null;

@@ -26,6 +26,7 @@ import type {
 } from "@assistant-ui/react";
 import { cn } from "@/lib/utils";
 import { hostOf, safeHref } from "../utils/href";
+import { t } from "@/i18n";
 
 const extensionForMimeType = (mimeType?: string): string => {
   switch (mimeType) {
@@ -214,7 +215,7 @@ function ImagePreview({
   fit = "contain",
   onLoad,
   onError,
-  alt = "Image content",
+  alt = t("thread.imageContent"),
   src,
   ...props
 }: ImagePreviewProps) {
@@ -359,7 +360,7 @@ function ImageSource({
           className="hover:text-foreground truncate"
         >
           {displayLabel}
-          <span className="sr-only"> (opens in a new tab)</span>
+          <span className="sr-only"> {t("thread.opensNewTab")}</span>
         </a>
       ) : (
         <span data-slot="image-source-label" className="truncate">
@@ -396,7 +397,7 @@ type ImageZoomProps = PropsWithChildren<{
   alt?: string;
 }>;
 
-function ImageZoom({ src, alt = "Image preview", children }: ImageZoomProps) {
+function ImageZoom({ src, alt = t("thread.imagePreview"), children }: ImageZoomProps) {
   const [isOpen, setIsOpen] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -466,7 +467,7 @@ function ImageZoom({ src, alt = "Image preview", children }: ImageZoomProps) {
         role="button"
         tabIndex={0}
         className="aui-image-zoom-trigger cursor-zoom-in"
-        aria-label="Click to zoom image"
+        aria-label={t("thread.zoomImage")}
       >
         {children}
       </div>
@@ -479,7 +480,7 @@ function ImageZoom({ src, alt = "Image preview", children }: ImageZoomProps) {
             aria-modal="true"
             className="aui-image-zoom-overlay fade-in animate-in fixed inset-0 z-50 flex items-center justify-center bg-black/80 duration-200"
             onClick={handleClose}
-            aria-label="Zoomed image"
+            aria-label={t("thread.zoomedImage")}
           >
             <img
               data-slot="image-zoom-content"
@@ -494,7 +495,7 @@ function ImageZoom({ src, alt = "Image preview", children }: ImageZoomProps) {
             <button
               ref={closeRef}
               type="button"
-              aria-label="Close zoomed image"
+              aria-label={t("thread.closeZoomedImage")}
               onClick={(e) => {
                 e.stopPropagation();
                 handleClose();
@@ -520,7 +521,7 @@ function ImageGenerating({ className }: { className?: string }) {
       )}
     >
       <Loader2Icon className="text-muted-foreground size-8 animate-spin" />
-      <span className="sr-only">Generating image…</span>
+      <span className="sr-only">{t("thread.generatingImage")}</span>
     </div>
   );
 }
@@ -541,7 +542,7 @@ function ImageContentFilterError({
       )}
     >
       <ShieldAlertIcon className="text-muted-foreground size-8" />
-      <p className="text-sm font-medium">Image could not be generated</p>
+      <p className="text-sm font-medium">{t("thread.imageFailed")}</p>
       {reason && <p className="text-muted-foreground text-xs">{reason}</p>}
     </div>
   );
@@ -577,7 +578,7 @@ function RegenerateButton({
       }}
       disabled={isRegenerating}
       data-slot="image-regenerate"
-      aria-label="Regenerate image"
+      aria-label={t("thread.regenerateImage")}
       className="hover:bg-muted inline-flex size-7 items-center justify-center rounded transition-colors duration-(--motion-fast) ease-out-quart disabled:opacity-50"
     >
       <RefreshCwIcon
@@ -597,7 +598,7 @@ function ImageActions({ part, onRegenerate, className }: ImageActionsProps) {
         type="button"
         onClick={() => downloadImagePart(part)}
         data-slot="image-download"
-        aria-label="Download image"
+        aria-label={t("thread.downloadImage")}
         className="hover:bg-muted inline-flex size-7 items-center justify-center rounded transition-colors duration-(--motion-fast) ease-out-quart"
       >
         <DownloadIcon className="size-4" />
@@ -608,7 +609,7 @@ function ImageActions({ part, onRegenerate, className }: ImageActionsProps) {
           copyImagePart(part).catch(() => {});
         }}
         data-slot="image-copy"
-        aria-label="Copy image"
+        aria-label={t("thread.copyImage")}
         className="hover:bg-muted inline-flex size-7 items-center justify-center rounded transition-colors duration-(--motion-fast) ease-out-quart"
       >
         <CopyIcon className="size-4" />
@@ -633,15 +634,15 @@ const ImageImpl: ImageMessagePartComponent = (props) => {
   if (status?.type === "incomplete" && status.reason === "content-filter") {
     return (
       <ImageRoot>
-        <ImageContentFilterError reason="The provider blocked this image." />
+        <ImageContentFilterError reason={t("thread.imageBlocked")} />
       </ImageRoot>
     );
   }
 
   return (
     <ImageRoot>
-      <ImageZoom src={image} alt={filename || "Image content"}>
-        <ImagePreview src={image} alt={filename || "Image content"} />
+      <ImageZoom src={image} alt={filename || t("thread.imageContent")}>
+        <ImagePreview src={image} alt={filename || t("thread.imageContent")} />
       </ImageZoom>
       <ImageFilename>{filename}</ImageFilename>
     </ImageRoot>

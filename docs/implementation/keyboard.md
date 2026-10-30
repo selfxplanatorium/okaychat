@@ -72,6 +72,6 @@ Stored in `user_settings.keyboard` (`KeyboardSettings` in `shared/types.ts`), va
 
 ## Adding a command
 
-1. Add a `CommandDef` to `COMMANDS` (id, label, group, default combos, scope). Run the tests: a default that clashes fails.
+1. Add a `CommandDef` to `COMMANDS` (id, `labelKey` from the `keyboard` namespace, group, default combos, scope). Show labels with `commandLabel()` and `groupLabel()`, never a stored string. Run the tests: a default that clashes fails.
 2. Either `useCommand(id, handler)` in the component that owns the state, or `data-command={id}` (or `command={id}` on `TooltipIconButton`) on the control.
 3. Nothing else: the command list, settings page, and tooltips read the catalogue.

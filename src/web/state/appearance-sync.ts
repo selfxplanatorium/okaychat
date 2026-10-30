@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { create } from "zustand";
 import { appearanceSchema, parseAppearancePatch, type UserAppearance } from "@shared/appearance";
 import { api, takePrefetched } from "@/lib/api";
+import { t } from "@/i18n";
 import { subscribeToCustomThemes } from "@/theme/palette";
 import { appearanceSnapshot, DEFAULT_APPEARANCE, restoreAppearance, useAppearance } from "./appearance";
 
@@ -54,7 +55,7 @@ export function useSyncAppearance(userId: string | undefined): boolean {
       cache();
     };
     const fail = () => {
-      if (alive) useAppearanceSyncStatus.setState({ error: "Appearance is saved on this device. Sync will retry when you reconnect or return to the app." });
+      if (alive) useAppearanceSyncStatus.setState({ error: t("composer.appearanceSyncFailed") });
     };
     const schedule = () => {
       clearTimeout(timer);

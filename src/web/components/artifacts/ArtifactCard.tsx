@@ -1,6 +1,8 @@
 import { AppWindowIcon, CodeIcon, FileSpreadsheetIcon, FileTextIcon, ImageIcon, Loader2Icon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
 import type { ArtifactKind, ArtifactToolResult } from "@shared/types";
+import { t } from "@/i18n";
+import { formatBytes } from "@/i18n/format";
 import { cn } from "@/lib/utils";
 import { useArtifactPanel } from "@/state/artifacts";
 import { useCurrentThreadId } from "@/state/thread-meta";
@@ -28,7 +30,7 @@ export function ArtifactCard({ args, result, status, action }: { args: unknown; 
   const r = result as ArtifactToolResult | undefined;
   const running = status?.type === "running";
   const failed = status?.type === "incomplete" || (!running && typeof result === "string");
-  const title = r?.title ?? a.title ?? a.id ?? "artifact";
+  const title = r?.title ?? a.title ?? a.id ?? t("artifacts.fallbackTitle");
   const Icon = ICONS[r?.kind ?? a.kind ?? "code"] ?? CodeIcon;
 
   // Open the panel when a call finishes live. History loads mount already complete and stay closed.
@@ -42,23 +44,22 @@ export function ArtifactCard({ args, result, status, action }: { args: unknown; 
   }, [running, r?.id, threadId, show]);
 
   const ops = a.docx_ops ?? a.xlsx_ops ?? a.pdf_ops;
+  const edits = a.edits?.length || ops?.length || 0;
   const detail = running
     ? isDocument(a.kind)
-      ? "Building the file…"
+      ? t("artifacts.building")
       : a.content
-        ? `${a.content.split("\n").length} lines`
-        : a.edits?.length
-          ? `${a.edits.length} edit${a.edits.length === 1 ? "" : "s"}`
-          : ops?.length
-            ? `${ops.length} edit${ops.length === 1 ? "" : "s"}`
-            : "…"
+        ? t("artifacts.lines", { count: a.content.split("\n").length })
+        : edits
+          ? t("artifacts.edits", { count: edits })
+          : "…"
     : failed
       ? typeof result === "string"
         ? result
-        : "Failed"
+        : t("artifacts.failed")
       : isDocument(r?.kind)
-        ? `${r!.kind.toUpperCase()} · ${Math.max(1, Math.round((r!.size ?? 0) / 1024))} KB · ${action === "create" ? "created" : "updated"}`
-        : `${action === "create" ? "Created" : "Updated"} · v${r?.version}`;
+        ? t(action === "create" ? "artifacts.documentCreated" : "artifacts.documentUpdated", { kind: r!.kind.toUpperCase(), size: formatBytes(r!.size ?? 0) })
+        : t(action === "create" ? "artifacts.created" : "artifacts.updated", { version: r?.version ?? "" });
 
   return (
     <button

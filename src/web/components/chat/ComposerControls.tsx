@@ -5,6 +5,7 @@ import type { McpPromptInfo } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
@@ -12,7 +13,7 @@ import { useChatModel } from "@/state/thread-meta";
 import { useChatSearch } from "@/state/chat-search";
 import { useCommand } from "@/keyboard/registry";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSubmenuRoot, MenuSubmenuTrigger, MenuTrigger } from "@/components/ui/menu";
-import { EFFORT_LABELS, useEffortChoices } from "./ModelPicker";
+import { effortLabel, useEffortChoices } from "./ModelPicker";
 
 const triggerClass =
   "hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 shrink-0 pointer-coarse:h-9 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart";
@@ -37,7 +38,7 @@ export function SearchToggle() {
       )}
     >
       {enabled ? <GlobeIcon className="size-3.5" /> : <GlobeOffIcon className="size-3.5" />}
-      Search
+      {t("composer.search")}
     </button>
   );
 }
@@ -118,12 +119,12 @@ function PromptDialog({
             }}
           >
             <DialogTitle className="pe-6 text-base">{shown.title ?? shown.name}</DialogTitle>
-            <DialogDescription>{shown.description ?? `A prompt from ${shown.server}.`}</DialogDescription>
+            <DialogDescription>{shown.description ?? t("composer.promptFrom", { server: shown.server })}</DialogDescription>
             {shown.arguments.map((arg, index) => (
               <label key={arg.name} className="flex flex-col gap-1 text-xs">
                 <span className="font-medium">
                   {arg.name}
-                  {arg.required && <span className="text-muted-foreground"> (required)</span>}
+                  {arg.required && <span className="text-muted-foreground"> {t("composer.required")}</span>}
                 </span>
                 <Input
                   autoFocus={index === 0}
@@ -137,11 +138,11 @@ function PromptDialog({
             {error && <p className="text-error text-xs">{error}</p>}
             <div className="flex justify-end gap-2">
               <Button type="button" variant="ghost" onClick={onClose}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button type="submit" disabled={busy}>
                 {busy && <Loader2Icon className="animate-spin" />}
-                Insert
+                {t("composer.insert")}
               </Button>
             </div>
           </form>
@@ -160,9 +161,9 @@ export function McpPromptsButton() {
   return (
     <>
       <Menu onOpenChange={(open) => open && void load()}>
-        <MenuTrigger aria-label="MCP prompts" data-command="composer.prompts" className={cn(triggerClass, "max-sm:hidden pointer-coarse:hidden")}>
+        <MenuTrigger aria-label={t("composer.mcpPrompts")} data-command="composer.prompts" className={cn(triggerClass, "max-sm:hidden pointer-coarse:hidden")}>
           <SquareSlashIcon className="size-3.5" />
-          Prompts
+          {t("composer.prompts")}
         </MenuTrigger>
         <MenuContent side="top" align="start" className="max-h-80 w-72">
           <PromptItems onPick={pick} />
@@ -187,7 +188,7 @@ export function MobileComposerMenu() {
       {dialog}
       <Menu onOpenChange={(open) => open && hasPrompts && void loadPrompts()}>
         <MenuTrigger
-          aria-label="Composer options"
+          aria-label={t("composer.composerOptions")}
           className="aui-composer-add-attachment text-muted-foreground hover:text-foreground hover:bg-muted-foreground/15 dark:border-muted-foreground/15 dark:hover:bg-muted-foreground/30 size-7 pointer-coarse:size-9 rounded-full flex items-center justify-center transition-[color,background-color,scale] active:scale-[0.96] motion-reduce:transition-none"
         >
           <PlusIcon className="size-4" />
@@ -197,20 +198,20 @@ export function MobileComposerMenu() {
             <MenuSubmenuRoot>
               <MenuSubmenuTrigger>
                 {current === "none" ? <ZapIcon /> : <BrainIcon />}
-                <span className="flex-1">Reasoning: {current ? EFFORT_LABELS[current] : "Default"}</span>
+                <span className="flex-1">{t("composer.reasoningValue", { value: current ? effortLabel(current) : t("composer.effortDefault") })}</span>
                 <ChevronRightIcon className="text-muted-foreground ml-auto" />
               </MenuSubmenuTrigger>
               {/* -5px (border + padding) lines the submenu's top edge up with the parent menu's. */}
               <MenuContent side="right" align="start" alignOffset={-5}>
-                <MenuLabel>Reasoning effort</MenuLabel>
+                <MenuLabel>{t("composer.reasoningEffort")}</MenuLabel>
                 <MenuItem onClick={() => set(undefined)}>
                   <CheckIcon className={cn(!current ? "opacity-100" : "opacity-0")} />
-                  Model default
+                  {t("composer.modelDefault")}
                 </MenuItem>
                 {options.map((e) => (
                   <MenuItem key={e} onClick={() => set(e)}>
                     <CheckIcon className={cn(current === e ? "opacity-100" : "opacity-0")} />
-                    {EFFORT_LABELS[e] ?? e}
+                    {effortLabel(e)}
                   </MenuItem>
                 ))}
               </MenuContent>
@@ -223,7 +224,7 @@ export function MobileComposerMenu() {
               className={cn(enabled && "depth-primary text-primary-foreground")}
             >
               {enabled ? <GlobeIcon /> : <GlobeOffIcon />}
-              <span className="flex-1">Search</span>
+              <span className="flex-1">{t("composer.search")}</span>
               <CheckIcon className={cn("ml-auto", enabled ? "opacity-100" : "opacity-0")} />
             </MenuItem>
           )}
@@ -231,7 +232,7 @@ export function MobileComposerMenu() {
             <MenuSubmenuRoot>
               <MenuSubmenuTrigger>
                 <SquareSlashIcon />
-                <span className="flex-1">Prompts</span>
+                <span className="flex-1">{t("composer.prompts")}</span>
                 <ChevronRightIcon className="text-muted-foreground ml-auto" />
               </MenuSubmenuTrigger>
               <MenuContent side="right" align="start" alignOffset={-5} className="max-h-80 w-64">
@@ -241,7 +242,7 @@ export function MobileComposerMenu() {
           )}
           <ComposerPrimitive.AddAttachment render={<MenuItem />}>
             <PaperclipIcon />
-            Attach
+            {t("composer.attach")}
           </ComposerPrimitive.AddAttachment>
         </MenuContent>
       </Menu>

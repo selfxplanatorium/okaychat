@@ -1,11 +1,19 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import type { GoWindow, UsageRow } from "@shared/types";
 import { Select } from "@/components/ui/select";
-import { api, formatCost, formatTokens } from "@/lib/api";
+import { api } from "@/lib/api";
+import { t, type PlainMessageKey } from "@/i18n";
+import { formatCost, formatNumber, formatPercent, formatTokens } from "@/i18n/format";
 import { useData } from "@/state/data";
 import { SettingsPage, SettingsSection } from "./SettingsUI";
 
 type Range = "1" | "7" | "30" | "90";
+
+const PURPOSE_LABELS = {
+  chat: "usage.purposeChat",
+  compaction: "usage.purposeCompaction",
+  title: "usage.purposeTitle",
+} as const satisfies Record<"chat" | "compaction" | "title", PlainMessageKey>;
 
 function useUsage(days: Range, groupBy: "day" | "model" | "kind") {
   const [data, setData] = useState<{ rows: UsageRow[]; go: GoWindow[] } | null>(null);
@@ -41,35 +49,35 @@ export function UsageSettings() {
   const nameOf = (ref: string) => models.find((m) => m.ref === ref)?.name ?? ref;
 
   return (
-    <SettingsPage title="Usage" description="Tokens and estimated cost from your own requests, priced with models.dev rates.">
+    <SettingsPage title={t("usage.title")} description={t("usage.description")}>
       <div className="flex justify-end">
         <Select
           className="w-40"
           value={days}
           onValueChange={setDays}
-          aria-label="Range"
+          aria-label={t("usage.range")}
           options={[
-            { value: "1", label: "Last 24 hours" },
-            { value: "7", label: "Last 7 days" },
-            { value: "30", label: "Last 30 days" },
-            { value: "90", label: "Last 90 days" },
+            { value: "1", label: t("usage.last24Hours") },
+            { value: "7", label: t("usage.last7Days") },
+            { value: "30", label: t("usage.last30Days") },
+            { value: "90", label: t("usage.last90Days") },
           ]}
         />
       </div>
 
       <SettingsSection>
         <div key={`${days}-${byDay ? "data" : "loading"}`} className="animate-fade-in grid grid-cols-2 divide-x sm:grid-cols-4">
-          <Stat label="Cost" value={formatCost(sum(rows, "cost"))} />
-          <Stat label="Requests" value={String(sum(rows, "requests"))} />
-          <Stat label="Tokens in / out" value={`${formatTokens(input)} / ${formatTokens(sum(rows, "output"))}`} />
-          <Stat label="Cache hits" value={`${input ? Math.round((sum(rows, "cacheRead") / input) * 100) : 0}%`} hint="Share of input read from cache" />
+          <Stat label={t("usage.cost")} value={formatCost(sum(rows, "cost"))} />
+          <Stat label={t("usage.requests")} value={formatNumber(sum(rows, "requests"))} />
+          <Stat label={t("usage.tokensInOut")} value={t("usage.tokensInOutValue", { input: formatTokens(input), output: formatTokens(sum(rows, "output")) })} />
+          <Stat label={t("usage.cacheHits")} value={formatPercent(input ? sum(rows, "cacheRead") / input : 0)} hint={t("usage.cacheHitsHint")} />
         </div>
       </SettingsSection>
 
       {goConnected && byDay && (
         <SettingsSection
-          title="OpenCode Go windows"
-          description="Go meters spend per model in rolling windows: 5 hours = 20%, week = 50%, month = 100% of each model's monthly limit. Free models do not count."
+          title={t("usage.goWindows")}
+          description={t("usage.goWindowsDescription")}
         >
           <div key={days} className="animate-fade-in grid grid-cols-3 divide-x">
             {byDay.go.map((w) => (
@@ -79,43 +87,43 @@ export function UsageSettings() {
         </SettingsSection>
       )}
 
-      <SettingsSection title="Daily cost">
+      <SettingsSection title={t("usage.dailyCost")}>
         <div className="flex h-40 items-end gap-1 px-4 pt-4 pb-2">
-          {rows.length === 0 && <p className="text-muted-foreground animate-fade-in m-auto text-sm">No usage in this range.</p>}
+          {rows.length === 0 && <p className="text-muted-foreground animate-fade-in m-auto text-sm">{t("usage.noUsage")}</p>}
           {rows.map((r, index) => (
             // Focusable, so the per-day figure is reachable without a pointer too.
-            <div key={r.key} tabIndex={0} aria-label={`${r.key}: ${formatCost(r.cost)}, ${r.requests} requests`} className="group relative flex h-full flex-1 flex-col justify-end rounded-t outline-none focus-visible:ring-1 focus-visible:ring-ring">
+            <div key={r.key} tabIndex={0} aria-label={t("usage.dayFigure", { day: r.key, cost: formatCost(r.cost), count: r.requests })} className="group relative flex h-full flex-1 flex-col justify-end rounded-t outline-none focus-visible:ring-1 focus-visible:ring-ring">
               <div
                 className="bg-primary/80 group-hover:bg-primary settings-bar min-h-px rounded-t transition-colors duration-(--motion-fast)"
                 style={{ height: `${(r.cost / maxCost) * 100}%`, "--i": index } as CSSProperties}
               />
               <div className="dropdown-glass pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 rounded-md border px-2 py-1 text-xs whitespace-nowrap group-hover:block group-hover:animate-fade-in group-focus-visible:block">
-                {r.key}: {formatCost(r.cost)} · {r.requests} req
+                {t("usage.dayTooltip", { day: r.key, cost: formatCost(r.cost), count: r.requests })}
               </div>
             </div>
           ))}
         </div>
       </SettingsSection>
 
-      <SettingsSection title="By model">
+      <SettingsSection title={t("usage.byModel")}>
         <table className="w-full text-sm">
           <thead className="text-muted-foreground text-xs">
             <tr className="text-left">
-              <th className="px-4 py-2 font-medium">Model</th>
-              <th className="px-2 py-2 text-right font-medium">Requests</th>
-              <th className="px-2 py-2 text-right font-medium">In</th>
-              <th className="px-2 py-2 text-right font-medium">Cached</th>
-              <th className="px-2 py-2 text-right font-medium">Out</th>
-              <th className="px-4 py-2 text-right font-medium">Cost</th>
+              <th className="px-4 py-2 font-medium">{t("usage.model")}</th>
+              <th className="px-2 py-2 text-right font-medium">{t("usage.requests")}</th>
+              <th className="px-2 py-2 text-right font-medium">{t("usage.input")}</th>
+              <th className="px-2 py-2 text-right font-medium">{t("usage.cached")}</th>
+              <th className="px-2 py-2 text-right font-medium">{t("usage.output")}</th>
+              <th className="px-4 py-2 text-right font-medium">{t("usage.cost")}</th>
             </tr>
           </thead>
           <tbody key={days} className="divide-y tabular-nums">
             {(byModel?.rows ?? []).map((r, index) => (
               <tr key={r.key} className="stagger animate-rise-in" style={{ "--i": index } as CSSProperties}>
                 <td className="max-w-56 truncate px-4 py-2">{nameOf(r.key)}</td>
-                <td className="px-2 py-2 text-right">{r.requests}</td>
+                <td className="px-2 py-2 text-right">{formatNumber(r.requests)}</td>
                 <td className="px-2 py-2 text-right">{formatTokens(r.input)}</td>
-                <td className="px-2 py-2 text-right">{r.input ? `${Math.round((r.cacheRead / r.input) * 100)}%` : "–"}</td>
+                <td className="px-2 py-2 text-right">{r.input ? formatPercent(r.cacheRead / r.input) : "–"}</td>
                 <td className="px-2 py-2 text-right">{formatTokens(r.output)}</td>
                 <td className="px-4 py-2 text-right">{formatCost(r.cost)}</td>
               </tr>
@@ -124,11 +132,11 @@ export function UsageSettings() {
         </table>
       </SettingsSection>
 
-      <SettingsSection title="By purpose" description="Chat replies, compaction summaries, and title generation.">
+      <SettingsSection title={t("usage.byPurpose")} description={t("usage.byPurposeDescription")}>
         <div key={`${days}-${byKind ? "data" : "loading"}`} className="animate-fade-in grid grid-cols-3 divide-x">
           {(["chat", "compaction", "title"] as const).map((k) => {
             const r = byKind?.rows.find((x) => x.key === k);
-            return <Stat key={k} label={k[0]!.toUpperCase() + k.slice(1)} value={formatCost(r?.cost ?? 0)} hint={`${r?.requests ?? 0} requests`} />;
+            return <Stat key={k} label={t(PURPOSE_LABELS[k])} value={formatCost(r?.cost ?? 0)} hint={t("usage.requestCount", { count: r?.requests ?? 0 })} />;
           })}
         </div>
       </SettingsSection>

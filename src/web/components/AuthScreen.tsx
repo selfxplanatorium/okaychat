@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 
 import { Brand } from "@/components/layout/Brand";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
 
 export function AuthScreen({ needsSetup, signupOpen, onDone }: { needsSetup: boolean; signupOpen: boolean; onDone: () => void }) {
@@ -46,14 +47,14 @@ export function AuthScreen({ needsSetup, signupOpen, onDone }: { needsSetup: boo
             <Brand />
           </div>
           <div className="stagger animate-rise-in" style={{ "--i": 1 } as CSSProperties}>
-            <h1 className="text-lg font-semibold">{needsSetup ? "Create the admin account" : mode === "login" ? "Sign in" : "Create an account"}</h1>
-            {needsSetup && <p className="text-muted-foreground text-sm">The first account manages this server.</p>}
+            <h1 className="text-lg font-semibold">{needsSetup ? t("auth.createAdmin") : mode === "login" ? t("auth.signIn") : t("auth.createAccountTitle")}</h1>
+            {needsSetup && <p className="text-muted-foreground text-sm">{t("auth.firstAccountNote")}</p>}
           </div>
           {mode === "signup" && (
             <Input
               className="stagger animate-rise-in"
               style={{ "--i": 2 } as CSSProperties}
-              placeholder="Name"
+              placeholder={t("auth.name")}
               value={name}
               onChange={(e) => setName(e.target.value)}
               autoComplete="name"
@@ -61,7 +62,7 @@ export function AuthScreen({ needsSetup, signupOpen, onDone }: { needsSetup: boo
           )}
           <Input
             type="email"
-            placeholder="Email"
+            placeholder={t("auth.email")}
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             autoComplete="email"
@@ -72,7 +73,7 @@ export function AuthScreen({ needsSetup, signupOpen, onDone }: { needsSetup: boo
           />
           <Input
             type="password"
-            placeholder="Password (8+ characters)"
+            placeholder={t("auth.password")}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete={mode === "login" ? "current-password" : "new-password"}
@@ -87,7 +88,7 @@ export function AuthScreen({ needsSetup, signupOpen, onDone }: { needsSetup: boo
             </p>
           )}
           <Button type="submit" disabled={busy} className="stagger animate-rise-in" style={{ "--i": 5 } as CSSProperties}>
-            {mode === "login" ? "Sign in" : "Create account"}
+            {mode === "login" ? t("auth.signIn") : t("auth.createAccount")}
           </Button>
           {!needsSetup && signupOpen && (
             <button
@@ -96,7 +97,7 @@ export function AuthScreen({ needsSetup, signupOpen, onDone }: { needsSetup: boo
               style={{ "--i": 6 } as CSSProperties}
               onClick={() => setMode(mode === "login" ? "signup" : "login")}
             >
-              {mode === "login" ? "No account? Create one" : "Have an account? Sign in"}
+              {mode === "login" ? t("auth.noAccount") : t("auth.haveAccount")}
             </button>
           )}
         </form>

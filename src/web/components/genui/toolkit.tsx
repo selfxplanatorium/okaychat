@@ -1,5 +1,6 @@
 import { createWidgetToolkit, useWidgetInstructions } from "generative-frame/assistant-ui";
 import { createSpecToolkit } from "generative-frame/spec/assistant-ui";
+import { t } from "@/i18n";
 import { catalog, components } from "./catalog";
 
 // The frame's CSP blocks most remote images, so models often ship widgets with broken ones. Chrome and
@@ -9,7 +10,7 @@ import { catalog, components } from "./catalog";
 const IMAGE_OFF_ICON =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='2' x2='22' y1='2' y2='22'/%3E%3Cpath d='M10.41 10.41a2 2 0 1 1-2.83-2.83'/%3E%3Cline x1='13.5' x2='6' y1='13.5' y2='21'/%3E%3Cline x1='18' x2='21' y1='12' y2='15'/%3E%3Cpath d='M3.59 3.59A1.99 1.99 0 0 0 3 5v14a2 2 0 0 0 2 2h14c.55 0 1.052-.22 1.41-.59'/%3E%3Cpath d='M21 15V5a2 2 0 0 0-2-2H9'/%3E%3C/svg%3E\")";
 
-const BROKEN_IMAGE_CSS = `
+const brokenImageCss = () => `
 img { position: relative; }
 img::before {
   content: "";
@@ -31,12 +32,18 @@ img::after {
   font: 13px/1.4 system-ui, sans-serif;
   color: var(--color-text-muted, #888);
 }
-img:not([alt])::after, img[alt=""]::after { content: "Image unavailable"; }
+img:not([alt])::after, img[alt=""]::after { content: "${t("genui.imageUnavailable").replace(/"/g, '\\"')}"; }
 `;
 
 // A null-origin sandbox instead of Safe Content Frame's hosted origin, so nothing loads from a third-party
 // frame host. Widgets lose persistent storage, which also means `widgetId` must be off.
-export const widgetOptions = { opaqueOrigin: true, maxHeight: 800, css: BROKEN_IMAGE_CSS };
+export const widgetOptions = {
+  opaqueOrigin: true,
+  maxHeight: 800,
+  get css() {
+    return brokenImageCss();
+  },
+};
 
 /**
  * Generative UI, two renderers the model picks per answer:

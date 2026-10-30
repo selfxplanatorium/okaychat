@@ -24,7 +24,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { api, formatBytes } from "@/lib/api";
+import { api } from "@/lib/api";
+import { currentLocale, t } from "@/i18n";
+import { formatBytes, formatNumber } from "@/i18n/format";
+import { Trans } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 import { browserDictationSupported } from "@/speech/adapters";
 import { canRecord, RecorderDictationAdapter } from "@/speech/recorder";
@@ -33,12 +36,19 @@ import { BrowserSpeechAdapter, browserSpeechSupported, primeAudio, ServerSpeechA
 import { useData } from "@/state/data";
 import { SettingsPage, SettingsRow, SettingsSection, SettingsSlider } from "./SettingsUI";
 
-const LANGUAGES: Array<[string, string]> = [
-  ["", "Detect automatically"], ["en", "English"], ["de", "German"], ["fr", "French"], ["es", "Spanish"], ["it", "Italian"], ["pt", "Portuguese"],
-  ["nl", "Dutch"], ["pl", "Polish"], ["sv", "Swedish"], ["da", "Danish"], ["nb", "Norwegian"], ["fi", "Finnish"], ["cs", "Czech"], ["tr", "Turkish"],
-  ["ru", "Russian"], ["uk", "Ukrainian"], ["ar", "Arabic"], ["hi", "Hindi"], ["ja", "Japanese"], ["ko", "Korean"], ["zh", "Chinese"],
+const LANGUAGE_CODES: Array<[value: string, name: string]> = [
+  ["en", "en"], ["de", "de"], ["fr", "fr"], ["es", "es"], ["it", "it"], ["pt", "pt"],
+  ["nl", "nl"], ["pl", "pl"], ["sv", "sv"], ["da", "da"], ["nb", "no"], ["fi", "fi"], ["cs", "cs"], ["tr", "tr"],
+  ["ru", "ru"], ["uk", "uk"], ["ar", "ar"], ["hi", "hi"], ["ja", "ja"], ["ko", "ko"], ["zh", "zh"],
 ];
-const SAMPLE = "Hello! This is how replies will sound when they are read aloud.";
+
+function languageOptions() {
+  const names = new Intl.DisplayNames(currentLocale(), { type: "language" });
+  return [
+    { value: "", label: t("voice.detectAutomatically") },
+    ...LANGUAGE_CODES.map(([value, name]) => ({ value, label: names.of(name) ?? value })),
+  ];
+}
 
 /** Read aloud and speech to text: engines, credentials, voices, and behavior. */
 export function VoiceSettings() {
@@ -55,7 +65,7 @@ export function VoiceSettings() {
     update({ speech: { stt: { ...speech.stt, ...patch.stt }, tts: { ...speech.tts, ...patch.tts } } });
 
   return (
-    <SettingsPage title="Voice" description="Read replies aloud and dictate messages.">
+    <SettingsPage title={t("voice.title")} description={t("voice.description")}>
       <ReadAloud speech={speech} status={status} save={save} onStatus={setStatus} />
       <SpeechToText speech={speech} status={status} save={save} onStatus={setStatus} />
       <Privacy status={status} />
@@ -69,7 +79,7 @@ function engineLabel(def: { name: string }, s: SpeechEngineStatus | undefined) {
   return (
     <span className="flex min-w-0 items-baseline gap-1.5">
       <span className="truncate">{def.name}</span>
-      {s && !s.ready && <span className="text-muted-foreground shrink-0 text-xs">{s.reason === "Not connected." ? "· not connected" : "· unavailable"}</span>}
+      {s && !s.ready && <span className="text-muted-foreground shrink-0 text-xs">{s.reason === "Not connected." ? t("voice.engineNotConnected") : t("voice.engineUnavailable")}</span>}
     </span>
   );
 }
@@ -80,7 +90,7 @@ function ReadAloud({ speech, status, save, onStatus }: SectionProps) {
   const def = engine === "off" ? undefined : ttsEngineDef(engine);
   const engineStatus = status.tts.find((e) => e.id === engine);
   const options = [
-    { value: "off" as const, label: "Off" },
+    { value: "off" as const, label: t("common.off") },
     ...TTS_ENGINES.filter((d) => d.id !== "local" || status.worker).map((d) => ({ value: d.id, label: engineLabel(d, status.tts.find((e) => e.id === d.id)) })),
   ];
   const choose = (next: TtsEngineId | "off") => {
@@ -88,11 +98,11 @@ function ReadAloud({ speech, status, save, onStatus }: SectionProps) {
     void save({ tts: { engine: next } });
   };
   return (
-    <SettingsSection title="Read aloud" description="A speaker button on every reply reads it out. Off until you pick a voice engine.">
+    <SettingsSection title={t("voice.readAloud")} description={t("voice.readAloudDescription")}>
       <SettingsRow
-        label="Voice engine"
+        label={t("voice.voiceEngine")}
         description={def?.id === "browser" ? <span className="text-warning">{def.note}</span> : def?.note}
-        control={<Select aria-label="Read-aloud engine" className="w-full md:w-72" value={engine} onValueChange={choose} options={options} />}
+        control={<Select aria-label={t("voice.readAloudEngine")} className="w-full md:w-72" value={engine} onValueChange={choose} options={options} />}
       />
       {def && engineStatus && !engineStatus.ready && <Credential credential={def.credential} status={engineStatus} keys={status.keys} onStatus={onStatus} />}
       {def && engineStatus?.ready && (
@@ -103,43 +113,43 @@ function ReadAloud({ speech, status, save, onStatus }: SectionProps) {
           ) : (
             (def.voices.length > 0 || def.freeVoice || def.id === "local") && (
               <SettingsRow
-                label="Voice"
+                label={t("voice.voice")}
                 control={<OptionPicker kind="tts" engine={def.id} what="voices" value={tts.voices?.[def.id] ?? (def.id === "local" ? status.localVoice : def.voices[0]) ?? ""} free={!!def.freeVoice} onSave={(v) => save({ tts: { voices: { ...tts.voices, [def.id]: v } } })} />}
               />
             )
           )}
           {(def.models.length > 0 || def.freeModel) && (
             <SettingsRow
-              label="Model"
+              label={t("voice.model")}
               control={<OptionPicker kind="tts" engine={def.id} what="models" value={tts.models?.[def.id] ?? def.models[0] ?? ""} free={!!def.freeModel} onSave={(v) => save({ tts: { models: { ...tts.models, [def.id]: v } } })} />}
             />
           )}
           {def.instructions && <StyleRow value={tts.instructions ?? ""} onSave={(instructions) => save({ tts: { instructions } })} />}
           <SettingsRow
-            label="Speed"
-            control={<SettingsSlider label="Read-aloud speed" min={0.5} max={2} step={0.05} value={tts.speed ?? 1} format={(v) => `${v.toFixed(2)}×`} onChange={(speed) => void save({ tts: { speed } })} />}
+            label={t("voice.speed")}
+            control={<SettingsSlider label={t("voice.readAloudSpeed")} min={0.5} max={2} step={0.05} value={tts.speed ?? 1} format={(v) => t("voice.speedValue", { n: formatNumber(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) })} onChange={(speed) => void save({ tts: { speed } })} />}
           />
           {def.id !== "browser" && (
             <SettingsRow
-              label="Pieces"
-              description="Replies are sent to the voice engine in pieces. Smaller pieces start playing sooner."
+              label={t("voice.pieces")}
+              description={t("voice.piecesDescription")}
               control={
                 <Select<TtsSplit>
-                  aria-label="Read-aloud pieces"
+                  aria-label={t("voice.readAloudPieces")}
                   className="w-full md:w-48"
                   value={tts.split ?? "sentence"}
                   onValueChange={(split) => save({ tts: { split } })}
-                  options={[{ value: "sentence", label: "Sentences" }, { value: "paragraph", label: "Paragraphs" }, { value: "none", label: "Whole reply" }]}
+                  options={[{ value: "sentence", label: t("voice.sentences") }, { value: "paragraph", label: t("voice.paragraphs") }, { value: "none", label: t("voice.wholeReply") }]}
                 />
               }
             />
           )}
           <SettingsRow
-            label="Read replies automatically"
-            description="Each reply is read aloud as soon as it finishes."
-            control={<Switch aria-label="Read replies automatically" checked={!!tts.autoPlay} onCheckedChange={(autoPlay) => save({ tts: { autoPlay } })} />}
+            label={t("voice.autoRead")}
+            description={t("voice.autoReadDescription")}
+            control={<Switch aria-label={t("voice.autoRead")} checked={!!tts.autoPlay} onCheckedChange={(autoPlay) => save({ tts: { autoPlay } })} />}
           />
-          <SettingsRow label="Preview" control={<Preview engine={def.id} />} />
+          <SettingsRow label={t("voice.preview")} control={<Preview engine={def.id} />} />
         </>
       )}
     </SettingsSection>
@@ -164,14 +174,14 @@ function Preview({ engine }: { engine: TtsEngineId }) {
         ? new BrowserSpeechAdapter(() => ({ voice: settings().voices?.browser, speed: settings().speed ?? 1 }))
         : new ServerSpeechAdapter(() => ({ engine, split: "none", speed: settings().speed ?? 1 }));
     primeAudio();
-    const u = adapter.speak(SAMPLE);
+    const u = adapter.speak(t("voice.sample"));
     current.current = u;
     u.subscribe(() => {
       if (u.status.type === "running") setState("playing");
       if (u.status.type === "ended") {
         setState("idle");
         if (u.status.reason === "error") {
-          setError(useSpeech.getState().error ?? "Playback failed.");
+          setError(useSpeech.getState().error ?? t("voice.playbackFailed"));
           useSpeech.getState().setError(null);
         }
       }
@@ -181,7 +191,7 @@ function Preview({ engine }: { engine: TtsEngineId }) {
     <div className="flex flex-col items-end gap-1">
       <Button size="sm" variant="outline" onClick={play}>
         {state === "loading" ? <Loader2Icon className="animate-spin" /> : state === "playing" ? <SquareIcon /> : <PlayIcon />}
-        {state === "idle" ? "Play sample" : "Stop"}
+        {state === "idle" ? t("voice.playSample") : t("common.stop")}
       </Button>
       {error && <span className="text-error max-w-72 text-right text-xs">{error}</span>}
     </div>
@@ -193,9 +203,9 @@ function StyleRow({ value, onSave }: { value: string; onSave: (value: string) =>
   useEffect(() => setText(value), [value]);
   return (
     <SettingsRow
-      label="Speaking style"
-      description="For example: calm and warm, a little slower. Ignored by models without style control."
-      control={<Textarea aria-label="Speaking style" rows={2} maxLength={1000} className="w-full md:w-72" value={text} onChange={(e) => setText(e.target.value)} onBlur={() => text !== value && onSave(text)} />}
+      label={t("voice.speakingStyle")}
+      description={t("voice.speakingStyleDescription")}
+      control={<Textarea aria-label={t("voice.speakingStyle")} rows={2} maxLength={1000} className="w-full md:w-72" value={text} onChange={(e) => setText(e.target.value)} onBlur={() => text !== value && onSave(text)} />}
     />
   );
 }
@@ -208,18 +218,18 @@ function BrowserVoiceRow({ value, onSave }: { value?: string; onSave: (voice: st
     window.speechSynthesis.addEventListener("voiceschanged", refresh);
     return () => window.speechSynthesis.removeEventListener("voiceschanged", refresh);
   }, []);
-  if (!browserSpeechSupported()) return <SettingsRow label="Voice" description={<span className="text-warning">This browser cannot speak.</span>} control={null} />;
+  if (!browserSpeechSupported()) return <SettingsRow label={t("voice.voice")} description={<span className="text-warning">{t("voice.browserCannotSpeak")}</span>} control={null} />;
   return (
     <SettingsRow
-      label="Voice"
-      description={voices.length === 0 ? <span className="text-warning">This browser reports no voices, so read aloud will likely be silent. On Linux install speech-dispatcher and a voice, or pick another engine.</span> : undefined}
+      label={t("voice.voice")}
+      description={voices.length === 0 ? <span className="text-warning">{t("voice.browserNoVoices")}</span> : undefined}
       control={
         <Select
-          aria-label="Browser voice"
+          aria-label={t("voice.browserVoice")}
           className="w-full md:w-72"
           value={value ?? ""}
           onValueChange={onSave}
-          options={[{ value: "", label: "System default" }, ...voices.map((v) => ({ value: v.voiceURI, label: `${v.name} (${v.lang})${v.localService ? "" : " · online"}` }))]}
+          options={[{ value: "", label: t("voice.systemDefault") }, ...voices.map((v) => ({ value: v.voiceURI, label: t(v.localService ? "voice.browserVoiceLocal" : "voice.browserVoiceOnline", { name: v.name, lang: v.lang }) }))]}
         />
       }
     />
@@ -233,49 +243,49 @@ function SpeechToText({ speech, status, save, onStatus }: SectionProps) {
   const engineStatus = status.stt.find((e) => e.id === engine);
   const browserWorks = browserDictationSupported();
   const options = [
-    { value: "off" as const, label: "Off" },
+    { value: "off" as const, label: t("common.off") },
     ...STT_ENGINES.filter((d) => d.id !== "local" || status.worker).map((d) => ({ value: d.id, label: engineLabel(d, status.stt.find((e) => e.id === d.id)) })),
   ];
   const note =
     def?.id === "browser" && !browserWorks ? (
-      <span className="text-warning">This browser has no speech recognition here{window.isSecureContext ? "" : " (it needs HTTPS)"}. Pick Whisper or a cloud service.</span>
+      <span className="text-warning">{t(window.isSecureContext ? "voice.noRecognitionHttps" : "voice.noRecognitionNeedsHttps")}</span>
     ) : (
       def?.note
     );
   return (
-    <SettingsSection title="Speech to text" description="The microphone button in the message box turns speech into text.">
+    <SettingsSection title={t("voice.speechToText")} description={t("voice.speechToTextDescription")}>
       <SettingsRow
-        label="Recognition engine"
+        label={t("voice.recognitionEngine")}
         description={note}
-        control={<Select<SttEngineId | "off"> aria-label="Speech recognition engine" className="w-full md:w-72" value={engine} onValueChange={(v) => save({ stt: { engine: v } })} options={options} />}
+        control={<Select<SttEngineId | "off"> aria-label={t("voice.speechRecognitionEngine")} className="w-full md:w-72" value={engine} onValueChange={(v) => save({ stt: { engine: v } })} options={options} />}
       />
       {def && engineStatus && (!engineStatus.ready || def.credential.type === "own") && <Credential credential={def.credential} status={engineStatus} keys={status.keys} onStatus={onStatus} />}
       {def && def.id !== "browser" && engineStatus?.ready && !canRecord() && (
         <div className="text-warning px-4 pb-3 text-xs">
-          This page is not served over HTTPS, so browsers block the microphone. The button lets you pick or record an audio file instead. Serve okaychat over HTTPS (for example with <code>tailscale serve</code>) to record directly.
+          <Trans k="voice.notHttps" params={{ command: <code>tailscale serve</code> }} />
         </div>
       )}
       {def && engineStatus?.ready && (
         <>
           {(def.models.length > 0 || def.freeModel) && (
             <SettingsRow
-              label="Model"
+              label={t("voice.model")}
               control={<OptionPicker kind="stt" engine={def.id} what="models" value={stt.models?.[def.id] ?? def.models[0] ?? ""} free={!!def.freeModel} onSave={(v) => save({ stt: { models: { ...stt.models, [def.id]: v } } })} />}
             />
           )}
           <SettingsRow
-            label="Language"
-            description="Naming the language improves accuracy, especially for short phrases."
-            control={<Select aria-label="Speech language" className="w-full md:w-56" value={stt.language ?? ""} onValueChange={(language) => save({ stt: { language } })} options={LANGUAGES.map(([value, label]) => ({ value, label }))} />}
+            label={t("voice.language")}
+            description={t("voice.languageDescription")}
+            control={<Select aria-label={t("voice.speechLanguage")} className="w-full md:w-56" value={stt.language ?? ""} onValueChange={(language) => save({ stt: { language } })} options={languageOptions()} />}
           />
           {def.id !== "browser" && (
             <SettingsRow
-              label="Stop after silence"
-              description="Ends the recording once you pause for this long. Off records until you press stop."
-              control={<SettingsSlider label="Stop after silence" min={0} max={5} step={0.5} value={stt.silenceSeconds ?? 0} format={(v) => (v === 0 ? "Off" : `${v} s`)} onChange={(silenceSeconds) => void save({ stt: { silenceSeconds } })} />}
+              label={t("voice.stopAfterSilence")}
+              description={t("voice.stopAfterSilenceDescription")}
+              control={<SettingsSlider label={t("voice.stopAfterSilence")} min={0} max={5} step={0.5} value={stt.silenceSeconds ?? 0} format={(v) => (v === 0 ? t("common.off") : t("voice.silenceValue", { n: formatNumber(v) }))} onChange={(silenceSeconds) => void save({ stt: { silenceSeconds } })} />}
             />
           )}
-          {def.id !== "browser" && <SettingsRow label="Try it" description="Records a few words and shows what the engine heard." control={<TryDictation />} />}
+          {def.id !== "browser" && <SettingsRow label={t("voice.tryIt")} description={t("voice.tryItDescription")} control={<TryDictation />} />}
         </>
       )}
     </SettingsSection>
@@ -295,7 +305,7 @@ function TryDictation() {
     const s = adapter.listen();
     session.current = s;
     setState("recording");
-    s.onSpeech((r) => setResult(r.transcript || "(nothing heard)"));
+    s.onSpeech((r) => setResult(r.transcript || t("voice.nothingHeard")));
     s.onSpeechEnd(() => {
       setState("idle");
       const error = useSpeech.getState().error;
@@ -311,12 +321,12 @@ function TryDictation() {
     <div className="flex max-w-72 flex-col items-end gap-1">
       {state === "idle" ? (
         <Button size="sm" variant="outline" onClick={start}>
-          <MicIcon /> {canRecord() ? "Record" : "Choose audio file"}
+          <MicIcon /> {canRecord() ? t("voice.record") : t("voice.chooseAudioFile")}
         </Button>
       ) : (
         <Button size="sm" variant="outline" disabled={state === "working"} onClick={() => void session.current?.stop()}>
           {state === "working" ? <Loader2Icon className="animate-spin" /> : <SquareIcon className="text-destructive fill-current" />}
-          {state === "working" ? "Transcribing…" : "Stop"}
+          {state === "working" ? t("voice.transcribing") : t("common.stop")}
         </Button>
       )}
       {result && <span className="text-muted-foreground text-right text-xs">{result}</span>}
@@ -331,24 +341,37 @@ function Privacy({ status }: { status: SpeechStatus }) {
   }, []);
   const hours = status.retentionHours;
   return (
-    <SettingsSection title="Recordings">
+    <SettingsSection title={t("voice.recordings")}>
       <SettingsRow
-        label={hours === 0 ? "Not stored" : `Kept for ${hours >= 48 ? `${Math.round(hours / 24)} days` : `${hours} hours`}`}
+        label={hours === 0 ? t("voice.notStored") : hours >= 48 ? t("voice.keptForDays", { count: Math.round(hours / 24) }) : t("voice.keptForHours", { count: hours })}
         description={
           hours === 0
-            ? "Recordings sent to a server engine are transcribed in memory and discarded right away. Read-aloud audio is never stored."
-            : "Your admin keeps recordings sent to a server engine for this long, encrypted, then deletes them. Read-aloud audio is never stored."
+            ? t("voice.notStoredDescription")
+            : t("voice.keptDescription")
         }
         control={
           stats && stats.count > 0 ? (
             <Button size="sm" variant="outline" onClick={() => api<{ deleted: number }>("/speech/recordings", { method: "DELETE" }).then(() => setStats({ count: 0, bytes: 0 }))}>
-              Delete {stats.count} ({formatBytes(stats.bytes)})
+              {t("voice.deleteRecordings", { count: formatNumber(stats.count), size: formatBytes(stats.bytes) })}
             </Button>
           ) : null
         }
       />
     </SettingsSection>
   );
+}
+
+function connectedText(name: string, shared: boolean, region?: string, url?: string) {
+  if (shared) {
+    if (region && url) return t("voice.keySharedRegionAt", { name, region, url });
+    if (region) return t("voice.keySharedRegion", { name, region });
+    if (url) return t("voice.keySharedAt", { name, url });
+    return t("voice.keyShared", { name });
+  }
+  if (region && url) return t("voice.keyConnectedRegionAt", { name, region, url });
+  if (region) return t("voice.keyConnectedRegion", { name, region });
+  if (url) return t("voice.keyConnectedAt", { name, url });
+  return t("voice.keyConnected", { name });
 }
 
 /** How an engine connects: provider link, speech-only key form, or nothing to do. */
@@ -370,8 +393,8 @@ export function Credential({
   if (credential.type === "provider") {
     return (
       <p className="text-muted-foreground px-4 pb-3 text-xs">
-        {status?.ready ? (status.shared ? "Uses the key your admin shared." : "Uses your provider key.") : "Uses the same key as chat. "}
-        {!status?.ready && <Link href="/settings/providers" className="text-primary hover:underline">Connect {credential.providerId === "openai" ? "OpenAI" : credential.providerId === "groq" ? "Groq" : "Mistral"} in Providers</Link>}
+        {status?.ready ? (status.shared ? t("voice.usesSharedKey") : t("voice.usesProviderKey")) : `${t("voice.usesChatKey")} `}
+        {!status?.ready && <Link href="/settings/providers" className="text-primary hover:underline">{t("voice.connectProvider", { provider: credential.providerId === "openai" ? "OpenAI" : credential.providerId === "groq" ? "Groq" : "Mistral" })}</Link>}
       </p>
     );
   }
@@ -398,7 +421,7 @@ export function SpeechKeyForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const path = scope === "admin" ? `/admin/speech/keys/${service}` : `/speech/keys/${service}`;
-  if (state?.shared && scope === "user") return <p className="text-muted-foreground px-4 pb-3 text-xs">Uses the {def.name} key your admin shared.</p>;
+  if (state?.shared && scope === "user") return <p className="text-muted-foreground px-4 pb-3 text-xs">{t("voice.usesNamedSharedKey", { name: def.name })}</p>;
   const send = async (method: "PUT" | "DELETE") => {
     setBusy(true);
     setError(null);
@@ -418,12 +441,10 @@ export function SpeechKeyForm({
     return (
       <div className="flex flex-wrap items-center gap-2 px-4 pb-3 text-xs">
         <span className="text-muted-foreground">
-          {def.name} {scope === "admin" ? "key shared with everyone" : "connected"}
-          {state.region ? ` (${state.region})` : ""}
-          {state.baseURL ? ` at ${state.baseURL}` : ""}.
+          {connectedText(def.name, scope === "admin", state.region, state.baseURL)}
         </span>
         <Button size="sm" variant="outline" onClick={() => send("DELETE")} disabled={busy}>
-          Remove
+          {t("common.remove")}
         </Button>
       </div>
     );
@@ -437,24 +458,24 @@ export function SpeechKeyForm({
       }}
     >
       {def.fields.includes("baseURL") && (
-        <Input aria-label={`${def.name} address`} placeholder="https://host:port/v1" value={baseURL} onChange={(e) => setBaseURL(e.target.value)} className="h-8 w-full sm:w-72" />
+        <Input aria-label={t("voice.serviceAddress", { name: def.name })} placeholder="https://host:port/v1" value={baseURL} onChange={(e) => setBaseURL(e.target.value)} className="h-8 w-full sm:w-72" />
       )}
-      {def.fields.includes("region") && <Input aria-label="Azure region" placeholder="Region, e.g. westeurope" value={region} onChange={(e) => setRegion(e.target.value)} className="h-8 w-full sm:w-44" />}
+      {def.fields.includes("region") && <Input aria-label={t("voice.azureRegion")} placeholder={t("voice.regionPlaceholder")} value={region} onChange={(e) => setRegion(e.target.value)} className="h-8 w-full sm:w-44" />}
       <Input
         type="password"
-        aria-label={`${def.name} API key`}
-        placeholder={def.fields.includes("baseURL") ? "API key (optional)" : "API key"}
+        aria-label={t("voice.serviceApiKey", { name: def.name })}
+        placeholder={def.fields.includes("baseURL") ? t("voice.apiKeyOptionalPlaceholder") : t("voice.apiKeyPlaceholder")}
         value={apiKey}
         onChange={(e) => setApiKey(e.target.value)}
         className="h-8 w-full sm:w-64"
       />
       <Button size="sm" type="submit" disabled={busy || (!def.fields.includes("baseURL") && !apiKey.trim())}>
         {busy && <Loader2Icon className="animate-spin" />}
-        Save
+        {t("common.save")}
       </Button>
       {def.keyUrl && (
         <a href={def.keyUrl} target="_blank" rel="noreferrer" className="text-primary flex items-center gap-1 text-xs hover:underline">
-          Get a key <ExternalLinkIcon className="size-3" />
+          {t("voice.getKey")} <ExternalLinkIcon className="size-3" />
         </a>
       )}
       {error && <span className="text-error w-full text-xs">{error}</span>}
@@ -484,11 +505,10 @@ function OptionPicker({ kind, engine, what, value, free, onSave }: { kind: "stt"
     setOpen(false);
     setQuery("");
   };
-  const noun = what === "voices" ? "voice" : "model";
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
-        aria-label={`${noun[0]!.toUpperCase()}${noun.slice(1)}`}
+        aria-label={what === "voices" ? t("voice.voice") : t("voice.model")}
         className="group bg-muted/60 hover:bg-muted aria-expanded:bg-muted flex h-8 w-full min-w-0 items-center justify-between gap-2 rounded-lg px-3 text-xs transition-colors duration-(--motion-fast) ease-out-quart md:w-72"
       >
         <span className="truncate">{current?.name ?? value}</span>
@@ -507,7 +527,7 @@ function OptionPicker({ kind, engine, what, value, free, onSave }: { kind: "stt"
             autoFocus={window.matchMedia("(pointer: fine)").matches}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={free ? `Search or type a ${noun} id, then Enter` : `Search ${noun}s`}
+            placeholder={free ? t(what === "voices" ? "voice.searchOrTypeVoice" : "voice.searchOrTypeModel") : t(what === "voices" ? "voice.searchVoices" : "voice.searchModels")}
             className="placeholder:text-muted-foreground h-7 pointer-coarse:h-9 min-w-0 flex-1 bg-transparent text-sm outline-none"
           />
         </form>
@@ -515,7 +535,7 @@ function OptionPicker({ kind, engine, what, value, free, onSave }: { kind: "stt"
           <div role="listbox">
             {!list && !failed && (
               <p className="text-muted-foreground flex items-center justify-center gap-2 px-3 py-6 text-sm">
-                <Loader2Icon className="size-4 animate-spin" /> Loading {noun}s…
+                <Loader2Icon className="size-4 animate-spin" /> {t(what === "voices" ? "voice.loadingVoices" : "voice.loadingModels")}
               </p>
             )}
             {failed && <p className="text-error px-3 py-6 text-center text-sm">{failed}</p>}
@@ -537,7 +557,7 @@ function OptionPicker({ kind, engine, what, value, free, onSave }: { kind: "stt"
                 </div>
               </div>
             ))}
-            {list && options.length === 0 && <p className="text-muted-foreground px-3 py-6 text-center text-sm">{free && q ? "Press Enter to use this id." : `No ${noun}s match.`}</p>}
+            {list && options.length === 0 && <p className="text-muted-foreground px-3 py-6 text-center text-sm">{free && q ? t("voice.pressEnter") : t(what === "voices" ? "voice.noVoicesMatch" : "voice.noModelsMatch")}</p>}
           </div>
         </ScrollArea>
       </PopoverContent>

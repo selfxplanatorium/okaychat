@@ -18,6 +18,7 @@ import {
   CollapsibleTrigger,
 } from "./collapsible-root";
 import { collapsePanel } from "./surfaces";
+import { t } from "@/i18n";
 
 const ANIMATION_DURATION = 200;
 
@@ -96,7 +97,7 @@ function ToolGroupRoot({
 function ToolGroupTrigger({
   count,
   active = false,
-  label = `${count} tool ${count === 1 ? "call" : "calls"}`,
+  label = t("thread.toolCalls", { count }),
   className,
   ...props
 }: React.ComponentProps<typeof CollapsibleTrigger> & {

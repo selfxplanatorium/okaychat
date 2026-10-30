@@ -4,7 +4,9 @@ import { useState } from "react";
 import type { CompactionState } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { api, formatCost, formatTokens } from "@/lib/api";
+import { api } from "@/lib/api";
+import { t } from "@/i18n";
+import { formatCost, formatDateTime, formatNumber, formatPercent, formatTokens } from "@/i18n/format";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 import { metadataOf, useContextUsage, useCurrentThreadId, useThreadMeta, useThreadMetaStore, useChatModel } from "@/state/thread-meta";
@@ -95,14 +97,14 @@ export function ContextMeter() {
     <Popover>
       <PopoverTrigger
         className="hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs tabular-nums transition-colors duration-(--motion-fast) ease-out-quart"
-        aria-label="Context usage"
+        aria-label={t("composer.contextUsage")}
       >
         <Ring fraction={fraction} />
-        <span className="hidden sm:inline">{tokens ? `${Math.round(fraction * 100)}%` : formatTokens(window)}</span>
+        <span className="hidden sm:inline">{tokens ? formatPercent(fraction) : formatTokens(window)}</span>
       </PopoverTrigger>
       <PopoverContent side="top" align="end" className="w-72 p-3">
         <div className="mb-2 flex items-baseline justify-between">
-          <span className="text-sm font-medium">Context window</span>
+          <span className="text-sm font-medium">{t("composer.contextWindowTitle")}</span>
           <span className="text-muted-foreground text-xs tabular-nums">
             {formatTokens(tokens)} / {formatTokens(window)}
           </span>
@@ -112,45 +114,45 @@ export function ContextMeter() {
             className={cn("h-full origin-left rounded-full transition-[transform,background-color] duration-(--motion-slow) ease-out-quart", fraction > 0.85 ? "bg-error" : fraction > 0.6 ? "bg-warning" : "bg-primary")}
             style={{ width: "100%", transform: `scaleX(${Math.min(1, fraction)})` }}
           />
-          {autoCompactAt > 0 && <div className="bg-foreground/40 absolute top-0 h-full w-px" style={{ left: `${autoCompactAt * 100}%` }} title="Auto-compact threshold" />}
+          {autoCompactAt > 0 && <div className="bg-foreground/40 absolute top-0 h-full w-px" style={{ left: `${autoCompactAt * 100}%` }} title={t("composer.autoCompactThreshold")} />}
         </div>
         <dl className="text-muted-foreground grid grid-cols-2 gap-y-1 text-xs">
-          <dt>Thread cost</dt>
+          <dt>{t("composer.threadCost")}</dt>
           <dd className="text-foreground text-right tabular-nums">{formatCost(meta?.usage?.cost ?? 0)}</dd>
-          <dt>Tokens in / out</dt>
+          <dt>{t("composer.tokensInOut")}</dt>
           <dd className="text-foreground text-right tabular-nums">
             {formatTokens(meta?.usage?.input ?? 0)} / {formatTokens(meta?.usage?.output ?? 0)}
           </dd>
-          <dt>Cache hits</dt>
-          <dd className="text-foreground text-right tabular-nums">{Math.round(cacheRatio * 100)}%</dd>
-          <dt>Auto-compact</dt>
-          <dd className="text-foreground text-right">{autoCompactAt > 0 ? `at ${Math.round(autoCompactAt * 100)}%` : "Off"}</dd>
+          <dt>{t("composer.cacheHits")}</dt>
+          <dd className="text-foreground text-right tabular-nums">{formatPercent(cacheRatio)}</dd>
+          <dt>{t("composer.autoCompact")}</dt>
+          <dd className="text-foreground text-right">{autoCompactAt > 0 ? t("composer.autoCompactAt", { percent: formatPercent(autoCompactAt) }) : t("common.off")}</dd>
         </dl>
         {meta?.compaction?.summary && (
           <p className="text-muted-foreground animate-fade-in mt-2 text-xs">
-            Compacted from {formatTokens(meta.compaction.tokensBefore ?? 0)} tokens on {new Date(meta.compaction.createdAt ?? 0).toLocaleString()}.
+            {t("composer.compactedFrom", { tokens: formatTokens(meta.compaction.tokensBefore ?? 0), date: formatDateTime(meta.compaction.createdAt ?? 0) })}
           </p>
         )}
         {meta?.compaction?.trim && (
           <p className="text-muted-foreground animate-fade-in mt-2 text-xs">
-            Trimmed from about {formatTokens(meta.compaction.trim.tokensBefore)} to {formatTokens(meta.compaction.trim.tokensAfter)} tokens on {new Date(meta.compaction.trim.createdAt).toLocaleString()}.
+            {t("composer.trimmedFrom", { before: formatTokens(meta.compaction.trim.tokensBefore), after: formatTokens(meta.compaction.trim.tokensAfter), date: formatDateTime(meta.compaction.trim.createdAt) })}
           </p>
         )}
         {error && <p className="text-error animate-fade-in mt-2 text-xs">{error}</p>}
         {!privacy.temporary && (
           <>
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <Button size="sm" variant="outline" disabled={!threadId || running || !!compacting} onClick={trimNow} title="Keep every message's text, drop earlier reasoning, tool results, and file contents">
+              <Button size="sm" variant="outline" disabled={!threadId || running || !!compacting} onClick={trimNow} title={t("composer.trimHint")}>
                 {/* The scissors stay mounted so the click's snip plays; they keep snipping while the trim runs. */}
                 <ScissorsIcon className={cn(compacting === "trim" && "icon-snipping")} />
-                Trim
+                {t("composer.trim")}
               </Button>
-              <Button size="sm" variant="outline" disabled={!threadId || running || !!compacting} onClick={compactNow} title="Replace earlier messages with a summary">
+              <Button size="sm" variant="outline" disabled={!threadId || running || !!compacting} onClick={compactNow} title={t("composer.summarizeHint")}>
                 {compacting === "summary" ? <Loader2Icon className="animate-spin" /> : <ShrinkIcon />}
-                {compacting === "summary" ? "Summarizing…" : "Summarize"}
+                {compacting === "summary" ? t("composer.summarizing") : t("composer.summarize")}
               </Button>
             </div>
-            <p className="text-muted-foreground mt-2 text-xs">Both rewrite earlier history, so the next reply is sent without the prompt cache once and costs more.</p>
+            <p className="text-muted-foreground mt-2 text-xs">{t("composer.compactWarning")}</p>
           </>
         )}
       </PopoverContent>
@@ -167,17 +169,17 @@ export function MessageMeta() {
   if (running || !meta.modelRef) return null;
   const name = models.find((m) => m.ref === meta.modelRef)?.name ?? meta.modelRef.split("/").pop();
   const u = meta.usage;
-  const cache = u?.input ? Math.round((u.cacheRead / u.input) * 100) : 0;
+  const cache = u?.input ? u.cacheRead / u.input : 0;
   return (
     <div className="text-muted-foreground/80 ms-auto flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap pe-2 text-[11px] tabular-nums opacity-0 transition-opacity duration-(--motion-fast) delay-75 ease-out-quart [[data-role=assistant]:hover_&]:opacity-100">
       <span>{name}</span>
       {u && (
-        <span title={`Input ${u.input} (cached ${u.cacheRead}, written ${u.cacheWrite}) · Output ${u.output} (reasoning ${u.reasoning})`}>
-          {formatTokens(u.input)} in{cache ? ` (${cache}% cached)` : ""} · {formatTokens(u.output)} out
+        <span title={t("composer.usageDetail", { input: formatNumber(u.input), cached: formatNumber(u.cacheRead), written: formatNumber(u.cacheWrite), output: formatNumber(u.output), reasoning: formatNumber(u.reasoning) })}>
+          {cache ? t("composer.usageCached", { input: formatTokens(u.input), percent: formatPercent(cache), output: formatTokens(u.output) }) : t("composer.usage", { input: formatTokens(u.input), output: formatTokens(u.output) })}
         </span>
       )}
       {meta.cost !== undefined && meta.cost > 0 && <span>{formatCost(meta.cost)}</span>}
-      {meta.durationMs !== undefined && <span>{(meta.durationMs / 1000).toFixed(1)}s</span>}
+      {meta.durationMs !== undefined && <span>{t("composer.seconds", { n: formatNumber(meta.durationMs / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) })}</span>}
     </div>
   );
 }
@@ -193,7 +195,7 @@ export function CompactionMarker() {
       <div className="text-muted-foreground animate-fade-in my-2 flex items-center gap-3 px-2 text-xs">
         <span className="bg-border h-px flex-1" />
         <ScissorsIcon className="size-3.5" />
-        Earlier reasoning, tool results, and files trimmed (about {formatTokens(trim.tokensBefore)} to {formatTokens(trim.tokensAfter)} tokens)
+        {t("composer.trimMarker", { before: formatTokens(trim.tokensBefore), after: formatTokens(trim.tokensAfter) })}
         <span className="bg-border h-px flex-1" />
       </div>
     );
@@ -204,7 +206,7 @@ export function CompactionMarker() {
       <button type="button" onClick={() => setOpen(!open)} className="hover:text-foreground flex w-full items-center gap-3 transition-colors duration-(--motion-fast) ease-out-quart">
         <span className="bg-border h-px flex-1" />
         <ShrinkIcon className="size-3.5" />
-        Earlier messages summarized ({formatTokens(meta.compaction.tokensBefore ?? 0)} tokens)
+        {t("composer.summaryMarker", { tokens: formatTokens(meta.compaction.tokensBefore ?? 0) })}
         <ChevronDownIcon className={cn("size-3.5 transition-transform duration-(--motion-base) ease-out-expo", open && "rotate-180")} />
         <span className="bg-border h-px flex-1" />
       </button>

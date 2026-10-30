@@ -1,5 +1,6 @@
 import { Select as SelectPrimitive } from "@base-ui/react/select";
 import { CheckIcon, ChevronsUpDownIcon } from "lucide-react";
+import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "./scroll-area";
 import { useSmoothHeight } from "./smooth-height";
@@ -45,7 +46,7 @@ export function Select<T extends string>({
           className,
         )}
       >
-        <span className="truncate">{current?.label ?? <span className="text-muted-foreground">{placeholder ?? "Select"}</span>}</span>
+        <span className="truncate">{current?.label ?? <span className="text-muted-foreground">{placeholder ?? t("common.select")}</span>}</span>
         <ChevronsUpDownIcon className="text-muted-foreground size-3.5 shrink-0" />
       </SelectPrimitive.Trigger>
       <SelectPrimitive.Portal>

@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select } from "@/components/ui/select";
 import { SelectionCheck } from "@/components/ui/selection";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
 
 // Who may use something an admin shares (a server-wide provider key or an MCP server): everyone, or only
@@ -47,14 +48,14 @@ export function useDirectory(): Directory {
   return value;
 }
 
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-
 export function audienceLabel(audience: ShareAudience | undefined, groups: UserGroup[]): string {
-  if (!audience || audience.mode === "all") return "Everyone";
+  if (!audience || audience.mode === "all") return t("audience.everyone");
   const groupIds = audience.groupIds.filter((id) => groups.some((g) => g.id === id));
-  if (!groupIds.length && !audience.userIds.length) return "Nobody";
+  if (!groupIds.length && !audience.userIds.length) return t("audience.nobody");
   if (groupIds.length === 1 && !audience.userIds.length) return groups.find((g) => g.id === groupIds[0])!.name;
-  return [groupIds.length && plural(groupIds.length, "group"), audience.userIds.length && plural(audience.userIds.length, "user")].filter(Boolean).join(", ");
+  if (!audience.userIds.length) return t("audience.groupCount", { count: groupIds.length });
+  if (!groupIds.length) return t("audience.userCount", { count: audience.userIds.length });
+  return t("audience.groupsAndUsers", { groups: t("audience.groupCount", { count: groupIds.length }), users: t("audience.userCount", { count: audience.userIds.length }) });
 }
 
 export interface CheckItem {
@@ -75,12 +76,12 @@ export function Checklist({ items, selected, onToggle, label, filter = false }: 
       {filter && (
         <div className="relative">
           <SearchIcon className="text-muted-foreground absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2" />
-          <Input placeholder="Filter" aria-label={`Filter ${label}`} value={query} onChange={(e) => setQuery(e.target.value)} className="h-8 pl-8" />
+          <Input placeholder={t("audience.filter")} aria-label={t("audience.filterLabel", { label })} value={query} onChange={(e) => setQuery(e.target.value)} className="h-8 pl-8" />
         </div>
       )}
       <ScrollArea className="bg-muted/40 max-h-48 rounded-lg border">
         <div role="group" aria-label={label} className="flex flex-col p-1">
-          {shown.length === 0 && <p className="text-muted-foreground px-2 py-1.5 text-xs">None</p>}
+          {shown.length === 0 && <p className="text-muted-foreground px-2 py-1.5 text-xs">{t("common.none")}</p>}
           {shown.map((item) => {
             const checked = selected.has(item.id);
             return (
@@ -169,44 +170,44 @@ export function AudienceDialog({
             <DialogDescription>{description}</DialogDescription>
           </DialogHeader>
           <Select
-            aria-label="Who can use it"
+            aria-label={t("audience.whoCanUse")}
             value={mode}
             onValueChange={setMode}
             options={[
-              { value: "all", label: "Everyone" },
-              { value: "selected", label: "Specific groups and users" },
+              { value: "all", label: t("audience.everyone") },
+              { value: "selected", label: t("audience.specific") },
             ]}
           />
           {mode === "selected" && (
             <>
               <div className="grid gap-1.5">
-                <p className="text-xs font-medium">Groups</p>
+                <p className="text-xs font-medium">{t("audience.groups")}</p>
                 {groups.length ? (
-                  <Checklist label="Groups" items={groups.map((g) => ({ id: g.id, label: g.name, hint: plural(g.userIds.length, "member") }))} selected={groupIds} onToggle={(id) => setGroupIds((s) => toggled(s, id))} />
+                  <Checklist label={t("audience.groups")} items={groups.map((g) => ({ id: g.id, label: g.name, hint: t("admin.memberCount", { count: g.userIds.length }) }))} selected={groupIds} onToggle={(id) => setGroupIds((s) => toggled(s, id))} />
                 ) : (
-                  <p className="text-muted-foreground text-xs">No groups yet. Create them under Admin → Groups.</p>
+                  <p className="text-muted-foreground text-xs">{t("audience.noGroups")}</p>
                 )}
               </div>
               <div className="grid gap-1.5">
-                <p className="text-xs font-medium">Users</p>
+                <p className="text-xs font-medium">{t("audience.users")}</p>
                 <Checklist
-                  label="Users"
+                  label={t("audience.users")}
                   filter={users.length > 8}
                   items={users.map((u) => ({ id: u.id, label: u.name, hint: u.email }))}
                   selected={userIds}
                   onToggle={(id) => setUserIds((s) => toggled(s, id))}
                 />
               </div>
-              {!groupIds.size && !userIds.size && <p className="text-muted-foreground text-xs">Nobody gets access until you pick a group or user.</p>}
+              {!groupIds.size && !userIds.size && <p className="text-muted-foreground text-xs">{t("audience.nobodyHasAccess")}</p>}
             </>
           )}
           {error && <p role="alert" className="text-error settings-error text-xs">{error}</p>}
           <DialogFooter>
             <DialogClose type="button" disabled={busy} render={<Button variant="outline" />}>
-              Cancel
+              {t("common.cancel")}
             </DialogClose>
             <Button type="submit" disabled={busy}>
-              {busy && <Loader2Icon className="animate-spin" />} Save
+              {busy && <Loader2Icon className="animate-spin" />} {t("common.save")}
             </Button>
           </DialogFooter>
         </form>

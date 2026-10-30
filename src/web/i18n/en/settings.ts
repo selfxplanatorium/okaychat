@@ -1,0 +1,16 @@
+export default {
+  backToChat: "Back to chat",
+  resetToDefault: "Reset to default",
+  sectionGeneral: "General",
+  sectionAccount: "Account",
+  sectionMemory: "Memory",
+  sectionProviders: "Providers",
+  sectionMcp: "MCP servers",
+  sectionProjects: "Projects",
+  sectionScheduled: "Scheduled",
+  sectionUsage: "Usage",
+  sectionVoice: "Voice",
+  sectionAppearance: "Appearance",
+  sectionKeyboard: "Keyboard",
+  sectionAdmin: "Admin",
+} as const;

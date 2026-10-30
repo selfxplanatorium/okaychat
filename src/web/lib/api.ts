@@ -24,19 +24,6 @@ export async function api<T>(path: string, init?: RequestInit & { json?: unknown
   return body as T;
 }
 
-export const formatTokens = (n: number) =>
-  n >= 1_000_000 ? `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M` : n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : `${n}`;
-
-export const formatCost = (n: number) => (n === 0 ? "$0" : n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
-
-export const formatBytes = (n: number) =>
-  n >= 1024 ** 3
-    ? `${(n / 1024 ** 3).toFixed(n >= 10 * 1024 ** 3 ? 0 : 1)} GB`
-    : n >= 1024 ** 2
-      ? `${(n / 1024 ** 2).toFixed(n >= 100 * 1024 ** 2 ? 0 : 1)} MB`
-      : n >= 1024
-        ? `${(n / 1024).toFixed(1)} KB`
-        : `${n} B`;
 
 const prefetched = new Map<string, { promise: Promise<unknown>; at: number }>();
 // A prefetch serves the screen that is mounting now. An older one could show stale data.

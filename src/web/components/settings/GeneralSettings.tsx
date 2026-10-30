@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { DEFAULT_USER_SETTINGS, SIDEBAR_ITEMS, type ModelInfo } from "@shared/types";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { t } from "@/i18n";
+import { formatPercent } from "@/i18n/format";
 import { api } from "@/lib/api";
 import { useData } from "@/state/data";
 import { ModelSelect } from "../chat/ModelPicker";
@@ -10,7 +12,13 @@ import { SettingsPage, SettingsRow, SettingsSection, SettingsSlider } from "./Se
 
 const toolModels = (m: ModelInfo) => m.toolCall;
 
-const SIDEBAR_LABELS = { newChat: "New chat", scheduled: "Scheduled", library: "Library", plugins: "Plugins", projects: "Projects" };
+const SIDEBAR_LABELS = {
+  newChat: "general.sidebarNewChat",
+  scheduled: "general.sidebarScheduled",
+  library: "general.sidebarLibrary",
+  plugins: "general.sidebarPlugins",
+  projects: "general.sidebarProjects",
+} as const;
 
 export function GeneralSettings() {
   const settings = useData((s) => s.settings);
@@ -24,13 +32,13 @@ export function GeneralSettings() {
   if (!settings) return null;
 
   return (
-    <SettingsPage title="General">
-      <SettingsSection title="Sidebar" description="Choose the shortcuts shown above your chats. Search and settings are always available.">
+    <SettingsPage title={t("general.title")}>
+      <SettingsSection title={t("general.sidebarTitle")} description={t("general.sidebarDescription")}>
         {SIDEBAR_ITEMS.map((item) => (
           <SettingsRow
             key={item}
-            label={SIDEBAR_LABELS[item]}
-            control={<Switch aria-label={`Show ${SIDEBAR_LABELS[item]} in sidebar`} checked={(settings.sidebarItems ?? SIDEBAR_ITEMS).includes(item)} onCheckedChange={(checked) => {
+            label={t(SIDEBAR_LABELS[item])}
+            control={<Switch aria-label={t("general.showInSidebar", { item: t(SIDEBAR_LABELS[item]) })} checked={(settings.sidebarItems ?? SIDEBAR_ITEMS).includes(item)} onCheckedChange={(checked) => {
               const visible = settings.sidebarItems ?? SIDEBAR_ITEMS;
               void update({ sidebarItems: SIDEBAR_ITEMS.filter((id) => id === item ? checked : visible.includes(id)) });
             }} />}
@@ -38,96 +46,96 @@ export function GeneralSettings() {
         ))}
       </SettingsSection>
 
-      <SettingsSection title="Models">
+      <SettingsSection title={t("general.modelsTitle")}>
         <SettingsRow
-          label="Default model"
-          description="Used for new chats until you pick another in the composer."
-          control={<ModelSelect aria-label="Default model" className="w-full md:w-80" value={settings.defaultModel ?? ""} onValueChange={(v) => update({ defaultModel: v || null })} choices={[{ value: "", label: "First available model" }]} />}
+          label={t("general.defaultModel")}
+          description={t("general.defaultModelDescription")}
+          control={<ModelSelect aria-label={t("general.defaultModel")} className="w-full md:w-80" value={settings.defaultModel ?? ""} onValueChange={(v) => update({ defaultModel: v || null })} choices={[{ value: "", label: t("general.firstAvailableModel") }]} />}
         />
         <SettingsRow
-          label="Utility model"
-          description="Writes chat titles and compaction summaries. A fast, cheap model works best."
+          label={t("general.utilityModel")}
+          description={t("general.utilityModelDescription")}
           control={
             <ModelSelect
               className="w-full md:w-80"
-              aria-label="Utility model"
+              aria-label={t("general.utilityModel")}
               value={settings.utilityModel ?? ""}
               onValueChange={(v) => update({ utilityModel: v || null })}
-              choices={[{ value: "", label: "Same as chat model" }]}
+              choices={[{ value: "", label: t("general.sameAsChatModel") }]}
             />
           }
         />
       </SettingsSection>
 
-      <SettingsSection title="Context">
+      <SettingsSection title={t("general.contextTitle")}>
         <SettingsRow
-          label="Auto-compact"
-          description="Summarize older messages when the conversation fills this much of the context window. 0 turns it off."
+          label={t("general.autoCompact")}
+          description={t("general.autoCompactDescription")}
           reset={settings.autoCompactAt !== DEFAULT_USER_SETTINGS.autoCompactAt ? () => update({ autoCompactAt: DEFAULT_USER_SETTINGS.autoCompactAt }) : null}
           control={
             <SettingsSlider
-              label="Auto-compact threshold"
+              label={t("general.autoCompactThreshold")}
               value={Math.round(settings.autoCompactAt * 100)}
               min={0}
               max={95}
               step={5}
-              format={(v) => (v === 0 ? "Off" : `${v}%`)}
+              format={(v) => (v === 0 ? t("common.off") : formatPercent(v / 100))}
               onChange={(v) => update({ autoCompactAt: v / 100 })}
             />
           }
         />
         <SettingsRow
-          label="Trim before summarizing"
-          description="At the auto-compact threshold, first drop reasoning, tool results, and file contents from earlier messages while keeping all of their text. A summary is written only if that does not free enough room. Each trim or summary rewrites the history, so that reply misses the prompt cache once."
-          control={<Switch checked={settings.trimBeforeCompact === true} onCheckedChange={(trimBeforeCompact) => update({ trimBeforeCompact })} aria-label="Trim before summarizing" />}
+          label={t("general.trimBeforeSummarizing")}
+          description={t("general.trimDescription")}
+          control={<Switch checked={settings.trimBeforeCompact === true} onCheckedChange={(trimBeforeCompact) => update({ trimBeforeCompact })} aria-label={t("general.trimBeforeSummarizing")} />}
         />
         <SettingsRow
-          label="Max agent steps"
-          description="Tool rounds per reply, followed by a final answer without tools. Web searches have a separate limit."
+          label={t("general.maxAgentSteps")}
+          description={t("general.maxAgentStepsDescription")}
           reset={settings.maxSteps !== DEFAULT_USER_SETTINGS.maxSteps ? () => update({ maxSteps: DEFAULT_USER_SETTINGS.maxSteps }) : null}
-          control={<SettingsSlider label="Max agent steps" value={settings.maxSteps} min={1} max={50} step={1} onChange={(v) => update({ maxSteps: v })} />}
+          control={<SettingsSlider label={t("general.maxAgentSteps")} value={settings.maxSteps} min={1} max={50} step={1} onChange={(v) => update({ maxSteps: v })} />}
         />
         <SettingsRow
-          label="Max web searches"
-          description="Search queries per reply, shared by the assistant and its sub-agents. Reading pages does not count. 0 turns searching off."
+          label={t("general.maxWebSearches")}
+          description={t("general.maxWebSearchesDescription")}
           reset={settings.maxSearches !== DEFAULT_USER_SETTINGS.maxSearches ? () => update({ maxSearches: DEFAULT_USER_SETTINGS.maxSearches }) : null}
-          control={<SettingsSlider label="Max web searches" value={settings.maxSearches} min={0} max={50} step={1} onChange={(v) => update({ maxSearches: v })} />}
+          control={<SettingsSlider label={t("general.maxWebSearches")} value={settings.maxSearches} min={0} max={50} step={1} onChange={(v) => update({ maxSearches: v })} />}
         />
       </SettingsSection>
 
-      <SettingsSection title="Tools">
+      <SettingsSection title={t("general.toolsTitle")}>
         <SettingsRow
-          label="Web search and page reading"
-          description="Free, no keys. Lets models search the web and read pages, PDFs, and sites that block bots."
-          control={<Switch checked={settings.webTools} onCheckedChange={(webTools) => update({ webTools })} aria-label="Web tools" />}
+          label={t("general.webTools")}
+          description={t("general.webToolsDescription")}
+          control={<Switch checked={settings.webTools} onCheckedChange={(webTools) => update({ webTools })} aria-label={t("general.webToolsLabel")} />}
         />
         <SettingsRow
-          label="Artifacts"
-          description="Lets models create pages, apps, diagrams, and documents that open in a side panel, with versions and download."
-          control={<Switch checked={settings.artifacts} onCheckedChange={(artifacts) => update({ artifacts })} aria-label="Artifacts" />}
+          label={t("general.artifacts")}
+          description={t("general.artifactsDescription")}
+          control={<Switch checked={settings.artifacts} onCheckedChange={(artifacts) => update({ artifacts })} aria-label={t("general.artifacts")} />}
         />
         <SettingsRow
-          label="Generative UI"
-          description="Lets models answer with tables, cards, and forms in the app's style, or interactive charts and calculators in a sandboxed frame."
-          control={<Switch checked={settings.generativeUI} onCheckedChange={(generativeUI) => update({ generativeUI })} aria-label="Generative UI" />}
+          label={t("general.generativeUi")}
+          description={t("general.generativeUiDescription")}
+          control={<Switch checked={settings.generativeUI} onCheckedChange={(generativeUI) => update({ generativeUI })} aria-label={t("general.generativeUi")} />}
         />
         <SettingsRow
-          label="Sub-agents"
-          description="Lets the chat model hand self-contained tasks to another model that works in its own context with web and read-only tools."
-          control={<Switch checked={settings.subagents} onCheckedChange={(subagents) => update({ subagents })} aria-label="Sub-agents" />}
+          label={t("general.subagents")}
+          description={t("general.subagentsDescription")}
+          control={<Switch checked={settings.subagents} onCheckedChange={(subagents) => update({ subagents })} aria-label={t("general.subagents")} />}
         />
         {settings.subagents && (
           <div className="settings-collapse">
             <SettingsRow
-              label="Sub-agent model"
-              description="Default for delegated tasks. The utility model and the chat model are offered too."
+              label={t("general.subagentModel")}
+              description={t("general.subagentModelDescription")}
               control={
                 <ModelSelect
                   className="w-full md:w-80"
-                  aria-label="Sub-agent model"
+                  aria-label={t("general.subagentModel")}
                   value={settings.subagentModel ?? ""}
                   onValueChange={(v) => update({ subagentModel: v || null })}
-                  choices={[{ value: "", label: "Same as utility model" }, { value: "chat", label: "Same as chat model" }]}
+                  choices={[{ value: "", label: t("general.sameAsUtilityModel") }, { value: "chat", label: t("general.sameAsChatModel") }]}
                   filter={toolModels}
                 />
               }
@@ -135,32 +143,32 @@ export function GeneralSettings() {
           </div>
         )}
         <SettingsRow
-          label="Code execution"
+          label={t("general.codeExecution")}
           className={!sandbox?.configured ? "text-muted-foreground" : undefined}
           description={
             <span id="code-execution-description">{!sandbox
-              ? "Checking sandbox availability…"
+              ? t("general.sandboxChecking")
               : !sandbox.configured
-              ? "Not set up on this server. An admin can add the sandbox container (see docker-compose.yml)."
+              ? t("general.sandboxNotConfigured")
               : sandbox && !sandbox.reachable
                 ? sandbox.error
-                  ? `The sandbox refuses to run code: ${sandbox.error}`
-                  : "The sandbox container is configured but not reachable right now."
-                : "Lets models run Python and Bash in a private, offline sandbox for each chat, with files that persist between runs."}</span>
+                  ? t("general.sandboxRefuses", { error: sandbox.error })
+                  : t("general.sandboxUnreachable")
+                : t("general.sandboxDescription")}</span>
           }
-          control={<Switch checked={settings.codeExecution && !!sandbox?.configured} disabled={!sandbox?.configured} onCheckedChange={(codeExecution) => update({ codeExecution })} aria-label="Code execution" aria-describedby="code-execution-description" />}
+          control={<Switch checked={settings.codeExecution && !!sandbox?.configured} disabled={!sandbox?.configured} onCheckedChange={(codeExecution) => update({ codeExecution })} aria-label={t("general.codeExecution")} aria-describedby="code-execution-description" />}
         />
       </SettingsSection>
 
       <ImageServicesSettings />
 
-      <SettingsSection title="Custom instructions" description="Added to the system prompt of every chat. Changing it resets the prompt cache once.">
+      <SettingsSection title={t("general.customInstructions")} description={t("general.customInstructionsDescription")}>
         <div className="p-3">
           <Textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onBlur={() => prompt !== settings.systemPrompt && update({ systemPrompt: prompt })}
-            placeholder="e.g. Be concise. I'm a backend engineer. Prefer TypeScript examples."
+            placeholder={t("general.customInstructionsPlaceholder")}
             className="min-h-32"
           />
         </div>

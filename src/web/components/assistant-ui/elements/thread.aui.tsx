@@ -28,6 +28,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useSmoothHeight } from "@/components/ui/smooth-height";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
+import { currentLocale, t } from "@/i18n";
+import { formatDuration, formatList } from "@/i18n/format";
 import {
   ActionBarMorePrimitive,
   ActionBarPrimitive,
@@ -303,7 +305,7 @@ const CopyActionButton: FC<{ className?: string }> = ({ className }) => {
   const copied = useAuiState((s) => s.message.isCopied);
   return (
     <ActionBarPrimitive.Copy asChild>
-      <TooltipIconButton tooltip="Copy" command="message.copy" className={className}>
+      <TooltipIconButton tooltip={t("common.copy")} command="message.copy" className={className}>
         <CopyFeedbackIcon copied={copied} />
       </TooltipIconButton>
     </ActionBarPrimitive.Copy>
@@ -329,7 +331,7 @@ const ThreadHistorySkeleton: FC = () => (
     role="status"
     className="animate-in fade-in fill-mode-both flex flex-col gap-y-6 [animation-delay:150ms] [animation-duration:200ms]"
   >
-    <span className="sr-only">Loading conversation</span>
+    <span className="sr-only">{t("thread.loadingConversation")}</span>
     <Skeleton className="ml-auto h-9 w-2/5 rounded-xl motion-reduce:animate-none" />
     <div className="flex flex-col gap-y-2">
       <Skeleton className="h-4 w-11/12 motion-reduce:animate-none" />
@@ -702,7 +704,7 @@ const ShowEarlierMessages: FC<{ loading: boolean; hidden: number; onShow: () => 
     }}
   >
     <span className={cn(loading && "shimmer motion-reduce:animate-none")}>
-      {loading ? "Loading earlier messages" : `Show earlier messages (${hidden} more)`}
+      {loading ? t("thread.loadingEarlier") : t("thread.showEarlier", { count: hidden })}
     </span>
   </Button>
 );
@@ -751,7 +753,7 @@ const SpokenMessage: FC = () => {
           className="text-muted-foreground mb-1.5 flex items-center gap-1.5 text-xs"
         >
           <PhoneIcon className="size-3" aria-hidden />
-          <span>Voice conversation</span>
+          <span>{t("thread.voiceConversation")}</span>
         </div>
       )}
       <div
@@ -766,7 +768,7 @@ const SpokenMessage: FC = () => {
           )}
         </span>
         <span className="sr-only">
-          {role === "user" ? "You said" : "Assistant said"}
+          {role === "user" ? t("thread.youSaid") : t("thread.assistantSaid")}
         </span>
         <div className="min-w-0 flex-1 wrap-break-word">
           <MessagePrimitive.Parts components={{ Text: SpokenText }} />
@@ -775,7 +777,7 @@ const SpokenMessage: FC = () => {
               data-slot="aui_spoken-message-indicator"
               role="status"
               className="text-muted-foreground ms-1 animate-pulse font-sans"
-              aria-label="Assistant is speaking"
+              aria-label={t("thread.assistantSpeaking")}
             >
               ●
             </span>
@@ -845,7 +847,7 @@ const ThreadLoadEarlier: FC = () => {
       }}
     >
       <span role="status" className="sr-only">
-        {loading ? "Loading earlier messages" : ""}
+        {loading ? t("thread.loadingEarlier") : ""}
       </span>
       {visible && (
         <ThreadPrimitive.LoadEarlier asChild>
@@ -858,7 +860,7 @@ const ThreadLoadEarlier: FC = () => {
             <span
               className={cn(loading && "shimmer motion-reduce:animate-none")}
             >
-              {loading ? "Loading earlier messages" : "Load earlier messages"}
+              {loading ? t("thread.loadingEarlier") : t("thread.loadEarlier")}
             </span>
           </Button>
         </ThreadPrimitive.LoadEarlier>
@@ -871,7 +873,7 @@ const ThreadScrollToBottom: FC = () => {
   return (
     <ThreadPrimitive.ScrollToBottom asChild>
       <TooltipIconButton
-        tooltip="Scroll to bottom"
+        tooltip={t("thread.scrollToBottom")}
         command="chat.scrollBottom"
         variant="outline"
         className="aui-thread-scroll-to-bottom dark:border-border dark:bg-background dark:hover:bg-accent absolute -top-12 z-10 self-center rounded-full p-4 transition-[opacity,translate] duration-(--motion-base) ease-out-quart disabled:pointer-events-none disabled:translate-y-2 disabled:opacity-0 disabled:duration-(--motion-fast) disabled:ease-in-quart"
@@ -886,7 +888,7 @@ const ThreadWelcome: FC = () => {
   return (
     <div className="aui-thread-welcome-root mb-6 flex flex-col px-2">
       <p className="aui-thread-welcome-message-inner animate-rise-in text-2xl font-medium tracking-tight">
-        How can I help you today?
+        {t("thread.welcome")}
       </p>
     </div>
   );
@@ -938,7 +940,7 @@ const SyncNotice: FC<{ sync: ThreadSync | undefined }> = ({ sync }) =>
   sync === "stale" ? (
     <div role="status" className="text-muted-foreground flex items-center gap-1.5 px-2.5 text-xs">
       <CloudOffIcon className="size-3.5 shrink-0" />
-      <span className="truncate">Showing a saved copy that could not be synced. Reload to send.</span>
+      <span className="truncate">{t("thread.syncStale")}</span>
     </div>
   ) : null;
 
@@ -961,13 +963,13 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
           {longPaste.notice}
           <ComposerPrimitive.Input
             {...longPaste.inputProps}
-            placeholder="Send a message..."
+            placeholder={t("thread.messagePlaceholder")}
             className="aui-composer-input caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base leading-6 outline-none"
             rows={1}
             submitMode={sync ? "none" : submitMode}
             autoFocus={autoFocus && finePointer}
             enterKeyHint="send"
-            aria-label="Message input"
+            aria-label={t("thread.messageInput")}
           />
           <SyncNotice sync={sync} />
           <VoiceNotice />
@@ -1022,7 +1024,7 @@ const ComposerAction: FC<{ blocked: boolean }> = ({ blocked }) => {
                 variant="ghost"
                 size="icon"
                 className="aui-composer-dictate text-muted-foreground hover:text-foreground size-7 pointer-coarse:size-9 rounded-full"
-                aria-label="Start voice input"
+                aria-label={t("thread.startVoiceInput")}
               >
                 <MicIcon className="aui-composer-dictate-icon size-4" />
               </TooltipIconButton>
@@ -1032,14 +1034,14 @@ const ComposerAction: FC<{ blocked: boolean }> = ({ blocked }) => {
             <DictationWaveform className="h-6 w-20 sm:w-28" />
             <ComposerPrimitive.StopDictation asChild>
               <TooltipIconButton
-                tooltip="Stop dictation"
+                tooltip={t("thread.stopDictation")}
                 command="composer.dictate"
                 side="bottom"
                 type="button"
                 variant="ghost"
                 size="icon"
                 className="aui-composer-stop-dictation text-destructive size-7 pointer-coarse:size-9 rounded-full"
-                aria-label="Stop voice input"
+                aria-label={t("thread.stopVoiceInput")}
               >
                 <SquareIcon className="aui-composer-stop-dictation-icon size-3.5 animate-pulse fill-current" />
               </TooltipIconButton>
@@ -1061,7 +1063,7 @@ const ComposerAction: FC<{ blocked: boolean }> = ({ blocked }) => {
           >
             {dictating ? (
               <TooltipIconButton
-                tooltip="Send recording"
+                tooltip={t("thread.sendRecording")}
                 side="bottom"
                 type="button"
                 variant="default"
@@ -1069,34 +1071,34 @@ const ComposerAction: FC<{ blocked: boolean }> = ({ blocked }) => {
                 disabled={!canSendDictation || sendPending || blocked}
                 onClick={sendDictation}
                 className="aui-composer-send size-7 pointer-coarse:size-9 rounded-[0.6rem] pointer-coarse:rounded-xl disabled:scale-[0.86] disabled:saturate-[0.4]"
-                aria-label="Stop recording and send"
+                aria-label={t("thread.stopRecordingAndSend")}
               >
                 <ArrowUpIcon className="aui-composer-send-icon size-4" />
               </TooltipIconButton>
             ) : blocked ? (
               <TooltipIconButton
-                tooltip="Loading the latest messages"
+                tooltip={t("thread.loadingLatest")}
                 side="bottom"
                 type="button"
                 variant="default"
                 size="icon"
                 disabled
                 className="aui-composer-send size-7 pointer-coarse:size-9 rounded-[0.6rem] pointer-coarse:rounded-xl disabled:scale-[0.86] disabled:saturate-[0.4]"
-                aria-label="Send message"
+                aria-label={t("thread.sendMessage")}
               >
                 <ArrowUpIcon className="aui-composer-send-icon size-4" />
               </TooltipIconButton>
             ) : (
               <ComposerPrimitive.Send asChild>
                 <TooltipIconButton
-                  tooltip="Send message"
+                  tooltip={t("thread.sendMessage")}
                   side="bottom"
                   type="button"
                   variant="default"
                   size="icon"
                   // Empty composer: the button sits back, then springs forward once there is something to send.
                   className="aui-composer-send size-7 pointer-coarse:size-9 rounded-[0.6rem] pointer-coarse:rounded-xl disabled:scale-[0.86] disabled:saturate-[0.4]"
-                  aria-label="Send message"
+                  aria-label={t("thread.sendMessage")}
                 >
                   <ArrowUpIcon className="aui-composer-send-icon size-4" />
                 </TooltipIconButton>
@@ -1118,7 +1120,7 @@ const ComposerAction: FC<{ blocked: boolean }> = ({ blocked }) => {
                 variant="default"
                 size="icon"
                 className="aui-composer-cancel size-7 pointer-coarse:size-9 rounded-[0.6rem] pointer-coarse:rounded-xl"
-                aria-label={isSending ? "Cancel sending" : "Stop generating"}
+                aria-label={isSending ? t("thread.cancelSending") : t("thread.stopGenerating")}
               >
                 <SquareIcon className="aui-composer-cancel-icon size-3.5 fill-current" />
               </Button>
@@ -1168,7 +1170,7 @@ const StreamingIndicator: FC<{ waiting: boolean }> = ({ waiting }) => {
     <span
       data-slot="aui_assistant-message-indicator"
       role="status"
-      aria-label="Assistant is working"
+      aria-label={t("thread.assistantWorking")}
       className={cn(
         "mt-1 ms-1 inline-flex items-center gap-1",
         leaving ? "chat-wait-out" : "chat-wait-in",
@@ -1180,12 +1182,6 @@ const StreamingIndicator: FC<{ waiting: boolean }> = ({ waiting }) => {
     </span>
   );
 };
-
-const formatElapsed = (seconds: number) =>
-  seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-
-const countPhrase = (n: number, one: string, many: string) =>
-  n === 1 ? one : many.replace("#", String(n));
 
 /** "Searched twice, read 3 pages, and used 2 tools · 41s", like a work log summary. */
 const workLabel = (
@@ -1201,17 +1197,18 @@ const workLabel = (
       part.toolName === "web_search" ? "search" : part.toolName === "web_fetch" ? "read" : "tool";
     counts.set(kind, (counts.get(kind) ?? 0) + 1);
   }
+  const searches = counts.get("search");
+  const reads = counts.get("read");
+  const tools = counts.get("tool");
   const phrases = [
-    counts.get("search") && countPhrase(counts.get("search")!, "searched the web", "searched # times"),
-    counts.get("read") && countPhrase(counts.get("read")!, "read a page", "read # pages"),
-    counts.get("tool") && countPhrase(counts.get("tool")!, "used a tool", "used # tools"),
-  ].filter((p): p is string => Boolean(p));
-  const text =
-    phrases.length > 1
-      ? `${phrases.slice(0, -1).join(", ")} and ${phrases.at(-1)}`
-      : (phrases[0] ?? "worked");
+    searches ? t("thread.workSearched", { count: searches }) : "",
+    reads ? t("thread.workRead", { count: reads }) : "",
+    tools ? t("thread.workUsed", { count: tools }) : "",
+  ].filter(Boolean);
+  const text = phrases.length > 0 ? formatList(phrases) : t("thread.workWorked");
+  const summary = `${text.charAt(0).toLocaleUpperCase(currentLocale())}${text.slice(1)}`;
   const seconds = reasoningDuration(timing);
-  return `${text[0]!.toUpperCase()}${text.slice(1)}${seconds ? ` · ${formatElapsed(seconds)}` : ""}`;
+  return seconds ? t("thread.workWithTime", { summary, time: formatDuration(seconds) }) : summary;
 };
 
 /**
@@ -1235,7 +1232,7 @@ const ReasoningRow: FC<{ text: string; running: boolean }> = ({ text, running })
       >
         <BrainIcon className="size-4 shrink-0" />
         <span className={cn("min-w-0 truncate", running && "shimmer")}>
-          {open || !firstLine ? (running ? "Thinking" : "Thought") : firstLine}
+          {open || !firstLine ? (running ? t("thread.thinking") : t("thread.thought")) : firstLine}
         </span>
         <ChevronDownIcon
           className={cn(
@@ -1428,14 +1425,14 @@ const AssistantActionBar: FC = () => {
       <CopyActionButton />
       {BranchAction && <BranchAction />}
       <ActionBarPrimitive.Reload asChild disabled={!!sync}>
-        <TooltipIconButton tooltip="Retry" command="message.retry">
+        <TooltipIconButton tooltip={t("common.retry")} command="message.retry">
           <RefreshCwIcon />
         </TooltipIconButton>
       </ActionBarPrimitive.Reload>
       <AuiIf condition={(s) => s.thread.capabilities.feedback}>
         <ActionBarPrimitive.FeedbackPositive asChild>
           <TooltipIconButton
-            tooltip="Helpful"
+            tooltip={t("thread.helpful")}
             className="data-[submitted=true]:bg-accent data-[submitted=true]:text-accent-foreground"
           >
             <ThumbsUpIcon />
@@ -1443,7 +1440,7 @@ const AssistantActionBar: FC = () => {
         </ActionBarPrimitive.FeedbackPositive>
         <ActionBarPrimitive.FeedbackNegative asChild>
           <TooltipIconButton
-            tooltip="Not helpful"
+            tooltip={t("thread.notHelpful")}
             className="data-[submitted=true]:bg-accent data-[submitted=true]:text-accent-foreground"
           >
             <ThumbsDownIcon />
@@ -1453,14 +1450,14 @@ const AssistantActionBar: FC = () => {
       <AuiIf condition={(s) => s.thread.capabilities.speech}>
         <AuiIf condition={(s) => s.message.speech == null}>
           <ActionBarPrimitive.Speak asChild>
-            <TooltipIconButton tooltip="Read aloud" command="message.readAloud">
+            <TooltipIconButton tooltip={t("thread.readAloud")} command="message.readAloud">
               <Volume2Icon />
             </TooltipIconButton>
           </ActionBarPrimitive.Speak>
         </AuiIf>
         <AuiIf condition={(s) => s.message.speech != null}>
           <ActionBarPrimitive.StopSpeaking asChild>
-            <TooltipIconButton tooltip="Stop reading" command="message.readAloud">
+            <TooltipIconButton tooltip={t("thread.stopReading")} command="message.readAloud">
               <VolumeXIcon />
             </TooltipIconButton>
           </ActionBarPrimitive.StopSpeaking>
@@ -1469,7 +1466,7 @@ const AssistantActionBar: FC = () => {
       <ActionBarMorePrimitive.Root>
         <ActionBarMorePrimitive.Trigger asChild>
           <TooltipIconButton
-            tooltip="More"
+            tooltip={t("common.more")}
             command="message.more"
             className="data-[state=open]:bg-accent"
           >
@@ -1485,7 +1482,7 @@ const AssistantActionBar: FC = () => {
           <ActionBarPrimitive.ExportMarkdown asChild>
             <ActionBarMorePrimitive.Item className="aui-action-bar-more-item hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none transition-colors duration-(--motion-fast) ease-out-quart select-none">
               <DownloadIcon className="size-4" />
-              Export as Markdown
+              {t("thread.exportMarkdown")}
             </ActionBarMorePrimitive.Item>
           </ActionBarPrimitive.ExportMarkdown>
         </ActionBarMorePrimitive.Content>
@@ -1573,7 +1570,7 @@ const UserRetryButton: FC = () => {
   const sync = useThreadSync();
   return (
     <TooltipIconButton
-      tooltip="Retry"
+      tooltip={t("common.retry")}
       command="message.retry"
       disabled={!!sync}
       onClick={() => aui.thread.startRun({ parentId: aui.message.getState().id })}
@@ -1595,7 +1592,7 @@ const UserActionBar: FC = () => {
       <UserRetryButton />
       {BranchAction && <BranchAction />}
       <ActionBarPrimitive.Edit asChild disabled={!!sync}>
-        <TooltipIconButton tooltip="Edit" command="message.edit" className="aui-user-action-edit">
+        <TooltipIconButton tooltip={t("common.edit")} command="message.edit" className="aui-user-action-edit">
           <SquarePenIcon />
         </TooltipIconButton>
       </ActionBarPrimitive.Edit>
@@ -1611,7 +1608,7 @@ const UserCopyButton: FC = () => {
   const { isCopied, copyToClipboard } = useCopyToClipboard();
   if (!text) return null;
   return (
-    <TooltipIconButton tooltip="Copy" command="message.copy" onClick={() => copyToClipboard(text)}>
+    <TooltipIconButton tooltip={t("common.copy")} command="message.copy" onClick={() => copyToClipboard(text)}>
       <CopyFeedbackIcon copied={isCopied} />
     </TooltipIconButton>
   );
@@ -1666,12 +1663,12 @@ const EditComposer: FC = () => {
         <div className="aui-edit-composer-footer mx-2.5 mb-2.5 flex items-center gap-1.5 self-end">
           <ComposerPrimitive.Cancel asChild>
             <Button variant="ghost" size="sm" className="h-8 px-3">
-              Cancel
+              {t("common.cancel")}
             </Button>
           </ComposerPrimitive.Cancel>
           <ComposerPrimitive.Send asChild disabled={!!sync}>
             <Button size="sm" className="h-8 px-3">
-              Update
+              {t("thread.update")}
             </Button>
           </ComposerPrimitive.Send>
         </div>
@@ -1695,7 +1692,7 @@ const BranchPicker: FC<BranchPickerPrimitive.Root.Props> = ({
       {...rest}
     >
       <BranchPickerPrimitive.Previous asChild>
-        <TooltipIconButton tooltip="Previous">
+        <TooltipIconButton tooltip={t("common.previous")}>
           <ChevronLeftIcon />
         </TooltipIconButton>
       </BranchPickerPrimitive.Previous>
@@ -1703,7 +1700,7 @@ const BranchPicker: FC<BranchPickerPrimitive.Root.Props> = ({
         <BranchPickerPrimitive.Number /> / <BranchPickerPrimitive.Count />
       </span>
       <BranchPickerPrimitive.Next asChild>
-        <TooltipIconButton tooltip="Next">
+        <TooltipIconButton tooltip={t("common.next")}>
           <ChevronRightIcon />
         </TooltipIconButton>
       </BranchPickerPrimitive.Next>

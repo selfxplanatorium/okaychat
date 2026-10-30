@@ -1,0 +1,16 @@
+export default {
+  title: "Projects",
+  description: "Group chats under shared instructions, pinned files, and a default model. Switch projects at the top of the sidebar.",
+  namePlaceholder: "Project name",
+  instructionsPlaceholder: "Instructions for every chat in this project, e.g. You help me run my bakery's marketing. Write in a warm, plain voice.",
+  defaultModel: "Default model",
+  useAccountDefault: "Use account default model",
+  createProject: "Create project",
+  fileTokens: "~{tokens} tokens",
+  removeFile: "Remove {name}",
+  pinFiles: "Pin files",
+  newProject: "New project",
+  empty: "No projects yet.",
+  deleteProject: "Delete project",
+  confirmDelete: "Delete \"{name}\"? Its chats stay and move to All chats.",
+} as const;

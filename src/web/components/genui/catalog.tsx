@@ -1,6 +1,8 @@
 import { defineCatalog, type JsonSchema } from "generative-frame/spec";
 import type { SpecComponentProps, SpecComponents } from "generative-frame/spec/react";
 import type { ReactNode } from "react";
+import { t } from "@/i18n";
+import { formatPercent } from "@/i18n/format";
 import { cn } from "@/lib/utils";
 
 // Declarative components the model composes with `render_spec`. They render in the app's own theme,
@@ -285,7 +287,7 @@ export const components: SpecComponents = {
       {props.label && (
         <span className="text-muted-foreground flex justify-between text-xs">
           {props.label}
-          <span className="tabular-nums">{Math.round(props.value)}%</span>
+          <span className="tabular-nums">{formatPercent(props.value / 100)}</span>
         </span>
       )}
       <span className="bg-muted h-2 overflow-hidden rounded-full">
@@ -351,7 +353,7 @@ export const components: SpecComponents = {
           emit("change", e.target.value);
         }}
       >
-        {props.value === undefined && <option value="">Select…</option>}
+        {props.value === undefined && <option value="">{t("genui.selectPlaceholder")}</option>}
         {props.options.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}

@@ -8,13 +8,17 @@ import { Button } from "@/components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
 import { FloatingSelectionBar, SelectionCheck, SelectModeToggle, useSelection, useSelectionKeys } from "@/components/ui/selection";
 import { Delayed, Skeleton } from "@/components/ui/skeleton";
+import { t } from "@/i18n";
+import { formatDate } from "@/i18n/format";
 import { api } from "@/lib/api";
-import { batchError, runBatch } from "@/lib/selection";
+import { runBatch } from "@/lib/selection";
 import { cn } from "@/lib/utils";
 import { exportThread, type ThreadExportFormat } from "@/lib/thread-export";
 import { showChat, useData } from "@/state/data";
 
-const formatDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { dateStyle: "medium" });
+/** Appends the first error's message to a bulk failure summary. */
+const withReason = (message: string, error: unknown) =>
+  error instanceof Error && error.message ? t("library.withReason", { message, reason: error.message }) : message;
 
 /** Archived chats across every project, with restore, open, export, and permanent delete, one by one or selected together. */
 export function ArchivedChats({ tabs }: { tabs: ReactNode }) {
@@ -40,7 +44,7 @@ export function ArchivedChats({ tabs }: { tabs: ReactNode }) {
     } catch (cause) {
       if (id !== requestId.current) return;
       setThreads((prev) => prev ?? []);
-      setError(cause instanceof Error ? cause.message : "Could not load archived chats.");
+      setError(cause instanceof Error ? cause.message : t("library.archivedLoadFailed"));
     }
   }, []);
 
@@ -56,7 +60,7 @@ export function ArchivedChats({ tabs }: { tabs: ReactNode }) {
     try {
       await task();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Something went wrong.");
+      setError(cause instanceof Error ? cause.message : t("common.somethingWentWrong"));
     } finally {
       setBusyId(null);
     }
@@ -97,14 +101,18 @@ export function ArchivedChats({ tabs }: { tabs: ReactNode }) {
   useSelectionKeys(selection.selecting, { onExit: () => setSelecting(false), onSelectAll: () => selection.selectAll() });
 
   /** Runs `task` per selected chat and drops the finished ones; leaves selection mode when none failed. */
-  const applyToSelection = async (verb: string, task: (id: string) => Promise<unknown>, onFailed?: (count: number) => void) => {
+  const applyToSelection = async (verb: "restore" | "delete", task: (id: string) => Promise<unknown>, onFailed?: (count: number) => void) => {
     const ids = [...selection.selected];
     const { failed, error } = await runBatch(ids, task);
     const done = new Set(ids.filter((id) => !failed.includes(id)));
     setThreads((prev) => prev?.filter((t) => !done.has(t.id)) ?? null);
     if (failed.length) {
       onFailed?.(failed.length);
-      throw new Error(batchError(failed.length, ids.length, verb, error));
+      const failure =
+        verb === "restore"
+          ? failed.length === ids.length ? t("library.restoreChatsFailedAll") : t("library.restoreChatsFailedSome", { failed: failed.length, total: ids.length })
+          : failed.length === ids.length ? t("library.deleteChatsFailedAll") : t("library.deleteChatsFailedSome", { failed: failed.length, total: ids.length });
+      throw new Error(withReason(failure, error));
     }
     setSelecting(false);
   };
@@ -115,7 +123,7 @@ export function ArchivedChats({ tabs }: { tabs: ReactNode }) {
     try {
       await applyToSelection("restore", (id) => api(`/threads/${id}`, { method: "PATCH", json: { status: "regular" } })).finally(() => aui.threads.reload());
     } catch (cause) {
-      setBulkError(cause instanceof Error ? cause.message : "Could not restore the selection.");
+      setBulkError(cause instanceof Error ? cause.message : t("library.restoreChatsFailedAll"));
     } finally {
       setBulkBusy(false);
     }
@@ -150,17 +158,17 @@ export function ArchivedChats({ tabs }: { tabs: ReactNode }) {
       {threads.length === 0 ? (
         <div className="flex flex-col items-center py-16 text-center">
           <ArchiveIcon aria-hidden className="text-muted-foreground mb-5 size-8" />
-          <h2 className="text-base font-medium">No archived chats</h2>
-          <p className="text-muted-foreground mt-2 max-w-xs text-sm">Chats you archive from the sidebar wait here until you restore or delete them.</p>
+          <h2 className="text-base font-medium">{t("library.archivedEmptyTitle")}</h2>
+          <p className="text-muted-foreground mt-2 max-w-xs text-sm">{t("library.archivedEmptyBody")}</p>
         </div>
       ) : (
         <ul className="bg-card divide-border rounded-xl divide-y shadow-[var(--depth-highlight),var(--shadow-raised)]">
           {threads.map((thread) => {
             const busy = busyId === thread.id;
-            const project = thread.projectId ? (projectNames.get(thread.projectId) ?? "Unknown project") : "No project";
+            const project = thread.projectId ? (projectNames.get(thread.projectId) ?? t("library.unknownProject")) : t("library.noProject");
             const label = (
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm">{thread.title || "New chat"}</p>
+                <p className="truncate text-sm">{thread.title || t("common.newChat")}</p>
                 <p className="text-muted-foreground truncate text-xs">
                   {project} · {formatDate(thread.updatedAt)}
                 </p>
@@ -191,27 +199,27 @@ export function ArchivedChats({ tabs }: { tabs: ReactNode }) {
             return (
               <li key={thread.id} className="flex min-h-12 items-center gap-2 px-3 py-2 pointer-coarse:px-4 pointer-coarse:py-3">
                 {label}
-                {busy && <Loader2Icon aria-label="Working" className="text-muted-foreground size-4 shrink-0 animate-spin" />}
+                {busy && <Loader2Icon aria-label={t("library.working")} className="text-muted-foreground size-4 shrink-0 animate-spin" />}
                 <Button variant="outline" size="sm" disabled={busy} onClick={() => void open(thread)}>
-                  <MessageCircleIcon /> <span className="max-sm:sr-only">Open</span>
+                  <MessageCircleIcon /> <span className="max-sm:sr-only">{t("common.open")}</span>
                 </Button>
                 <Button variant="outline" size="sm" disabled={busy} onClick={() => void restore(thread)}>
-                  <ArchiveRestoreIcon /> <span className="max-sm:sr-only">Restore</span>
+                  <ArchiveRestoreIcon /> <span className="max-sm:sr-only">{t("library.restore")}</span>
                 </Button>
                 <Menu>
-                  <MenuTrigger render={<Button variant="ghost" size="icon-sm" disabled={busy} aria-label="More actions" className="pointer-coarse:size-10" />}>
+                  <MenuTrigger render={<Button variant="ghost" size="icon-sm" disabled={busy} aria-label={t("library.moreActions")} className="pointer-coarse:size-10" />}>
                     <MoreHorizontalIcon />
                   </MenuTrigger>
                   <MenuContent align="end" className="min-w-48">
                     <MenuItem onClick={() => void exportAs(thread, "markdown")}>
-                      <FileTextIcon /> Export Markdown
+                      <FileTextIcon /> {t("library.exportMarkdown")}
                     </MenuItem>
                     <MenuItem onClick={() => void exportAs(thread, "pdf")}>
-                      <FileDownIcon /> Export PDF
+                      <FileDownIcon /> {t("library.exportPdf")}
                     </MenuItem>
                     <MenuSeparator />
                     <MenuItem destructive onClick={() => setDeleting(thread)}>
-                      <Trash2Icon /> Delete permanently
+                      <Trash2Icon /> {t("library.deletePermanently")}
                     </MenuItem>
                   </MenuContent>
                 </Menu>
@@ -228,9 +236,9 @@ export function ArchivedChats({ tabs }: { tabs: ReactNode }) {
           onClear={selection.clear}
           error={bulkError}
         >
-          {bulkBusy && <Loader2Icon aria-label="Working" className="text-muted-foreground mx-1 size-4 animate-spin" />}
+          {bulkBusy && <Loader2Icon aria-label={t("library.working")} className="text-muted-foreground mx-1 size-4 animate-spin" />}
           <Button variant="ghost" size="sm" disabled={bulkBusy || selection.selected.size === 0} onClick={() => void restoreSelected()} className="pointer-coarse:h-10">
-            <ArchiveRestoreIcon /> Restore
+            <ArchiveRestoreIcon /> {t("library.restore")}
           </Button>
           <Button
             variant="ghost"
@@ -242,7 +250,7 @@ export function ArchivedChats({ tabs }: { tabs: ReactNode }) {
             }}
             className="text-destructive hover:bg-destructive/10 hover:text-destructive pointer-coarse:h-10"
           >
-            <Trash2Icon /> Delete
+            <Trash2Icon /> {t("common.delete")}
           </Button>
         </FloatingSelectionBar>
       )}
@@ -254,7 +262,7 @@ export function ArchivedChats({ tabs }: { tabs: ReactNode }) {
         onConfirm={async () => {
           try {
             await applyToSelection(
-              "be deleted",
+              "delete",
               (id) => api(`/threads/${id}`, { method: "DELETE" }),
               (count) => setBulkDelete((prev) => ({ ...prev, count })),
             );

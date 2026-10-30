@@ -5,6 +5,7 @@ import { McpPromptsButton, MobileComposerMenu, SearchToggle } from "./ComposerCo
 import { EffortPicker, ModelPicker } from "./ModelPicker";
 import { BranchedFromBanner, BranchMenu, PendingBranchRun } from "./branch";
 import { pickWelcomeLine } from "./welcome-lines";
+import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 import { useChatPrivacy } from "@/state/chat-privacy";
@@ -14,7 +15,7 @@ function Welcome() {
   const name = useData((s) => s.me?.name);
   // Re-picks only when the name arrives, so the line does not change on every render.
   const line = useMemo(() => pickWelcomeLine(name), [name]);
-  const text = privacy.temporary ? "Temporary chat" : line;
+  const text = privacy.temporary ? t("composer.temporaryChat") : line;
   return (
     <div className="mb-6 flex flex-col items-center px-2 text-center max-md:my-auto">
       {/* Keyed by the text, so switching to a temporary chat writes the new line in. */}
@@ -40,7 +41,7 @@ function Welcome() {
         )}
       >
         <div className="min-h-0 overflow-hidden">
-          <p className="text-muted-foreground mt-2 max-w-sm text-sm">This chat isn’t saved and won’t create memories.{privacy.personalized ? " Saved preferences are used for this chat." : " Personalization is off."}</p>
+          <p className="text-muted-foreground mt-2 max-w-sm text-sm">{t(privacy.personalized ? "composer.temporaryNoticePersonalized" : "composer.temporaryNoticePlain")}</p>
         </div>
       </div>
     </div>

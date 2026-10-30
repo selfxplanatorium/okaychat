@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
 import { Popover, PopoverContent } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
@@ -32,7 +33,7 @@ const pendingRuns = new Map<string, string>();
  */
 async function branchChat(aui: ReturnType<typeof useAui>, upTo: string, run: boolean, modelRef?: string) {
   const { remoteId } = aui.threadListItem.getState();
-  if (!remoteId) throw new Error("This chat is not saved yet.");
+  if (!remoteId) throw new Error(t("composer.chatNotSaved"));
   const thread = await api<ThreadSummary>(`/threads/${remoteId}/branch`, { method: "POST", json: { messageId: upTo, modelRef } });
   if (thread.modelRef) useData.setState((s) => ({ threadModels: { ...s.threadModels, [thread.id]: thread.modelRef! } }));
   if (run) pendingRuns.set(thread.id, upTo);
@@ -87,7 +88,7 @@ export function BranchMenu() {
     if (!upTo) return;
     setError(null);
     void branchChat(aui, upTo, user || !!modelRef, modelRef).catch((cause) =>
-      setError(cause instanceof Error ? cause.message : "Could not branch. Try again."),
+      setError(cause instanceof Error ? cause.message : t("composer.branchFailed")),
     );
   };
 
@@ -104,7 +105,7 @@ export function BranchMenu() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      aria-label="Branch off"
+                      aria-label={t("composer.branchOff")}
                       data-command="message.branch"
                       className="aui-button-icon data-popup-open:bg-accent size-6 p-1 pointer-coarse:size-9 pointer-coarse:p-2"
                     />
@@ -114,16 +115,16 @@ export function BranchMenu() {
             >
               <BranchIcon />
             </TooltipTrigger>
-            <TooltipContent side="bottom">Branch off</TooltipContent>
+            <TooltipContent side="bottom">{t("composer.branchOff")}</TooltipContent>
           </Tooltip>
           <MenuContent align={role === "user" ? "end" : "start"} className="max-h-[min(32rem,var(--available-height))] w-56">
             <MenuItem onClick={() => branch()}>
               <BranchIcon />
-              Branch off
+              {t("composer.branchOff")}
             </MenuItem>
             {hasModels && (
               <MenuItem onClick={() => setPicking(true)}>
-                <span className="min-w-0 flex-1 truncate">Switch model…</span>
+                <span className="min-w-0 flex-1 truncate">{t("composer.switchModel")}</span>
                 <ChevronRightIcon className="text-muted-foreground ms-auto" />
               </MenuItem>
             )}
@@ -162,14 +163,14 @@ export function BranchedFromBanner() {
   if (!source) return null;
   return (
     <div data-slot="aui_branched-from" className="mb-6 flex flex-col items-start gap-1 px-2">
-      <span className="text-muted-foreground text-xs">Branched from:</span>
+      <span className="text-muted-foreground text-xs">{t("composer.branchedFrom")}</span>
       <button
         type="button"
         onClick={() => aui.threads.switchToThread(source.id)}
         className="text-muted-foreground hover:text-foreground hover:bg-muted -ms-2 flex max-w-full items-center gap-2 rounded-lg px-2 py-1 text-sm transition-colors duration-(--motion-fast) ease-out-quart"
       >
         <BranchIcon className="size-4 shrink-0" />
-        <span className="truncate">{source.title ?? "Untitled chat"}</span>
+        <span className="truncate">{source.title ?? t("composer.untitledChat")}</span>
       </button>
     </div>
   );

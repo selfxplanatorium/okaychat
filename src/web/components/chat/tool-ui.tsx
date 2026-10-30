@@ -3,9 +3,11 @@ import { BookOpenIcon, BotIcon, ChevronDownIcon, DownloadIcon, EyeIcon, FileText
 import { useState, type ReactNode } from "react";
 import { ArtifactCard } from "@/components/artifacts/ArtifactCard";
 import { SimpleMarkdown } from "@/components/ui/simple-markdown";
-import { formatCost } from "@/lib/api";
+import { t } from "@/i18n";
+import { formatBytes, formatCost, formatList, formatNumber } from "@/i18n/format";
+import { Trans } from "@/i18n/react";
 import { useData } from "@/state/data";
-import { formatBytes, RunFiles, type RunFile } from "./reply-files";
+import { RunFiles, type RunFile } from "./reply-files";
 import { cn } from "@/lib/utils";
 
 type SearchResult = { title: string; url: string; snippet: string };
@@ -52,10 +54,10 @@ export const toolkit = defineToolkit({
       const r = result as { engine?: string; results?: SearchResult[] } | undefined;
       const results = r?.results ?? [];
       const running = status?.type === "running";
-      const error = status?.type === "incomplete" ? "Search failed" : undefined;
+      const error = status?.type === "incomplete" ? t("tools.searchFailed") : undefined;
       const query = (args as { query?: string })?.query ?? "";
       return (
-        <ToolShell icon={<SearchIcon className="size-4" />} running={running} error={error} label={running ? `Searching “${query}”` : `Searched “${query}” · ${results.length} results`}>
+        <ToolShell icon={<SearchIcon className="size-4" />} running={running} error={error} label={running ? t("tools.searching", { query }) : t("tools.searched", { query, count: results.length })}>
           {results.length > 0 && (
             <div className="grid gap-1.5 sm:grid-cols-2">
               {results.map((res) => (
@@ -79,7 +81,7 @@ export const toolkit = defineToolkit({
       const url = (args as { url?: string })?.url ?? "";
       const r = result as { title?: string; via?: string; pages?: number; content?: string } | undefined;
       const running = status?.type === "running";
-      const error = status?.type === "incomplete" ? "Could not read the page" : undefined;
+      const error = status?.type === "incomplete" ? t("tools.pageReadFailed") : undefined;
       return (
         <ToolShell
           icon={<FileTextIcon className="size-4" />}
@@ -87,11 +89,16 @@ export const toolkit = defineToolkit({
           error={error}
           label={
             <>
-              {running ? "Reading " : "Read "}
-              <a href={url} target="_blank" rel="noreferrer" className="hover:underline" onClick={(e) => e.stopPropagation()}>
-                {r?.title || host(url)}
-              </a>
-              {r?.via === "scrapling" && " (via Scrapling)"}
+              <Trans
+                k={r?.via === "scrapling" ? (running ? "tools.readingViaScrapling" : "tools.readViaScrapling") : running ? "tools.reading" : "tools.read"}
+                params={{
+                  page: (
+                    <a href={url} target="_blank" rel="noreferrer" className="hover:underline" onClick={(e) => e.stopPropagation()}>
+                      {r?.title || host(url)}
+                    </a>
+                  ),
+                }}
+              />
             </>
           }
         >
@@ -111,7 +118,7 @@ export const toolkit = defineToolkit({
   read_artifact: {
     type: "backend",
     render: ({ args, status }) => (
-      <ToolShell icon={<BookOpenIcon className="size-4" />} running={status?.type === "running"} label={`Read artifact ${(args as { id?: string })?.id ?? ""}`} />
+      <ToolShell icon={<BookOpenIcon className="size-4" />} running={status?.type === "running"} label={t("tools.readArtifact", { id: (args as { id?: string })?.id ?? "" })} />
     ),
   },
   create_document: {
@@ -129,7 +136,7 @@ export const toolkit = defineToolkit({
   read_document: {
     type: "backend",
     render: ({ args, status }) => (
-      <ToolShell icon={<BookOpenIcon className="size-4" />} running={status?.type === "running"} label={`Read document ${(args as { id?: string })?.id ?? ""}`} />
+      <ToolShell icon={<BookOpenIcon className="size-4" />} running={status?.type === "running"} label={t("tools.readDocument", { id: (args as { id?: string })?.id ?? "" })} />
     ),
   },
   view_artifact: {
@@ -138,12 +145,16 @@ export const toolkit = defineToolkit({
       const a = (args ?? {}) as { id?: string; page?: number; sheet?: string };
       const r = (result ?? {}) as { capture?: string; width?: number; height?: number };
       const running = status?.type === "running";
-      const target = a.sheet ?? (a.page ? `page ${a.page}` : "page 1");
+      const target = a.sheet ?? t("tools.pageNumber", { page: a.page || 1 });
       return (
         <ToolShell
           icon={<EyeIcon className="size-4" />}
           running={running}
-          label={running ? `Looking at ${a.id ?? "artifact"}…` : `Looked at ${a.id ?? "artifact"} (${r.capture ?? target})`}
+          label={
+            running
+              ? t("tools.lookingAt", { id: a.id ?? t("tools.artifact") })
+              : t("tools.lookedAt", { id: a.id ?? t("tools.artifact"), target: r.capture ?? target })
+          }
         />
       );
     },
@@ -166,11 +177,11 @@ export const toolkit = defineToolkit({
 export const widgetHelperRenders: Record<string, ToolCallMessagePartComponent> = {
   read_me: ({ status }) => {
     const running = status?.type === "running";
-    return <ToolShell icon={<BookOpenIcon className="size-4" />} running={running} label={running ? "Reading the widget guide" : "Read the widget guide"} />;
+    return <ToolShell icon={<BookOpenIcon className="size-4" />} running={running} label={running ? t("tools.readingWidgetGuide") : t("tools.readWidgetGuide")} />;
   },
   preview_widget: ({ status }) => {
     const running = status?.type === "running";
-    return <ToolShell icon={<EyeIcon className="size-4" />} running={running} label={running ? "Previewing the widget" : "Previewed the widget"} />;
+    return <ToolShell icon={<EyeIcon className="size-4" />} running={running} label={running ? t("tools.previewingWidget") : t("tools.previewedWidget")} />;
   },
 };
 
@@ -188,18 +199,18 @@ type RunCodeResult = {
 function RunCodeCard({ args, result, running }: { args: unknown; result: unknown; running: boolean }) {
   const a = (args ?? {}) as { language?: "python" | "bash"; code?: string };
   const r = typeof result === "object" && result ? (result as RunCodeResult) : undefined;
-  const lang = (r?.language ?? a.language) === "bash" ? "Bash" : "Python";
+  const language = (r?.language ?? a.language) === "bash" ? "Bash" : "Python";
   const failed = !running && (typeof result === "string" || (r ? r.exitCode !== 0 : false));
-  const seconds = r ? `${(r.durationMs / 1000).toFixed(1)} s` : "";
+  const seconds = r ? t("tools.seconds", { s: formatNumber(r.durationMs / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) }) : "";
   const label = running
-    ? `Running ${lang}…`
+    ? t("tools.running", { language })
     : typeof result === "string" || !r
-      ? `${lang} could not run`
+      ? t("tools.couldNotRun", { language })
       : r.stopped
-        ? `${lang} ${r.stopped}`
+        ? t("tools.stopped", { language, reason: r.stopped })
         : r.exitCode === 0
-          ? `Ran ${lang} · ${seconds}`
-          : `${lang} exited with ${r.exitCode} · ${seconds}`;
+          ? t("tools.ran", { language, seconds })
+          : t("tools.exited", { language, code: r.exitCode ?? "", seconds });
   return (
     <div className="my-2">
       <ToolShell icon={<SquareTerminalIcon className="size-4" />} running={running} error={failed && typeof result === "string" ? result : undefined} label={label}>
@@ -207,13 +218,13 @@ function RunCodeCard({ args, result, running }: { args: unknown; result: unknown
           {a.code && <pre className="bg-muted/40 max-h-80 overflow-auto rounded-lg p-3 font-mono text-xs">{a.code}</pre>}
           {r?.stdout && <pre className="max-h-80 overflow-auto rounded-lg border p-3 font-mono text-xs whitespace-pre-wrap">{r.stdout}</pre>}
           {r?.stderr && <pre className={cn("max-h-80 overflow-auto rounded-lg border p-3 font-mono text-xs whitespace-pre-wrap", failed ? "text-warning" : "text-muted-foreground")}>{r.stderr}</pre>}
-          {r && !r.stdout && !r.stderr && <p className="text-muted-foreground text-xs">No output.</p>}
+          {r && !r.stdout && !r.stderr && <p className="text-muted-foreground text-xs">{t("tools.noOutput")}</p>}
         </div>
       </ToolShell>
       {r && <RunFiles files={r.files} className="ml-6" />}
       {r?.tooLarge?.length ? (
         <p className="text-muted-foreground ml-6 mt-1.5 text-xs">
-          Not saved, over the 50 MB limit: {r.tooLarge.map((f) => `${f.path} (${formatBytes(f.size)})`).join(", ")}
+          {t("tools.notSaved", { files: formatList(r.tooLarge.map((f) => `${f.path} (${formatBytes(f.size)})`)) })}
         </p>
       ) : null}
     </div>
@@ -227,13 +238,13 @@ function GeneratedImage({ args, result, running }: { args: unknown; result: unkn
     return (
       <div className="bg-muted/40 my-2 flex aspect-square w-full max-w-sm flex-col items-center justify-center gap-2 rounded-xl border p-4 text-center">
         <Loader2Icon className="text-muted-foreground size-5 animate-spin" />
-        <span className="shimmer text-sm">Generating image…</span>
+        <span className="shimmer text-sm">{t("tools.generatingImage")}</span>
         <span className="text-muted-foreground line-clamp-3 text-xs">{prompt}</span>
       </div>
     );
   }
   if (typeof image === "string" || !image.url) {
-    return <ToolShell icon={<ImageIcon className="size-4" />} running={false} error={typeof image === "string" ? image : "No image"} label="Image generation failed" />;
+    return <ToolShell icon={<ImageIcon className="size-4" />} running={false} error={typeof image === "string" ? image : t("tools.noImage")} label={t("tools.imageFailed")} />;
   }
   return (
     <figure className="group/img animate-blur-in relative my-2 w-fit max-w-full">
@@ -249,7 +260,7 @@ function GeneratedImage({ args, result, running }: { args: unknown; result: unkn
       <a
         href={image.url}
         download={`${image.id}.${image.mime?.split("/")[1]?.replace("jpeg", "jpg") ?? "png"}`}
-        aria-label="Download image"
+        aria-label={t("tools.downloadImage")}
         className="surface-glass text-muted-foreground hover:text-foreground absolute top-2 right-2 rounded-lg border p-1.5 opacity-0 transition-opacity duration-(--motion-fast) ease-out-quart group-hover/img:opacity-100 focus-visible:opacity-100"
       >
         <DownloadIcon className="size-4" />
@@ -268,14 +279,14 @@ function SubagentCard({ args, result, running }: { args: unknown; result: unknow
   const failed = !running && typeof result === "string";
   const busy = running || r?.status === "running";
   const ref = r?.model ?? a.model;
-  const name = models.find((m) => m.ref === ref)?.name ?? ref?.split("/").pop() ?? "Sub-agent";
+  const name = models.find((m) => m.ref === ref)?.name ?? ref?.split("/").pop() ?? t("tools.subagent");
   const detail = [
-    r?.steps ? `${r.steps} step${r.steps === 1 ? "" : "s"}` : null,
-    r?.tools.length ? `${r.tools.length} tool call${r.tools.length === 1 ? "" : "s"}` : null,
+    r?.steps ? t("tools.steps", { count: r.steps }) : null,
+    r?.tools.length ? t("tools.toolCalls", { count: r.tools.length }) : null,
     r?.cost ? formatCost(r.cost) : null,
   ]
     .filter(Boolean)
-    .join(" · ");
+    .join(t("tools.detailSeparator"));
   return (
     <div className="my-2 rounded-xl border text-sm">
       <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors duration-(--motion-fast) ease-out-quart hover:bg-muted/40">
@@ -286,7 +297,7 @@ function SubagentCard({ args, result, running }: { args: unknown; result: unknow
           </span>
         </span>
         <span className="min-w-0 flex-1">
-          <span className={cn("block truncate font-medium", busy && "shimmer")}>{busy ? `${name} is working` : failed ? `${name} failed` : `${name} finished`}</span>
+          <span className={cn("block truncate font-medium", busy && "shimmer")}>{busy ? t("tools.working", { name }) : failed ? t("tools.failed", { name }) : t("tools.finished", { name })}</span>
           <span className="text-muted-foreground block truncate text-xs">{failed ? (result as string) : detail || a.task}</span>
         </span>
         <ChevronDownIcon className={cn("text-muted-foreground size-4 shrink-0 transition-transform duration-(--motion-base) ease-out-expo", open && "rotate-180")} />
@@ -295,13 +306,13 @@ function SubagentCard({ args, result, running }: { args: unknown; result: unknow
         <div className="animate-rise-in flex flex-col gap-3 border-t px-3 py-3">
           {a.task && (
             <div>
-              <p className="text-muted-foreground mb-1 text-xs font-medium">Task</p>
+              <p className="text-muted-foreground mb-1 text-xs font-medium">{t("tools.task")}</p>
               <p className="text-muted-foreground text-xs whitespace-pre-wrap">{a.task}</p>
             </div>
           )}
           {r?.text && (
             <div>
-              <p className="text-muted-foreground mb-1 text-xs font-medium">Report</p>
+              <p className="text-muted-foreground mb-1 text-xs font-medium">{t("tools.report")}</p>
               <SimpleMarkdown className="max-h-96 overflow-auto">{r.text}</SimpleMarkdown>
             </div>
           )}

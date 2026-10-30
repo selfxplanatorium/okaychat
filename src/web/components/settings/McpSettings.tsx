@@ -6,6 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { t, type PlainMessageKey } from "@/i18n";
+import { formatNumber } from "@/i18n/format";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
@@ -15,18 +17,18 @@ import { SettingsPage, SettingsSection } from "./SettingsUI";
 type ServerView = McpServerInfo & { authorizationUrl?: string };
 
 // Keyless remote servers that work out of the box.
-const PRESETS: Array<{ name: string; url: string; note: string }> = [
-  { name: "Context7", url: "https://mcp.context7.com/mcp", note: "Up-to-date library docs" },
-  { name: "DeepWiki", url: "https://mcp.deepwiki.com/mcp", note: "Ask questions about GitHub repos" },
+const PRESETS: Array<{ name: string; url: string; note: PlainMessageKey }> = [
+  { name: "Context7", url: "https://mcp.context7.com/mcp", note: "mcp.presetContext7" },
+  { name: "DeepWiki", url: "https://mcp.deepwiki.com/mcp", note: "mcp.presetDeepWiki" },
 ];
 
-const STATUS: Record<McpServerInfo["status"], { label: string; dot: string }> = {
-  connected: { label: "Connected", dot: "bg-success" },
-  connecting: { label: "Connecting", dot: "bg-warning animate-pulse" },
-  idle: { label: "Idle (connects on use)", dot: "bg-muted-foreground/50" },
-  error: { label: "Error", dot: "bg-error" },
-  "needs-auth": { label: "Needs authorization", dot: "bg-warning" },
-  disabled: { label: "Disabled", dot: "bg-muted-foreground/30" },
+const STATUS: Record<McpServerInfo["status"], { label: PlainMessageKey; dot: string }> = {
+  connected: { label: "mcp.statusConnected", dot: "bg-success" },
+  connecting: { label: "mcp.statusConnecting", dot: "bg-warning animate-pulse" },
+  idle: { label: "mcp.statusIdle", dot: "bg-muted-foreground/50" },
+  error: { label: "mcp.statusError", dot: "bg-error" },
+  "needs-auth": { label: "mcp.statusNeedsAuth", dot: "bg-warning" },
+  disabled: { label: "mcp.statusDisabled", dot: "bg-muted-foreground/30" },
 };
 
 const toLines = (rec?: Record<string, string>) => Object.entries(rec ?? {}).map(([k, v]) => `${k}=${v}`).join("\n");
@@ -88,74 +90,73 @@ function ServerForm({ initial, onDone }: { initial?: ServerView; onDone: () => v
       }}
     >
       <div className="grid gap-3 sm:grid-cols-[2fr_1fr]">
-        <Input placeholder="Name (e.g. github)" value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
+        <Input placeholder={t("mcp.namePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
         <Select
           value={transport}
           onValueChange={setTransport}
-          aria-label="Transport"
+          aria-label={t("mcp.transport")}
           options={[
-            { value: "http", label: "Streamable HTTP" },
-            { value: "sse", label: "SSE (legacy)" },
-            ...(isAdmin ? [{ value: "stdio" as const, label: "stdio (local command)" }] : []),
+            { value: "http", label: t("mcp.transportHttp") },
+            { value: "sse", label: t("mcp.transportSse") },
+            ...(isAdmin ? [{ value: "stdio" as const, label: t("mcp.transportStdio") }] : []),
           ]}
         />
       </div>
       {transport === "stdio" ? (
         <>
-          <Input placeholder="Command, e.g. npx -y @modelcontextprotocol/server-everything" value={command} onChange={(e) => setCommand(e.target.value)} required />
-          <Textarea placeholder={"Environment, one per line\nAPI_KEY=..."} value={env} onChange={(e) => setEnv(e.target.value)} className="min-h-20 font-mono text-xs" />
-          <p className="text-muted-foreground text-xs">Runs inside the okaychat container as the server user. Only admins can add stdio servers.</p>
+          <Input placeholder={t("mcp.commandPlaceholder")} value={command} onChange={(e) => setCommand(e.target.value)} required />
+          <Textarea placeholder={t("mcp.envPlaceholder")} value={env} onChange={(e) => setEnv(e.target.value)} className="min-h-20 font-mono text-xs" />
+          <p className="text-muted-foreground text-xs">{t("mcp.stdioNote")}</p>
         </>
       ) : (
         <>
           <Input placeholder="https://example.com/mcp" value={url} onChange={(e) => setUrl(e.target.value)} type="url" required />
           <Textarea
-            placeholder={"Headers, one per line (optional)\nAuthorization: Bearer ..."}
+            placeholder={t("mcp.headersPlaceholder")}
             value={headers}
             onChange={(e) => setHeaders(e.target.value)}
             className="min-h-16 font-mono text-xs"
           />
-          <p className="text-muted-foreground text-xs">Servers that use OAuth show an Authorize button after you add them.</p>
+          <p className="text-muted-foreground text-xs">{t("mcp.oauthNote")}</p>
         </>
       )}
       <label className="text-muted-foreground flex items-center gap-2 text-xs">
-        Tool timeout
+        {t("mcp.toolTimeout")}
         <Input className="h-7 w-20" type="number" min={1} max={3600} value={timeout} onChange={(e) => setTimeoutSec(e.target.value)} />
-        seconds
+        {t("mcp.seconds")}
       </label>
       <label className="text-muted-foreground flex items-center gap-2 text-xs">
-        Ask before running
+        {t("mcp.askBefore")}
         <Select
           className="h-7 w-auto"
           value={approval}
           onValueChange={setApproval}
-          aria-label="Approval"
+          aria-label={t("mcp.approval")}
           options={[
-            { value: "destructive", label: "Tools marked destructive" },
-            { value: "always", label: "Every tool" },
-            { value: "never", label: "Never" },
+            { value: "destructive", label: t("mcp.approvalDestructive") },
+            { value: "always", label: t("mcp.approvalAlways") },
+            { value: "never", label: t("mcp.approvalNever") },
           ]}
         />
       </label>
       {isAdmin && (
         <label className="flex items-start gap-3 text-xs">
-          <Switch className="mt-0.5" checked={shared} onCheckedChange={setShared} aria-label="Share with other users" />
+          <Switch className="mt-0.5" checked={shared} onCheckedChange={setShared} aria-label={t("mcp.shareWithUsers")} />
           <span>
-            <span className="font-medium">Share with other users</span>
+            <span className="font-medium">{t("mcp.shareWithUsers")}</span>
             <span className="text-muted-foreground block">
-              Everyone you share it with can switch it on for themselves. They use the headers{transport === "stdio" ? " and environment" : ""} you set here, so leave
-              personal tokens out unless everyone may act as you. OAuth servers ask each user to authorize with their own account.
+              {t(transport === "stdio" ? "mcp.shareNoteStdio" : "mcp.shareNote")}
             </span>
           </span>
         </label>
       )}
       {isAdmin && shared && (
         <div className="flex items-center gap-2 pl-12 text-xs">
-          <span className="text-muted-foreground">Shared with</span>
+          <span className="text-muted-foreground">{t("mcp.sharedWith")}</span>
           <AudienceButton
             audience={audience}
-            title={`Who can use ${name || "this server"}`}
-            description="Only these users see the server and can switch it on. Saved with the server."
+            title={t("mcp.audienceTitle", { name: name || t("mcp.thisServer") })}
+            description={t("mcp.audienceDescription")}
             onSave={setAudience}
           />
         </div>
@@ -163,11 +164,11 @@ function ServerForm({ initial, onDone }: { initial?: ServerView; onDone: () => v
       {error && <p className="text-error settings-error text-xs">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onDone}>
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button type="submit" disabled={busy}>
           {busy && <Loader2Icon className="animate-spin" />}
-          {initial ? "Save" : "Add server"}
+          {initial ? t("common.save") : t("mcp.addServer")}
         </Button>
       </div>
     </form>
@@ -202,12 +203,18 @@ function ServerRow({ server, index }: { server: ServerView; index: number }) {
           <span className="truncate text-sm font-medium">{server.name}</span>
           {(server.shared || server.sharedWithMe) && (
             <span className="bg-muted text-muted-foreground shrink-0 rounded px-1.5 py-px text-[10px] font-medium">
-              {server.sharedWithMe ? "Shared by admin" : "Shared"}
+              {server.sharedWithMe ? t("mcp.sharedByAdmin") : t("mcp.shared")}
             </span>
           )}
           <span className="text-muted-foreground truncate text-xs">
-            {server.transport} · {status.label}
-            {server.tools.length ? ` · ${server.tools.filter((t) => t.enabled).length}/${server.tools.length} tools` : ""}
+            {server.tools.length
+              ? t("mcp.summaryWithTools", {
+                  transport: server.transport,
+                  status: t(status.label),
+                  enabled: formatNumber(server.tools.filter((tool) => tool.enabled).length),
+                  count: server.tools.length,
+                })
+              : t("mcp.summary", { transport: server.transport, status: t(status.label) })}
           </span>
         </button>
         {server.status === "needs-auth" && server.authorizationUrl && (
@@ -217,24 +224,24 @@ function ServerRow({ server, index }: { server: ServerView; index: number }) {
               window.open(server.authorizationUrl, "okaychat-mcp-oauth", "width=520,height=720");
             }}
           >
-            <KeyRoundIcon /> Authorize
+            <KeyRoundIcon /> {t("mcp.authorize")}
           </Button>
         )}
-        <Button size="icon-sm" variant="ghost" aria-label="Reconnect" disabled={busy} onClick={() => act(() => api(`/mcp/${server.id}/test`, { method: "POST" }))}>
+        <Button size="icon-sm" variant="ghost" aria-label={t("mcp.reconnect")} disabled={busy} onClick={() => act(() => api(`/mcp/${server.id}/test`, { method: "POST" }))}>
           <RefreshCwIcon className={cn(busy && "animate-spin")} />
         </Button>
         {!server.sharedWithMe && (
-          <Button size="icon-sm" variant="ghost" aria-label="Edit" onClick={() => setEditing(true)}>
+          <Button size="icon-sm" variant="ghost" aria-label={t("common.edit")} onClick={() => setEditing(true)}>
             <PencilIcon />
           </Button>
         )}
         <Switch
           checked={server.enabled}
-          aria-label={`Enable ${server.name}`}
+          aria-label={t("mcp.enable", { name: server.name })}
           onCheckedChange={(enabled) => act(() => api(`/mcp/${server.id}/tools`, { method: "PATCH", json: { enabled } }))}
         />
         {!server.sharedWithMe && (
-          <Button size="icon-sm" variant="ghost" aria-label="Delete" onClick={() => act(() => api(`/mcp/${server.id}`, { method: "DELETE" }))}>
+          <Button size="icon-sm" variant="ghost" aria-label={t("common.delete")} onClick={() => act(() => api(`/mcp/${server.id}`, { method: "DELETE" }))}>
             <TrashIcon />
           </Button>
         )}
@@ -243,7 +250,7 @@ function ServerRow({ server, index }: { server: ServerView; index: number }) {
       {open && (
         <div className="settings-collapse mt-3 ml-10">
           <div className="flex flex-col gap-1">
-            {server.tools.length === 0 && <p className="text-muted-foreground text-xs">No tools yet. Reconnect to list them.</p>}
+            {server.tools.length === 0 && <p className="text-muted-foreground text-xs">{t("mcp.noTools")}</p>}
             {server.tools.map((tool) => (
               <label key={tool.name} className="hover:bg-muted/50 flex items-start gap-3 rounded-lg px-2 py-1.5 transition-colors duration-(--motion-fast)">
                 <Switch
@@ -257,7 +264,7 @@ function ServerRow({ server, index }: { server: ServerView; index: number }) {
                 <span className="min-w-0">
                   <span className="flex items-center gap-1.5 font-mono text-xs">
                     {tool.name}
-                    {tool.needsApproval && <span className="bg-warning/12 text-warning rounded px-1 py-px font-sans text-[10px] font-medium">asks first</span>}
+                    {tool.needsApproval && <span className="bg-warning/12 text-warning rounded px-1 py-px font-sans text-[10px] font-medium">{t("mcp.asksFirst")}</span>}
                   </span>
                   {tool.description && <span className="text-muted-foreground line-clamp-2 block text-xs">{tool.description}</span>}
                 </span>
@@ -289,15 +296,15 @@ export function McpSettings({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <SettingsPage
-      title={embedded ? "" : "MCP servers"}
-      description="Connect Model Context Protocol servers to give models tools. Connections open on first use, time out per call, reconnect once on failure, and close when idle."
+      title={embedded ? "" : t("mcp.title")}
+      description={t("mcp.description")}
     >
       <SettingsSection
-        title="Your servers"
+        title={t("mcp.yourServers")}
         action={
           !adding && (
             <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
-              <PlusIcon /> Add server
+              <PlusIcon /> {t("mcp.addServer")}
             </Button>
           )
         }
@@ -306,14 +313,14 @@ export function McpSettings({ embedded = false }: { embedded?: boolean }) {
         {servers.map((s, index) => (
           <ServerRow key={s.id} server={s} index={index} />
         ))}
-        {!adding && servers.length === 0 && <p className="text-muted-foreground animate-fade-in px-4 py-6 text-center text-sm">No servers yet.</p>}
+        {!adding && servers.length === 0 && <p className="text-muted-foreground animate-fade-in px-4 py-6 text-center text-sm">{t("mcp.noServers")}</p>}
       </SettingsSection>
-      <SettingsSection title="Quick add" description="Public servers that need no key.">
+      <SettingsSection title={t("mcp.quickAdd")} description={t("mcp.quickAddDescription")}>
         {PRESETS.filter((p) => !installed.has(p.name.toLowerCase())).map((p, index) => (
           <div key={p.name} className="stagger animate-rise-in flex items-center justify-between gap-3 px-4 py-3" style={{ "--i": index } as CSSProperties}>
             <div>
               <div className="text-sm font-medium">{p.name}</div>
-              <div className="text-muted-foreground text-xs">{p.note}</div>
+              <div className="text-muted-foreground text-xs">{t(p.note)}</div>
             </div>
             <Button
               size="sm"
@@ -323,7 +330,7 @@ export function McpSettings({ embedded = false }: { embedded?: boolean }) {
                 await refresh();
               }}
             >
-              <PlusIcon /> Add
+              <PlusIcon /> {t("mcp.add")}
             </Button>
           </div>
         ))}

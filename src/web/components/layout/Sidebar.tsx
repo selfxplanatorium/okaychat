@@ -1,5 +1,6 @@
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { useRef } from "react";
+import { t } from "@/i18n";
 import { useCommand, useKeyboardDialog, useShortcutProps } from "@/keyboard/registry";
 import { SIDEBAR_ITEMS } from "@shared/types";
 import { useChatPrivacyStore } from "@/state/chat-privacy";
@@ -33,8 +34,8 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
   const visibleItems = useData((s) => s.settings?.sidebarItems) ?? SIDEBAR_ITEMS;
   const empty = useAuiState((s) => s.thread.isEmpty);
   useCommand("app.search", () => toggleDialog("search"), !settings);
-  const searchHint = useShortcutProps("app.search", "Search chats");
-  const closeHint = useShortcutProps("app.toggleSidebar", "Close sidebar");
+  const searchHint = useShortcutProps("app.search", t("sidebar.searchChats"));
+  const closeHint = useShortcutProps("app.toggleSidebar", t("sidebar.closeSidebar"));
   const me = useData((s) => s.me);
   const panelRef = useRef<HTMLDivElement>(null);
   // Settings keeps the panel open on desktop; leaving returns it to the chat's own open state.
@@ -66,13 +67,13 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
                 <Brand />
               </Link>
               <div className="flex items-center gap-1">
-              <button type="button" onClick={() => setSearchOpen(true)} aria-label="Search chats" {...searchHint} className="text-sidebar-muted-foreground hover:bg-sidebar-row-hover focus-visible:outline-ring rounded-lg p-1.5 pointer-coarse:p-2.5">
+              <button type="button" onClick={() => setSearchOpen(true)} aria-label={t("sidebar.searchChats")} {...searchHint} className="text-sidebar-muted-foreground hover:bg-sidebar-row-hover focus-visible:outline-ring rounded-lg p-1.5 pointer-coarse:p-2.5">
                 <SearchIcon className="size-4" />
               </button>
               <button
                 type="button"
                 onClick={onToggle}
-                aria-label="Close sidebar"
+                aria-label={t("sidebar.closeSidebar")}
                 {...closeHint}
                 className="text-sidebar-muted-foreground hover:bg-sidebar-row-hover rounded-lg p-1.5 pointer-coarse:p-2.5 transition-colors duration-(--motion-fast) ease-out-quart"
               >
@@ -80,18 +81,18 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
               </button>
               </div>
             </div>
-            <nav aria-label="Main navigation" className="glide-host flex flex-col gap-0.5 px-2 pt-2 pb-4">
+            <nav aria-label={t("sidebar.mainNavigation")} className="glide-host flex flex-col gap-0.5 px-2 pt-2 pb-4">
               <GlideHighlight />
               {visibleItems.includes("newChat") && <button type="button" data-glide aria-current={location === "/" && empty ? "page" : undefined} className={cn(rowClass, location === "/" && empty && "bg-sidebar-row-hover")} onClick={async () => {
                 await aui.threads.switchToNewThread();
                 useChatPrivacyStore.getState().set(aui.threadListItem.getState().id, { temporary: false, personalized: true });
                 showChat(navigate);
-              }}><SquarePenIcon className="size-4 shrink-0" /> New chat</button>}
+              }}><SquarePenIcon className="size-4 shrink-0" /> {t("common.newChat")}</button>}
               {([
-                { id: "scheduled", label: "Scheduled", href: "/scheduled", icon: CalendarClockIcon },
-                { id: "library", label: "Library", href: "/library", icon: LibraryIcon },
-                { id: "plugins", label: "Plugins", href: "/plugins", icon: PuzzleIcon },
-                { id: "projects", label: "Projects", href: "/projects", icon: FolderIcon },
+                { id: "scheduled", label: "sidebar.scheduled", href: "/scheduled", icon: CalendarClockIcon },
+                { id: "library", label: "sidebar.library", href: "/library", icon: LibraryIcon },
+                { id: "plugins", label: "sidebar.plugins", href: "/plugins", icon: PuzzleIcon },
+                { id: "projects", label: "sidebar.projects", href: "/projects", icon: FolderIcon },
               ] as const).filter((item) => visibleItems.includes(item.id)).map((item) => (
                 <Link
                   key={item.id}
@@ -102,7 +103,7 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
                   // Start the Library's first page while the pointer heads for the click, so it opens with data.
                   {...(item.id === "library" ? { onPointerEnter: prefetchLibrary, onFocus: prefetchLibrary, onPointerDown: prefetchLibrary } : {})}
                 >
-                  <item.icon className="size-4 shrink-0" /> {item.label}
+                  <item.icon className="size-4 shrink-0" /> {t(item.label)}
                 </Link>
               ))}
             </nav>
@@ -155,19 +156,19 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
                 </MenuTrigger>
                 <MenuContent side="top" className="w-60">
                   <MenuItem onClick={() => navigate("/settings/account")}>
-                    <UserRoundIcon /> Account
+                    <UserRoundIcon /> {t("sidebar.account")}
                   </MenuItem>
                   <MenuItem onClick={() => navigate("/settings")}>
-                    <SettingsIcon /> Settings
+                    <SettingsIcon /> {t("common.settings")}
                   </MenuItem>
                   <MenuItem onClick={() => void signOut()}>
-                    <LogOutIcon /> Log out
+                    <LogOutIcon /> {t("sidebar.logOut")}
                   </MenuItem>
                 </MenuContent>
               </Menu>
               <Link
                 href="/settings"
-                aria-label="Settings"
+                aria-label={t("common.settings")}
                 className="text-sidebar-muted-foreground hover:bg-sidebar-row-hover rounded-lg p-2 pointer-coarse:p-3 transition-colors duration-(--motion-fast) ease-out-quart"
               >
                 <SettingsIcon className="size-4" />

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { t, type MessageKey } from "@/i18n";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -16,11 +17,11 @@ export function elicitationOf(result: unknown): McpElicitation | null {
   return e && typeof e.id === "string" && Array.isArray(e.fields) ? e : null;
 }
 
-const OUTCOME: Record<NonNullable<McpElicitation["answered"]>, string> = {
-  accept: "Sent",
-  decline: "Declined",
-  cancel: "Cancelled",
-};
+const OUTCOME = {
+  accept: "tools.elicitationSent",
+  decline: "tools.elicitationDeclined",
+  cancel: "tools.elicitationCancelled",
+} as const satisfies Record<NonNullable<McpElicitation["answered"]>, MessageKey>;
 
 const initial = (field: McpElicitationField): Value | undefined => field.default;
 
@@ -55,7 +56,7 @@ export function McpElicitationCard({ elicitation }: { elicitation: McpElicitatio
     return (
       <p className="text-muted-foreground mt-2 flex items-center gap-1.5 text-xs">
         {outcome === "accept" ? <CheckIcon className="size-3.5" /> : <XIcon className="size-3.5" />}
-        {OUTCOME[outcome]}: {elicitation.message}
+        {t(OUTCOME[outcome], { message: elicitation.message })}
       </p>
     );
   }
@@ -69,22 +70,22 @@ export function McpElicitationCard({ elicitation }: { elicitation: McpElicitatio
       }}
     >
       <div>
-        <p className="text-muted-foreground text-xs font-medium">{elicitation.server} asks</p>
+        <p className="text-muted-foreground text-xs font-medium">{t("tools.elicitationAsks", { server: elicitation.server })}</p>
         <p className="text-sm whitespace-pre-wrap">{elicitation.message}</p>
       </div>
       {elicitation.fields.map((field, index) => (
         <Field key={field.name} field={field} autoFocus={index === 0} value={values[field.name]} onChange={(v) => setValues({ ...values, [field.name]: v })} />
       ))}
-      <p className="text-muted-foreground text-xs">Only send what you are comfortable sharing with {elicitation.server}. Never enter passwords here.</p>
+      <p className="text-muted-foreground text-xs">{t("tools.elicitationWarning", { server: elicitation.server })}</p>
       {error && <p className="text-error text-xs">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" size="sm" variant="ghost" disabled={!!busy} onClick={() => answer("decline")}>
           {busy === "decline" && <Loader2Icon className="animate-spin" />}
-          Decline
+          {t("tools.decline")}
         </Button>
         <Button type="submit" size="sm" disabled={!!busy}>
           {busy === "accept" && <Loader2Icon className="animate-spin" />}
-          Send
+          {t("tools.send")}
         </Button>
       </div>
     </form>
@@ -95,7 +96,7 @@ function Field({ field, value, onChange, autoFocus }: { field: McpElicitationFie
   const label = (
     <span className="font-medium">
       {field.title ?? field.name}
-      {field.required && <span className="text-muted-foreground"> (required)</span>}
+      {field.required && <span className="text-muted-foreground"> {t("tools.required")}</span>}
     </span>
   );
   const hint = field.description && <span className="text-muted-foreground">{field.description}</span>;

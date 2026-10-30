@@ -1,5 +1,6 @@
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { create } from "zustand";
+import { t } from "@/i18n";
 
 // Per device, like the artifact panel: a comfortable width depends on the screen, not the account.
 const WIDTH_KEY = "okaychat:sidebar-width";
@@ -52,7 +53,7 @@ export function SidebarResizeHandle() {
     <div
       role="separator"
       aria-orientation="vertical"
-      aria-label="Resize sidebar"
+      aria-label={t("sidebar.resizeSidebar")}
       aria-valuenow={width}
       tabIndex={0}
       onPointerDown={onPointerDown}

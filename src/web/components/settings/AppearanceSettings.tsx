@@ -1,4 +1,6 @@
 import { useAppearanceSyncStatus } from "@/state/appearance-sync";
+import { t, type PlainMessageKey } from "@/i18n";
+import { formatList, formatPercent } from "@/i18n/format";
 // Ported from T3Code (MIT, Copyright (c) 2026 T3 Tools Inc.).
 // Source: apps/web/src/components/settings/SettingsPanels.tsx (AppearanceSettingsPanel,
 // TypographySection, font rows) and ThemeImportDialog.tsx. The theme library and editor live in ./theme.
@@ -52,17 +54,17 @@ import {
 } from "@/theme/settings";
 import { isVsCodeThemeFile, pairVsCodeThemes, parseVsCodeThemeFile, resolveThemeLabelCollisions } from "@/theme/vscode-import";
 
-const MOTION_OPTIONS: Array<{ group: MotionGroup; label: string; description: string }> = [
-  { group: "interface", label: "Interface animations", description: "Messages, menus, dialogs, and pages animate as they appear and leave." },
-  { group: "transitions", label: "Transitions", description: "Hover states, color changes, and panels fade or slide instead of switching at once." },
-  { group: "icons", label: "Icon animations", description: "Icons move when you hover over or click a control." },
-  { group: "loading", label: "Loading indicators", description: "Spinners, pulses, and shimmering text while something is working." },
+const MOTION_OPTIONS: Array<{ group: MotionGroup; label: PlainMessageKey; description: PlainMessageKey }> = [
+  { group: "interface", label: "appearance.motionInterface", description: "appearance.motionInterfaceDescription" },
+  { group: "transitions", label: "appearance.motionTransitions", description: "appearance.motionTransitionsDescription" },
+  { group: "icons", label: "appearance.motionIcons", description: "appearance.motionIconsDescription" },
+  { group: "loading", label: "appearance.motionLoading", description: "appearance.motionLoadingDescription" },
 ];
 
-const CHAT_WIDTH_OPTIONS: Array<{ value: ChatWidth; label: string }> = [
-  { value: "comfortable", label: "Comfortable (default)" },
-  { value: "wide", label: "Wide" },
-  { value: "full", label: "Full" },
+const CHAT_WIDTH_OPTIONS: Array<{ value: ChatWidth; label: PlainMessageKey }> = [
+  { value: "comfortable", label: "appearance.chatWidthComfortable" },
+  { value: "wide", label: "appearance.chatWidthWide" },
+  { value: "full", label: "appearance.chatWidthFull" },
 ];
 
 /** Tracks the OS scheme so the library follows "System" live. */
@@ -151,7 +153,7 @@ function ThemeImportBody({ onClose }: { onClose: () => void }) {
     try {
       setFiles(await Promise.all(selected.map(async (file) => ({ name: file.name, text: await file.text() }))));
     } catch {
-      setError("Could not read that file. Paste the JSON below instead.");
+      setError(t("appearance.importReadFailed"));
     } finally {
       setReading(false);
     }
@@ -167,7 +169,7 @@ function ThemeImportBody({ onClose }: { onClose: () => void }) {
       if (saved.length === 1) assignInstalledTheme(saved[0]!);
       onClose();
     } catch {
-      setError("Could not save that theme.");
+      setError(t("appearance.importSaveFailed"));
       setConflicts(null);
     }
   };
@@ -177,7 +179,7 @@ function ThemeImportBody({ onClose }: { onClose: () => void }) {
     try {
       themes = parseThemeSources(sources);
     } catch {
-      setError("That theme file is invalid.");
+      setError(t("appearance.importInvalid"));
       return;
     }
     const existing = themes.filter((t) => getCustomThemes().some((c) => c.id === t.id));
@@ -199,11 +201,11 @@ function ThemeImportBody({ onClose }: { onClose: () => void }) {
   return (
     <>
         <DialogHeader className="gap-2 p-6 pb-3">
-          <DialogTitle>{conflicts ? "Already installed" : "Add a theme"}</DialogTitle>
+          <DialogTitle>{conflicts ? t("appearance.alreadyInstalled") : t("appearance.addTheme")}</DialogTitle>
           <DialogDescription>
             {conflicts
-              ? `${conflicts.map((t) => t.label).join(", ")} is already installed. Update it, or keep both copies.`
-              : "Paste a theme JSON file, or choose T3 Code or VS Code .json files."}
+              ? t("appearance.alreadyInstalledBody", { names: formatList(conflicts.map((theme) => theme.label)), count: conflicts.length })
+              : t("appearance.importDescription")}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-5 p-6 pt-3">
@@ -212,12 +214,12 @@ function ThemeImportBody({ onClose }: { onClose: () => void }) {
               {errorLine}
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <Button variant="ghost" onClick={() => setConflicts(null)}>
-                  Back
+                  {t("common.back")}
                 </Button>
                 <Button variant="outline" onClick={() => install(pending, "keep")}>
-                  Keep both
+                  {t("appearance.keepBoth")}
                 </Button>
-                <Button onClick={() => install(pending, "update")}>Update existing</Button>
+                <Button onClick={() => install(pending, "update")}>{t("appearance.updateExisting")}</Button>
               </div>
             </>
           ) : (
@@ -242,14 +244,14 @@ function ThemeImportBody({ onClose }: { onClose: () => void }) {
                 )}
               >
                 <div className="min-w-0">
-                  <p className="text-sm font-medium">Theme file</p>
+                  <p className="text-sm font-medium">{t("appearance.themeFile")}</p>
                   <p className="text-muted-foreground truncate text-xs">
-                    {files.length > 0 ? files.map((f) => f.name).join(", ") : "Drop T3 Code or VS Code .json files"}
+                    {files.length > 0 ? formatList(files.map((f) => f.name ?? ""), { type: "unit", style: "short" }) : t("appearance.dropFiles")}
                   </p>
                 </div>
                 <Button size="sm" variant="outline" disabled={reading} onClick={() => inputRef.current?.click()}>
                   <UploadIcon />
-                  {reading ? "Reading…" : "Choose files"}
+                  {reading ? t("appearance.reading") : t("appearance.chooseFiles")}
                 </Button>
                 <input
                   ref={inputRef}
@@ -265,16 +267,16 @@ function ThemeImportBody({ onClose }: { onClose: () => void }) {
               </div>
               <div className="flex items-center gap-3" aria-hidden>
                 <div className="bg-border h-px flex-1" />
-                <span className="text-muted-foreground text-2xs tracking-wider uppercase">or paste JSON</span>
+                <span className="text-muted-foreground text-2xs tracking-wider uppercase">{t("appearance.orPasteJson")}</span>
                 <div className="bg-border h-px flex-1" />
               </div>
               <div className="space-y-2">
                 <label htmlFor={textId} className="text-sm font-medium">
-                  Theme JSON
+                  {t("appearance.themeJson")}
                 </label>
                 <Textarea
                   id={textId}
-                  aria-label="Theme JSON"
+                  aria-label={t("appearance.themeJson")}
                   spellCheck={false}
                   value={text}
                   placeholder={'{\n  "version": 1,\n  "name": "Aurora",\n  "appearance": "light",\n  "colors": { ... }\n}'}
@@ -288,11 +290,11 @@ function ThemeImportBody({ onClose }: { onClose: () => void }) {
               {errorLine}
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <Button variant="ghost" onClick={onClose}>
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
                 <Button disabled={sources.length === 0 || reading} onClick={submit}>
                   <PlusIcon />
-                  Add theme
+                  {t("appearance.addTheme")}
                 </Button>
               </div>
             </>
@@ -357,9 +359,9 @@ function FontRow({
   const listed = [...bundled, ...uploaded];
   const system = systemFamilies.filter((name) => !listed.includes(name) && (!monospace || isMonospaceFamily(name)));
   const options: Array<SelectOption<string>> = [
-    { value: "", label: `${defaultLabel} (default)` },
-    ...bundled.map((name) => ({ value: name, label: <FontOptionLabel family={name} tag="Bundled" /> })),
-    ...uploaded.map((name) => ({ value: name, label: <FontOptionLabel family={name} tag="Uploaded" /> })),
+    { value: "", label: t("appearance.fontDefault", { name: defaultLabel }) },
+    ...bundled.map((name) => ({ value: name, label: <FontOptionLabel family={name} tag={t("appearance.fontBundled")} /> })),
+    ...uploaded.map((name) => ({ value: name, label: <FontOptionLabel family={name} tag={t("appearance.fontUploaded")} /> })),
     ...system.map((name) => ({ value: name, label: <FontOptionLabel family={name} /> })),
   ];
   // A family that is no longer installed still shows, so the choice stays visible and can be changed.
@@ -379,7 +381,7 @@ function FontRow({
 
   const sizeOptions = Array.from({ length: sizeMax - sizeMin + 1 }, (_, i) => sizeMin + i).map((px) => ({
     value: String(px),
-    label: `${px} px`,
+    label: t("appearance.pixels", { n: px }),
   }));
   const changed = family !== "" || size !== sizeDefault;
 
@@ -391,7 +393,7 @@ function FontRow({
       control={
         <div className="flex w-full items-center gap-2 sm:w-96">
           <Select<string>
-            aria-label={`${label} family`}
+            aria-label={t("appearance.fontFamilyLabel", { name: label })}
             className="h-8 min-w-0 flex-1"
             value={family}
             options={options}
@@ -399,7 +401,7 @@ function FontRow({
             onOpenChange={openSystemFonts}
           />
           <Select<string>
-            aria-label={`${label} size`}
+            aria-label={t("appearance.fontSizeLabel", { name: label })}
             className="w-24 shrink-0"
             value={String(size)}
             options={sizeOptions}
@@ -428,7 +430,7 @@ function InstalledFontsRow() {
     try {
       await installFont(file);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not install the font.");
+      setError(caught instanceof Error ? caught.message : t("appearance.fontInstallFailed"));
     } finally {
       setBusy(false);
     }
@@ -445,20 +447,20 @@ function InstalledFontsRow() {
     try {
       await removeFont(font.id);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not remove the font.");
+      setError(caught instanceof Error ? caught.message : t("appearance.fontRemoveFailed"));
     }
   };
 
   return (
     <SettingsRow
-      label="Installed fonts"
-      description="Font files you upload. They sync with your account. WOFF, WOFF2, TTF, or OTF, up to 15 MB."
+      label={t("appearance.installedFonts")}
+      description={t("appearance.installedFontsDescription")}
       control={
         <div className="flex w-full flex-col gap-2 sm:w-96">
           <div className="flex justify-end">
             <Button variant="outline" size="sm" disabled={busy} onClick={() => fileInput.current?.click()}>
               <UploadIcon />
-              {busy ? "Installing" : "Install font"}
+              {busy ? t("appearance.installing") : t("appearance.installFont")}
             </Button>
             <input
               ref={fileInput}
@@ -479,7 +481,7 @@ function InstalledFontsRow() {
                   <span className="truncate" style={{ fontFamily: cssFontFamilies(font.family) ?? undefined }}>
                     {font.family}
                   </span>
-                  <Button variant="ghost" size="icon" aria-label={`Remove ${font.family}`} onClick={() => void remove(font)}>
+                  <Button variant="ghost" size="icon" aria-label={t("appearance.removeFont", { name: font.family })} onClick={() => void remove(font)}>
                     <Trash2Icon />
                   </Button>
                 </li>
@@ -507,12 +509,12 @@ function TypographySection() {
 
   return (
     <SettingsSection
-      title="Typography"
+      title={t("appearance.typography")}
       action={
         <label className="text-muted-foreground flex cursor-pointer items-center gap-2 text-xs font-medium">
-          Advanced
+          {t("appearance.advanced")}
           <Switch
-            aria-label="Show advanced typography settings"
+            aria-label={t("appearance.showAdvancedTypography")}
             checked={s.typographyAdvanced}
             onCheckedChange={(checked) => update({ typographyAdvanced: Boolean(checked) })}
           />
@@ -520,8 +522,8 @@ function TypographySection() {
       }
     >
       <FontRow
-        label="Interface font"
-        description="Everything outside code blocks. The size applies to this device only."
+        label={t("appearance.interfaceFont")}
+        description={t("appearance.interfaceFontDescription")}
         family={s.fontFamilySans}
         defaultLabel={DEFAULT_SANS_FONT_LABEL}
         size={s.fontSizeInterface}
@@ -535,8 +537,8 @@ function TypographySection() {
       {s.typographyAdvanced && (
         <div className="settings-collapse">
           <FontRow
-            label="Prompt font"
-            description="Only the box you write prompts in. Mono works well here."
+            label={t("appearance.promptFont")}
+            description={t("appearance.promptFontDescription")}
             family={s.fontFamilyComposer}
             defaultLabel={interfaceLabel}
             size={s.fontSizePrompt}
@@ -550,10 +552,10 @@ function TypographySection() {
         </div>
       )}
       <FontRow
-        label={s.typographyAdvanced ? "Code font" : "Monospace font"}
-        description="Code blocks and file previews."
+        label={s.typographyAdvanced ? t("appearance.codeFont") : t("appearance.monospaceFont")}
+        description={t("appearance.codeFontDescription")}
         family={s.fontFamilyCode}
-        defaultLabel="System monospace"
+        defaultLabel={t("appearance.systemMonospace")}
         monospace
         size={s.fontSizeCode}
         sizeMin={MIN_CODE_FONT_SIZE}
@@ -566,12 +568,12 @@ function TypographySection() {
       {s.typographyAdvanced && isMac && (
         <div className="settings-collapse">
           <SettingsRow
-            label="Font smoothing"
-            description="Use thinner grayscale text smoothing instead of the macOS default."
+            label={t("appearance.fontSmoothing")}
+            description={t("appearance.fontSmoothingDescription")}
             reset={s.fontSmoothing !== DEFAULT_APPEARANCE.fontSmoothing ? () => reset("fontSmoothing") : null}
             control={
               <Switch
-                aria-label="Font smoothing"
+                aria-label={t("appearance.fontSmoothing")}
                 checked={s.fontSmoothing}
                 onCheckedChange={(checked) => update({ fontSmoothing: Boolean(checked) })}
               />
@@ -580,10 +582,10 @@ function TypographySection() {
         </div>
       )}
       <SettingsRow
-        label="Word wrap"
-        description="Wrap long lines in code blocks by default. Use the wrap button on a block to override it."
+        label={t("appearance.wordWrap")}
+        description={t("appearance.wordWrapDescription")}
         reset={s.wordWrap !== DEFAULT_APPEARANCE.wordWrap ? () => reset("wordWrap") : null}
-        control={<Switch aria-label="Word wrap in code blocks" checked={s.wordWrap} onCheckedChange={(checked) => update({ wordWrap: Boolean(checked) })} />}
+        control={<Switch aria-label={t("appearance.wordWrapAria")} checked={s.wordWrap} onCheckedChange={(checked) => update({ wordWrap: Boolean(checked) })} />}
       />
       <InstalledFontsRow />
     </SettingsSection>
@@ -604,7 +606,7 @@ export function AppearanceSettings() {
   const [importSession, setImportSession] = useState(0);
 
   return (
-    <SettingsPage title="Appearance" description="Colors, themes, and typography synced across your devices.">
+    <SettingsPage title={t("appearance.title")} description={t("appearance.description")}>
       {syncError && <p role="status" className="text-muted-foreground animate-fade-in mb-4 text-sm">{syncError}</p>}
       <ThemeLibrary
         theme={s.theme}
@@ -619,82 +621,82 @@ export function AppearanceSettings() {
 
       <ThemeImportDialog open={importOpen} session={importSession} onClose={() => setImportOpen(false)} />
 
-      <SettingsSection title="Interface">
+      <SettingsSection title={t("appearance.interface")}>
         <SettingsRow
-          label="Contrast"
-          description="Adjust the contrast of colors and borders across the interface."
+          label={t("appearance.contrast")}
+          description={t("appearance.contrastDescription")}
           reset={s.appearanceContrast !== DEFAULT_APPEARANCE.appearanceContrast ? () => reset("appearanceContrast") : null}
           control={
             <SettingsSlider
-              label="Contrast"
+              label={t("appearance.contrast")}
               value={s.appearanceContrast}
               min={MIN_APPEARANCE_CONTRAST}
               max={MAX_APPEARANCE_CONTRAST}
               step={5}
-              format={(v) => `${v}%`}
+              format={(v) => formatPercent(v / 100)}
               onChange={(appearanceContrast) => update({ appearanceContrast })}
             />
           }
         />
         <SettingsRow
-          label="Glass opacity"
-          description="Higher values make menus, dialogs, and the composer more solid."
+          label={t("appearance.glassOpacity")}
+          description={t("appearance.glassOpacityDescription")}
           reset={s.glassOpacity !== DEFAULT_APPEARANCE.glassOpacity ? () => reset("glassOpacity") : null}
           control={
             <SettingsSlider
-              label="Glass opacity"
+              label={t("appearance.glassOpacity")}
               value={s.glassOpacity}
               min={MIN_GLASS_OPACITY}
               max={MAX_GLASS_OPACITY}
               step={5}
-              format={(v) => `${v}%`}
+              format={(v) => formatPercent(v / 100)}
               onChange={(glassOpacity) => update({ glassOpacity })}
             />
           }
         />
         <SettingsRow
-          label="Chat width"
-          description="Set how wide messages and the composer can grow on large screens."
+          label={t("appearance.chatWidth")}
+          description={t("appearance.chatWidthDescription")}
           reset={s.chatWidth !== DEFAULT_APPEARANCE.chatWidth ? () => reset("chatWidth") : null}
           control={
             <div className="w-full sm:w-48">
               <Select<ChatWidth>
-                aria-label="Chat width"
+                aria-label={t("appearance.chatWidth")}
                 value={s.chatWidth}
-                options={CHAT_WIDTH_OPTIONS}
+                options={CHAT_WIDTH_OPTIONS.map((option) => ({ ...option, label: t(option.label) }))}
                 onValueChange={(chatWidth) => update({ chatWidth })}
               />
             </div>
           }
         />
         <SettingsRow
-          label="Docked sidebar"
-          description="Fill the window edge instead of floating inset with rounded corners. Drag the sidebar's edge to change its width."
+          label={t("appearance.dockedSidebar")}
+          description={t("appearance.dockedSidebarDescription")}
           reset={s.sidebarStyle !== DEFAULT_APPEARANCE.sidebarStyle ? () => reset("sidebarStyle") : null}
           control={
             <Switch
-              aria-label="Docked sidebar"
+              aria-label={t("appearance.dockedSidebar")}
               checked={s.sidebarStyle === "docked"}
               onCheckedChange={(checked) => update({ sidebarStyle: checked ? "docked" : "floating" })}
             />
           }
         />
         <SettingsRow
-          label="Square corners"
-          description="Remove rounded corners from every surface, control, and image."
+          label={t("appearance.squareCorners")}
+          description={t("appearance.squareCornersDescription")}
           reset={s.squareCorners !== DEFAULT_APPEARANCE.squareCorners ? () => reset("squareCorners") : null}
-          control={<Switch aria-label="Square corners" checked={s.squareCorners} onCheckedChange={(checked) => update({ squareCorners: Boolean(checked) })} />}
+          control={<Switch aria-label={t("appearance.squareCorners")} checked={s.squareCorners} onCheckedChange={(checked) => update({ squareCorners: Boolean(checked) })} />}
         />
       </SettingsSection>
 
-      <SettingsSection title="Motion">
+      <SettingsSection title={t("appearance.motion")}>
         <SettingsRow
-          label="Animations"
-          description="Turn off to stop every animation. Your system's reduced-motion setting also applies."
+          label={t("appearance.animations")}
+          description={t("appearance.animationsDescription")}
           reset={s.motionOff.length ? () => reset("motionOff") : null}
           control={
             <Switch
-              aria-label="Animations"
+              aria-label={t("appearance.animations")}
               checked={s.motionOff.length < MOTION_GROUPS.length}
               onCheckedChange={(checked) => update({ motionOff: checked ? [] : [...MOTION_GROUPS] })}
             />
@@ -704,11 +706,11 @@ export function AppearanceSettings() {
           <SettingsRow
             key={option.group}
             className="sm:pl-8"
-            label={option.label}
-            description={option.description}
+            label={t(option.label)}
+            description={t(option.description)}
             control={
               <Switch
-                aria-label={option.label}
+                aria-label={t(option.label)}
                 checked={!s.motionOff.includes(option.group)}
                 onCheckedChange={(checked) =>
                   update({
@@ -722,17 +724,17 @@ export function AppearanceSettings() {
           />
         ))}
         <SettingsRow
-          label="Panel animations"
-          description="Set how fast panels open and close. Applies while transitions are on."
+          label={t("appearance.panelAnimations")}
+          description={t("appearance.panelAnimationsDescription")}
           reset={s.panelAnimationDurationMs !== DEFAULT_APPEARANCE.panelAnimationDurationMs ? () => reset("panelAnimationDurationMs") : null}
           control={
             <SettingsSlider
-              label="Panel animation duration"
+              label={t("appearance.panelAnimationDuration")}
               value={s.panelAnimationDurationMs}
               min={MIN_PANEL_ANIMATION_DURATION_MS}
               max={MAX_PANEL_ANIMATION_DURATION_MS}
               step={25}
-              format={(v) => `${v} ms`}
+              format={(v) => t("appearance.milliseconds", { n: v })}
               onChange={(panelAnimationDurationMs) => update({ panelAnimationDurationMs })}
             />
           }

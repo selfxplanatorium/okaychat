@@ -9,43 +9,57 @@ import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
+import { t, type PlainMessageKey } from "@/i18n";
+import { formatDate, formatList, formatTime } from "@/i18n/format";
+import { Trans } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 import { showChat, useActiveModel, useData } from "@/state/data";
 import { ModelSelect } from "../chat/ModelPicker";
 import { SettingsPage, SettingsSection } from "./SettingsUI";
 
-const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
 const INTERVALS = [
-  { value: "15", label: "15 minutes" },
-  { value: "30", label: "30 minutes" },
-  { value: "60", label: "hour" },
-  { value: "180", label: "3 hours" },
-  { value: "360", label: "6 hours" },
-  { value: "720", label: "12 hours" },
-];
+  { value: "15", label: "schedules.interval15", every: "schedules.every15" },
+  { value: "30", label: "schedules.interval30", every: "schedules.every30" },
+  { value: "60", label: "schedules.interval60", every: "schedules.every60" },
+  { value: "180", label: "schedules.interval180", every: "schedules.every180" },
+  { value: "360", label: "schedules.interval360", every: "schedules.every360" },
+  { value: "720", label: "schedules.interval720", every: "schedules.every720" },
+] as const satisfies ReadonlyArray<{ value: string; label: PlainMessageKey; every: PlainMessageKey }>;
+
+// 2024-01-07 was a Sunday, so day index 0 is Sunday.
+const dayName = (day: number) => formatDate(new Date(2024, 0, 7 + day), { weekday: "short" });
 
 function describe(spec: ScheduleSpec): string {
-  if (spec.kind === "interval") return `Every ${INTERVALS.find((i) => Number(i.value) === spec.minutes)?.label ?? `${spec.minutes} minutes`}`;
-  const days =
-    spec.weekdays.length === 0 || spec.weekdays.length === 7
-      ? "Every day"
-      : spec.weekdays.join() === "1,2,3,4,5"
-        ? "Weekdays"
-        : spec.weekdays.map((d) => DAYS[d]).join(", ");
-  return `${days} at ${spec.time}`;
+  if (spec.kind === "interval") {
+    const known = INTERVALS.find((i) => Number(i.value) === spec.minutes);
+    return known ? t(known.every) : t("schedules.everyMinutes", { count: spec.minutes });
+  }
+  const [hours = 0, minutes = 0] = spec.time.split(":").map(Number);
+  const time = formatTime(new Date(2000, 0, 1, hours, minutes));
+  if (spec.weekdays.length === 0 || spec.weekdays.length === 7) return t("schedules.everyDayAt", { time });
+  if (spec.weekdays.join() === "1,2,3,4,5") return t("schedules.weekdaysAt", { time });
+  return t("schedules.daysAt", { days: formatList(spec.weekdays.map(dayName), { type: "unit", style: "narrow" }), time });
 }
 
 type Target = "own" | "new" | "existing";
 
-const TARGETS: Array<{ value: Target; label: string }> = [
-  { value: "own", label: "Same chat every run" },
-  { value: "new", label: "New chat each run" },
-  { value: "existing", label: "An existing chat" },
+const TARGETS: Array<{ value: Target; label: PlainMessageKey }> = [
+  { value: "own", label: "schedules.targetOwn" },
+  { value: "new", label: "schedules.targetNew" },
+  { value: "existing", label: "schedules.targetExisting" },
 ];
+
+const HINTS = {
+  own: "schedules.hintOwn",
+  new: "schedules.hintNew",
+  existing: "schedules.hintExisting",
+} as const satisfies Record<Target, PlainMessageKey>;
 
 const targetOf = (s: Schedule): Target => (s.threadMode === "new" ? "new" : s.threadAttached ? "existing" : "own");
 
-const when = (t: number | null) => (t ? new Date(t).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—");
+const when = (time: number | null) =>
+  time ? formatDate(time, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
 
 function ScheduleForm({ initial, initialThreadId, onDone }: { initial?: Schedule; initialThreadId?: string; onDone: () => void }) {
   const projects = useData((s) => s.projects);
@@ -70,7 +84,7 @@ function ScheduleForm({ initial, initialThreadId, onDone }: { initial?: Schedule
   }, [target, threads]);
 
   const submit = async () => {
-    if (target === "existing" && !threadId) return setError("Pick a chat.");
+    if (target === "existing" && !threadId) return setError(t("schedules.pickChatError"));
     setBusy(true);
     setError(null);
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -105,27 +119,27 @@ function ScheduleForm({ initial, initialThreadId, onDone }: { initial?: Schedule
         void submit();
       }}
     >
-      <Input placeholder="Name (e.g. Morning news brief)" value={title} onChange={(e) => setTitle(e.target.value)} required autoFocus />
-      <Textarea placeholder="Prompt, e.g. Search the web for today's top AI news and give me five bullet points with links." value={prompt} onChange={(e) => setPrompt(e.target.value)} className="min-h-24" required />
-      <ModelSelect aria-label="Model" value={modelRef} onValueChange={setModelRef} />
+      <Input placeholder={t("schedules.namePlaceholder")} value={title} onChange={(e) => setTitle(e.target.value)} required autoFocus />
+      <Textarea placeholder={t("schedules.promptPlaceholder")} value={prompt} onChange={(e) => setPrompt(e.target.value)} className="min-h-24" required />
+      <ModelSelect aria-label={t("schedules.model")} value={modelRef} onValueChange={setModelRef} />
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <Select
-          aria-label="Repeat"
+          aria-label={t("schedules.repeat")}
           className="w-auto"
           value={kind}
           onValueChange={setKind}
           options={[
-            { value: "daily", label: "At a time" },
-            { value: "interval", label: "Every" },
+            { value: "daily", label: t("schedules.atATime") },
+            { value: "interval", label: t("schedules.every") },
           ]}
         />
         {kind === "daily" ? (
           <>
             <Input type="time" className="h-8 w-32" value={time} onChange={(e) => setTime(e.target.value)} required />
             <div className="flex gap-1">
-              {DAYS.map((d, i) => (
+              {WEEKDAYS.map((i) => (
                 <button
-                  key={d}
+                  key={i}
                   type="button"
                   aria-pressed={weekdays.includes(i)}
                   onClick={() => setWeekdays(weekdays.includes(i) ? weekdays.filter((w) => w !== i) : [...weekdays, i].sort())}
@@ -134,56 +148,56 @@ function ScheduleForm({ initial, initialThreadId, onDone }: { initial?: Schedule
                     weekdays.includes(i) ? "bg-primary text-primary-foreground border-transparent" : "text-muted-foreground hover:bg-muted",
                   )}
                 >
-                  {d}
+                  {dayName(i)}
                 </button>
               ))}
             </div>
           </>
         ) : (
-          <Select aria-label="Interval" className="w-auto" value={minutes} onValueChange={setMinutes} options={INTERVALS} />
+          <Select
+            aria-label={t("schedules.interval")}
+            className="w-auto"
+            value={minutes}
+            onValueChange={setMinutes}
+            options={INTERVALS.map((i) => ({ value: i.value, label: t(i.label) }))}
+          />
         )}
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <Select aria-label="Results go to" className="w-auto" value={target} onValueChange={setTarget} options={TARGETS} />
+        <Select aria-label={t("schedules.resultsGoTo")} className="w-auto" value={target} onValueChange={setTarget} options={TARGETS.map((x) => ({ value: x.value, label: t(x.label) }))} />
         {target === "existing" ? (
           <Select
-            aria-label="Chat"
+            aria-label={t("schedules.chat")}
             className="min-w-0 flex-1"
             value={threadId}
             onValueChange={setThreadId}
-            placeholder={threads ? "Pick a chat" : "Loading chats…"}
+            placeholder={threads ? t("schedules.pickChat") : t("schedules.loadingChats")}
             disabled={!threads}
-            options={(threads ?? []).map((t) => ({ value: t.id, label: t.title || "Untitled chat" }))}
+            options={(threads ?? []).map((thread) => ({ value: thread.id, label: thread.title || t("schedules.untitledChat") }))}
           />
         ) : (
           projects.length > 0 && (
             <Select
-              aria-label="Project"
+              aria-label={t("schedules.project")}
               className="w-auto"
               value={projectId}
               onValueChange={setProjectId}
-              options={[{ value: "", label: "No project" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
+              options={[{ value: "", label: t("schedules.noProject") }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
             />
           )
         )}
       </div>
       <p className="text-muted-foreground text-xs">
-        Runs on the server, so your browser can be closed.{" "}
-        {target === "existing"
-          ? "Runs use the model above without changing the chat's own model, and wait while the chat is replying."
-          : target === "new"
-            ? "Each run starts a fresh chat without earlier runs as context."
-            : "Every run lands in this schedule's own chat, with earlier runs as context."}{" "}
-        Tools that need approval wait until you open the chat.
+        {t(HINTS[target])}
       </p>
       {error && <p className="text-error settings-error text-xs">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onDone}>
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button type="submit" disabled={busy}>
           {busy && <Loader2Icon className="animate-spin" />}
-          {initial ? "Save" : "Add schedule"}
+          {initial ? t("common.save") : t("schedules.addSchedule")}
         </Button>
       </div>
     </form>
@@ -225,12 +239,12 @@ export function ScheduleSettings() {
   };
 
   return (
-    <SettingsPage title="Scheduled prompts" description="Run a prompt on a schedule, even when okaychat is closed.">
+    <SettingsPage title={t("schedules.title")} description={t("schedules.description")}>
       <SettingsSection
         action={
           editing !== "new" && (
             <Button size="sm" variant="outline" onClick={() => setEditing("new")}>
-              <PlusIcon /> New schedule
+              <PlusIcon /> {t("schedules.newSchedule")}
             </Button>
           )
         }
@@ -245,7 +259,7 @@ export function ScheduleSettings() {
             }}
           />
         )}
-        {schedules?.length === 0 && editing !== "new" && <p className="text-muted-foreground animate-fade-in px-4 py-6 text-sm">No schedules yet.</p>}
+        {schedules?.length === 0 && editing !== "new" && <p className="text-muted-foreground animate-fade-in px-4 py-6 text-sm">{t("schedules.empty")}</p>}
         {schedules?.map((s, index) =>
           editing === s.id ? (
             <ScheduleForm
@@ -258,46 +272,47 @@ export function ScheduleSettings() {
             />
           ) : (
             <div key={s.id} className="stagger animate-rise-in flex items-start gap-3 px-4 py-3" style={{ "--i": index } as CSSProperties}>
-              <Switch className="mt-0.5" checked={s.enabled} onCheckedChange={(enabled) => void save(s, { enabled })} aria-label={`Enable ${s.title}`} />
+              <Switch className="mt-0.5" checked={s.enabled} onCheckedChange={(enabled) => void save(s, { enabled })} aria-label={t("schedules.enable", { title: s.title })} />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium">{s.title}</p>
                 <p className="text-muted-foreground text-xs">
                   {describe(s.spec)} · {models.find((m) => m.ref === s.modelRef)?.name ?? s.modelRef}
-                  {s.threadMode === "new" && " · New chat each run"}
+                  {s.threadMode === "new" && ` · ${t("schedules.newChatEachRun")}`}
                 </p>
                 <p className="text-muted-foreground text-xs">
                   {s.lastStatus === "running" ? (
                     <span className="animate-fade-in inline-flex items-center gap-1">
-                      <Loader2Icon className="size-3 animate-spin" /> Running
+                      <Loader2Icon className="size-3 animate-spin" /> {t("schedules.running")}
                     </span>
                   ) : (
-                    <>
-                      Last {when(s.lastRunAt)}
-                      {s.lastStatus === "error" && <span className="text-error"> · {s.lastError}</span>}
-                    </>
+                    s.lastStatus === "error" ? (
+                      <Trans k="schedules.lastRunError" params={{ date: when(s.lastRunAt), error: <span className="text-error">{s.lastError}</span> }} />
+                    ) : (
+                      t("schedules.lastRun", { date: when(s.lastRunAt) })
+                    )
                   )}
-                  {s.enabled && ` · Next ${when(s.nextRunAt)}`}
+                  {s.enabled && ` · ${t("schedules.nextRun", { date: when(s.nextRunAt) })}`}
                 </p>
               </div>
               <div className="flex shrink-0 gap-1">
                 {s.threadId && (
-                  <Button size="icon-sm" variant="ghost" aria-label={s.threadMode === "new" ? "Open latest chat" : "Open chat"} onClick={() => void openThread(s.threadId!)}>
+                  <Button size="icon-sm" variant="ghost" aria-label={s.threadMode === "new" ? t("schedules.openLatestChat") : t("schedules.openChat")} onClick={() => void openThread(s.threadId!)}>
                     <MessageSquareIcon />
                   </Button>
                 )}
                 <Button
                   size="icon-sm"
                   variant="ghost"
-                  aria-label="Run now"
+                  aria-label={t("schedules.runNow")}
                   disabled={s.lastStatus === "running"}
                   onClick={() => void api(`/schedules/${s.id}/run`, { method: "POST" }).then(() => setTimeout(() => void refresh(), 300))}
                 >
                   <PlayIcon />
                 </Button>
-                <Button size="icon-sm" variant="ghost" aria-label="Edit" onClick={() => setEditing(s.id)}>
+                <Button size="icon-sm" variant="ghost" aria-label={t("common.edit")} onClick={() => setEditing(s.id)}>
                   <PencilIcon />
                 </Button>
-                <Button size="icon-sm" variant="ghost" aria-label="Delete" onClick={() => void api(`/schedules/${s.id}`, { method: "DELETE" }).then(refresh)}>
+                <Button size="icon-sm" variant="ghost" aria-label={t("common.delete")} onClick={() => void api(`/schedules/${s.id}`, { method: "DELETE" }).then(refresh)}>
                   <TrashIcon />
                 </Button>
               </div>

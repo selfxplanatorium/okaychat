@@ -1,4 +1,5 @@
 import type { DictationAdapter } from "@assistant-ui/react";
+import { t } from "@/i18n";
 import { speechFetch, useSpeech } from "./store";
 
 type Session = DictationAdapter.Session;
@@ -129,7 +130,7 @@ export class RecorderDictationAdapter implements DictationAdapter {
         stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
       } catch (error) {
         const name = (error as Error).name;
-        useSpeech.getState().setError(name === "NotAllowedError" ? "Microphone access was blocked. Allow it in the browser's site settings." : "No microphone is available.");
+        useSpeech.getState().setError(name === "NotAllowedError" ? t("speech.micBlocked") : t("speech.noMic"));
         return end("error");
       }
       if (controller.signal.aborted) return stream.getTracks().forEach((t) => t.stop());

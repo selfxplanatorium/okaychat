@@ -1,6 +1,7 @@
 import { ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import type { ComponentType } from "react";
 import { Link } from "wouter";
+import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { AdminSettings } from "./AdminSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
@@ -37,10 +38,10 @@ function MobileIndex({ sections }: { sections: ReturnType<typeof useSettingsSect
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:hidden">
       <div className="flex h-12 shrink-0 items-center px-3">
         <Link href="/" className="text-sidebar-muted-foreground hover:bg-sidebar-row-hover flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm">
-          <ArrowLeftIcon className="size-4" /> Back to chat
+          <ArrowLeftIcon className="size-4" /> {t("settings.backToChat")}
         </Link>
       </div>
-      <h1 className="px-4 pt-2 pb-3 text-xl font-semibold">Settings</h1>
+      <h1 className="px-4 pt-2 pb-3 text-xl font-semibold">{t("common.settings")}</h1>
       <div className="bg-card divide-border mx-4 mb-6 flex flex-col divide-y overflow-hidden rounded-xl shadow-[var(--depth-highlight),var(--shadow-raised)]">
         {sections.map((s) => (
           <Link
@@ -74,7 +75,7 @@ export function SettingsLayout({ section }: { section?: string }) {
         {section !== undefined && (
           <header className="bg-background/80 border-border sticky top-0 z-10 flex h-12 items-center border-b px-2 backdrop-blur md:hidden">
             <Link href="/settings" className="text-muted-foreground hover:text-foreground flex min-h-11 items-center gap-1 rounded-lg pr-2 text-sm">
-              <ChevronLeftIcon className="size-4" /> Settings
+              <ChevronLeftIcon className="size-4" /> {t("common.settings")}
             </Link>
           </header>
         )}

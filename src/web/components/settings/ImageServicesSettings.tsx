@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
+import { t } from "@/i18n";
+import { Trans } from "@/i18n/react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -34,15 +36,15 @@ export function ImageServicesSettings() {
 
   return (
     <SettingsSection
-      title="Image generation"
-      description={ready > 1 ? "Several services are on, so the assistant asks which one to use before the first image in a chat." : "The assistant can create and edit images with the services you turn on."}
+      title={t("providers.imageGeneration")}
+      description={ready > 1 ? t("providers.imageSeveral") : t("providers.imageDescription")}
     >
       {services.map((s) => (
         <div key={s.id}>
           <SettingsRow
             label={s.name}
             description={<Credential service={s} />}
-            control={<Switch aria-label={`Use ${s.name} for images`} checked={s.connected && s.enabled} disabled={!s.connected} onCheckedChange={(enabled) => choose(s.id, { enabled })} />}
+            control={<Switch aria-label={t("providers.useForImages", { name: s.name })} checked={s.connected && s.enabled} disabled={!s.connected} onCheckedChange={(enabled) => choose(s.id, { enabled })} />}
           />
           <div className="flex flex-col gap-2 px-4 pb-3 empty:hidden">
             {s.credential === "codex" && <CodexConnect onChange={refresh} />}
@@ -56,13 +58,13 @@ export function ImageServicesSettings() {
 }
 
 function Credential({ service: s }: { service: ImageServiceStatus }) {
-  if (s.credential === "codex") return <>Uses your own ChatGPT plan through the Codex CLI. Sign in once with a one-time code.</>;
-  if (s.shared) return <>Uses the key your admin shared.</>;
-  if (s.credential === "own") return <>{s.connected ? "Uses the key saved for images." : "Needs an API key for image generation."}</>;
+  if (s.credential === "codex") return <>{t("providers.imageCodex")}</>;
+  if (s.shared) return <>{t("providers.imageShared")}</>;
+  if (s.credential === "own") return <>{s.connected ? t("providers.imageOwnSaved") : t("providers.imageOwnNeeded")}</>;
   return s.connected ? (
-    <>Uses your {s.name} key from <Link href="/settings/providers" className="text-primary hover:underline">Providers</Link>.</>
+    <Trans k="providers.imageUsesKey" params={{ name: s.name, link: <Link href="/settings/providers" className="text-primary hover:underline">{t("settings.sectionProviders")}</Link> }} />
   ) : (
-    <>Connect {s.name} in <Link href="/settings/providers" className="text-primary hover:underline">Providers</Link>. The same key works for chat and images.</>
+    <Trans k="providers.imageConnect" params={{ name: s.name, link: <Link href="/settings/providers" className="text-primary hover:underline">{t("settings.sectionProviders")}</Link> }} />
   );
 }
 
@@ -87,7 +89,7 @@ function OwnKey({ service: s, onChange }: { service: ImageServiceStatus; onChang
     return (
       <div>
         <Button size="sm" variant="outline" onClick={() => send("DELETE")} disabled={busy}>
-          Remove key
+          {t("providers.removeKey")}
         </Button>
       </div>
     );
@@ -100,14 +102,14 @@ function OwnKey({ service: s, onChange }: { service: ImageServiceStatus; onChang
         void send("PUT");
       }}
     >
-      <Input type="password" aria-label={`${s.name} API key`} placeholder="API key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} className="h-8 w-full sm:w-72" />
+      <Input type="password" aria-label={t("providers.keyOf", { name: s.name })} placeholder={t("providers.apiKey")} value={apiKey} onChange={(e) => setApiKey(e.target.value)} className="h-8 w-full sm:w-72" />
       <Button size="sm" type="submit" disabled={busy || !apiKey.trim()}>
         {busy && <Loader2Icon className="animate-spin" />}
-        Save
+        {t("common.save")}
       </Button>
       {s.keyUrl && (
         <a href={s.keyUrl} target="_blank" rel="noreferrer" className="text-primary flex items-center gap-1 text-xs hover:underline">
-          Get a key <ExternalLinkIcon className="size-3" />
+          {t("providers.getKey")} <ExternalLinkIcon className="size-3" />
         </a>
       )}
       {error && <span className="text-error w-full text-xs">{error}</span>}
@@ -136,10 +138,10 @@ function ModelField({ service: s, onSave }: { service: ImageServiceStatus; onSav
 
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
-      <span className="text-muted-foreground w-12">Model</span>
+      <span className="text-muted-foreground w-12">{t("providers.model")}</span>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
-          aria-label={`${s.name} image model`}
+          aria-label={t("providers.imageModelOf", { name: s.name })}
           className="group bg-muted/60 hover:bg-muted aria-expanded:bg-muted flex h-8 w-full min-w-0 items-center justify-between gap-2 rounded-lg px-3 font-mono text-xs transition-colors duration-(--motion-fast) ease-out-quart sm:w-72"
         >
           <span className="truncate">{s.model}</span>
@@ -152,7 +154,7 @@ function ModelField({ service: s, onSave }: { service: ImageServiceStatus; onSav
               autoFocus={window.matchMedia("(pointer: fine)").matches}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={`Search ${s.name} models`}
+              placeholder={t("providers.searchModels", { name: s.name })}
               className="placeholder:text-muted-foreground h-7 pointer-coarse:h-9 min-w-0 flex-1 bg-transparent text-sm outline-none"
             />
           </div>
@@ -160,12 +162,12 @@ function ModelField({ service: s, onSave }: { service: ImageServiceStatus; onSav
             <div role="listbox">
               {!list && !failed && (
                 <p className="text-muted-foreground flex items-center justify-center gap-2 px-3 py-6 text-sm">
-                  <Loader2Icon className="size-4 animate-spin" /> Loading models from {s.name}…
+                  <Loader2Icon className="size-4 animate-spin" /> {t("providers.loadingModels", { name: s.name })}
                 </p>
               )}
               {failed && <p className="text-error px-3 py-6 text-center text-sm">{failed}</p>}
               {list && !list.live && (
-                <p className="text-muted-foreground px-2 pt-1 pb-2 text-[11px]">{list.error ?? `${s.name} has no model list API. Showing models known to work.`}</p>
+                <p className="text-muted-foreground px-2 pt-1 pb-2 text-[11px]">{list.error ?? t("providers.noModelList", { name: s.name })}</p>
               )}
               {models.map((m) => (
                 <div
@@ -184,7 +186,7 @@ function ModelField({ service: s, onSave }: { service: ImageServiceStatus; onSav
                   </div>
                 </div>
               ))}
-              {list && models.length === 0 && <p className="text-muted-foreground px-3 py-6 text-center text-sm">No models match.</p>}
+              {list && models.length === 0 && <p className="text-muted-foreground px-3 py-6 text-center text-sm">{t("providers.noModelsMatch")}</p>}
             </div>
           </ScrollArea>
         </PopoverContent>

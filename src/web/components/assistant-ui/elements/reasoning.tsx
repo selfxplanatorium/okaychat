@@ -19,6 +19,8 @@ import {
   CollapsibleTrigger,
 } from "./collapsible-root";
 import { collapsePanel } from "./surfaces";
+import { t } from "@/i18n";
+import { formatDuration } from "@/i18n/format";
 
 export const ANIMATION_DURATION = 200;
 
@@ -185,7 +187,6 @@ function ReasoningTrigger({
   active?: boolean;
   duration?: number | undefined;
 }) {
-  const durationText = duration ? ` (${duration}s)` : "";
 
   return (
     <CollapsibleTrigger
@@ -207,7 +208,7 @@ function ReasoningTrigger({
           active && "shimmer motion-reduce:animate-none",
         )}
       >
-        Reasoning{durationText}
+        {duration ? t("thread.reasoningFor", { time: formatDuration(duration) }) : t("thread.reasoning")}
       </span>
       <ChevronDownIcon
         data-slot="reasoning-trigger-chevron"

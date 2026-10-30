@@ -4,6 +4,8 @@ import type { ProviderInfo } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { t } from "@/i18n";
+import { formatNumber } from "@/i18n/format";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
@@ -73,17 +75,17 @@ export function ProviderForm({ provider, onSaved, autoFocus }: { provider: Provi
         <Input
           type="password"
           autoFocus={autoFocus}
-          placeholder={provider.shared ? "Your own key, used instead of the server's" : provider.connected ? "Key saved. Paste a new one to replace it." : "API key"}
+          placeholder={provider.shared ? t("providers.ownKeyPlaceholder") : provider.connected ? t("providers.keySavedPlaceholder") : t("providers.apiKey")}
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
           autoComplete="off"
         />
         <Button type="submit" disabled={busy || (!apiKey && baseURL === (provider.baseURL ?? ""))}>
-          {provider.connected && !provider.shared ? "Update" : "Connect"}
+          {provider.connected && !provider.shared ? t("providers.update") : t("common.connect")}
         </Button>
       </div>
       {(provider.needsBaseURL || provider.custom) && (
-        <Input placeholder="Base URL, e.g. http://host.docker.internal:11434/v1" value={baseURL} onChange={(e) => setBaseURL(e.target.value)} />
+        <Input placeholder={t("providers.baseUrlPlaceholder")} value={baseURL} onChange={(e) => setBaseURL(e.target.value)} />
       )}
       {error && <p className="text-error settings-error text-xs">{error}</p>}
     </form>
@@ -98,18 +100,18 @@ function ProviderRow({ provider, index, expanded, onToggle }: { provider: Provid
       <div className="flex items-center gap-3">
         <button type="button" onClick={onToggle} className="flex min-w-0 flex-1 items-center gap-2 text-left">
           <span className="truncate text-sm font-medium">{provider.name}</span>
-          {provider.id === "opencode-go" && <span className="bg-primary/10 text-primary rounded px-1.5 py-0.5 text-[10px] font-medium">Recommended</span>}
-          {provider.connected && <CheckCircle2Icon className="text-success animate-pop-in size-3.5 shrink-0" aria-label="Connected" />}
-          {provider.shared && <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[10px] font-medium">Server key</span>}
-          <span className="text-muted-foreground ml-auto text-xs tabular-nums">{provider.modelCount ? `${provider.modelCount} models` : ""}</span>
+          {provider.id === "opencode-go" && <span className="bg-primary/10 text-primary rounded px-1.5 py-0.5 text-[10px] font-medium">{t("providers.recommended")}</span>}
+          {provider.connected && <CheckCircle2Icon className="text-success animate-pop-in size-3.5 shrink-0" aria-label={t("providers.connected")} />}
+          {provider.shared && <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[10px] font-medium">{t("providers.serverKey")}</span>}
+          <span className="text-muted-foreground ml-auto text-xs tabular-nums">{provider.modelCount ? t("providers.modelCount", { count: provider.modelCount }) : ""}</span>
         </button>
         {provider.connected && !provider.shared && (
           <>
             {base === "/admin/providers" && (
               <AudienceButton
                 audience={provider.audience}
-                title={`Who can use ${provider.name}`}
-                description="Users outside this audience do not see the server key. Their own key for this provider still works."
+                title={t("providers.whoCanUse", { name: provider.name })}
+                description={t("providers.audienceDescription")}
                 onSave={async (audience) => {
                   await api(`${base}/${provider.id}/access`, { method: "PUT", json: audience });
                   await refresh();
@@ -118,7 +120,7 @@ function ProviderRow({ provider, index, expanded, onToggle }: { provider: Provid
             )}
             <Switch
               checked={provider.enabled}
-              aria-label={`Enable ${provider.name}`}
+              aria-label={t("providers.enable", { name: provider.name })}
               onCheckedChange={async (enabled) => {
                 await api(`${base}/${provider.id}`, { method: "PUT", json: { enabled } });
                 await refresh();
@@ -128,7 +130,7 @@ function ProviderRow({ provider, index, expanded, onToggle }: { provider: Provid
               <Button
                 size="icon-sm"
                 variant="ghost"
-                aria-label={`Disconnect ${provider.name}`}
+                aria-label={t("providers.disconnect", { name: provider.name })}
                 onClick={async () => {
                   await api(`${base}/${provider.id}`, { method: "DELETE" });
                   await refresh();
@@ -145,7 +147,7 @@ function ProviderRow({ provider, index, expanded, onToggle }: { provider: Provid
           {chatgpt ? (
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-muted-foreground max-w-sm text-xs">
-                Chat with the models of your own ChatGPT plan. Signs in through the Codex CLI with a one-time code. The same login generates images.
+                {t("providers.chatgptDescription")}
               </p>
               <CodexConnect onChange={refresh} />
             </div>
@@ -159,7 +161,7 @@ function ProviderRow({ provider, index, expanded, onToggle }: { provider: Provid
                   rel="noreferrer"
                   className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs transition-colors duration-(--motion-fast)"
                 >
-                  {provider.id === "opencode-go" ? "Get a key in the OpenCode console" : "Provider docs"} <ExternalLinkIcon className="size-3" />
+                  {provider.id === "opencode-go" ? t("providers.getKeyOpencode") : t("providers.providerDocs")} <ExternalLinkIcon className="size-3" />
                 </a>
               )}
             </div>
@@ -182,7 +184,7 @@ function CustomProviderForm({ onDone }: { onDone: () => void }) {
       onSubmit={async (e) => {
         e.preventDefault();
         const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-        if (!slug) return setError("Give it a name.");
+        if (!slug) return setError(t("providers.nameRequired"));
         try {
           await api(`${base}/custom-${slug}`, { method: "PUT", json: { name, baseURL, apiKey: apiKey || undefined, enabled: true } });
           await refresh();
@@ -192,15 +194,15 @@ function CustomProviderForm({ onDone }: { onDone: () => void }) {
         }
       }}
     >
-      <Input placeholder="Name (e.g. Ollama)" value={name} onChange={(e) => setName(e.target.value)} required />
-      <Input placeholder="OpenAI-compatible base URL (…/v1)" value={baseURL} onChange={(e) => setBaseURL(e.target.value)} required />
-      <Input type="password" placeholder="API key (optional)" value={apiKey} onChange={(e) => setApiKey(e.target.value)} className="sm:col-span-2" />
+      <Input placeholder={t("providers.customNamePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} required />
+      <Input placeholder={t("providers.customBaseUrlPlaceholder")} value={baseURL} onChange={(e) => setBaseURL(e.target.value)} required />
+      <Input type="password" placeholder={t("providers.apiKeyOptional")} value={apiKey} onChange={(e) => setApiKey(e.target.value)} className="sm:col-span-2" />
       {error && <p className="text-error settings-error text-xs sm:col-span-2">{error}</p>}
       <div className="flex justify-end gap-2 sm:col-span-2">
         <Button type="button" variant="ghost" onClick={onDone}>
-          Cancel
+          {t("common.cancel")}
         </Button>
-        <Button type="submit">Add provider</Button>
+        <Button type="submit">{t("providers.addProvider")}</Button>
       </div>
     </form>
   );
@@ -208,7 +210,7 @@ function CustomProviderForm({ onDone }: { onDone: () => void }) {
 
 export function ProvidersSettings() {
   return (
-    <SettingsPage title="Providers" description="OpenCode Go is the primary connection. Add any other provider for more models. Keys are encrypted at rest.">
+    <SettingsPage title={t("settings.sectionProviders")} description={t("providers.description")}>
       <ProviderLists />
     </SettingsPage>
   );
@@ -238,13 +240,13 @@ export function ProviderLists() {
 
   return (
     <div className="flex flex-col gap-8">
-      {connected.length > 0 && <SettingsSection title="Connected">{rows(connected)}</SettingsSection>}
+      {connected.length > 0 && <SettingsSection title={t("providers.connected")}>{rows(connected)}</SettingsSection>}
       <SettingsSection
-        title="Add a provider"
+        title={t("providers.addAProvider")}
         action={
           <div className="relative">
             <SearchIcon className="text-muted-foreground absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2" />
-            <Input placeholder="Search providers" value={query} onChange={(e) => setQuery(e.target.value)} className="h-8 w-56 pl-8" />
+            <Input placeholder={t("providers.searchProviders")} value={query} onChange={(e) => setQuery(e.target.value)} className="h-8 w-56 pl-8" />
           </div>
         }
       >
@@ -257,11 +259,11 @@ export function ProviderLists() {
             onClick={() => setAddingCustom(true)}
             className={cn("text-muted-foreground hover:text-foreground flex items-center gap-2 px-4 py-3 text-sm transition-colors duration-(--motion-fast)")}
           >
-            <PlusIcon className="size-4" /> Custom OpenAI-compatible endpoint (Ollama, LM Studio, vLLM…)
+            <PlusIcon className="size-4" /> {t("providers.customEndpoint")}
           </button>
         )}
       </SettingsSection>
-      {rest.length > 0 && <SettingsSection title={`All providers (${rest.length})`}>{rows(rest)}</SettingsSection>}
+      {rest.length > 0 && <SettingsSection title={t("providers.allProviders", { count: formatNumber(rest.length) })}>{rows(rest)}</SettingsSection>}
     </div>
   );
 }

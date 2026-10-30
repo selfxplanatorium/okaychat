@@ -12,8 +12,10 @@ import { Select } from "@/components/ui/select";
 import { SimpleMarkdown } from "@/components/ui/simple-markdown";
 import { Delayed, Skeleton } from "@/components/ui/skeleton";
 import { BulkDeleteDialog, FloatingSelectionBar, SelectionCheck, SelectModeToggle, useSelection, useSelectionKeys } from "@/components/ui/selection";
+import { t, type PlainMessageKey } from "@/i18n";
+import { formatBytes, formatDate } from "@/i18n/format";
 import { api } from "@/lib/api";
-import { batchError, runBatch } from "@/lib/selection";
+import { runBatch } from "@/lib/selection";
 import { cn } from "@/lib/utils";
 import { showChat, useData } from "@/state/data";
 import { cachedLibraryPage, DEFAULT_LIBRARY_QUERY, fetchLibraryFirstPage, forgetLibraryPages } from "@/state/library-cache";
@@ -25,14 +27,14 @@ import { ArchivedChats } from "./ArchivedChats";
 
 const VIEW_KEY = "okaychat:library-view";
 
-const KIND_LABELS: Record<LibraryKind, string> = {
-  image: "Images",
-  document: "Word files",
-  pdf: "PDFs",
-  spreadsheet: "Spreadsheets",
-  code: "Code & artifacts",
-  other: "Other files",
-};
+const KIND_LABELS = {
+  image: "library.kindImages",
+  document: "library.kindDocuments",
+  pdf: "library.kindPdfs",
+  spreadsheet: "library.kindSpreadsheets",
+  code: "library.kindCode",
+  other: "library.kindOther",
+} as const satisfies Record<LibraryKind, PlainMessageKey>;
 
 const KIND_ICONS: Record<LibraryKind, typeof FileTextIcon> = {
   image: ImageIcon,
@@ -43,17 +45,14 @@ const KIND_ICONS: Record<LibraryKind, typeof FileTextIcon> = {
   other: PaperclipIcon,
 };
 
-const formatSize = (bytes: number) => {
-  if (!bytes) return "—";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024).toLocaleString()} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-};
+const formatSize = (bytes: number) => (bytes ? formatBytes(bytes) : "—");
 
-const formatDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { dateStyle: "medium" });
+/** Appends the first error's message to a bulk failure summary. */
+const withReason = (message: string, error: unknown) =>
+  error instanceof Error && error.message ? t("library.withReason", { message, reason: error.message }) : message;
 
 async function downloadUrl(name: string, url: string) {
-  const blob = await fetch(url, { credentials: "same-origin" }).then((r) => { if (!r.ok) throw new Error("Could not download the file."); return r.blob(); });
+  const blob = await fetch(url, { credentials: "same-origin" }).then((r) => { if (!r.ok) throw new Error(t("library.downloadFailed")); return r.blob(); });
   const href = URL.createObjectURL(blob);
   Object.assign(document.createElement("a"), { href, download: name }).click();
   setTimeout(() => URL.revokeObjectURL(href), 1000);
@@ -94,7 +93,7 @@ function ItemActions({ item, onDeleted }: { item: LibraryItem; onDeleted: () => 
       void useData.getState().refreshStorage().catch(() => {});
       onDeleted();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not delete file.");
+      setError(cause instanceof Error ? cause.message : t("library.deleteFileFailed"));
     } finally {
       setBusy(false);
     }
@@ -104,17 +103,17 @@ function ItemActions({ item, onDeleted }: { item: LibraryItem; onDeleted: () => 
       {error && <p role="alert" className="text-destructive text-xs">{error}</p>}
       {downloadable(item) && (
         <Button variant="outline" size="sm" onClick={() => void downloadItem(item).catch((e: Error) => setError(e.message))}>
-          <DownloadIcon /> Download
+          <DownloadIcon /> {t("common.download")}
         </Button>
       )}
       {item.threadId ? <OpenChatButton threadId={item.threadId} /> : null}
       {item.deletable ? (
         <Button variant="destructive" size="sm" onClick={remove} disabled={busy}>
           {confirming ? (
-            <>Really delete?</>
+            <>{t("library.reallyDelete")}</>
           ) : (
             <>
-              <TrashIcon /> Delete
+              <TrashIcon /> {t("common.delete")}
             </>
           )}
         </Button>
@@ -138,7 +137,7 @@ function OpenChatButton({ threadId }: { threadId: string }) {
         showChat(navigate);
       }}
     >
-      <MessageCircleIcon /> Open chat
+      <MessageCircleIcon /> {t("library.openChat")}
     </Button>
   );
 }
@@ -160,7 +159,7 @@ function ArtifactPreview({ item }: { item: LibraryItem }) {
   if (!version) {
     return (
       <div className="text-muted-foreground flex h-24 items-center justify-center gap-2 text-sm">
-        <Loader2Icon className="size-4 animate-spin" /> Loading {item.name}
+        <Loader2Icon className="size-4 animate-spin" /> {t("library.loadingFile", { name: item.name })}
       </div>
     );
   }
@@ -205,19 +204,19 @@ function ItemPreviewBody({ item }: { item: LibraryItem }) {
   return (
     <div className="text-muted-foreground flex h-full flex-col items-center justify-center gap-3 text-sm">
       <Icon className="size-10" />
-      <p>No inline preview. Download the file to view it.</p>
+      <p>{t("library.noPreview")}</p>
     </div>
   );
 }
 
 function TextFilePreview({ url }: { url: string }) {
-  const [text, setText] = useState("Loading…");
+  const [text, setText] = useState(t("common.loading"));
   useEffect(() => {
     let active = true;
     fetch(url).then(async (r) => {
-      if (!r.ok) throw new Error("Could not preview this file.");
+      if (!r.ok) throw new Error(t("library.previewFailed"));
       const body = await r.json() as { text: string; truncated?: boolean };
-      if (active) setText(body.text + (body.truncated ? "\n[Preview truncated]" : ""));
+      if (active) setText(body.text + (body.truncated ? "\n" + t("library.previewTruncated") : ""));
     }).catch((e: Error) => { if (active) setText(e.message); });
     return () => { active = false; };
   }, [url]);
@@ -235,7 +234,7 @@ function ItemPreviewDialog({ item, onClose, onDeleted }: { item: LibraryItem | n
               <div className="min-w-0 pr-8 sm:flex-1 sm:pr-0">
                 <DialogTitle className="truncate text-sm font-medium">{item.name}</DialogTitle>
                 <p className="text-muted-foreground truncate text-xs">
-                  {KIND_LABELS[item.kind]} · {formatSize(item.size)} · {formatDate(item.createdAt)}
+                  {t(KIND_LABELS[item.kind])} · {formatSize(item.size)} · {formatDate(item.createdAt)}
                   {item.threadTitle ? ` · ${item.threadTitle}` : ""}
                 </p>
               </div>
@@ -292,7 +291,7 @@ function GridCard({ item, onOpen, selection }: { item: LibraryItem; onOpen: () =
       <div className="flex flex-col gap-0.5 px-3 py-2">
         <span className="truncate text-sm">{item.name}</span>
         <span className="text-muted-foreground truncate text-xs">
-          {KIND_LABELS[item.kind]} · {formatSize(item.size)} · {formatDate(item.createdAt)}
+          {t(KIND_LABELS[item.kind])} · {formatSize(item.size)} · {formatDate(item.createdAt)}
         </span>
       </div>
     </button>
@@ -313,7 +312,7 @@ function ListRow({ item, onOpen, selection }: { item: LibraryItem; onOpen: () =>
       {selection && <SelectionCheck checked={selection.selected} />}
       <Icon className="text-muted-foreground size-4 shrink-0" />
       <span className="min-w-0 flex-1 truncate text-sm">{item.name}</span>
-      <span className="text-muted-foreground hidden w-28 shrink-0 truncate text-xs sm:block">{KIND_LABELS[item.kind]}</span>
+      <span className="text-muted-foreground hidden w-28 shrink-0 truncate text-xs sm:block">{t(KIND_LABELS[item.kind])}</span>
       <span className="text-muted-foreground hidden w-20 shrink-0 text-xs tabular-nums sm:block">{formatSize(item.size)}</span>
       <span className="text-muted-foreground hidden w-36 shrink-0 truncate text-xs md:block">{item.threadTitle ?? "—"}</span>
       <span className="text-muted-foreground w-24 shrink-0 text-right text-xs tabular-nums">{formatDate(item.createdAt)}</span>
@@ -337,8 +336,8 @@ export function LibraryPage() {
       </div>
       <div hidden={section !== "archived"} className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 pt-6 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-6">
         <header>
-          <h1 className="text-xl font-semibold tracking-tight">Library</h1>
-          <p className="text-muted-foreground mt-1 text-sm">Archived chats from every project.</p>
+          <h1 className="text-xl font-semibold tracking-tight">{t("library.title")}</h1>
+          <p className="text-muted-foreground mt-1 text-sm">{t("library.archivedIntro")}</p>
         </header>
         <ArchivedChats tabs={tabs} />
       </div>
@@ -348,7 +347,7 @@ export function LibraryPage() {
 
 function LibrarySectionSwitch({ section, onChange }: { section: LibrarySection; onChange: (section: LibrarySection) => void }) {
   return (
-    <div aria-label="Library section" className="bg-muted/60 flex self-start rounded-lg p-0.5">
+    <div aria-label={t("library.sectionLabel")} className="bg-muted/60 flex self-start rounded-lg p-0.5">
       {(["files", "archived"] as const).map((s) => (
         <button
           key={s}
@@ -360,7 +359,7 @@ function LibrarySectionSwitch({ section, onChange }: { section: LibrarySection; 
             section === s && "bg-background text-foreground shadow-sm",
           )}
         >
-          {s === "files" ? "Files" : "Archived chats"}
+          {s === "files" ? t("library.files") : t("library.archivedChats")}
         </button>
       ))}
     </div>
@@ -414,7 +413,7 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
         setItems((prev) => (nextCursor && prev ? [...prev, ...page.items] : page.items));
         setCursor(page.nextCursor);
       } catch (cause) {
-        if (id === requestId.current) { setItems((prev) => prev ?? []); setError(cause instanceof Error ? cause.message : "Could not load files."); }
+        if (id === requestId.current) { setItems((prev) => prev ?? []); setError(cause instanceof Error ? cause.message : t("library.loadFilesFailed")); }
       } finally {
         if (id === requestId.current) setLoading(false);
       }
@@ -484,7 +483,7 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
       setCursor(null);
       selection.selectAll(all.map((i) => i.id));
     } catch (cause) {
-      if (id === requestId.current) setBulkError(cause instanceof Error ? cause.message : "Could not load every file.");
+      if (id === requestId.current) setBulkError(cause instanceof Error ? cause.message : t("library.loadEveryFileFailed"));
     } finally {
       if (id === requestId.current) {
         setLoading(false);
@@ -501,7 +500,7 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
     setBulkError(null);
     // One at a time: browsers drop downloads started in a burst.
     const { failed, error } = await runBatch(files, downloadItem, 1);
-    if (failed.length) setBulkError(batchError(failed.length, files.length, "download", error));
+    if (failed.length) setBulkError(withReason(failed.length === files.length ? t("library.downloadFilesFailedAll") : t("library.downloadFilesFailedSome", { failed: failed.length, total: files.length }), error));
     setBulkBusy(false);
   };
 
@@ -513,7 +512,7 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
     if (gone.size) void useData.getState().refreshStorage().catch(() => {});
     if (failed.length) {
       setDeleting((prev) => ({ ...prev, count: failed.length }));
-      throw new Error(batchError(failed.length, deletable.length, "be deleted", error));
+      throw new Error(withReason(failed.length === deletable.length ? t("library.deleteFilesFailedAll") : t("library.deleteFilesFailedSome", { failed: failed.length, total: deletable.length }), error));
     }
     setSelecting(false);
   };
@@ -523,15 +522,15 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
       {error && <p role="alert" className="text-destructive text-sm">{error}</p>}
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Library</h1>
-          <p className="text-muted-foreground mt-1 text-sm">Every file your chats received or created, in one place.</p>
+          <h1 className="text-xl font-semibold tracking-tight">{t("library.title")}</h1>
+          <p className="text-muted-foreground mt-1 text-sm">{t("library.filesIntro")}</p>
         </div>
         <div className="bg-muted/60 flex rounded-lg p-0.5">
           {(["grid", "list"] as const).map((v) => (
             <button
               key={v}
               type="button"
-              aria-label={v === "grid" ? "Grid view" : "List view"}
+              aria-label={v === "grid" ? t("library.gridView") : t("library.listView")}
               aria-pressed={view === v}
               onClick={() => {
                 setView(v);
@@ -565,43 +564,43 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
                 kind === k ? "depth-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
               )}
             >
-              {k === "all" ? "All" : KIND_LABELS[k]}
+              {k === "all" ? t("library.kindAll") : t(KIND_LABELS[k])}
             </button>
           ))}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-0 flex-1 basis-56">
             <SearchIcon className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
-            <Input value={search} onChange={(e) => setSearch(e.currentTarget.value)} placeholder="Search by name…" aria-label="Search the library" className="pl-8" />
+            <Input value={search} onChange={(e) => setSearch(e.currentTarget.value)} placeholder={t("library.searchPlaceholder")} aria-label={t("library.searchLabel")} className="pl-8" />
           </div>
           <Select
-            aria-label="Source"
+            aria-label={t("library.sourceLabel")}
             className="w-40"
             value={source}
             onValueChange={setSource}
             options={[
-              { value: "all", label: "All sources" },
-              { value: "uploaded", label: "Uploaded" },
-              { value: "generated", label: "Created in chat" },
+              { value: "all", label: t("library.allSources") },
+              { value: "uploaded", label: t("library.uploaded") },
+              { value: "generated", label: t("library.createdInChat") },
             ]}
           />
           <Select
-            aria-label="Project"
+            aria-label={t("library.projectLabel")}
             className="w-44"
             value={project}
             onValueChange={setProject}
-            options={[{ value: "all", label: "All projects" }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
+            options={[{ value: "all", label: t("library.allProjects") }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
           />
           <Select
-            aria-label="Sort"
+            aria-label={t("library.sortLabel")}
             className="w-40"
             value={sort}
             onValueChange={setSort}
             options={[
-              { value: "newest", label: "Newest" },
-              { value: "oldest", label: "Oldest" },
-              { value: "name", label: "Name" },
-              { value: "size", label: "Size" },
+              { value: "newest", label: t("library.sortNewest") },
+              { value: "oldest", label: t("library.sortOldest") },
+              { value: "name", label: t("library.sortName") },
+              { value: "size", label: t("library.sortSize") },
             ]}
           />
         </div>
@@ -618,8 +617,8 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
       ) : items.length === 0 ? (
         <div className="flex flex-col items-center py-16 text-center">
           <PaperclipIcon aria-hidden className="text-muted-foreground mb-5 size-8" />
-          <h2 className="text-base font-medium">Nothing here yet</h2>
-          <p className="text-muted-foreground mt-2 max-w-xs text-sm">Files you attach and things your chats create — images, documents, spreadsheets — collect here.</p>
+          <h2 className="text-base font-medium">{t("library.emptyTitle")}</h2>
+          <p className="text-muted-foreground mt-2 max-w-xs text-sm">{t("library.emptyBody")}</p>
         </div>
       ) : view === "grid" ? (
         <div aria-busy={refreshing} className={cn("grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4", fade)}>
@@ -638,7 +637,7 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
       {cursor && (
         <div ref={sentinel} className="flex justify-center">
           <Button variant="outline" size="sm" disabled={loading} onClick={() => void load(cursor)}>
-            {loading ? <Loader2Icon className="animate-spin" /> : null} Load more
+            {loading ? <Loader2Icon className="animate-spin" /> : null} {t("library.loadMore")}
           </Button>
         </div>
       )}
@@ -652,9 +651,9 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
           onClear={selection.clear}
           error={bulkError}
         >
-          {bulkBusy && <Loader2Icon aria-label="Working" className="text-muted-foreground mx-1 size-4 animate-spin" />}
+          {bulkBusy && <Loader2Icon aria-label={t("library.working")} className="text-muted-foreground mx-1 size-4 animate-spin" />}
           <Button variant="ghost" size="sm" disabled={bulkBusy || !selectedItems.some(downloadable)} onClick={() => void downloadSelected()} className="pointer-coarse:h-10">
-            <DownloadIcon /> Download
+            <DownloadIcon /> {t("common.download")}
           </Button>
           <Button
             variant="ghost"
@@ -666,7 +665,7 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
             }}
             className="text-destructive hover:bg-destructive/10 hover:text-destructive pointer-coarse:h-10"
           >
-            <TrashIcon /> Delete
+            <TrashIcon /> {t("common.delete")}
           </Button>
         </FloatingSelectionBar>
       )}
@@ -674,14 +673,14 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
       <BulkDeleteDialog
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
-        title={deleting.count === 1 ? "Delete 1 file permanently?" : `Delete ${deleting.count} files permanently?`}
+        title={t("library.deleteFilesTitle", { count: deleting.count })}
         description={
           <>
-            {deleting.count === 1 ? "It is" : "They are"} removed for good and free their storage.
-            {deleting.kept > 0 && ` ${deleting.kept === 1 ? "1 selected artifact can't be deleted here and stays" : `${deleting.kept} selected artifacts can't be deleted here and stay`}.`}
+            {t("library.deleteFilesBody", { count: deleting.count })}
+            {deleting.kept > 0 && ` ${t("library.keptArtifacts", { count: deleting.kept })}`}
           </>
         }
-        confirmLabel={`Delete ${deleting.count}`}
+        confirmLabel={t("library.deleteCount", { count: deleting.count })}
         onConfirm={deleteSelected}
       />
 

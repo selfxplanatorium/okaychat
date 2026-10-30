@@ -13,6 +13,7 @@ import { generateId, lastAssistantMessageIsCompleteWithApprovalResponses, lastAs
 import { createAssistantStream } from "assistant-stream";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { ThreadSummary } from "@shared/types";
+import { t } from "@/i18n";
 import { api, takePrefetched } from "@/lib/api";
 import { toolkit, widgetHelperRenders } from "@/components/chat/tool-ui";
 import { WidgetInstructions, widgets } from "@/components/genui/toolkit";
@@ -120,13 +121,13 @@ const threadListAdapter: RemoteThreadListAdapter = {
     await api(`/threads/${remoteId}`, { method: "DELETE" });
   },
   async fetch(remoteId) {
-    if (isTemporaryChat(remoteId)) return { remoteId, status: "regular", title: "Temporary chat" };
-    const t = await api<ThreadSummary>(`/threads/${remoteId}`);
-    if (t.modelRef) useData.getState().rememberThreadModels({ [t.id]: t.modelRef });
-    return { remoteId: t.id, status: t.status, title: t.title ?? undefined, lastMessageAt: new Date(t.updatedAt), custom: threadCustom(t) };
+    if (isTemporaryChat(remoteId)) return { remoteId, status: "regular", title: t("composer.temporaryChat") };
+    const thread = await api<ThreadSummary>(`/threads/${remoteId}`);
+    if (thread.modelRef) useData.getState().rememberThreadModels({ [thread.id]: thread.modelRef });
+    return { remoteId: thread.id, status: thread.status, title: thread.title ?? undefined, lastMessageAt: new Date(thread.updatedAt), custom: threadCustom(thread) };
   },
   async generateTitle(remoteId, messages) {
-    if (isTemporaryChat(remoteId)) return createAssistantStream(async (controller) => { controller.appendText("Temporary chat"); });
+    if (isTemporaryChat(remoteId)) return createAssistantStream(async (controller) => { controller.appendText(t("composer.temporaryChat")); });
     const text = messages
       .filter((m) => m.role === "user")
       .flatMap((m) => m.content)
@@ -218,7 +219,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
             if (isTemporaryChat(remoteId)) return;
             // The UI blocks edits until the server's rows are on screen; this catches any caller that slips past.
             // Throwing leaves the message unpersisted in assistant-ui, so it is written again on the next settle.
-            if (useThreadSyncStore.getState().byId[remoteId]) throw new Error("Chat is not synced with the server yet.");
+            if (useThreadSyncStore.getState().byId[remoteId]) throw new Error(t("composer.notSynced"));
             await tracked(remoteId, api(`/threads/${remoteId}/messages`, {
               method: "POST",
               json: { id: localMessageId, parent_id: item.parentId, format: fmt.format, content: fmt.encode(item) },

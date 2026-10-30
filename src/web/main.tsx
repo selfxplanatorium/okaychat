@@ -10,6 +10,8 @@ import "@fontsource/ubuntu-mono";
 import "./fonts/bundled.css";
 import "./index.css";
 import { installIconMotion } from "./motion/icons";
+import { loadLocale } from "./i18n";
+import { localeLoaders } from "./i18n/locales";
 
 installIconMotion();
 
@@ -19,8 +21,11 @@ if (import.meta.env.PROD && "serviceWorker" in navigator) {
   window.addEventListener("load", () => void navigator.serviceWorker.register("/sw.js").catch(() => {}));
 }
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
+// English resolves at once; another language loads its chunk before the first render.
+void loadLocale(localeLoaders).then(() =>
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  ),
 );

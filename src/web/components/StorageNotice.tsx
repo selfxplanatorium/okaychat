@@ -1,5 +1,6 @@
 import { TriangleAlertIcon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
+import { t } from "@/i18n";
 import { useData } from "@/state/data";
 import { storagePercent } from "./StorageMeter";
 
@@ -48,10 +49,10 @@ export function StorageNotice() {
       <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden />
       <p className="min-w-0">
         {full
-          ? "Your storage is full — uploads and generated files are rejected until you delete old chats, attachments, or fonts."
-          : "You are close to your storage limit."}
+          ? t("shell.storageFullNotice")
+          : t("shell.storageNear")}
       </p>
-      <button type="button" aria-label="Dismiss" onClick={dismiss} className="hover:text-foreground shrink-0 rounded p-0.5 transition-colors duration-(--motion-fast)">
+      <button type="button" aria-label={t("shell.dismiss")} onClick={dismiss} className="hover:text-foreground shrink-0 rounded p-0.5 transition-colors duration-(--motion-fast)">
         <XIcon className="size-3.5" />
       </button>
     </div>

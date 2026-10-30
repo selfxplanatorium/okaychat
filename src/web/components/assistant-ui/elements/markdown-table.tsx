@@ -6,6 +6,7 @@ import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-ic
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { cn } from "@/lib/utils";
+import { t } from "@/i18n";
 
 type Format = "csv" | "markdown" | "plain";
 
@@ -98,7 +99,7 @@ export const MarkdownTable: FC<ComponentProps<"table">> = ({ className, children
       </div>
       <div className="border-border/60 flex items-center justify-between gap-2 border-t px-2 py-1.5">
         <TooltipIconButton
-          tooltip={expanded ? "Collapse all cells" : "Expand all cells"}
+          tooltip={expanded ? t("thread.collapseCells") : t("thread.expandCells")}
           side="top"
           aria-pressed={expanded}
           onClick={toggleExpanded}
@@ -107,7 +108,7 @@ export const MarkdownTable: FC<ComponentProps<"table">> = ({ className, children
         </TooltipIconButton>
         <div className="flex items-center gap-1">
           <Menu>
-            <MenuTrigger render={<TooltipIconButton tooltip="Download table" side="top" />}>
+            <MenuTrigger render={<TooltipIconButton tooltip={t("thread.downloadTable")} side="top" />}>
               <DownloadIcon aria-hidden />
             </MenuTrigger>
             <MenuContent side="bottom" align="end" className="min-w-36">
@@ -120,7 +121,7 @@ export const MarkdownTable: FC<ComponentProps<"table">> = ({ className, children
           </Menu>
           <TooltipIconButton
             ref={copyRef}
-            tooltip={<>Copy table contents<br /><span className="text-muted-foreground">(right click for more)</span></>}
+            tooltip={<>{t("thread.copyTable")}<br /><span className="text-muted-foreground">{t("thread.rightClickMore")}</span></>}
             side="top"
             onClick={() => copyToClipboard(text("plain"))}
             onContextMenu={(e) => {
@@ -140,7 +141,7 @@ export const MarkdownTable: FC<ComponentProps<"table">> = ({ className, children
                   </MenuItem>
                 ))}
                 <MenuItem onClick={() => copyToClipboard(text("plain"))}>
-                  <TextIcon /> Plain
+                  <TextIcon /> {t("thread.plain")}
                 </MenuItem>
               </MenuContent>
             </Menu>

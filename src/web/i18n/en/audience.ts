@@ -1,0 +1,15 @@
+export default {
+  everyone: "Everyone",
+  nobody: "Nobody",
+  groupCount: { one: "{count} group", other: "{count} groups" },
+  userCount: { one: "{count} user", other: "{count} users" },
+  groupsAndUsers: "{groups}, {users}",
+  filter: "Filter",
+  filterLabel: "Filter {label}",
+  whoCanUse: "Who can use it",
+  specific: "Specific groups and users",
+  groups: "Groups",
+  users: "Users",
+  noGroups: "No groups yet. Create them under Admin → Groups.",
+  nobodyHasAccess: "Nobody gets access until you pick a group or user.",
+} as const;

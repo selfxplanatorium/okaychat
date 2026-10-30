@@ -14,6 +14,8 @@ import {
 import type { FileMessagePartComponent } from "@assistant-ui/react";
 import { cn } from "@/lib/utils";
 import { AudioPlayer, VideoPlayer } from "./media-player";
+import { t } from "@/i18n";
+import { formatBytes } from "@/i18n/format";
 
 const fileVariants = cva(
   "aui-file-root animate-fade-in inline-flex items-center gap-3 rounded-lg transition-colors duration-(--motion-fast) ease-out-quart",
@@ -141,19 +143,13 @@ function getFileLabel(mimeType: string): string {
   const subtype = /^[^/;]+\/(?:x-)?(?:[^;+]*\.)?([^;+.\s]+)/.exec(
     mimeType.toLowerCase(),
   )?.[1];
-  if (!subtype || subtype === "octet-stream") return "File";
-  if (subtype === "plain") return "Text file";
-  return `${subtype.toUpperCase()} file`;
+  if (!subtype || subtype === "octet-stream") return t("thread.kindFile");
+  if (subtype === "plain") return t("thread.kindTextFile");
+  return t("thread.kindTypeFile", { type: subtype.toUpperCase() });
 }
 
 function formatFileSize(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return formatBytes(bytes);
 }
 
 export type FileRootProps = React.ComponentProps<"div"> &
@@ -214,7 +210,7 @@ function FileName({
       className={cn("min-w-0 flex-1 truncate font-medium", className)}
       {...props}
     >
-      {children || "Unnamed file"}
+      {children || t("thread.unnamedFile")}
     </span>
   );
 }
@@ -266,7 +262,7 @@ function FileDownload({
         "text-muted-foreground hover:bg-accent hover:text-accent-foreground shrink-0 rounded-md p-1 transition-colors",
         className,
       )}
-      aria-label={!children ? `Download ${filename || "file"}` : undefined}
+      aria-label={!children ? t("thread.downloadName", { name: filename || t("thread.fileWord") }) : undefined}
       {...props}
     >
       {children || <DownloadIcon className="size-4" />}

@@ -47,9 +47,3 @@ export async function runBatch<T>(items: readonly T[], task: (item: T) => unknow
   );
   return { failed, error };
 }
-
-/** One line for a bulk action that partly or fully failed; `verb` is e.g. "delete". */
-export function batchError(failed: number, total: number, verb: string, error: unknown) {
-  const reason = error instanceof Error && error.message ? ` ${error.message}` : "";
-  return failed === total ? `Could not ${verb} the selection.${reason}` : `${failed} of ${total} could not ${verb}.${reason}`;
-}

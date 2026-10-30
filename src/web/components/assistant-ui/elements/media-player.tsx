@@ -10,6 +10,7 @@ import {
 import { PauseIcon, PlayIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { field, inkButton, mono, paper } from "./surfaces";
+import { t } from "@/i18n";
 
 export interface AudioPlayerProps extends Omit<
   ComponentProps<"div">,
@@ -106,8 +107,7 @@ export function AudioPlayer({
         : { src, currentTime: 0, playing: false, hasError: false }),
       ...patch,
     }));
-  const displayTitle = title ?? "Audio";
-  const playbackLabel = title ? ` ${title}` : " audio";
+  const displayTitle = title ?? t("thread.audio");
   const durationLabel =
     duration === undefined ? "--:--" : formatDuration(duration);
 
@@ -155,7 +155,7 @@ export function AudioPlayer({
       ) : null}
       <button
         type="button"
-        aria-label={`${playing ? "Pause" : "Play"}${playbackLabel}`}
+        aria-label={title ? t(playing ? "thread.pauseName" : "thread.playName", { name: title }) : t(playing ? "thread.pauseAudio" : "thread.playAudio")}
         disabled={hasError}
         onClick={togglePlayback}
         className={cn(
@@ -179,8 +179,8 @@ export function AudioPlayer({
           max={duration ?? 0}
           step={0.1}
           value={Math.min(currentTime, duration ?? 0)}
-          aria-label="Seek"
-          aria-valuetext={`${formatDuration(currentTime)} of ${durationLabel}`}
+          aria-label={t("thread.seek")}
+          aria-valuetext={t("thread.timeOf", { current: formatDuration(currentTime), total: durationLabel })}
           disabled={hasError}
           onChange={(event) => {
             const nextTime = Number(event.currentTarget.value);
@@ -212,7 +212,7 @@ export function AudioPlayer({
       />
       {hasError ? (
         <span role="alert" className="text-muted-foreground text-xs">
-          Can't play this audio
+          {t("thread.audioError")}
         </span>
       ) : null}
     </div>
@@ -259,7 +259,7 @@ export function VideoPlayer({
           controls
           playsInline
           preload="metadata"
-          aria-label={title ?? "Video"}
+          aria-label={title ?? t("thread.video")}
           className={cn(
             "block max-w-full",
             ratio !== "auto" && "h-full w-full object-contain",

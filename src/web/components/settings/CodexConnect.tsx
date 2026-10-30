@@ -2,6 +2,7 @@ import { CheckIcon, CopyIcon, ExternalLinkIcon, Loader2Icon } from "lucide-react
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
 
 type CodexStatus = { version: string | null; connected: boolean; login: { url?: string; code?: string; error?: string } | null };
@@ -31,7 +32,7 @@ export function CodexConnect({ onChange }: { onChange?: () => void }) {
   }, [waiting, refresh]);
 
   if (!status) return null;
-  if (!status.version) return <p className="text-muted-foreground animate-rise-in text-sm">The Codex CLI is not installed on this server.</p>;
+  if (!status.version) return <p className="text-muted-foreground animate-rise-in text-sm">{t("providers.codexMissing")}</p>;
 
   const connect = async () => {
     setBusy(true);
@@ -54,10 +55,10 @@ export function CodexConnect({ onChange }: { onChange?: () => void }) {
     return (
       <div className="animate-rise-in flex items-center gap-3">
         <span className="text-success flex items-center gap-1.5 text-sm">
-          <CheckIcon className="animate-pop-in size-4" /> Connected
+          <CheckIcon className="animate-pop-in size-4" /> {t("providers.connected")}
         </span>
         <Button size="sm" variant="outline" onClick={disconnect}>
-          Disconnect
+          {t("common.disconnect")}
         </Button>
       </div>
     );
@@ -67,17 +68,17 @@ export function CodexConnect({ onChange }: { onChange?: () => void }) {
     return (
       <div className="animate-rise-in flex flex-col items-end gap-2 text-sm">
         <a href={status.login!.url} target="_blank" rel="noreferrer" className="text-primary flex items-center gap-1 transition-colors duration-(--motion-fast) hover:underline">
-          Open {new URL(status.login!.url!).host} <ExternalLinkIcon className="size-3.5" />
+          {t("providers.openHost", { host: new URL(status.login!.url!).host })} <ExternalLinkIcon className="size-3.5" />
         </a>
-        <button type="button" onClick={() => copyToClipboard(status.login!.code!)} className="bg-muted flex items-center gap-2 rounded-lg px-3 py-1.5 font-mono text-base tracking-wider" aria-label="Copy code">
+        <button type="button" onClick={() => copyToClipboard(status.login!.code!)} className="bg-muted flex items-center gap-2 rounded-lg px-3 py-1.5 font-mono text-base tracking-wider" aria-label={t("providers.copyCode")}>
           {status.login!.code}
           {isCopied ? <CheckIcon className="animate-pop-in size-4" /> : <CopyIcon className="text-muted-foreground size-4" />}
         </button>
         <span className="text-muted-foreground animate-pulse-soft flex items-center gap-1.5 text-xs">
-          <Loader2Icon className="size-3 animate-spin" /> Waiting for approval
+          <Loader2Icon className="size-3 animate-spin" /> {t("providers.waitingForApproval")}
         </span>
         <Button size="xs" variant="ghost" onClick={disconnect}>
-          Cancel
+          {t("common.cancel")}
         </Button>
       </div>
     );
@@ -87,7 +88,7 @@ export function CodexConnect({ onChange }: { onChange?: () => void }) {
     <div className="animate-rise-in flex flex-col items-end gap-1">
       <Button size="sm" variant="outline" onClick={connect} disabled={busy}>
         {busy && <Loader2Icon className="animate-spin" />}
-        Connect ChatGPT
+        {t("providers.connectChatgpt")}
       </Button>
       {(error ?? status.login?.error) && <span className="text-error animate-fade-in text-xs">{error ?? status.login?.error}</span>}
     </div>

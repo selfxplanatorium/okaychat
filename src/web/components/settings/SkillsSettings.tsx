@@ -5,14 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { t } from "@/i18n";
+import { formatList, formatTokens } from "@/i18n/format";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { SettingsPage, SettingsSection } from "./SettingsUI";
 
 // Skills are reusable SKILL.md instruction packages (Anthropic Agent Skills format). The account
 // preference gates everything: off, no chat sees the skill index or any skill tool.
-
-const formatChars = (n: number) => (n < 1024 ? `${n}` : `${Math.round(n / 1024)}k`);
 
 function useSkillData() {
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -69,11 +69,11 @@ function SkillForm({ initial, onDone, onCancel }: { initial?: SkillDetail; onDon
       }}
     >
       <div className="grid gap-3 sm:grid-cols-2">
-        <Input placeholder="skill-name (kebab-case)" value={name} onChange={(e) => setName(e.target.value)} required autoFocus spellCheck={false} />
-        <Input placeholder="One sentence: what it does and when to use it" value={description} onChange={(e) => setDescription(e.target.value)} required maxLength={1024} />
+        <Input placeholder={t("skills.namePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} required autoFocus spellCheck={false} />
+        <Input placeholder={t("skills.descriptionPlaceholder")} value={description} onChange={(e) => setDescription(e.target.value)} required maxLength={1024} />
       </div>
       <Textarea
-        placeholder={"Instructions the model loads with load_skill:\n## Steps\n1. …"}
+        placeholder={t("skills.bodyPlaceholder")}
         value={body}
         onChange={(e) => setBody(e.target.value)}
         className="min-h-40 font-mono text-xs"
@@ -85,22 +85,22 @@ function SkillForm({ initial, onDone, onCancel }: { initial?: SkillDetail; onDon
           {files.map((file, i) => (
             <div key={i} className="border-border rounded-lg border p-2">
               <div className="flex items-center gap-2">
-                <Input value={file.name} onChange={(e) => setFiles(files.toSpliced(i, 1, { ...file, name: e.target.value }))} className="font-mono text-xs" spellCheck={false} aria-label="File name" />
-                <button type="button" aria-label={`Remove ${file.name}`} onClick={() => setFiles(files.toSpliced(i, 1))} className="text-muted-foreground hover:text-destructive rounded p-1">
+                <Input value={file.name} onChange={(e) => setFiles(files.toSpliced(i, 1, { ...file, name: e.target.value }))} className="font-mono text-xs" spellCheck={false} aria-label={t("skills.fileName")} />
+                <button type="button" aria-label={t("skills.removeFile", { name: file.name })} onClick={() => setFiles(files.toSpliced(i, 1))} className="text-muted-foreground hover:text-destructive rounded p-1">
                   <TrashIcon className="size-3.5" />
                 </button>
               </div>
-              <Textarea value={file.content} onChange={(e) => setFiles(files.toSpliced(i, 1, { ...file, content: e.target.value }))} className="mt-2 min-h-16 font-mono text-xs" spellCheck={false} aria-label={`Content of ${file.name}`} />
+              <Textarea value={file.content} onChange={(e) => setFiles(files.toSpliced(i, 1, { ...file, content: e.target.value }))} className="mt-2 min-h-16 font-mono text-xs" spellCheck={false} aria-label={t("skills.fileContent", { name: file.name })} />
             </div>
           ))}
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="submit" disabled={busy} size="sm">{initial ? "Save changes" : "Create skill"}</Button>
+        <Button type="submit" disabled={busy} size="sm">{initial ? t("skills.saveChanges") : t("skills.createSkill")}</Button>
         <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setFiles([...files, { name: "", content: "" }])}>
-          <PlusIcon className="size-3.5" /> Add file
+          <PlusIcon className="size-3.5" /> {t("skills.addFile")}
         </Button>
-        <Button type="button" variant="outline" size="sm" onClick={onCancel}>Cancel</Button>
+        <Button type="button" variant="outline" size="sm" onClick={onCancel}>{t("common.cancel")}</Button>
         {error && <p role="alert" className="text-destructive text-xs">{error}</p>}
       </div>
     </form>
@@ -133,20 +133,21 @@ function SkillRow({ skill, editing, onEdit, onChanged }: { skill: Skill; editing
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate font-mono text-sm">{skill.name}</span>
-          {skill.origin !== "manual" && <span className="text-muted-foreground bg-muted rounded px-1 py-px text-[10px] font-medium">{skill.origin === "conversation" ? "from a chat" : "from a source"}</span>}
+          {skill.origin !== "manual" && <span className="text-muted-foreground bg-muted rounded px-1 py-px text-[10px] font-medium">{skill.origin === "conversation" ? t("skills.fromChat") : t("skills.fromSource")}</span>}
         </div>
         <p className="text-muted-foreground mt-0.5 line-clamp-2 text-xs">{skill.description}</p>
         <p className="text-muted-foreground mt-1 text-[10px]">
-          {formatChars(skill.chars)} chars · {skill.files.length} file{skill.files.length === 1 ? "" : "s"}
-          {skill.files.length > 0 && ` (${skill.files.map((file) => file.name).join(", ")})`}
+          {skill.files.length > 0
+            ? t("skills.sizeAndFilesNamed", { size: formatTokens(skill.chars), count: skill.files.length, names: formatList(skill.files.map((file) => file.name), { type: "unit", style: "narrow" }) })
+            : t("skills.sizeAndFiles", { size: formatTokens(skill.chars), count: 0 })}
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <Switch checked={skill.enabled} disabled={busy} onCheckedChange={(enabled) => void change(enabled)} aria-label={`Enable ${skill.name}`} />
-        <button type="button" aria-label={`Edit ${skill.name}`} onClick={onEdit} className="text-muted-foreground hover:text-foreground rounded p-1.5 transition-colors duration-(--motion-fast)">
+        <Switch checked={skill.enabled} disabled={busy} onCheckedChange={(enabled) => void change(enabled)} aria-label={t("skills.enable", { name: skill.name })} />
+        <button type="button" aria-label={t("skills.edit", { name: skill.name })} onClick={onEdit} className="text-muted-foreground hover:text-foreground rounded p-1.5 transition-colors duration-(--motion-fast)">
           <PencilIcon className="size-4" />
         </button>
-        <button type="button" aria-label={`Delete ${skill.name}`} onClick={() => void remove()} disabled={busy} className="text-muted-foreground hover:text-destructive rounded p-1.5 transition-colors duration-(--motion-fast)">
+        <button type="button" aria-label={t("skills.deleteSkill", { name: skill.name })} onClick={() => void remove()} disabled={busy} className="text-muted-foreground hover:text-destructive rounded p-1.5 transition-colors duration-(--motion-fast)">
           <TrashIcon className="size-4" />
         </button>
       </div>
@@ -201,7 +202,7 @@ function SourceRow({ source, onChanged }: { source: SkillSource; onChanged: () =
               {source.kind === "github" ? <GlobeIcon className="size-3" /> : <FileArchiveIcon className="size-3" />}
               {source.kind}
             </span>
-            {source.hasToken && <span className="text-muted-foreground text-[10px]">with token</span>}
+            {source.hasToken && <span className="text-muted-foreground text-[10px]">{t("skills.withToken")}</span>}
           </div>
           <p className="text-muted-foreground mt-0.5 truncate text-xs">
             {source.url}
@@ -212,16 +213,16 @@ function SourceRow({ source, onChanged }: { source: SkillSource; onChanged: () =
         <div className="flex shrink-0 items-center gap-1.5">
           <Button variant="outline" size="sm" disabled={busy} onClick={() => void load()}>
             {busy ? <Loader2Icon className="size-3.5 animate-spin" /> : <RefreshCwIcon className="size-3.5" />}
-            {listing ? "Refresh" : "Browse"}
+            {listing ? t("common.refresh") : t("skills.browse")}
           </Button>
-          <button type="button" aria-label={`Remove source ${source.name}`} onClick={() => void remove()} disabled={busy} className="text-muted-foreground hover:text-destructive rounded p-1.5 transition-colors duration-(--motion-fast)">
+          <button type="button" aria-label={t("skills.removeSource", { name: source.name })} onClick={() => void remove()} disabled={busy} className="text-muted-foreground hover:text-destructive rounded p-1.5 transition-colors duration-(--motion-fast)">
             <TrashIcon className="size-4" />
           </button>
         </div>
       </div>
       {listing && (
         <div className="mt-2 flex flex-col gap-1.5">
-          {listing.entries.length === 0 && !errors.length && <p className="text-muted-foreground text-xs">No skills found here.</p>}
+          {listing.entries.length === 0 && !errors.length && <p className="text-muted-foreground text-xs">{t("skills.noSkillsFound")}</p>}
           {listing.entries.map((entry) => (
             <div key={entry.path} className="border-border flex items-center justify-between gap-3 rounded-lg border px-2.5 py-2">
               <div className="min-w-0">
@@ -230,7 +231,7 @@ function SourceRow({ source, onChanged }: { source: SkillSource; onChanged: () =
               </div>
               <Button variant="outline" size="sm" disabled={installing !== null} onClick={() => void install(entry.name)}>
                 {installing === entry.name && <Loader2Icon className="size-3.5 animate-spin" />}
-                {installing === entry.name ? "Installing…" : "Install"}
+                {installing === entry.name ? t("skills.installing") : t("skills.install")}
               </Button>
             </div>
           ))}
@@ -256,9 +257,9 @@ function AddSourceForm({ onDone }: { onDone: () => void }) {
     return (
       <div className="px-4 py-3">
         <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-          <PlusIcon className="size-3.5" /> Link a source
+          <PlusIcon className="size-3.5" /> {t("skills.linkSource")}
         </Button>
-        <p className="text-muted-foreground mt-2 text-xs">A GitHub repository, a SKILL.md URL, or a .zip URL. Optional: branch, subpath, and a read-only access token for private repos.</p>
+        <p className="text-muted-foreground mt-2 text-xs">{t("skills.linkSourceHint")}</p>
       </div>
     );
   }
@@ -283,16 +284,16 @@ function AddSourceForm({ onDone }: { onDone: () => void }) {
         void submit();
       }}
     >
-      <Input placeholder="https://github.com/owner/repo, a SKILL.md URL, or a .zip URL" value={url} onChange={(e) => setUrl(e.target.value)} type="url" required autoFocus />
+      <Input placeholder={t("skills.urlPlaceholder")} value={url} onChange={(e) => setUrl(e.target.value)} type="url" required autoFocus />
       <div className="grid gap-2 sm:grid-cols-3">
-        <Input placeholder="Name (optional)" value={name} onChange={(e) => setName(e.target.value)} />
-        <Input placeholder="Branch (optional)" value={branch} onChange={(e) => setBranch(e.target.value)} spellCheck={false} />
-        <Input placeholder="Subpath, e.g. skills/ (optional)" value={subpath} onChange={(e) => setSubpath(e.target.value)} spellCheck={false} />
+        <Input placeholder={t("skills.sourceNamePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} />
+        <Input placeholder={t("skills.branchPlaceholder")} value={branch} onChange={(e) => setBranch(e.target.value)} spellCheck={false} />
+        <Input placeholder={t("skills.subpathPlaceholder")} value={subpath} onChange={(e) => setSubpath(e.target.value)} spellCheck={false} />
       </div>
-      <Input placeholder="Access token for private repos (optional, stored encrypted)" value={token} onChange={(e) => setToken(e.target.value)} type="password" autoComplete="off" spellCheck={false} />
+      <Input placeholder={t("skills.tokenPlaceholder")} value={token} onChange={(e) => setToken(e.target.value)} type="password" autoComplete="off" spellCheck={false} />
       <div className="flex items-center gap-2">
-        <Button type="submit" size="sm" disabled={busy}>Save source</Button>
-        <Button type="button" variant="outline" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+        <Button type="submit" size="sm" disabled={busy}>{t("skills.saveSource")}</Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => setOpen(false)}>{t("common.cancel")}</Button>
         {error && <p role="alert" className="text-destructive text-xs">{error}</p>}
       </div>
     </form>
@@ -311,10 +312,10 @@ function ImportRow({ onChanged }: { onChanged: () => void }) {
       form.append("file", file);
       const res = await api<{ installed: Skill[]; skipped: string[] }>("/skills/import", { method: "POST", body: form });
       const notes = [
-        ...res.installed.map((s) => `installed ${s.name}`),
+        ...res.installed.map((s) => t("skills.importedSkill", { name: s.name })),
         ...res.skipped,
       ];
-      setResult(notes.join(" · ") || "Nothing imported.");
+      setResult(notes.join(" · ") || t("skills.nothingImported"));
       onChanged();
     } catch (e) {
       setResult((e as Error).message);
@@ -330,7 +331,7 @@ function ImportRow({ onChanged }: { onChanged: () => void }) {
         type="file"
         accept=".md,.zip,text/markdown,application/zip"
         className="sr-only"
-        aria-label="Import a SKILL.md or .zip"
+        aria-label={t("skills.importFile")}
         disabled={busy}
         onChange={(e) => {
           const file = e.target.files?.[0];
@@ -339,7 +340,7 @@ function ImportRow({ onChanged }: { onChanged: () => void }) {
       />
       <Button variant="outline" size="sm" disabled={busy} onClick={() => inputRef.current?.click()}>
         {busy ? <Loader2Icon className="size-3.5 animate-spin" /> : <PackageIcon className="size-3.5" />}
-        Import a SKILL.md or .zip
+        {t("skills.importFile")}
       </Button>
       {result && <p className="text-muted-foreground mt-2 text-xs">{result}</p>}
     </div>
@@ -368,25 +369,25 @@ export function SkillsSettings({ embedded = false }: { embedded?: boolean }) {
   };
   return (
     <SettingsPage
-      title={embedded ? "" : "Skills"}
-      description="Reusable instruction packages for your chats (Agent Skills format: a SKILL.md plus optional reference files)."
+      title={embedded ? "" : t("skills.title")}
+      description={t("skills.description")}
     >
-      <SettingsSection title="Use skills in chats" description="When on, each chat sees the index of enabled skills and can load their instructions on demand. Installing and creating skills always asks you first.">
+      <SettingsSection title={t("skills.useInChats")} description={t("skills.useInChatsDescription")}>
         <div className="flex items-center justify-between px-4 py-3">
           <p className="text-muted-foreground text-xs">
             {prefs.enabled
-              ? "Enabled. Chats load skill bodies only when a task matches."
-              : "Off. Chats see no skills and no skill tools."}
+              ? t("skills.statusEnabled")
+              : t("skills.statusOff")}
           </p>
-          <Switch checked={prefs.enabled} disabled={toggleBusy} onCheckedChange={(enabled) => void toggle(enabled)} aria-label="Use skills in chats" />
+          <Switch checked={prefs.enabled} disabled={toggleBusy} onCheckedChange={(enabled) => void toggle(enabled)} aria-label={t("skills.useInChats")} />
         </div>
       </SettingsSection>
       <SettingsSection
-        title="Installed skills"
-        description={`${skills.length} installed`}
+        title={t("skills.installed")}
+        description={t("skills.installedCount", { count: skills.length })}
         action={
           <Button size="sm" variant="outline" onClick={() => setEditingId("new")}>
-            <PlusIcon className="size-3.5" /> New skill
+            <PlusIcon className="size-3.5" /> {t("skills.newSkill")}
           </Button>
         }
       >
@@ -394,7 +395,7 @@ export function SkillsSettings({ embedded = false }: { embedded?: boolean }) {
           <SkillRow key={skill.id} skill={skill} editing={editingId === skill.id} onEdit={() => setEditingId(skill.id)} onChanged={refresh} />
         ))}
         {skills.length === 0 && (
-          <p className="text-muted-foreground px-4 py-4 text-sm">No skills yet. Create one, import a SKILL.md or .zip, or install from a source below.</p>
+          <p className="text-muted-foreground px-4 py-4 text-sm">{t("skills.empty")}</p>
         )}
         {editingId !== null && (
           <div className="border-border border-t">
@@ -406,10 +407,10 @@ export function SkillsSettings({ embedded = false }: { embedded?: boolean }) {
           </div>
         )}
       </SettingsSection>
-      <SettingsSection title="Import">
+      <SettingsSection title={t("skills.importSection")}>
         <ImportRow onChanged={() => { refresh(); }} />
       </SettingsSection>
-      <SettingsSection title="Skill sources" description="Linked GitHub repos or raw files. Sources are fetched server-side; their content is stored as text and never executed.">
+      <SettingsSection title={t("skills.sources")} description={t("skills.sourcesDescription")}>
         {sources.map((source) => (
           <SourceRow key={source.id} source={source} onChanged={refresh} />
         ))}

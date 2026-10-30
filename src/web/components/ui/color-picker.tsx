@@ -9,6 +9,7 @@ import {
 } from "react";
 
 import type { HsvColor } from "@/lib/color";
+import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 function clamp(value: number) {
@@ -123,8 +124,7 @@ export function ColorSaturationValuePlane({
       {...handlers}
     >
       <span id={instructionsId} className="sr-only">
-        Use arrow keys to adjust the focused value. Hold Shift for larger steps. Use Home and End
-        for the minimum and maximum. Press Tab to move between saturation and brightness.
+        {t("ui.colorPickerHelp")}
       </span>
       {(
         [

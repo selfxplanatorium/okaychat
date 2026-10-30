@@ -4,6 +4,7 @@ import type { HLJSApi } from "highlight.js";
 import { CopyFeedbackIcon } from "@/components/assistant-ui/elements/surfaces";
 import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { t } from "@/i18n";
 import { useAppearance } from "@/state/appearance";
 import "./code-block.css";
 
@@ -129,15 +130,15 @@ export const CodeBlock = memo(function CodeBlock({ code, language = "", actions 
         <div className="flex shrink-0 items-center gap-1">
           {actions}
           <TooltipIconButton
-            tooltip={wrap ? "Disable line wrapping" : "Enable line wrapping"}
-            aria-label="Wrap code"
+            tooltip={wrap ? t("ui.disableWrap") : t("ui.enableWrap")}
+            aria-label={t("ui.wrapCode")}
             aria-pressed={wrap}
             className="aria-pressed:bg-accent aria-pressed:text-accent-foreground"
             onClick={() => setWrapOverride(!wrap)}
           >
             <WrapTextIcon aria-hidden />
           </TooltipIconButton>
-          <TooltipIconButton tooltip="Copy code" data-command="code.copy" onClick={() => { if (code && !isCopied) void copyToClipboard(code); }}>
+          <TooltipIconButton tooltip={t("ui.copyCode")} data-command="code.copy" onClick={() => { if (code && !isCopied) void copyToClipboard(code); }}>
             <CopyFeedbackIcon copied={isCopied} />
           </TooltipIconButton>
         </div>

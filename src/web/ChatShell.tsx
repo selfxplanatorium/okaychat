@@ -3,6 +3,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Route, Switch, useLocation } from "wouter";
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { AppLoading } from "@/components/AppLoading";
+import { t } from "@/i18n";
 import { ArtifactPanel } from "@/components/artifacts/ArtifactPanel";
 import { ChatView } from "@/components/chat/ChatView";
 import { Sidebar } from "@/components/layout/Sidebar";
@@ -27,15 +28,15 @@ const SettingsLayout = preloadable(() => import("@/components/settings/SettingsL
 function ChatHeader({ sidebarOpen, onToggle }: { sidebarOpen: boolean; onToggle: () => void }) {
   const aui = useAui();
   const [, navigate] = useLocation();
-  const sidebarHint = useShortcutProps("app.toggleSidebar", "Open sidebar");
-  const newChatHint = useShortcutProps("nav.newChat", "New chat");
+  const sidebarHint = useShortcutProps("app.toggleSidebar", t("shell.openSidebar"));
+  const newChatHint = useShortcutProps("nav.newChat", t("common.newChat"));
   if (sidebarOpen) return null;
   return (
     <div className="shell-chat-header absolute top-2 left-2 flex gap-1">
       <button
         type="button"
         onClick={onToggle}
-        aria-label="Open sidebar"
+        aria-label={t("shell.openSidebar")}
         {...sidebarHint}
         className="surface-glass text-muted-foreground hover:text-foreground relative z-20 rounded-lg border p-1.5 pointer-coarse:p-2.5 transition-colors duration-(--motion-fast) ease-out-quart"
       >
@@ -43,7 +44,7 @@ function ChatHeader({ sidebarOpen, onToggle }: { sidebarOpen: boolean; onToggle:
       </button>
       <button
         type="button"
-        aria-label="New chat"
+        aria-label={t("common.newChat")}
         {...newChatHint}
         onClick={async () => {
           await aui.threads.switchToNewThread();
@@ -123,9 +124,9 @@ function ChatUrlSync() {
   });
 
   useEffect(() => {
-    document.title = title ? `${title} · okaychat` : "okaychat";
+    document.title = title ? t("shell.tabTitle", { title }) : t("shell.appName");
   }, [title]);
-  useEffect(() => () => void (document.title = "okaychat"), []);
+  useEffect(() => () => void (document.title = t("shell.appName")), []);
   return null;
 }
 
@@ -173,7 +174,7 @@ export function Shell({ userId }: { userId: string }) {
 
   const reload = useCallback(() => {
     setLoadError(null);
-    void (takePreloadedData(userId) ?? load()).then(() => setLoaded(true)).catch(() => setLoadError("Could not load your chats and settings."));
+    void (takePreloadedData(userId) ?? load()).then(() => setLoaded(true)).catch(() => setLoadError(t("shell.loadFailed")));
     // Uploaded fonts apply on every page, so they load with the shell. A failure here must not block the app.
     void loadInstalledFonts();
   }, [load, userId]);
@@ -199,7 +200,7 @@ export function Shell({ userId }: { userId: string }) {
       <div role="alert" className="animate-fade-in grid h-full place-content-center gap-3 text-center text-sm">
         <p>{loadError}</p>
         <button type="button" className="text-primary underline underline-offset-4" onClick={reload}>
-          Try again
+          {t("common.tryAgain")}
         </button>
       </div>
     );
@@ -245,10 +246,10 @@ export function Shell({ userId }: { userId: string }) {
               {["scheduled", "library", "plugins", "projects"].map((page) => (
                 <Route key={page} path={`/${page}`}>
                   <div className={`flex h-12 shrink-0 items-center px-3 ${sidebarOpen ? "md:hidden" : ""}`}>
-                    <button type="button" aria-label="Open sidebar" onClick={() => setSidebarOpen(true)} className="text-muted-foreground hover:bg-accent rounded-lg p-2 pointer-coarse:p-3"><PanelLeftIcon className="size-4" /></button>
+                    <button type="button" aria-label={t("shell.openSidebar")} onClick={() => setSidebarOpen(true)} className="text-muted-foreground hover:bg-accent rounded-lg p-2 pointer-coarse:p-3"><PanelLeftIcon className="size-4" /></button>
                   </div>
                   <main className="min-h-0 flex-1 overflow-y-auto">
-                    <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">Loading…</p>}><NavigationPage page={page} /></Suspense>
+                    <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">{t("common.loading")}</p>}><NavigationPage page={page} /></Suspense>
                   </main>
                 </Route>
               ))}

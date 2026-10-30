@@ -1,4 +1,5 @@
 import type { KeyboardSettings } from "@shared/types";
+import { t, type PlainMessageKey } from "@/i18n";
 import { normalizeCombo } from "./keys";
 
 /**
@@ -10,7 +11,8 @@ export type CommandGroup = "General" | "Navigation" | "Chat" | "Composer" | "Mes
 
 export interface CommandDef {
   id: string;
-  label: string;
+  /** Shown through `t()` at render time; this module evaluates before the locale loads. */
+  labelKey: PlainMessageKey;
   group: CommandGroup;
   keys: string[];
   /**
@@ -22,72 +24,82 @@ export interface CommandDef {
   palette?: boolean;
 }
 
-const SETTINGS_SECTIONS = [
-  ["general", "General"], ["account", "Account"], ["memory", "Memory"], ["providers", "Providers"], ["mcp", "MCP servers"],
-  ["projects", "Projects"], ["schedules", "Scheduled"], ["usage", "Usage"], ["appearance", "Appearance"],
-  ["keyboard", "Keyboard"], ["admin", "Admin"],
-] as const;
+const SETTINGS_SECTIONS = ["general", "account", "memory", "providers", "mcp", "projects", "schedules", "usage", "appearance", "keyboard", "admin"] as const;
+
+const SETTINGS_LABELS = {
+  general: "keyboard.settingsGeneral", account: "keyboard.settingsAccount", memory: "keyboard.settingsMemory", providers: "keyboard.settingsProviders",
+  mcp: "keyboard.settingsMcp", projects: "keyboard.settingsProjects", schedules: "keyboard.settingsSchedules", usage: "keyboard.settingsUsage",
+  appearance: "keyboard.settingsAppearance", keyboard: "keyboard.settingsKeyboard", admin: "keyboard.settingsAdmin",
+} as const satisfies Record<(typeof SETTINGS_SECTIONS)[number], PlainMessageKey>;
 
 export const COMMANDS: readonly CommandDef[] = [
-  { id: "app.commands", label: "Show commands and shortcuts", group: "General", keys: ["Mod+/", "?"], scope: "global" },
-  { id: "app.search", label: "Search chats", group: "General", keys: ["Mod+K"], scope: "global" },
-  { id: "app.toggleSidebar", label: "Show or hide the sidebar", group: "General", keys: ["Alt+Shift+S"] },
-  { id: "app.colorScheme", label: "Switch color scheme (light, system, dark)", group: "General", keys: [] },
-  { id: "app.logout", label: "Log out", group: "General", keys: [] },
+  { id: "app.commands", labelKey: "keyboard.cmdAppCommands", group: "General", keys: ["Mod+/", "?"], scope: "global" },
+  { id: "app.search", labelKey: "keyboard.cmdAppSearch", group: "General", keys: ["Mod+K"], scope: "global" },
+  { id: "app.toggleSidebar", labelKey: "keyboard.cmdAppToggleSidebar", group: "General", keys: ["Alt+Shift+S"] },
+  { id: "app.colorScheme", labelKey: "keyboard.cmdAppColorScheme", group: "General", keys: [] },
+  { id: "app.logout", labelKey: "keyboard.cmdAppLogout", group: "General", keys: [] },
 
-  { id: "nav.newChat", label: "New chat", group: "Navigation", keys: ["Alt+Shift+N"] },
-  { id: "nav.temporaryChat", label: "Start or end a temporary chat", group: "Navigation", keys: ["Alt+Shift+G"] },
-  { id: "nav.previousChat", label: "Previous chat in the sidebar", group: "Navigation", keys: ["Alt+Shift+ArrowUp"] },
-  { id: "nav.nextChat", label: "Next chat in the sidebar", group: "Navigation", keys: ["Alt+Shift+ArrowDown"] },
-  { id: "nav.chatList", label: "Focus the chat list", group: "Navigation", keys: ["Alt+Shift+H"] },
-  { id: "nav.library", label: "Open Library", group: "Navigation", keys: ["Alt+Shift+L"] },
-  { id: "nav.projects", label: "Open Projects", group: "Navigation", keys: ["Alt+Shift+P"] },
-  { id: "nav.scheduled", label: "Open Scheduled", group: "Navigation", keys: [] },
-  { id: "nav.plugins", label: "Open Plugins", group: "Navigation", keys: [] },
-  { id: "nav.settings", label: "Open settings", group: "Navigation", keys: ["Alt+Shift+O"] },
-  { id: "nav.projectFilter", label: "Filter chats by project", group: "Navigation", keys: [] },
+  { id: "nav.newChat", labelKey: "keyboard.cmdNavNewChat", group: "Navigation", keys: ["Alt+Shift+N"] },
+  { id: "nav.temporaryChat", labelKey: "keyboard.cmdNavTemporaryChat", group: "Navigation", keys: ["Alt+Shift+G"] },
+  { id: "nav.previousChat", labelKey: "keyboard.cmdNavPreviousChat", group: "Navigation", keys: ["Alt+Shift+ArrowUp"] },
+  { id: "nav.nextChat", labelKey: "keyboard.cmdNavNextChat", group: "Navigation", keys: ["Alt+Shift+ArrowDown"] },
+  { id: "nav.chatList", labelKey: "keyboard.cmdNavChatList", group: "Navigation", keys: ["Alt+Shift+H"] },
+  { id: "nav.library", labelKey: "keyboard.cmdNavLibrary", group: "Navigation", keys: ["Alt+Shift+L"] },
+  { id: "nav.projects", labelKey: "keyboard.cmdNavProjects", group: "Navigation", keys: ["Alt+Shift+P"] },
+  { id: "nav.scheduled", labelKey: "keyboard.cmdNavScheduled", group: "Navigation", keys: [] },
+  { id: "nav.plugins", labelKey: "keyboard.cmdNavPlugins", group: "Navigation", keys: [] },
+  { id: "nav.settings", labelKey: "keyboard.cmdNavSettings", group: "Navigation", keys: ["Alt+Shift+O"] },
+  { id: "nav.projectFilter", labelKey: "keyboard.cmdNavProjectFilter", group: "Navigation", keys: [] },
 
-  { id: "chat.focusComposer", label: "Focus the message box", group: "Chat", keys: ["Alt+Shift+I"] },
-  { id: "chat.focusMessages", label: "Jump to the last message", group: "Chat", keys: ["Alt+Shift+J"] },
-  { id: "chat.stop", label: "Stop generating", group: "Chat", keys: ["Alt+Shift+X"] },
-  { id: "chat.retryLast", label: "Retry the last answer", group: "Chat", keys: ["Alt+Shift+R"] },
-  { id: "chat.editLast", label: "Edit your last message", group: "Chat", keys: ["Alt+Shift+E"] },
-  { id: "chat.copyLast", label: "Copy the last answer", group: "Chat", keys: ["Alt+Shift+C"] },
-  { id: "chat.readLast", label: "Read the last answer aloud or stop", group: "Chat", keys: ["Alt+Shift+V"] },
-  { id: "chat.copyLastCode", label: "Copy the last code block", group: "Chat", keys: ["Alt+Shift+B"] },
-  { id: "chat.artifact", label: "Open or close the artifact panel", group: "Chat", keys: ["Alt+Shift+A"] },
-  { id: "chat.options", label: "Chat options", group: "Chat", keys: [] },
-  { id: "chat.share", label: "Share chat", group: "Chat", keys: [] },
-  { id: "chat.menu", label: "Chat menu (pin, move, export, …)", group: "Chat", keys: [] },
-  { id: "chat.rename", label: "Rename chat", group: "Chat", keys: ["F2"] },
-  { id: "chat.pin", label: "Pin or unpin chat", group: "Chat", keys: [] },
-  { id: "chat.archive", label: "Archive chat", group: "Chat", keys: [] },
-  { id: "chat.delete", label: "Delete chat", group: "Chat", keys: ["Alt+Shift+Backspace"] },
-  { id: "chat.scrollBottom", label: "Scroll to the bottom", group: "Chat", keys: [] },
+  { id: "chat.focusComposer", labelKey: "keyboard.cmdChatFocusComposer", group: "Chat", keys: ["Alt+Shift+I"] },
+  { id: "chat.focusMessages", labelKey: "keyboard.cmdChatFocusMessages", group: "Chat", keys: ["Alt+Shift+J"] },
+  { id: "chat.stop", labelKey: "keyboard.cmdChatStop", group: "Chat", keys: ["Alt+Shift+X"] },
+  { id: "chat.retryLast", labelKey: "keyboard.cmdChatRetryLast", group: "Chat", keys: ["Alt+Shift+R"] },
+  { id: "chat.editLast", labelKey: "keyboard.cmdChatEditLast", group: "Chat", keys: ["Alt+Shift+E"] },
+  { id: "chat.copyLast", labelKey: "keyboard.cmdChatCopyLast", group: "Chat", keys: ["Alt+Shift+C"] },
+  { id: "chat.readLast", labelKey: "keyboard.cmdChatReadLast", group: "Chat", keys: ["Alt+Shift+V"] },
+  { id: "chat.copyLastCode", labelKey: "keyboard.cmdChatCopyLastCode", group: "Chat", keys: ["Alt+Shift+B"] },
+  { id: "chat.artifact", labelKey: "keyboard.cmdChatArtifact", group: "Chat", keys: ["Alt+Shift+A"] },
+  { id: "chat.options", labelKey: "keyboard.cmdChatOptions", group: "Chat", keys: [] },
+  { id: "chat.share", labelKey: "keyboard.cmdChatShare", group: "Chat", keys: [] },
+  { id: "chat.menu", labelKey: "keyboard.cmdChatMenu", group: "Chat", keys: [] },
+  { id: "chat.rename", labelKey: "keyboard.cmdChatRename", group: "Chat", keys: ["F2"] },
+  { id: "chat.pin", labelKey: "keyboard.cmdChatPin", group: "Chat", keys: [] },
+  { id: "chat.archive", labelKey: "keyboard.cmdChatArchive", group: "Chat", keys: [] },
+  { id: "chat.delete", labelKey: "keyboard.cmdChatDelete", group: "Chat", keys: ["Alt+Shift+Backspace"] },
+  { id: "chat.scrollBottom", labelKey: "keyboard.cmdChatScrollBottom", group: "Chat", keys: [] },
 
-  { id: "composer.model", label: "Choose model", group: "Composer", keys: ["Alt+Shift+M"] },
-  { id: "composer.effort", label: "Reasoning effort", group: "Composer", keys: ["Alt+Shift+T"] },
-  { id: "composer.search", label: "Turn web search on or off", group: "Composer", keys: ["Alt+Shift+W"] },
-  { id: "composer.attach", label: "Attach files", group: "Composer", keys: ["Alt+Shift+U"] },
-  { id: "composer.prompts", label: "Insert an MCP prompt", group: "Composer", keys: [] },
-  { id: "composer.dictate", label: "Start or stop voice input", group: "Composer", keys: [] },
+  { id: "composer.model", labelKey: "keyboard.cmdComposerModel", group: "Composer", keys: ["Alt+Shift+M"] },
+  { id: "composer.effort", labelKey: "keyboard.cmdComposerEffort", group: "Composer", keys: ["Alt+Shift+T"] },
+  { id: "composer.search", labelKey: "keyboard.cmdComposerSearch", group: "Composer", keys: ["Alt+Shift+W"] },
+  { id: "composer.attach", labelKey: "keyboard.cmdComposerAttach", group: "Composer", keys: ["Alt+Shift+U"] },
+  { id: "composer.prompts", labelKey: "keyboard.cmdComposerPrompts", group: "Composer", keys: [] },
+  { id: "composer.dictate", labelKey: "keyboard.cmdComposerDictate", group: "Composer", keys: [] },
 
-  { id: "message.next", label: "Next message", group: "Messages", keys: ["J", "ArrowDown"], scope: "message", palette: false },
-  { id: "message.previous", label: "Previous message", group: "Messages", keys: ["K", "ArrowUp"], scope: "message", palette: false },
-  { id: "message.first", label: "First loaded message", group: "Messages", keys: ["Home"], scope: "message", palette: false },
-  { id: "message.last", label: "Last message", group: "Messages", keys: ["End"], scope: "message", palette: false },
-  { id: "message.copy", label: "Copy message", group: "Messages", keys: ["C"], scope: "message", palette: false },
-  { id: "message.readAloud", label: "Read message aloud or stop", group: "Messages", keys: ["S"], scope: "message", palette: false },
-  { id: "message.edit", label: "Edit message", group: "Messages", keys: ["E"], scope: "message", palette: false },
-  { id: "message.retry", label: "Retry message", group: "Messages", keys: ["R"], scope: "message", palette: false },
-  { id: "message.branch", label: "Branch from message", group: "Messages", keys: ["B"], scope: "message", palette: false },
-  { id: "message.more", label: "More message actions", group: "Messages", keys: ["M"], scope: "message", palette: false },
-  { id: "message.exit", label: "Back to the message box", group: "Messages", keys: ["Escape"], scope: "message", palette: false },
+  { id: "message.next", labelKey: "keyboard.cmdMessageNext", group: "Messages", keys: ["J", "ArrowDown"], scope: "message", palette: false },
+  { id: "message.previous", labelKey: "keyboard.cmdMessagePrevious", group: "Messages", keys: ["K", "ArrowUp"], scope: "message", palette: false },
+  { id: "message.first", labelKey: "keyboard.cmdMessageFirst", group: "Messages", keys: ["Home"], scope: "message", palette: false },
+  { id: "message.last", labelKey: "keyboard.cmdMessageLast", group: "Messages", keys: ["End"], scope: "message", palette: false },
+  { id: "message.copy", labelKey: "keyboard.cmdMessageCopy", group: "Messages", keys: ["C"], scope: "message", palette: false },
+  { id: "message.readAloud", labelKey: "keyboard.cmdMessageReadAloud", group: "Messages", keys: ["S"], scope: "message", palette: false },
+  { id: "message.edit", labelKey: "keyboard.cmdMessageEdit", group: "Messages", keys: ["E"], scope: "message", palette: false },
+  { id: "message.retry", labelKey: "keyboard.cmdMessageRetry", group: "Messages", keys: ["R"], scope: "message", palette: false },
+  { id: "message.branch", labelKey: "keyboard.cmdMessageBranch", group: "Messages", keys: ["B"], scope: "message", palette: false },
+  { id: "message.more", labelKey: "keyboard.cmdMessageMore", group: "Messages", keys: ["M"], scope: "message", palette: false },
+  { id: "message.exit", labelKey: "keyboard.cmdMessageExit", group: "Messages", keys: ["Escape"], scope: "message", palette: false },
 
-  ...SETTINGS_SECTIONS.map(([id, label]): CommandDef => ({ id: `settings.${id}`, label: `Settings: ${label}`, group: "Settings", keys: [] })),
+  ...SETTINGS_SECTIONS.map((id): CommandDef => ({ id: `settings.${id}`, labelKey: SETTINGS_LABELS[id], group: "Settings", keys: [] })),
 ];
 
 export const COMMAND_GROUPS: readonly CommandGroup[] = ["General", "Navigation", "Chat", "Composer", "Messages", "Settings"];
+
+const GROUP_LABELS = {
+  General: "keyboard.groupGeneral", Navigation: "keyboard.groupNavigation", Chat: "keyboard.groupChat",
+  Composer: "keyboard.groupComposer", Messages: "keyboard.groupMessages", Settings: "keyboard.groupSettings",
+} as const satisfies Record<CommandGroup, PlainMessageKey>;
+
+export const commandLabel = (c: CommandDef) => t(c.labelKey);
+export const groupLabel = (group: CommandGroup) => t(GROUP_LABELS[group]);
 
 export const commandById = new Map(COMMANDS.map((c) => [c.id, c]));
 

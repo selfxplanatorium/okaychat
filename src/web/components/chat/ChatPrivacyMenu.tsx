@@ -10,6 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { GhostIcon } from "@/components/chat/GhostIcon";
 import { ShareButton } from "@/components/share/ShareButton";
+import { t, type PlainMessageKey } from "@/i18n";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useAppearance } from "@/state/appearance";
@@ -20,25 +21,25 @@ import { useThreadSync } from "@/state/thread-sync";
 import { runCommand, useCommand } from "@/keyboard/registry";
 
 const MODES = [
-  { mode: "light", label: "Light", Icon: SunIcon },
-  { mode: "system", label: "System", Icon: MonitorIcon },
-  { mode: "dark", label: "Dark", Icon: MoonIcon },
-] as const;
+  { mode: "light", label: "composer.schemeLight", Icon: SunIcon },
+  { mode: "system", label: "composer.schemeSystem", Icon: MonitorIcon },
+  { mode: "dark", label: "composer.schemeDark", Icon: MoonIcon },
+] as const satisfies ReadonlyArray<{ mode: string; label: PlainMessageKey; Icon: unknown }>;
 
 function ColorSchemeToggle() {
   const mode = useAppearance((s) => s.mode);
   const setMode = useAppearance((s) => s.setMode);
   return (
     <div className="flex items-center justify-between gap-4">
-      <span className="text-sm font-medium">Color scheme</span>
-      <div role="group" aria-label="Color scheme" className="bg-muted flex rounded-lg p-0.5">
+      <span className="text-sm font-medium">{t("composer.colorScheme")}</span>
+      <div role="group" aria-label={t("composer.colorScheme")} className="bg-muted flex rounded-lg p-0.5">
         {MODES.map(({ mode: value, label, Icon }) => (
           <button
             key={value}
             type="button"
-            aria-label={label}
+            aria-label={t(label)}
             aria-pressed={mode === value}
-            title={label}
+            title={t(label)}
             onClick={() => setMode(value)}
             className={cn(
               "inline-flex size-7 items-center justify-center rounded-md transition-[color,background-color,box-shadow] duration-(--motion-fast) ease-out-quart",
@@ -111,7 +112,7 @@ export function ChatPrivacyMenu() {
       setOpen(false);
       setGhostOpen(false);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not start a chat. Try again.");
+      setError(cause instanceof Error ? cause.message : t("composer.startChatFailed"));
       // The ghost popover shows its own errors; a plain toggle has nowhere else to report one.
       if (!ghostOpen) setOpen(true);
     }
@@ -138,7 +139,7 @@ export function ChatPrivacyMenu() {
       aui.threads.switchToThread(thread.id);
       await aui.threads.item({ id: previous.id }).delete();
       setGhostOpen(false);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not save the chat. Try again."); }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : t("composer.saveChatFailed")); }
     finally { setBusy(false); }
   };
 
@@ -154,7 +155,7 @@ export function ChatPrivacyMenu() {
     // From the keyboard the next step is typing, so focus goes to the new chat's message box.
     void changeChat(!privacy.temporary).then(() => runCommand("chat.focusComposer"));
   });
-  const ghostLabel = asks ? "Save or end temporary chat" : privacy.temporary ? "End temporary chat" : "Start temporary chat";
+  const ghostLabel = asks ? t("composer.ghostSaveOrEnd") : privacy.temporary ? t("composer.ghostEnd") : t("composer.ghostStart");
 
   return (
     <div className="shell-chat-actions absolute top-2 right-2 flex items-center gap-1">
@@ -173,28 +174,28 @@ export function ChatPrivacyMenu() {
             <TooltipContent side="bottom">{ghostLabel}</TooltipContent>
           </Tooltip>
           <PopoverContent align="end" className="w-72 max-w-[calc(100vw-1rem)] p-4 pointer-coarse:[&_button]:min-h-11">
-            <h2 className="text-sm font-medium">Temporary chat</h2>
-            <p className="text-muted-foreground mt-1 text-xs">This chat is not saved. Save it to keep it in your history, or end it to discard it.</p>
+            <h2 className="text-sm font-medium">{t("composer.temporaryChat")}</h2>
+            <p className="text-muted-foreground mt-1 text-xs">{t("composer.temporaryPopoverBody")}</p>
             <div className="mt-4 flex flex-col gap-2">
-              <Button disabled={busy || running} onClick={() => void saveChat()}>Save to history</Button>
-              <Button variant="outline" disabled={busy || running} onClick={() => void changeChat(false)}>End and discard</Button>
+              <Button disabled={busy || running} onClick={() => void saveChat()}>{t("composer.saveToHistory")}</Button>
+              <Button variant="outline" disabled={busy || running} onClick={() => void changeChat(false)}>{t("composer.endAndDiscard")}</Button>
             </div>
             {error && <p role="alert" className="text-destructive mt-3 text-xs">{error}</p>}
           </PopoverContent>
         </Popover>
       )}
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger data-command="chat.options" className="surface-glass text-muted-foreground hover:text-foreground relative z-20 inline-flex size-8 pointer-coarse:size-10 items-center justify-center rounded-lg border transition-colors duration-(--motion-fast)" aria-label="Chat options">
+        <PopoverTrigger data-command="chat.options" className="surface-glass text-muted-foreground hover:text-foreground relative z-20 inline-flex size-8 pointer-coarse:size-10 items-center justify-center rounded-lg border transition-colors duration-(--motion-fast)" aria-label={t("composer.chatOptions")}>
           <MoreHorizontalIcon className="size-4" />
         </PopoverTrigger>
         <PopoverContent align="end" className="w-80 max-w-[calc(100vw-1rem)] p-4">
-          <h2 className="text-sm font-medium">{privacy.temporary ? "Temporary chat" : "Chat options"}</h2>
+          <h2 className="text-sm font-medium">{privacy.temporary ? t("composer.temporaryChat") : t("composer.chatOptions")}</h2>
           {privacy.temporary ? <>
-            <p className="text-muted-foreground mt-1 text-xs">Not saved in history. Disappears when you reload. Never creates memories.</p>
+            <p className="text-muted-foreground mt-1 text-xs">{t("composer.temporaryOptionsBody")}</p>
             <div className="my-4 flex items-center justify-between gap-4">
               <div>
-                <label htmlFor="temporary-personalization" className="text-sm font-medium">Personalize this chat</label>
-                <p className="text-muted-foreground mt-1 text-xs">Use your saved memories and custom instructions for this chat.</p>
+                <label htmlFor="temporary-personalization" className="text-sm font-medium">{t("composer.personalizeChat")}</label>
+                <p className="text-muted-foreground mt-1 text-xs">{t("composer.personalizeChatBody")}</p>
               </div>
               <Switch id="temporary-personalization" checked={privacy.personalized} disabled={busy || running} onCheckedChange={(personalized) => {
                 const item = aui.threadListItem.getState();
@@ -204,8 +205,8 @@ export function ChatPrivacyMenu() {
           </> : <>
             <div className="my-4 flex items-center justify-between gap-4">
               <div>
-                <label htmlFor="chat-memory" className={cn("text-sm font-medium", memoryEnabled !== true && "text-muted-foreground")}>Use memory for this chat</label>
-                <p id="chat-memory-description" className="text-muted-foreground mt-1 text-xs">{memoryEnabled === false ? "Turn on Use memory in Memory settings to enable this control." : memoryEnabled !== true ? "Checking account memory settings…" : "Allow saved memories and new memories in this chat."}</p>
+                <label htmlFor="chat-memory" className={cn("text-sm font-medium", memoryEnabled !== true && "text-muted-foreground")}>{t("composer.useMemory")}</label>
+                <p id="chat-memory-description" className="text-muted-foreground mt-1 text-xs">{memoryEnabled === false ? t("composer.memoryOff") : memoryEnabled !== true ? t("composer.memoryChecking") : t("composer.memoryOn")}</p>
               </div>
               <Switch id="chat-memory" aria-describedby="chat-memory-description" checked={memoryEnabled === true && !meta?.memoryDisabled} disabled={busy || running || memoryEnabled !== true} onCheckedChange={async (enabled) => {
                 setBusy(true);
@@ -214,11 +215,11 @@ export function ChatPrivacyMenu() {
                   const { remoteId } = await aui.threadListItem.initialize();
                   await api(`/threads/${remoteId}`, { method: "PATCH", json: { memoryDisabled: !enabled } });
                   await refresh(remoteId);
-                } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not change memory. Try again."); }
+                } catch (cause) { setError(cause instanceof Error ? cause.message : t("composer.memoryChangeFailed")); }
                 finally { setBusy(false); }
               }} />
             </div>
-            <Link href="/settings/memory" onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground mb-4 block text-xs underline underline-offset-4">Memory settings</Link>
+            <Link href="/settings/memory" onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground mb-4 block text-xs underline underline-offset-4">{t("composer.memorySettings")}</Link>
             {skillsEnabled && (
               <button
                 type="button"
@@ -229,13 +230,13 @@ export function ChatPrivacyMenu() {
                   try {
                     await aui.thread.append(CREATE_SKILL_PROMPT);
                     setOpen(false);
-                  } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not start the draft. Try again."); }
+                  } catch (cause) { setError(cause instanceof Error ? cause.message : t("composer.skillDraftFailed")); }
                   finally { setBusy(false); }
                 }}
                 className="hover:bg-accent mb-4 -mx-2 flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors duration-(--motion-fast) disabled:opacity-50"
               >
                 <PuzzleIcon className="size-4 shrink-0" />
-                Create skill from this chat
+                {t("composer.createSkill")}
               </button>
             )}
             {started && remoteId && (
@@ -245,7 +246,7 @@ export function ChatPrivacyMenu() {
                 className="hover:bg-accent mb-4 -mx-2 flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors duration-(--motion-fast)"
               >
                 <CalendarClockIcon className="size-4 shrink-0" />
-                Schedule a prompt in this chat
+                {t("composer.schedulePrompt")}
               </Link>
             )}
           </>}

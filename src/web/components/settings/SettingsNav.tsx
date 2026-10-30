@@ -2,28 +2,29 @@ import { ArrowLeftIcon, AudioLinesIcon, BarChart3Icon, BlocksIcon, BrainIcon, Ca
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from "react";
 import { Link } from "wouter";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { t, type PlainMessageKey } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 
 // Light on purpose: the chat sidebar hosts this rail, while the pages themselves load lazily in SettingsLayout.
-const SETTINGS_SECTIONS: Array<{ id: string; label: string; icon: ComponentType<{ className?: string }>; admin?: boolean }> = [
-  { id: "general", label: "General", icon: SlidersHorizontalIcon },
-  { id: "account", label: "Account", icon: UserRoundIcon },
-  { id: "memory", label: "Memory", icon: BrainIcon },
-  { id: "providers", label: "Providers", icon: KeyRoundIcon },
-  { id: "mcp", label: "MCP servers", icon: BlocksIcon },
-  { id: "projects", label: "Projects", icon: FolderIcon },
-  { id: "schedules", label: "Scheduled", icon: CalendarClockIcon },
-  { id: "usage", label: "Usage", icon: BarChart3Icon },
-  { id: "voice", label: "Voice", icon: AudioLinesIcon },
-  { id: "appearance", label: "Appearance", icon: PaletteIcon },
-  { id: "keyboard", label: "Keyboard", icon: KeyboardIcon },
-  { id: "admin", label: "Admin", icon: ShieldIcon, admin: true },
+const SETTINGS_SECTIONS: Array<{ id: string; labelKey: PlainMessageKey; icon: ComponentType<{ className?: string }>; admin?: boolean }> = [
+  { id: "general", labelKey: "settings.sectionGeneral", icon: SlidersHorizontalIcon },
+  { id: "account", labelKey: "settings.sectionAccount", icon: UserRoundIcon },
+  { id: "memory", labelKey: "settings.sectionMemory", icon: BrainIcon },
+  { id: "providers", labelKey: "settings.sectionProviders", icon: KeyRoundIcon },
+  { id: "mcp", labelKey: "settings.sectionMcp", icon: BlocksIcon },
+  { id: "projects", labelKey: "settings.sectionProjects", icon: FolderIcon },
+  { id: "schedules", labelKey: "settings.sectionScheduled", icon: CalendarClockIcon },
+  { id: "usage", labelKey: "settings.sectionUsage", icon: BarChart3Icon },
+  { id: "voice", labelKey: "settings.sectionVoice", icon: AudioLinesIcon },
+  { id: "appearance", labelKey: "settings.sectionAppearance", icon: PaletteIcon },
+  { id: "keyboard", labelKey: "settings.sectionKeyboard", icon: KeyboardIcon },
+  { id: "admin", labelKey: "settings.sectionAdmin", icon: ShieldIcon, admin: true },
 ];
 
 export function useSettingsSections() {
   const isAdmin = useData((s) => s.me?.role === "admin");
-  return SETTINGS_SECTIONS.filter((s) => !s.admin || isAdmin);
+  return SETTINGS_SECTIONS.filter((s) => !s.admin || isAdmin).map((s) => ({ ...s, label: t(s.labelKey) }));
 }
 
 type Pill = { x: number; y: number; width: number; height: number };
@@ -63,7 +64,7 @@ export function SettingsNav({ section }: { section?: string }) {
   return (
     <div className="flex h-full flex-col">
       <ScrollArea className="min-h-0 flex-1">
-        <nav ref={navRef} aria-label="Settings" className="relative flex flex-col gap-1 p-2">
+        <nav ref={navRef} aria-label={t("common.settings")} className="relative flex flex-col gap-1 p-2">
           {/* A single pill moves between sections; items paint above it. */}
           {pill && (
             <span
@@ -100,7 +101,7 @@ export function SettingsNav({ section }: { section?: string }) {
           href="/"
           className="text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground flex h-12 items-center gap-2 rounded-lg px-2.5 text-sm whitespace-nowrap transition-colors duration-(--motion-fast)"
         >
-          <ArrowLeftIcon className="size-4" /> Back to chat
+          <ArrowLeftIcon className="size-4" /> {t("settings.backToChat")}
         </Link>
       </div>
     </div>

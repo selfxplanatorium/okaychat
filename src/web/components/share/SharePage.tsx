@@ -10,6 +10,8 @@ import { catalog, components } from "@/components/genui/catalog";
 import { widgetOptions } from "@/components/genui/toolkit";
 import { Brand } from "@/components/layout/Brand";
 import { SimpleMarkdown } from "@/components/ui/simple-markdown";
+import { t } from "@/i18n";
+import { formatDate } from "@/i18n/format";
 import { api } from "@/lib/api";
 
 function SharedArtifact({ token, part }: { token: string; part: Extract<SharedPart, { type: "artifact" }> }) {
@@ -76,9 +78,9 @@ export function SharePage({ token }: { token: string }) {
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     api<SharedThread>(`/public/shares/${token}`)
-      .then((t) => {
-        setThread(t);
-        document.title = `${t.title ?? "Shared chat"} · okaychat`;
+      .then((shared) => {
+        setThread(shared);
+        document.title = t("shell.tabTitle", { title: shared.title ?? t("share.sharedChat") });
       })
       .catch((e: Error) => setError(e.message));
   }, [token]);
@@ -90,16 +92,16 @@ export function SharePage({ token }: { token: string }) {
           <a href="/" className="transition-opacity duration-(--motion-fast) ease-out-quart hover:opacity-80">
             <Brand />
           </a>
-          <span className="text-muted-foreground text-xs">Shared chat · read only</span>
+          <span className="text-muted-foreground text-xs">{t("share.sharedReadOnly")}</span>
         </div>
       </header>
       <main className="mx-auto max-w-3xl px-4 py-6">
         {error && <p className="text-muted-foreground animate-fade-in py-20 text-center">{error}</p>}
         {thread && (
           <>
-            <h1 className="animate-rise-in mb-1 text-2xl font-semibold tracking-tight">{thread.title ?? "Shared chat"}</h1>
+            <h1 className="animate-rise-in mb-1 text-2xl font-semibold tracking-tight">{thread.title ?? t("share.sharedChat")}</h1>
             <p className="text-muted-foreground animate-fade-in mb-6 text-sm">
-              {new Date(thread.createdAt).toLocaleDateString(undefined, { dateStyle: "long" })}
+              {formatDate(thread.createdAt, { dateStyle: "long" })}
             </p>
             <div className="flex flex-col gap-6">
               {thread.messages.map((m, index) =>
@@ -136,7 +138,7 @@ export function SharePage({ token }: { token: string }) {
                         </div>
                       ) : (
                         <p key={i} className="text-muted-foreground my-1 flex items-center gap-1.5 text-xs">
-                          <WrenchIcon className="size-3" /> Used {p.name.replaceAll("_", " ")}
+                          <WrenchIcon className="size-3" /> {t("share.usedTool", { name: p.name.replaceAll("_", " ") })}
                         </p>
                       ),
                     )}

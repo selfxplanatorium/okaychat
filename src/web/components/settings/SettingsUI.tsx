@@ -1,5 +1,6 @@
 import { RotateCcwIcon } from "lucide-react";
 import { Children, isValidElement, type CSSProperties, type ReactNode } from "react";
+import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 /** Layout primitives shared by every settings page. Mirrors T3Code's SettingsSection / SettingsRow. */
@@ -63,7 +64,7 @@ export function SettingsRow({
         <div className="flex items-center gap-1.5 text-sm font-medium">
           {label}
           {reset && (
-            <button type="button" onClick={reset} aria-label="Reset to default" className="text-muted-foreground hover:text-foreground rounded p-0.5 transition-colors duration-(--motion-fast)">
+            <button type="button" onClick={reset} aria-label={t("settings.resetToDefault")} className="text-muted-foreground hover:text-foreground rounded p-0.5 transition-colors duration-(--motion-fast)">
               <RotateCcwIcon className="size-3" />
             </button>
           )}

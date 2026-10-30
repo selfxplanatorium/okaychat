@@ -4,6 +4,7 @@ import type { Mermaid } from "mermaid";
 import { CopyFeedbackIcon } from "@/components/assistant-ui/elements/surfaces";
 import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { t } from "@/i18n";
 import { CodeBlock } from "./code-block";
 
 // Mermaid and its renderers (d3, dagre, ...) load only when a diagram mounts.
@@ -93,8 +94,8 @@ export const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: str
 
   const toggle = svg !== null && (
     <TooltipIconButton
-      tooltip={showCode ? "Show diagram" : "Show code"}
-      aria-label={showCode ? "Show diagram" : "Show code"}
+      tooltip={showCode ? t("ui.showDiagram") : t("ui.showCode")}
+      aria-label={showCode ? t("ui.showDiagram") : t("ui.showCode")}
       onClick={() => setShowCode(!showCode)}
     >
       {showCode ? <NetworkIcon aria-hidden /> : <CodeIcon aria-hidden />}
@@ -109,7 +110,7 @@ export const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: str
         <span className="text-muted-foreground truncate font-medium lowercase">mermaid</span>
         <div className="flex shrink-0 items-center gap-1">
           {toggle}
-          <TooltipIconButton tooltip="Copy code" onClick={() => { if (!isCopied) void copyToClipboard(code); }}>
+          <TooltipIconButton tooltip={t("ui.copyCode")} onClick={() => { if (!isCopied) void copyToClipboard(code); }}>
             <CopyFeedbackIcon copied={isCopied} />
           </TooltipIconButton>
         </div>

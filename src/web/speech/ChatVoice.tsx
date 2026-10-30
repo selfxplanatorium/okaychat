@@ -1,6 +1,7 @@
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { Loader2Icon, XIcon } from "lucide-react";
 import { useEffect, useRef, type FC } from "react";
+import { t } from "@/i18n";
 import { chatPrivacyFor } from "@/state/chat-privacy";
 import { useData } from "@/state/data";
 import { useThreadSyncStore } from "@/state/thread-sync";
@@ -77,12 +78,12 @@ export const VoiceNotice: FC = () => {
     <div role="status" className="flex items-center gap-2 px-2.5 text-xs">
       {transcribing ? (
         <span className="text-muted-foreground flex items-center gap-1.5">
-          <Loader2Icon className="size-3.5 animate-spin" /> Transcribing…
+          <Loader2Icon className="size-3.5 animate-spin" /> {t("speech.transcribing")}
         </span>
       ) : (
         <span className="text-error flex min-w-0 items-center gap-1.5">
           <span className="truncate">{error}</span>
-          <button type="button" aria-label="Dismiss" onClick={() => setError(null)} className="hover:text-foreground shrink-0 rounded p-0.5">
+          <button type="button" aria-label={t("speech.dismiss")} onClick={() => setError(null)} className="hover:text-foreground shrink-0 rounded p-0.5">
             <XIcon className="size-3" />
           </button>
         </span>
@@ -94,5 +95,5 @@ export const VoiceNotice: FC = () => {
 /** The dictation button's label: server engines on plain HTTP transcribe an audio file instead of the microphone. */
 export function useDictateLabel(): string {
   const engine = useData((s) => sttEngineOf(s.settings?.speech));
-  return engine !== "browser" && engine !== "off" && !canRecord() ? "Transcribe an audio file (the microphone needs HTTPS)" : "Voice input";
+  return engine !== "browser" && engine !== "off" && !canRecord() ? t("speech.transcribeFile") : t("speech.voiceInput");
 }

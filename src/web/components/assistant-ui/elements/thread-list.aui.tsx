@@ -55,7 +55,8 @@ import type { ThreadCustom } from "@/runtime/RuntimeProvider";
 import { SharePanel } from "@/components/share/ShareButton";
 import { DeleteChatDialog } from "@/components/chat/DeleteChatDialog";
 import { SelectionCheck, useSelectionKeys } from "@/components/ui/selection";
-import { batchError, runBatch } from "@/lib/selection";
+import { runBatch } from "@/lib/selection";
+import { t, type PlainMessageKey } from "@/i18n";
 import { useThreadSelection } from "@/state/thread-selection";
 import { runCommand, useCommand } from "@/keyboard/registry";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -69,6 +70,24 @@ import {
   MenuSubmenuTrigger,
   MenuTrigger,
 } from "@/components/ui/menu";
+
+type BatchVerb = "pin" | "unpin" | "move" | "archive" | "delete";
+
+const withReason = (message: string, error: unknown) =>
+  error instanceof Error && error.message ? t("sidebar.withReason", { message, reason: error.message }) : message;
+
+/** One line for a bulk action that partly or fully failed. */
+function batchFailure(verb: BatchVerb, failed: number, total: number) {
+  const p = { failed, total };
+  const all = failed === total;
+  switch (verb) {
+    case "pin": return all ? t("sidebar.pinFailedAll") : t("sidebar.pinFailedSome", p);
+    case "unpin": return all ? t("sidebar.unpinFailedAll") : t("sidebar.unpinFailedSome", p);
+    case "move": return all ? t("sidebar.moveFailedAll") : t("sidebar.moveFailedSome", p);
+    case "archive": return all ? t("sidebar.archiveFailedAll") : t("sidebar.archiveFailedSome", p);
+    case "delete": return all ? t("sidebar.deleteFailedAll") : t("sidebar.deleteFailedSome", p);
+  }
+}
 
 // One document listener for every row's quick action, which swaps pin for delete while Shift is held.
 let shiftHeld = false;
@@ -121,8 +140,8 @@ export const ThreadListSearch = forwardRef<
         type="search"
         value={value}
         onChange={(event) => onValueChange(event.target.value)}
-        aria-label="Search chats"
-        placeholder="Search chats"
+        aria-label={t("sidebar.searchChats")}
+        placeholder={t("sidebar.searchChats")}
         className={cn("h-8 ps-8 text-sm", className)}
         {...props}
       />
@@ -169,16 +188,18 @@ export const ThreadListItems: FC<
   );
 };
 
+type GroupLabel = Extract<PlainMessageKey, `sidebar.group${string}`>;
+
 const dateGroupLabel = (
   date: Date | undefined,
   startOfToday: number,
   startOfYesterday: number,
   startOfLastWeek: number,
-): string => {
-  if (!date || date.getTime() >= startOfToday) return "Today";
-  if (date.getTime() >= startOfYesterday) return "Yesterday";
-  if (date.getTime() >= startOfLastWeek) return "Last 7 Days";
-  return "Older";
+): GroupLabel => {
+  if (!date || date.getTime() >= startOfToday) return "sidebar.groupToday";
+  if (date.getTime() >= startOfYesterday) return "sidebar.groupYesterday";
+  if (date.getTime() >= startOfLastWeek) return "sidebar.groupLast7Days";
+  return "sidebar.groupOlder";
 };
 
 const startOfLocalDay = (date: Date) =>
@@ -215,7 +236,7 @@ const useStartOfToday = () =>
     getServerStartOfToday,
   );
 
-export type ThreadListGroup = { label: string; indices: number[] };
+export type ThreadListGroup = { label: GroupLabel; indices: number[] };
 
 /**
  * Filters the thread list by title and buckets the matches: pinned chats
@@ -247,7 +268,7 @@ export const useThreadListGroups = (searchQuery = "") => {
           // A chat created here has no custom metadata yet and belongs to this project.
           (!activeProject || projectId === undefined || projectId === activeProject) &&
           (!query ||
-            (itemsById.get(id)?.title || "New chat").toLowerCase().includes(query))
+            (itemsById.get(id)?.title || t("common.newChat")).toLowerCase().includes(query))
         );
       })
       .map(({ index }) => index);
@@ -272,7 +293,7 @@ export const useThreadListGroups = (searchQuery = "") => {
       .sort((a, b) => time(b) - time(a));
 
     const result: ThreadListGroup[] = pinned.length
-      ? [{ label: "Pinned", indices: [...pinned].sort((a, b) => time(b) - time(a)) }]
+      ? [{ label: "sidebar.groupPinned", indices: [...pinned].sort((a, b) => time(b) - time(a)) }]
       : [];
     for (const index of sorted) {
       const label = dateGroupLabel(
@@ -313,7 +334,7 @@ const ThreadListItemRow: FC<{ index: number; flipKey: string }> = ({ index, flip
   );
 };
 
-const ThreadListGroupLabel: FC<{ label: string }> = ({ label }) => {
+const ThreadListGroupLabel: FC<{ label: GroupLabel }> = ({ label }) => {
   const [entering, setEntering] = useState(true);
   return (
     <div
@@ -322,7 +343,7 @@ const ThreadListGroupLabel: FC<{ label: string }> = ({ label }) => {
       className={cn("text-muted-foreground px-2.5 pt-3 pb-1 text-xs font-medium", entering && "animate-fade-in")}
       onAnimationEnd={(event) => event.target === event.currentTarget && setEntering(false)}
     >
-      {label}
+      {t(label)}
     </div>
   );
 };
@@ -381,7 +402,7 @@ const ThreadListItemGroups: FC<{ searchQuery?: string }> = ({
         data-slot="aui_thread-list-empty"
         className="text-muted-foreground animate-fade-in px-2.5 py-2 text-sm"
       >
-        No titles match
+        {t("sidebar.noTitlesMatch")}
       </div>
     );
   }
@@ -435,7 +456,7 @@ export const ThreadListNew = forwardRef<
               data-slot="aui_thread-list-new-label"
               className={cn("whitespace-nowrap", labelClassName)}
             >
-              New chat
+              {t("common.newChat")}
             </span>
           </>
         )}
@@ -450,7 +471,7 @@ const ThreadListSkeleton: FC = () => {
   return (
     <div
       role="status"
-      aria-label="Loading chats"
+      aria-label={t("sidebar.loadingChats")}
       className="flex flex-col gap-0.5"
     >
       {Array.from({ length: 5 }, (_, i) => (
@@ -477,7 +498,7 @@ export const ThreadListItem: FC = () => {
   const isRunning = useAuiState((s) => s.threadListItem.isRunning);
   // Regenerating a title or building an export reuses the running spinner, since the menu has closed.
   const [busy, setBusy] = useState(false);
-  const title = useAuiState((s) => s.threadListItem.title) || "New chat";
+  const title = useAuiState((s) => s.threadListItem.title) || t("common.newChat");
   const [isRenaming, setIsRenaming] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const selectRef = useRef<HTMLButtonElement>(null);
@@ -517,7 +538,7 @@ export const ThreadListItem: FC = () => {
           {(isRunning || busy) && (
             <Loader2Icon aria-hidden className="text-muted-foreground -ms-1 size-3.5 shrink-0 animate-spin" />
           )}
-          <ThreadListItemTitle fallback="New chat" />
+          <ThreadListItemTitle fallback={t("common.newChat")} />
         </button>
       ) : isRenaming ? (
         <ThreadListItemRename
@@ -539,8 +560,8 @@ export const ThreadListItem: FC = () => {
               className="text-muted-foreground me-1.5 size-3.5 shrink-0 animate-spin"
             />
           )}
-          <ThreadListItemTitle fallback="New chat" />
-          {isRunning && <span className="sr-only">Running</span>}
+          <ThreadListItemTitle fallback={t("common.newChat")} />
+          {isRunning && <span className="sr-only">{t("sidebar.running")}</span>}
         </TooltipTrigger>
       )}
       {!selecting && !isRenaming && <ThreadListItemQuickAction />}
@@ -660,7 +681,7 @@ const ThreadListItemRename: FC<{
       ref={inputRef}
       autoFocus
       data-slot="aui_thread-list-item-rename"
-      aria-label="Rename chat"
+      aria-label={t("sidebar.renameChat")}
       value={value}
       className="h-7 min-w-0 flex-1 ps-2.5 pe-9 text-sm"
       onChange={(event) => setValue(event.target.value)}
@@ -691,7 +712,7 @@ const ThreadListItemQuickAction: FC = () => {
     | undefined;
   const pinned = custom?.pinned === true;
   const deleting = useShiftHeld();
-  const label = deleting ? "Delete chat" : pinned ? "Unpin chat" : "Pin chat";
+  const label = deleting ? t("sidebar.deleteChat") : pinned ? t("sidebar.unpinChat") : t("sidebar.pinChat");
 
   return (
     <Button
@@ -754,19 +775,19 @@ const ThreadListItemMenu: FC<{
       .then(() => aui.threadListItem.updateCustom({ ...custom, ...change }))
       .catch(() => {});
 
-  const busyWhile = async (label: string, task: () => Promise<void>) => {
+  const busyWhile = async (failure: string, task: () => Promise<void>) => {
     onBusy(true);
     try {
       await task();
     } catch (cause) {
-      window.alert(cause instanceof Error ? cause.message : `Could not ${label}.`);
+      window.alert(cause instanceof Error ? cause.message : failure);
     } finally {
       onBusy(false);
     }
   };
 
   const regenerateTitle = () =>
-    busyWhile("regenerate the title", async () => {
+    busyWhile(t("sidebar.regenerateTitleFailed"), async () => {
       const { title } = await api<{ title: string }>(`/threads/${remoteId}/title`, {
         method: "POST",
         json: { modelRef: getActiveModel(remoteId)?.ref },
@@ -823,24 +844,24 @@ const ThreadListItemMenu: FC<{
           }}
         >
           <MenuItem onClick={withFocus(() => useThreadSelection.getState().start(aui.threadListItem.getState().id))}>
-            <ListChecksIcon /> Select
+            <ListChecksIcon /> {t("common.select")}
           </MenuItem>
           <MenuSeparator />
           <MenuItem onClick={() => void update({ pinned: !pinned })}>
             {pinned ? <PinOffIcon /> : <PinIcon />}
-            {pinned ? "Unpin" : "Pin"}
+            {pinned ? t("sidebar.unpin") : t("sidebar.pin")}
           </MenuItem>
           <MenuItem disabled={!remoteId} onClick={withFocus(() => setSharing(true))}>
-            <ShareIcon /> Share
+            <ShareIcon /> {t("sidebar.share")}
           </MenuItem>
           <MenuSubmenuRoot>
             <MenuSubmenuTrigger>
               <FolderInputIcon />
-              <span className="flex-1">Move to</span>
+              <span className="flex-1">{t("sidebar.moveTo")}</span>
               <ChevronRightIcon className="text-muted-foreground ms-auto" />
             </MenuSubmenuTrigger>
             <MenuContent side="right" align="start" className="max-h-[min(24rem,var(--available-height))] max-w-[calc(100vw-1rem)]">
-              {[{ id: null, name: "No project" }, ...projects].map((p) => (
+              {[{ id: null, name: t("sidebar.noProject") }, ...projects].map((p) => (
                 <MenuItem
                   key={p.id ?? ""}
                   disabled={p.id === projectId}
@@ -858,36 +879,36 @@ const ThreadListItemMenu: FC<{
               window.open(chatPath(remoteId!), "_blank", "noopener")
             }
           >
-            <ExternalLinkIcon /> Open in New Tab
+            <ExternalLinkIcon /> {t("sidebar.openInNewTab")}
           </MenuItem>
           <MenuSeparator />
           <MenuItem onClick={withFocus(onRename)}>
-            <TextCursorIcon /> Rename
+            <TextCursorIcon /> {t("common.rename")}
           </MenuItem>
           <MenuItem disabled={!remoteId} onClick={() => void regenerateTitle()}>
-            <SparklesIcon /> Regenerate Title
+            <SparklesIcon /> {t("sidebar.regenerateTitle")}
           </MenuItem>
           <MenuSubmenuRoot>
             <MenuSubmenuTrigger disabled={!remoteId}>
               <DownloadIcon />
-              <span className="flex-1">Export</span>
+              <span className="flex-1">{t("common.export")}</span>
               <ChevronRightIcon className="text-muted-foreground ms-auto" />
             </MenuSubmenuTrigger>
             <MenuContent side="right" align="start">
-              <MenuItem onClick={() => void busyWhile("export the chat", () => exportThread(remoteId!, "markdown", title))}>
-                <FileTextIcon /> Markdown
+              <MenuItem onClick={() => void busyWhile(t("sidebar.exportChatFailed"), () => exportThread(remoteId!, "markdown", title))}>
+                <FileTextIcon /> {t("sidebar.markdown")}
               </MenuItem>
-              <MenuItem onClick={() => void busyWhile("export the chat", () => exportThread(remoteId!, "pdf", title))}>
-                <FileDownIcon /> PDF
+              <MenuItem onClick={() => void busyWhile(t("sidebar.exportChatFailed"), () => exportThread(remoteId!, "pdf", title))}>
+                <FileDownIcon /> {t("sidebar.pdf")}
               </MenuItem>
             </MenuContent>
           </MenuSubmenuRoot>
           <MenuSeparator />
           <MenuItem onClick={() => void Promise.resolve().then(() => aui.threadListItem.archive()).catch(() => {})}>
-            <ArchiveIcon /> Archive
+            <ArchiveIcon /> {t("sidebar.archive")}
           </MenuItem>
           <MenuItem destructive onClick={withFocus(() => setConfirmDelete(true))}>
-            <Trash2Icon /> Permanently Delete
+            <Trash2Icon /> {t("sidebar.deletePermanently")}
           </MenuItem>
         </MenuContent>
       </ContextMenu.Root>
@@ -895,7 +916,7 @@ const ThreadListItemMenu: FC<{
       {remoteId && (
         <Dialog open={sharing} onOpenChange={setSharing}>
           <DialogContent className="gap-3 sm:max-w-sm">
-            <DialogTitle className="truncate pe-6 text-base">{title || "New chat"}</DialogTitle>
+            <DialogTitle className="truncate pe-6 text-base">{title || t("common.newChat")}</DialogTitle>
             <div>
               <SharePanel threadId={remoteId} title={null} />
             </div>
@@ -953,7 +974,7 @@ export const ThreadSelectionBar: FC<{ scope: RefObject<HTMLElement | null> }> = 
   const sharedProject = count > 0 && new Set([...ids].map(projectOf)).size === 1 ? projectOf([...ids][0]!) : undefined;
 
   /** Runs `task` per selected chat; throws the summary when some failed, so callers can show it. */
-  const apply = async (verb: string, task: (id: string) => unknown, leave: boolean) => {
+  const apply = async (verb: BatchVerb, task: (id: string) => unknown, leave: boolean) => {
     const selection = [...useThreadSelection.getState().ids];
     setBusy(true);
     setError(null);
@@ -961,14 +982,14 @@ export const ThreadSelectionBar: FC<{ scope: RefObject<HTMLElement | null> }> = 
       const { failed, error } = await runBatch(selection, task);
       if (failed.length) {
         useThreadSelection.setState({ ids: new Set(failed) });
-        throw new Error(batchError(failed.length, selection.length, verb, error));
+        throw new Error(withReason(batchFailure(verb, failed.length, selection.length), error));
       }
       if (leave) exit();
     } finally {
       setBusy(false);
     }
   };
-  const run = (verb: string, task: (id: string) => unknown, leave = false) =>
+  const run = (verb: BatchVerb, task: (id: string) => unknown, leave = false) =>
     void apply(verb, task, leave).catch((cause: Error) => setError(cause.message));
 
   const item = (id: string) => aui.threads.item({ id });
@@ -980,15 +1001,15 @@ export const ThreadSelectionBar: FC<{ scope: RefObject<HTMLElement | null> }> = 
     {active && (
     <div
       role="toolbar"
-      aria-label="Selected chats"
+      aria-label={t("sidebar.selectedChats")}
       data-slot="aui_thread-selection-bar"
       className="border-sidebar-border animate-rise-in flex shrink-0 flex-col gap-1 border-t px-2 pt-1.5 pb-1"
     >
       <div className="flex items-center gap-1">
         <span className="min-w-0 flex-1 truncate px-1 text-sm font-medium tabular-nums" aria-live="polite">
-          {count === 0 ? "Select chats" : count === 1 ? "1 chat selected" : `${count} chats selected`}
+          {count === 0 ? t("sidebar.selectChats") : t("sidebar.selectedCount", { count })}
         </span>
-        {busy && <Loader2Icon aria-label="Working" className="text-muted-foreground size-4 shrink-0 animate-spin" />}
+        {busy && <Loader2Icon aria-label={t("sidebar.working")} className="text-muted-foreground size-4 shrink-0 animate-spin" />}
         <Button
           variant="ghost"
           size="sm"
@@ -996,7 +1017,7 @@ export const ThreadSelectionBar: FC<{ scope: RefObject<HTMLElement | null> }> = 
           onClick={allSelected ? clear : selectAll}
           className="text-sidebar-muted-foreground hover:bg-sidebar-row-hover px-2 pointer-coarse:h-10"
         >
-          {allSelected ? "Deselect all" : "Select all"}
+          {allSelected ? t("sidebar.deselectAll") : t("common.selectAll")}
         </Button>
         <Tooltip>
           <TooltipTrigger
@@ -1004,7 +1025,7 @@ export const ThreadSelectionBar: FC<{ scope: RefObject<HTMLElement | null> }> = 
               <Button
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Done selecting"
+                aria-label={t("sidebar.doneSelecting")}
                 onClick={exit}
                 className="hover:bg-sidebar-row-hover pointer-coarse:size-10"
               />
@@ -1012,7 +1033,7 @@ export const ThreadSelectionBar: FC<{ scope: RefObject<HTMLElement | null> }> = 
           >
             <XIcon />
           </TooltipTrigger>
-          <TooltipContent side="top">Done (Esc)</TooltipContent>
+          <TooltipContent side="top">{t("sidebar.doneEsc")}</TooltipContent>
         </Tooltip>
       </div>
       {error && (
@@ -1030,18 +1051,18 @@ export const ThreadSelectionBar: FC<{ scope: RefObject<HTMLElement | null> }> = 
           }
         >
           {allPinned ? <PinOffIcon /> : <PinIcon />}
-          {allPinned ? "Unpin" : "Pin"}
+          {allPinned ? t("sidebar.unpin") : t("sidebar.pin")}
         </button>
         <Menu>
           <MenuTrigger disabled={busy || count === 0} className={actionClass}>
-            <FolderInputIcon /> Move
+            <FolderInputIcon /> {t("sidebar.move")}
           </MenuTrigger>
           <MenuContent
             side="top"
             align="center"
             className="max-h-[min(24rem,var(--available-height))] max-w-[calc(100vw-1rem)] min-w-48"
           >
-            {[{ id: null, name: "No project" }, ...projects].map((p) => (
+            {[{ id: null, name: t("sidebar.noProject") }, ...projects].map((p) => (
               <MenuItem
                 key={p.id ?? ""}
                 disabled={p.id === sharedProject}
@@ -1059,7 +1080,7 @@ export const ThreadSelectionBar: FC<{ scope: RefObject<HTMLElement | null> }> = 
           className={actionClass}
           onClick={() => run("archive", (id) => item(id).archive(), true)}
         >
-          <ArchiveIcon /> Archive
+          <ArchiveIcon /> {t("sidebar.archive")}
         </button>
         <button
           type="button"
@@ -1070,7 +1091,7 @@ export const ThreadSelectionBar: FC<{ scope: RefObject<HTMLElement | null> }> = 
             setConfirmDelete(true);
           }}
         >
-          <Trash2Icon /> Delete
+          <Trash2Icon /> {t("common.delete")}
         </button>
       </div>
     </div>

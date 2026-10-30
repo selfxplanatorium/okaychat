@@ -1,5 +1,6 @@
 import type { SpeechSynthesisAdapter } from "@assistant-ui/react";
 import type { SpeechSettings, TtsEngineId, TtsSplit } from "@shared/speech";
+import { t } from "@/i18n";
 import { speechFetch, useSpeech } from "./store";
 import { splitForSpeech, spokenText } from "./text";
 
@@ -85,7 +86,7 @@ export class ServerSpeechAdapter implements SpeechSynthesisAdapter {
         const fail = () => {
           audio.removeEventListener("ended", done);
           audio.removeEventListener("error", fail);
-          reject(new Error("The audio could not be played."));
+          reject(new Error(t("speech.playFailed")));
         };
         audio.addEventListener("ended", done);
         audio.addEventListener("error", fail);
@@ -146,7 +147,7 @@ export class BrowserSpeechAdapter implements SpeechSynthesisAdapter {
     u.addEventListener("end", () => res.set({ type: "ended", reason: "finished" }));
     u.addEventListener("error", (e) => {
       if (e.error === "canceled" || e.error === "interrupted") return;
-      useSpeech.getState().setError(`The browser could not speak (${e.error}). Choose another voice in Settings → Voice.`);
+      useSpeech.getState().setError(t("speech.browserCouldNotSpeak", { reason: e.error }));
       res.set({ type: "ended", reason: "error", error: e.error });
     });
     window.speechSynthesis.cancel();

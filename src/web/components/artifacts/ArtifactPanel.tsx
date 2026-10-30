@@ -6,6 +6,8 @@ import { useHighlightedCode } from "@/components/ui/code-block";
 import { SimpleMarkdown } from "@/components/ui/simple-markdown";
 import { Select } from "@/components/ui/select";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
+import { t } from "@/i18n";
+import { formatBytes } from "@/i18n/format";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { motionAllowed, useAppearance } from "@/state/appearance";
@@ -108,7 +110,7 @@ function ResizeHandle({ width, onResize }: { width: number; onResize: (width: nu
     <div
       role="separator"
       aria-orientation="vertical"
-      aria-label="Resize panel"
+      aria-label={t("artifacts.resizePanel")}
       aria-valuenow={width}
       tabIndex={0}
       onPointerDown={onPointerDown}
@@ -314,18 +316,18 @@ function ArtifactPanelBody({
             {current && (
               <p className="text-muted-foreground flex items-center gap-1 text-xs">
                 {docKind ? docKind === "xlsx" ? <FileSpreadsheetIcon className="size-3" /> : <FileTextIcon className="size-3" /> : null}
-                {current.kind === "code" ? (current.language ?? "code") : current.kind}
-                {current.size ? ` · ${Math.max(1, Math.round(current.size / 1024))} KB` : ""}
+                {current.kind === "code" ? (current.language ?? t("artifacts.codeKind")) : current.kind}
+                {current.size ? ` · ${formatBytes(current.size)}` : ""}
               </p>
             )}
           </div>
           {versions && versions.length > 1 && (
             <Select
-              aria-label="Version"
+              aria-label={t("artifacts.version")}
               className="h-7 w-20 text-xs"
               value={String(current?.version)}
               onValueChange={(v) => setSelected(Number(v))}
-              options={versions.map((v) => ({ value: String(v.version), label: `v${v.version}` })).reverse()}
+              options={versions.map((v) => ({ value: String(v.version), label: t("artifacts.versionLabel", { version: v.version }) })).reverse()}
             />
           )}
           {hasPreview && hasCode && (
@@ -342,15 +344,15 @@ function ArtifactPanelBody({
                   )}
                 >
                   {v === "preview" ? <EyeIcon className="size-3.5" /> : <CodeIcon className="size-3.5" />}
-                  <span className="max-sm:hidden">{v === "preview" ? "Preview" : "Code"}</span>
+                  <span className="max-sm:hidden">{v === "preview" ? t("artifacts.preview") : t("artifacts.code")}</span>
                 </button>
               ))}
             </div>
           )}
           {showCode && (
             <TooltipIconButton
-              tooltip={wrap ? "Disable line wrapping" : "Enable line wrapping"}
-              aria-label="Wrap code"
+              tooltip={wrap ? t("artifacts.disableWrap") : t("artifacts.enableWrap")}
+              aria-label={t("artifacts.wrapCode")}
               aria-pressed={wrap}
               className="aria-pressed:bg-accent aria-pressed:text-accent-foreground"
               onClick={() => setWrapOverride(!wrap)}
@@ -359,15 +361,15 @@ function ArtifactPanelBody({
             </TooltipIconButton>
           )}
           {(doc || docKind === "docx") && view === "preview" && (
-            <TooltipIconButton tooltip="Reload" onClick={() => setReloadKey((k) => k + 1)}>
+            <TooltipIconButton tooltip={t("artifacts.reload")} onClick={() => setReloadKey((k) => k + 1)}>
               <RotateCwIcon />
             </TooltipIconButton>
           )}
-          <TooltipIconButton tooltip={isCopied ? "Copied" : "Copy"} disabled={!hasCode} onClick={() => current && hasCode && copyToClipboard(current.content)}>
+          <TooltipIconButton tooltip={isCopied ? t("common.copied") : t("common.copy")} disabled={!hasCode} onClick={() => current && hasCode && copyToClipboard(current.content)}>
             {isCopied ? <CheckIcon /> : <CopyIcon />}
           </TooltipIconButton>
           <TooltipIconButton
-            tooltip="Download"
+            tooltip={t("common.download")}
             disabled={!current}
             onClick={() => {
               if (!current) return;
@@ -378,7 +380,7 @@ function ArtifactPanelBody({
           >
             <DownloadIcon />
           </TooltipIconButton>
-          <TooltipIconButton tooltip="Close" command="chat.artifact" onClick={onClose}>
+          <TooltipIconButton tooltip={t("common.close")} command="chat.artifact" onClick={onClose}>
             <XIcon />
           </TooltipIconButton>
         </header>

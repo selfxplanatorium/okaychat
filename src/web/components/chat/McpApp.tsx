@@ -2,6 +2,7 @@ import { useAui } from "@assistant-ui/react";
 import { AppWindowIcon, Loader2Icon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { t } from "@/i18n";
 import { api, ApiError } from "@/lib/api";
 
 // MCP Apps (the `io.modelcontextprotocol/ui` extension): a tool names a `ui://` HTML resource, the chat
@@ -198,7 +199,7 @@ export function McpAppCard({ app, toolName, input, result }: { app: AppRef; tool
         <span className="truncate font-mono">{toolName}</span>
       </div>
       {error ? (
-        <p className="text-error text-xs">This app could not load: {error}</p>
+        <p className="text-error text-xs">{t("tools.appLoadFailed", { error })}</p>
       ) : !resource ? (
         <div className="bg-muted/40 flex h-24 items-center justify-center rounded-xl border">
           <Loader2Icon className="text-muted-foreground size-4 animate-spin" />
@@ -218,10 +219,10 @@ export function McpAppCard({ app, toolName, input, result }: { app: AppRef; tool
           <span>{confirm.message}</span>
           <span className="flex shrink-0 gap-1.5">
             <Button size="sm" variant="ghost" onClick={() => confirm.answer(false)}>
-              Deny
+              {t("tools.deny")}
             </Button>
             <Button size="sm" onClick={() => confirm.answer(true)}>
-              Allow
+              {t("tools.allow")}
             </Button>
           </span>
         </div>

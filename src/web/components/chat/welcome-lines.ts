@@ -1,51 +1,53 @@
+import { interpolate, template, type MessageKey } from "@/i18n";
+
 type Slot = "morning" | "afternoon" | "evening" | "night";
 
 // `{name}` becomes the user's name. Lines with it are skipped until the name is known.
 const ANY = [
-  "Tell me the plan. I'll supply the foreseeable consequences.",
-  "Your half-baked idea is welcome here.",
-  "{name}, how much of this plan is held together by optimism?",
-  "{name}, let's hear the idea before common sense gets here.",
-  "Okay, {name}. What's the plan we're calling reasonable?",
-  "This sounds like a future us problem. Let's interfere.",
-  "How much trouble can one little question cause?",
-  "We can start with the sensible idea, if you brought one.",
-];
+  "composer.welcomeAny1",
+  "composer.welcomeAny2",
+  "composer.welcomeAny3",
+  "composer.welcomeAny4",
+  "composer.welcomeAny5",
+  "composer.welcomeAny6",
+  "composer.welcomeAny7",
+  "composer.welcomeAny8",
+] as const satisfies readonly MessageKey[];
 
-const BY_SLOT: Record<Slot, string[]> = {
+const BY_SLOT = {
   morning: [
-    "Morning, {name}. Have we tried coffee before strategy?",
-    "Morning, {name}. Let's make a plan before the inbox does.",
-    "Coffee first. Grand schemes second.",
-    "Good morning. The to-do list has been making demands.",
-    "New day. Same suspiciously optimistic estimates.",
-    "Let's see what survived yesterday's 'I'll do it tomorrow.'",
+    "composer.welcomeMorning1",
+    "composer.welcomeMorning2",
+    "composer.welcomeMorning3",
+    "composer.welcomeMorning4",
+    "composer.welcomeMorning5",
+    "composer.welcomeMorning6",
   ],
   afternoon: [
-    "Afternoon already. Rude.",
-    "{name}, there's still time for a small, manageable plot twist.",
-    "Afternoon, {name}. Shall we negotiate with the to-do list?",
-    "The afternoon slump has requested a meeting. Declined.",
-    "We still have time. Depending on what you're about to ask.",
-    "Lunch is over. Apparently the tasks aren't.",
+    "composer.welcomeAfternoon1",
+    "composer.welcomeAfternoon2",
+    "composer.welcomeAfternoon3",
+    "composer.welcomeAfternoon4",
+    "composer.welcomeAfternoon5",
+    "composer.welcomeAfternoon6",
   ],
   evening: [
-    "Evening, {name}. One quick thing, allegedly.",
-    "{name}, what are we squeezing in before 'definitely stopping'?",
-    "Let's wrap this up before it develops a sequel.",
-    "Today's loose ends have formed a committee.",
-    "Just one more thing. Famous last words.",
-    "Evening. How did the side quest go?",
+    "composer.welcomeEvening1",
+    "composer.welcomeEvening2",
+    "composer.welcomeEvening3",
+    "composer.welcomeEvening4",
+    "composer.welcomeEvening5",
+    "composer.welcomeEvening6",
   ],
   night: [
-    "This had better be a good idea. It's past our bedtime.",
-    "Ah, the hour when buying a domain feels reasonable.",
-    "Still up, {name}? Let's keep the domain purchases supervised.",
-    "{name}, is this a tomorrow problem wearing a fake mustache?",
-    "The sensible ideas went to bed. What have you got?",
-    "Let's write it down before morning asks for evidence.",
+    "composer.welcomeNight1",
+    "composer.welcomeNight2",
+    "composer.welcomeNight3",
+    "composer.welcomeNight4",
+    "composer.welcomeNight5",
+    "composer.welcomeNight6",
   ],
-};
+} as const satisfies Record<Slot, readonly MessageKey[]>;
 
 function slotFor(hour: number): Slot {
   if (hour >= 5 && hour < 12) return "morning";
@@ -55,7 +57,8 @@ function slotFor(hour: number): Slot {
 }
 
 export function pickWelcomeLine(name: string | undefined, now: Date = new Date()): string {
-  const lines = [...ANY, ...BY_SLOT[slotFor(now.getHours())]].filter((line) => name || !line.includes("{name}"));
-  const line = lines[Math.floor(Math.random() * lines.length)] ?? ANY[0] ?? "How can I help?";
-  return name ? line.replace("{name}", name) : line;
+  const keys: readonly MessageKey[] = [...ANY, ...BY_SLOT[slotFor(now.getHours())]];
+  const lines = keys.filter((key) => name || !template(key).includes("{name}"));
+  const key = lines[Math.floor(Math.random() * lines.length)] ?? ANY[0];
+  return interpolate(template(key), name ? { name } : undefined);
 }

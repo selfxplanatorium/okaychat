@@ -10,7 +10,8 @@ import { useArtifactPanel } from "@/state/artifacts";
 import { useChatPrivacyStore } from "@/state/chat-privacy";
 import { showChat, useData } from "@/state/data";
 import { useThreadSelection } from "@/state/thread-selection";
-import { COMMAND_GROUPS, COMMANDS } from "./commands";
+import { t } from "@/i18n";
+import { COMMAND_GROUPS, COMMANDS, commandLabel, groupLabel } from "./commands";
 import { Kbd } from "./Kbd";
 import { commandAvailable, commandTarget, dialogReturnFocus, press, runCommand, useBindings, useCommand, useKeyboardDialog, useKeyboardDispatcher } from "./registry";
 
@@ -181,11 +182,11 @@ function CommandList() {
   const rows = useMemo(
     () =>
       COMMAND_GROUPS.flatMap((group) =>
-        COMMANDS.filter((c) => c.group === group && available.has(c.id) && (!q || `${c.label} ${c.group}`.toLowerCase().includes(q))),
+        COMMANDS.filter((c) => c.group === group && available.has(c.id) && (!q || `${commandLabel(c)} ${groupLabel(c.group)}`.toLowerCase().includes(q))),
       ),
     [available, q],
   );
-  const messageCommands = COMMANDS.filter((c) => c.scope === "message" && (bindings.get(c.id)?.length ?? 0) > 0 && (!q || c.label.toLowerCase().includes(q)));
+  const messageCommands = COMMANDS.filter((c) => c.scope === "message" && (bindings.get(c.id)?.length ?? 0) > 0 && (!q || commandLabel(c).toLowerCase().includes(q)));
 
   const run = (id: string) => {
     ran.current = true;
@@ -206,20 +207,20 @@ function CommandList() {
           return restore && dialogReturnFocus();
         }}
       >
-        <DialogTitle className="sr-only">Commands</DialogTitle>
-        <DialogDescription className="sr-only">Run any command by name. Use arrow keys to choose and Enter to run.</DialogDescription>
+        <DialogTitle className="sr-only">{t("keyboard.commands")}</DialogTitle>
+        <DialogDescription className="sr-only">{t("keyboard.commandsHelp")}</DialogDescription>
         <div className="border-border flex items-center gap-3 border-b px-5 py-4">
           <CommandIcon aria-hidden className="text-muted-foreground size-5 shrink-0" />
           <input
             autoFocus
-            aria-label="Search commands"
+            aria-label={t("keyboard.searchCommands")}
             role="combobox"
             aria-expanded={open}
             aria-autocomplete="list"
             aria-activedescendant={rows[selected] ? `command-${rows[selected].id}` : undefined}
             aria-controls="command-results"
             className="placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-base outline-none"
-            placeholder="Type a command…"
+            placeholder={t("keyboard.typeCommand")}
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -238,12 +239,12 @@ function CommandList() {
               }
             }}
           />
-          <button type="button" aria-label="Close commands" onClick={close} className="text-muted-foreground hover:text-foreground rounded border px-1.5 py-1 text-xs">Esc</button>
+          <button type="button" aria-label={t("keyboard.closeCommands")} onClick={close} className="text-muted-foreground hover:text-foreground rounded border px-1.5 py-1 text-xs">{t("keyboard.esc")}</button>
         </div>
-        <div ref={list} id="command-results" role="listbox" aria-label="Commands" className="max-h-[min(60dvh,30rem)] overflow-y-auto p-2">
+        <div ref={list} id="command-results" role="listbox" aria-label={t("keyboard.commands")} className="max-h-[min(60dvh,30rem)] overflow-y-auto p-2">
           {rows.map((command, index) => (
             <div key={command.id}>
-              {command.group !== rows[index - 1]?.group && <p className="text-muted-foreground px-3 pt-3 pb-1 text-xs">{command.group}</p>}
+              {command.group !== rows[index - 1]?.group && <p className="text-muted-foreground px-3 pt-3 pb-1 text-xs">{groupLabel(command.group)}</p>}
               <button
                 id={`command-${command.id}`}
                 role="option"
@@ -257,7 +258,7 @@ function CommandList() {
                   selected === index ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
                 )}
               >
-                <span className="min-w-0 flex-1 truncate">{command.label}</span>
+                <span className="min-w-0 flex-1 truncate">{commandLabel(command)}</span>
                 <span className="flex shrink-0 gap-1.5">
                   {(bindings.get(command.id) ?? []).map((combo) => <Kbd key={combo} combo={combo} />)}
                 </span>
@@ -266,15 +267,15 @@ function CommandList() {
           ))}
           {rows.length === 0 && (
             <p role="status" className="text-muted-foreground flex items-center gap-2 px-3 py-6 text-sm">
-              <SearchIcon className="size-4" /> No command matches.
+              <SearchIcon className="size-4" /> {t("keyboard.noMatch")}
             </p>
           )}
           {messageCommands.length > 0 && (
             <div className="mt-2 border-t pt-1">
-              <p className="text-muted-foreground px-3 pt-3 pb-1 text-xs">While a message has focus</p>
+              <p className="text-muted-foreground px-3 pt-3 pb-1 text-xs">{t("keyboard.whileMessageFocus")}</p>
               {messageCommands.map((command) => (
                 <div key={command.id} className="text-muted-foreground flex min-h-8 items-center gap-3 px-3 text-sm">
-                  <span className="min-w-0 flex-1 truncate">{command.label}</span>
+                  <span className="min-w-0 flex-1 truncate">{commandLabel(command)}</span>
                   <span className="flex shrink-0 gap-1.5">
                     {(bindings.get(command.id) ?? []).map((combo) => <Kbd key={combo} combo={combo} />)}
                   </span>
@@ -284,9 +285,9 @@ function CommandList() {
           )}
         </div>
         <div className="text-muted-foreground border-border flex items-center justify-between gap-3 border-t px-5 py-3 text-xs">
-          <span>↑ ↓ to choose · Enter to run · Esc to close</span>
+          <span>{t("keyboard.paletteHint")}</span>
           <Link href="/settings/keyboard" onClick={close} className="hover:text-foreground underline underline-offset-4">
-            Customize shortcuts
+            {t("keyboard.customize")}
           </Link>
         </div>
       </DialogContent>

@@ -1,11 +1,11 @@
 import { DownloadIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { t } from "@/i18n";
+import { formatBytes } from "@/i18n/format";
 import { api } from "@/lib/api";
 import { useCurrentThreadId } from "@/state/thread-meta";
 
 export type RunFile = { path: string; size: number; url: string; image: boolean; fileId?: string };
-
-export const formatBytes = (n: number) => (n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 ** 2).toFixed(1)} MB`);
 
 const AUDIO = /\.(mp3|wav|ogg|oga|opus|flac|m4a)$/i;
 
@@ -39,7 +39,7 @@ export function RunFiles({ files, className }: { files: readonly RunFile[]; clas
         ))}
         {files.length > FILES_SHOWN && (
           <button type="button" onClick={() => setAll(!all)} className="hover:bg-muted/60 text-muted-foreground hover:text-foreground rounded-lg border px-2 py-1 text-xs transition-colors duration-(--motion-fast) ease-out-quart">
-            {all ? "Show fewer" : `Show ${files.length - FILES_SHOWN} more`}
+            {all ? t("tools.showFewer") : t("tools.showMoreFiles", { count: files.length - FILES_SHOWN })}
           </button>
         )}
       </div>

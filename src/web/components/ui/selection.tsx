@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObjec
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { pruneSelection, toggleSelection } from "@/lib/selection";
+import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 /** The box drawn on a selectable row or card. Decorative: the row itself carries the checkbox role. */
@@ -134,22 +135,22 @@ export function FloatingSelectionBar({
     <div className="pointer-events-none sticky bottom-[max(1rem,env(safe-area-inset-bottom))] z-20 flex justify-center">
       <div
         role="toolbar"
-        aria-label="Selection actions"
+        aria-label={t("ui.selectionActions")}
         className="dropdown-glass depth-float animate-rise-in pointer-events-auto flex max-w-full flex-col gap-1.5 rounded-2xl border p-1.5"
       >
         {error && <p role="alert" className="text-destructive px-2 pt-1 text-xs">{error}</p>}
         <div className="flex flex-wrap items-center gap-1">
-          <span className="px-2 text-sm font-medium tabular-nums">{count} selected</span>
+          <span className="px-2 text-sm font-medium tabular-nums">{t("ui.selectedCount", { count })}</span>
           <Button variant="ghost" size="sm" disabled={selectAllBusy} onClick={allSelected ? onClear : onSelectAll} className="pointer-coarse:h-10">
             {selectAllBusy ? <Loader2Icon className="animate-spin" /> : <SelectionCheck checked={allSelected} indeterminate={count > 0} className="size-3.5" />}
-            {allSelected ? "Deselect all" : "Select all"}
+            {allSelected ? t("ui.deselectAll") : t("common.selectAll")}
           </Button>
           <span aria-hidden className="bg-border mx-0.5 h-5 w-px" />
           {children}
         </div>
       </div>
       <span aria-live="polite" className="sr-only">
-        {count === 1 ? "1 item selected" : `${count} items selected`}
+        {t("ui.itemsSelected", { count })}
       </span>
     </div>
   );
@@ -180,7 +181,7 @@ export function BulkDeleteDialog({
       await onConfirm();
       onOpenChange(false);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not delete the selection.");
+      setError(cause instanceof Error ? cause.message : t("ui.deleteSelectionFailed"));
     } finally {
       setBusy(false);
     }
@@ -195,7 +196,7 @@ export function BulkDeleteDialog({
         {error && <p role="alert" className="text-destructive text-sm">{error}</p>}
         <DialogFooter>
           <DialogClose disabled={busy} render={<Button variant="outline" />}>
-            Cancel
+            {t("common.cancel")}
           </DialogClose>
           <Button variant="destructive" disabled={busy} onClick={() => void confirm()}>
             {busy && <Loader2Icon className="animate-spin" />} {confirmLabel}

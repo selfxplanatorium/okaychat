@@ -1,6 +1,7 @@
 import { FileSpreadsheetIcon, Loader2Icon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { DocumentArtifactKind, SheetPreview } from "@shared/types";
+import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 // Document previews run in the user's browser only:
@@ -40,7 +41,7 @@ function DocxPreview({ url, title, className }: { url: string; title: string; cl
     setError(null);
     (async () => {
       const response = await fetch(url);
-      if (!response.ok) throw new Error("Could not load the document.");
+      if (!response.ok) throw new Error(t("artifacts.documentLoadFailed"));
       const data = await response.arrayBuffer();
       const { renderAsync } = await import("docx-preview");
       if (cancelled || !container.current) return;
@@ -63,7 +64,7 @@ function DocxPreview({ url, title, className }: { url: string; title: string; cl
     <div className={cn("bg-muted/30 h-full overflow-auto", className)}>
       {loading && !error && (
         <div className="text-muted-foreground flex h-24 items-center justify-center gap-2 text-sm">
-          <Loader2Icon className="size-4 animate-spin" /> Loading {title}
+          <Loader2Icon className="size-4 animate-spin" /> {t("artifacts.loadingTitle", { title })}
         </div>
       )}
       {error && <p className="text-muted-foreground p-4 text-sm">{error}</p>}
@@ -81,7 +82,7 @@ function SheetPreviewGrid({ url, title, className }: { url: string; title: strin
     let cancelled = false;
     setSheets(null);
     fetch(url)
-      .then((r) => (r.ok ? (r.json() as Promise<SheetPreview[]>) : Promise.reject(new Error("Could not read the spreadsheet."))))
+      .then((r) => (r.ok ? (r.json() as Promise<SheetPreview[]>) : Promise.reject(new Error(t("artifacts.spreadsheetReadFailed")))))
       .then((data) => !cancelled && setSheets(data))
       .catch((e: Error) => !cancelled && setError(e.message));
     return () => {
@@ -94,7 +95,7 @@ function SheetPreviewGrid({ url, title, className }: { url: string; title: strin
       {error && <p className="text-muted-foreground p-4 text-sm">{error}</p>}
       {!sheets && !error && (
         <div className="text-muted-foreground flex h-24 items-center justify-center gap-2 text-sm">
-          <Loader2Icon className="size-4 animate-spin" /> Loading {title}
+          <Loader2Icon className="size-4 animate-spin" /> {t("artifacts.loadingTitle", { title })}
         </div>
       )}
       {sheets && sheets.length > 1 && (
@@ -164,13 +165,13 @@ function SheetPreviewGrid({ url, title, className }: { url: string; title: strin
               ))}
             </tbody>
           </table>
-          {sheet.truncated && <p className="text-muted-foreground mt-2 text-xs">Preview limited to the first rows and columns.</p>}
+          {sheet.truncated && <p className="text-muted-foreground mt-2 text-xs">{t("artifacts.previewTruncated")}</p>}
         </div>
       )}
-      {!sheet && sheets && <p className="text-muted-foreground p-4 text-sm">This workbook has no sheets.</p>}
+      {!sheet && sheets && <p className="text-muted-foreground p-4 text-sm">{t("artifacts.noSheets")}</p>}
       {sheet && sheet.rows.length === 0 && (
         <p className="text-muted-foreground flex items-center gap-2 px-4 pb-4 text-sm">
-          <FileSpreadsheetIcon className="size-4" /> Empty sheet
+          <FileSpreadsheetIcon className="size-4" /> {t("artifacts.emptySheet")}
         </p>
       )}
     </div>

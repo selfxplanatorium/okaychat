@@ -7,6 +7,8 @@
  * ("?" is Shift+/ in the US layout and Shift+ß in the German one), so it is matched by the character.
  */
 
+import type { PlainMessageKey } from "@/i18n";
+
 export type Platform = "mac" | "other";
 
 export const platform: Platform =
@@ -151,36 +153,36 @@ export function ariaCombo(text: string): string {
  * Browser and OS shortcuts. `blocked` ones never reach the page (Chrome and Firefox handle them first);
  * `taken` ones reach it, but taking them away surprises people.
  */
-export function browserConflict(text: string): { level: "blocked" | "taken"; what: string } | null {
+export function browserConflict(text: string): { level: "blocked" | "taken"; what: PlainMessageKey } | null {
   const combo = normalizeCombo(text);
   if (!combo) return null;
-  const blocked: Record<string, string> = {
-    "Mod+T": "new tab", "Mod+W": "close tab", "Mod+N": "new window", "Mod+Shift+T": "reopen closed tab",
-    "Mod+Shift+N": "private window", "Mod+Shift+W": "close window", "Mod+Q": "quit", "Mod+Shift+Q": "quit",
-    "Mod+Tab": "next tab", "Mod+Shift+Tab": "previous tab", "Mod+PageUp": "previous tab", "Mod+PageDown": "next tab",
-    ...Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`Mod+${i + 1}`, "switch tab"])),
-    "Alt+F4": "close window", "F11": "full screen", "F12": "developer tools", "Mod+Shift+I": "developer tools",
-    "Mod+Shift+J": "developer tools", "Mod+Shift+C": "developer tools",
+  const blocked: Record<string, PlainMessageKey> = {
+    "Mod+T": "keyboard.conflictNewTab", "Mod+W": "keyboard.conflictCloseTab", "Mod+N": "keyboard.conflictNewWindow", "Mod+Shift+T": "keyboard.conflictReopenClosedTab",
+    "Mod+Shift+N": "keyboard.conflictPrivateWindow", "Mod+Shift+W": "keyboard.conflictCloseWindow", "Mod+Q": "keyboard.conflictQuit", "Mod+Shift+Q": "keyboard.conflictQuit",
+    "Mod+Tab": "keyboard.conflictNextTab", "Mod+Shift+Tab": "keyboard.conflictPreviousTab", "Mod+PageUp": "keyboard.conflictPreviousTab", "Mod+PageDown": "keyboard.conflictNextTab",
+    ...Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`Mod+${i + 1}`, "keyboard.conflictSwitchTab" as const])),
+    "Alt+F4": "keyboard.conflictCloseWindow", "F11": "keyboard.conflictFullScreen", "F12": "keyboard.conflictDeveloperTools", "Mod+Shift+I": "keyboard.conflictDeveloperTools",
+    "Mod+Shift+J": "keyboard.conflictDeveloperTools", "Mod+Shift+C": "keyboard.conflictDeveloperTools",
   };
-  if (platform === "mac") Object.assign(blocked, { "Mod+H": "hide app", "Mod+M": "minimize", "Mod+Space": "Spotlight", "Mod+Alt+I": "developer tools" });
-  const taken: Record<string, string> = {
-    "Mod+F": "find", "Mod+G": "find next", "Mod+Shift+G": "find previous", "Mod+P": "print", "Mod+S": "save page",
-    "Mod+O": "open file", "Mod+R": "reload", "Mod+Shift+R": "hard reload", "F5": "reload", "Mod+L": "address bar",
-    "Mod+D": "bookmark", "Mod+H": "history", "Mod+J": "downloads", "Mod+U": "page source", "Mod+E": "search",
-    "Mod+A": "select all", "Mod+C": "copy", "Mod+V": "paste", "Mod+X": "cut", "Mod+Z": "undo", "Mod+Y": "redo",
-    "Mod+Shift+Z": "redo", "Mod+Shift+V": "paste as plain text", "Mod+Shift+A": "tab search", "Mod+Shift+B": "bookmarks bar",
-    "Mod+Shift+O": "bookmark manager", "Mod+Shift+Delete": "clear browsing data", "Mod+Shift+P": "private window (Firefox)",
-    "Mod+Shift+K": "web console (Firefox)", "Mod+Shift+E": "network monitor (Firefox)", "Mod+Shift+S": "screenshot (Firefox)",
-    "Mod+Shift+H": "history (Firefox)", "Mod+Shift+Y": "downloads (Firefox)", "Mod+Shift+M": "profiles", "Mod+Shift+D": "bookmark all tabs",
-    "Mod+Shift+U": "Unicode input (Linux)", "Mod+Shift+X": "text direction (Firefox)", "Mod+B": "bold (text fields)",
-    "Mod+I": "italic (text fields)", "Mod+0": "reset zoom", "Mod+-": "zoom out", "Mod+=": "zoom in", "Mod+Plus": "zoom in",
-    "Alt+ArrowLeft": "back", "Alt+ArrowRight": "forward", "Alt+Home": "home page", "F1": "help", "F3": "find next",
-    "F6": "address bar", "F7": "caret browsing", "Mod+Shift+F": "full screen (Mac)", "Shift+Escape": "task manager (Chrome)",
-    "Mod+,": "browser settings (Mac)", "Mod+K": "web search",
-    "Tab": "move focus", "Shift+Tab": "move focus",
+  if (platform === "mac") Object.assign(blocked, { "Mod+H": "keyboard.conflictHideApp", "Mod+M": "keyboard.conflictMinimize", "Mod+Space": "keyboard.conflictSpotlight", "Mod+Alt+I": "keyboard.conflictDeveloperTools" });
+  const taken: Record<string, PlainMessageKey> = {
+    "Mod+F": "keyboard.conflictFind", "Mod+G": "keyboard.conflictFindNext", "Mod+Shift+G": "keyboard.conflictFindPrevious", "Mod+P": "keyboard.conflictPrint", "Mod+S": "keyboard.conflictSavePage",
+    "Mod+O": "keyboard.conflictOpenFile", "Mod+R": "keyboard.conflictReload", "Mod+Shift+R": "keyboard.conflictHardReload", "F5": "keyboard.conflictReload", "Mod+L": "keyboard.conflictAddressBar",
+    "Mod+D": "keyboard.conflictBookmark", "Mod+H": "keyboard.conflictHistory", "Mod+J": "keyboard.conflictDownloads", "Mod+U": "keyboard.conflictPageSource", "Mod+E": "keyboard.conflictSearch",
+    "Mod+A": "keyboard.conflictSelectAll", "Mod+C": "keyboard.conflictCopy", "Mod+V": "keyboard.conflictPaste", "Mod+X": "keyboard.conflictCut", "Mod+Z": "keyboard.conflictUndo", "Mod+Y": "keyboard.conflictRedo",
+    "Mod+Shift+Z": "keyboard.conflictRedo", "Mod+Shift+V": "keyboard.conflictPasteAsPlainText", "Mod+Shift+A": "keyboard.conflictTabSearch", "Mod+Shift+B": "keyboard.conflictBookmarksBar",
+    "Mod+Shift+O": "keyboard.conflictBookmarkManager", "Mod+Shift+Delete": "keyboard.conflictClearBrowsingData", "Mod+Shift+P": "keyboard.conflictPrivateWindowFirefox",
+    "Mod+Shift+K": "keyboard.conflictWebConsoleFirefox", "Mod+Shift+E": "keyboard.conflictNetworkMonitorFirefox", "Mod+Shift+S": "keyboard.conflictScreenshotFirefox",
+    "Mod+Shift+H": "keyboard.conflictHistoryFirefox", "Mod+Shift+Y": "keyboard.conflictDownloadsFirefox", "Mod+Shift+M": "keyboard.conflictProfiles", "Mod+Shift+D": "keyboard.conflictBookmarkAllTabs",
+    "Mod+Shift+U": "keyboard.conflictUnicodeInputLinux", "Mod+Shift+X": "keyboard.conflictTextDirectionFirefox", "Mod+B": "keyboard.conflictBoldTextFields",
+    "Mod+I": "keyboard.conflictItalicTextFields", "Mod+0": "keyboard.conflictResetZoom", "Mod+-": "keyboard.conflictZoomOut", "Mod+=": "keyboard.conflictZoomIn", "Mod+Plus": "keyboard.conflictZoomIn",
+    "Alt+ArrowLeft": "keyboard.conflictBack", "Alt+ArrowRight": "keyboard.conflictForward", "Alt+Home": "keyboard.conflictHomePage", "F1": "keyboard.conflictHelp", "F3": "keyboard.conflictFindNext",
+    "F6": "keyboard.conflictAddressBar", "F7": "keyboard.conflictCaretBrowsing", "Mod+Shift+F": "keyboard.conflictFullScreenMac", "Shift+Escape": "keyboard.conflictTaskManagerChrome",
+    "Mod+,": "keyboard.conflictBrowserSettingsMac", "Mod+K": "keyboard.conflictWebSearch",
+    "Tab": "keyboard.conflictMoveFocus", "Shift+Tab": "keyboard.conflictMoveFocus",
   };
   // Windows and Linux open browser menus with Alt+letter.
-  if (platform !== "mac") for (const letter of "FEVSBTHD") taken[`Alt+${letter}`] = "browser menu";
+  if (platform !== "mac") for (const letter of "FEVSBTHD") taken[`Alt+${letter}`] = "keyboard.conflictBrowserMenu";
   if (blocked[combo]) return { level: "blocked", what: blocked[combo] };
   if (taken[combo]) return { level: "taken", what: taken[combo] };
   return null;

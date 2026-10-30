@@ -7,6 +7,7 @@ import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useCurrentThreadId } from "@/state/thread-meta";
+import { t } from "@/i18n";
 
 /** Top-right of a chat: create, copy, or revoke the thread's public read-only link. */
 export function ShareButton() {
@@ -17,7 +18,7 @@ export function ShareButton() {
     <Popover>
       <PopoverTrigger
         className="surface-glass text-muted-foreground hover:text-foreground animate-fade-in relative z-20 rounded-lg border p-1.5 pointer-coarse:p-2.5 transition-colors duration-(--motion-fast) ease-out-quart"
-        aria-label="Share chat"
+        aria-label={t("share.shareChat")}
         data-command="chat.share"
       >
         <Share2Icon className="size-4" />
@@ -30,7 +31,7 @@ export function ShareButton() {
 }
 
 /** Share controls for one thread, used by the chat's share popover and the sidebar row menu. */
-export function SharePanel({ threadId, title = "Share this chat" }: { threadId: string; title?: ReactNode | null }) {
+export function SharePanel({ threadId, title = t("share.shareThisChat") }: { threadId: string; title?: ReactNode | null }) {
   const [token, setToken] = useState<string | null | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const { isCopied, copyToClipboard } = useCopyToClipboard();
@@ -53,12 +54,12 @@ export function SharePanel({ threadId, title = "Share this chat" }: { threadId: 
   return (
     <>
       {title !== null && <p className="mb-1 text-sm font-medium">{title}</p>}
-      <p className="text-muted-foreground mb-3 text-xs">Anyone with the link can read the chat, including later messages. Reasoning, tool inputs, and costs stay private.</p>
+      <p className="text-muted-foreground mb-3 text-xs">{t("share.shareNotice")}</p>
       {token ? (
         <div className="animate-rise-in">
           <div className="mb-2 flex gap-1">
             <input readOnly value={url} className="bg-muted min-w-0 flex-1 rounded-lg px-2 text-xs" onFocus={(e) => e.target.select()} />
-            <Button size="icon-sm" variant="outline" aria-label="Copy link" onClick={() => copyToClipboard(url)}>
+            <Button size="icon-sm" variant="outline" aria-label={t("share.copyLink")} onClick={() => copyToClipboard(url)}>
               {/* Both icons share a grid cell so the check can pop over the copy icon. */}
               <span className="relative grid place-items-center">
                 <CopyIcon
@@ -81,7 +82,7 @@ export function SharePanel({ threadId, title = "Share this chat" }: { threadId: 
             disabled={busy}
             onClick={() => run(async () => void (await api(`/threads/${threadId}/share`, { method: "DELETE" }), setToken(null)))}
           >
-            Stop sharing
+            {t("share.stopSharing")}
           </Button>
         </div>
       ) : (
@@ -91,7 +92,7 @@ export function SharePanel({ threadId, title = "Share this chat" }: { threadId: 
           disabled={busy || token === undefined}
           onClick={() => run(async () => setToken((await api<{ token: string }>(`/threads/${threadId}/share`, { method: "POST" })).token))}
         >
-          {busy ? <Loader2Icon className="animate-spin" /> : <Link2Icon />} Create link
+          {busy ? <Loader2Icon className="animate-spin" /> : <Link2Icon />} {t("share.createLink")}
         </Button>
       )}
     </>

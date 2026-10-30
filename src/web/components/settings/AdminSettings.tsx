@@ -7,7 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { api, formatBytes, formatCost } from "@/lib/api";
+import { api } from "@/lib/api";
+import { t } from "@/i18n";
+import { formatBytes, formatCost } from "@/i18n/format";
 import { useData } from "@/state/data";
 import { Checklist, invalidateDirectory, useDirectory } from "./Audience";
 import { ProviderLists, ProviderScopeProvider } from "./ProvidersSettings";
@@ -38,17 +40,17 @@ function NewUserForm({ onDone }: { onDone: () => void }) {
         }
       }}
     >
-      <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
-      <Input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-      <Input type="password" placeholder="Initial password (8+ characters)" value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required autoComplete="new-password" />
-      <Select aria-label="Role" value={role} onValueChange={setRole} options={[{ value: "user", label: "User" }, { value: "admin", label: "Admin" }]} />
+      <Input placeholder={t("admin.namePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
+      <Input type="email" placeholder={t("admin.emailPlaceholder")} value={email} onChange={(e) => setEmail(e.target.value)} required />
+      <Input type="password" placeholder={t("admin.initialPasswordPlaceholder")} value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required autoComplete="new-password" />
+      <Select aria-label={t("admin.role")} value={role} onValueChange={setRole} options={[{ value: "user", label: t("admin.roleUser") }, { value: "admin", label: t("admin.roleAdmin") }]} />
       {error && <p className="text-error settings-error text-xs sm:col-span-2">{error}</p>}
       <div className="flex justify-end gap-2 sm:col-span-2">
         <Button type="button" variant="ghost" onClick={onDone}>
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button type="submit" disabled={busy}>
-          {busy && <Loader2Icon className="animate-spin" />} Add user
+          {busy && <Loader2Icon className="animate-spin" />} {t("admin.addUser")}
         </Button>
       </div>
     </form>
@@ -57,9 +59,9 @@ function NewUserForm({ onDone }: { onDone: () => void }) {
 
 /** "2 GB", "500 MB", "1.5GB", a bare number in MB → bytes; "" resets to the default. */
 function parseLimit(text: string): number | null | undefined {
-  const t = text.trim().toUpperCase().replace(/\s+/g, "");
-  if (!t) return null;
-  const match = t.match(/^([\d.]+)(B|KB|MB|GB|TB)?$/);
+  const value = text.trim().toUpperCase().replace(/\s+/g, "");
+  if (!value) return null;
+  const match = value.match(/^([\d.]+)(B|KB|MB|GB|TB)?$/);
   if (!match) return undefined;
   const multiplier = { B: 1, KB: 1024, MB: 1024 ** 2, GB: 1024 ** 3, TB: 1024 ** 4 }[match[2] ?? "MB"]!;
   const bytes = Math.round(Number(match[1]) * multiplier);
@@ -89,10 +91,10 @@ function UserEditDialog({ edit, onClose, onSaved }: { edit: UserEdit | null; onC
     if (isLimit) {
       // An untouched prefill keeps the exact stored bytes, which formatBytes rounds.
       const parsed = user.storageLimit !== null && text === formatBytes(user.storageLimit) ? user.storageLimit : parseLimit(text);
-      if (parsed === undefined) return setError('Use a size like "2 GB" or "500 MB".');
+      if (parsed === undefined) return setError(t("admin.limitFormatError"));
       json = { storageLimit: parsed };
     } else {
-      if (text.length < 8) return setError("Use at least 8 characters.");
+      if (text.length < 8) return setError(t("admin.passwordTooShort"));
       json = { password: text };
     }
     setBusy(true);
@@ -119,18 +121,18 @@ function UserEditDialog({ edit, onClose, onSaved }: { edit: UserEdit | null; onC
           }}
         >
           <DialogHeader>
-            <DialogTitle className="text-base">{isLimit ? "Storage limit" : "Reset password"}</DialogTitle>
+            <DialogTitle className="text-base">{isLimit ? t("admin.storageLimit") : t("admin.resetPassword")}</DialogTitle>
             <DialogDescription>
               {isLimit
-                ? `For ${user?.email}. A bare number means MB. Leave empty to use the server default.`
-                : `For ${user?.email}. They will be signed out everywhere.`}
+                ? t("admin.limitDescription", { email: user?.email ?? "" })
+                : t("admin.passwordDescription", { email: user?.email ?? "" })}
             </DialogDescription>
           </DialogHeader>
           <Input
-            aria-label={isLimit ? "Storage limit" : "New password"}
+            aria-label={isLimit ? t("admin.storageLimit") : t("admin.newPassword")}
             type={isLimit ? "text" : "password"}
             autoComplete={isLimit ? "off" : "new-password"}
-            placeholder={isLimit ? "Server default" : "8+ characters"}
+            placeholder={isLimit ? t("admin.serverDefault") : t("admin.passwordHint")}
             value={text}
             onChange={(e) => setText(e.target.value)}
             autoFocus
@@ -138,10 +140,10 @@ function UserEditDialog({ edit, onClose, onSaved }: { edit: UserEdit | null; onC
           {error && <p role="alert" className="text-error settings-error text-xs">{error}</p>}
           <DialogFooter>
             <DialogClose type="button" disabled={busy} render={<Button variant="outline" />}>
-              Cancel
+              {t("common.cancel")}
             </DialogClose>
             <Button type="submit" disabled={busy || (!isLimit && !text)}>
-              {busy && <Loader2Icon className="animate-spin" />} {isLimit ? "Save" : "Reset password"}
+              {busy && <Loader2Icon className="animate-spin" />} {isLimit ? t("common.save") : t("admin.resetPassword")}
             </Button>
           </DialogFooter>
         </form>
@@ -175,14 +177,14 @@ function Users({ defaultLimit }: { defaultLimit: number | null }) {
   };
 
   const limitLabel = (u: AdminUser) =>
-    u.storageLimit !== null ? formatBytes(u.storageLimit) : defaultLimit !== null ? `default ${formatBytes(defaultLimit)}` : "default";
+    u.storageLimit !== null ? formatBytes(u.storageLimit) : defaultLimit !== null ? t("admin.limitDefaultSized", { size: formatBytes(defaultLimit) }) : t("admin.limitDefault");
   return (
     <SettingsSection
-      title="Users"
+      title={t("admin.users")}
       action={
         !adding && (
           <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
-            <PlusIcon /> Add user
+            <PlusIcon /> {t("admin.addUser")}
           </Button>
         )
       }
@@ -200,30 +202,30 @@ function Users({ defaultLimit }: { defaultLimit: number | null }) {
         <div key={u.id} className="stagger animate-rise-in flex items-center gap-3 px-4 py-3" style={{ "--i": index } as CSSProperties}>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium">
-              {u.name} {u.id === me?.id && <span className="text-muted-foreground font-normal">(you)</span>}
+              {u.name} {u.id === me?.id && <span className="text-muted-foreground font-normal">{t("admin.you")}</span>}
             </p>
             <p className="text-muted-foreground truncate text-xs">
-              {u.email} · {u.threads} chats · {formatBytes(u.storageUsed)} of {limitLabel(u)} stored · {formatCost(u.cost30d)} in 30 days
+              {t("admin.userStats", { email: u.email, chats: u.threads, used: formatBytes(u.storageUsed), limit: limitLabel(u), cost: formatCost(u.cost30d) })}
             </p>
           </div>
           <Select
-            aria-label={`Role of ${u.name}`}
+            aria-label={t("admin.roleOf", { name: u.name })}
             className="h-7 w-24 text-xs"
             value={u.role}
             disabled={u.id === me?.id}
             onValueChange={(role) => void act(() => api(`/admin/users/${u.id}`, { method: "PATCH", json: { role } }))}
             options={[
-              { value: "user", label: "User" },
-              { value: "admin", label: "Admin" },
+              { value: "user", label: t("admin.roleUser") },
+              { value: "admin", label: t("admin.roleAdmin") },
             ]}
           />
-          <Button size="icon-sm" variant="ghost" aria-label={`Storage limit of ${u.name}`} onClick={() => setEdit({ kind: "limit", user: u })}>
+          <Button size="icon-sm" variant="ghost" aria-label={t("admin.storageLimitOf", { name: u.name })} onClick={() => setEdit({ kind: "limit", user: u })}>
             <HardDriveIcon />
           </Button>
           <Button
             size="icon-sm"
             variant="ghost"
-            aria-label={`Reset password of ${u.name}`}
+            aria-label={t("admin.resetPasswordOf", { name: u.name })}
             onClick={() => setEdit({ kind: "password", user: u })}
           >
             <KeyRoundIcon />
@@ -231,9 +233,9 @@ function Users({ defaultLimit }: { defaultLimit: number | null }) {
           <Button
             size="icon-sm"
             variant="ghost"
-            aria-label={`Delete ${u.name}`}
+            aria-label={t("admin.deleteUser", { name: u.name })}
             disabled={u.id === me?.id}
-            onClick={() => confirm(`Delete ${u.email} and all their chats, keys, and files?`) && void act(() => api(`/admin/users/${u.id}`, { method: "DELETE" }))}
+            onClick={() => confirm(t("admin.deleteUserConfirm", { email: u.email })) && void act(() => api(`/admin/users/${u.id}`, { method: "DELETE" }))}
           >
             <TrashIcon />
           </Button>
@@ -287,12 +289,12 @@ function GroupDialog({ group, onClose }: { group: UserGroup | "new" | null; onCl
           }}
         >
           <DialogHeader>
-            <DialogTitle className="text-base">{isNew ? "New group" : "Edit group"}</DialogTitle>
-            <DialogDescription>Share providers and MCP servers with a group instead of every user.</DialogDescription>
+            <DialogTitle className="text-base">{isNew ? t("admin.newGroup") : t("admin.editGroup")}</DialogTitle>
+            <DialogDescription>{t("admin.groupDescription")}</DialogDescription>
           </DialogHeader>
-          <Input aria-label="Group name" placeholder="Name, e.g. Engineering" value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
+          <Input aria-label={t("admin.groupName")} placeholder={t("admin.groupNamePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
           <Checklist
-            label="Members"
+            label={t("admin.members")}
             filter={users.length > 8}
             items={users.map((u) => ({ id: u.id, label: u.name, hint: u.email }))}
             selected={members}
@@ -307,10 +309,10 @@ function GroupDialog({ group, onClose }: { group: UserGroup | "new" | null; onCl
           {error && <p role="alert" className="text-error settings-error text-xs">{error}</p>}
           <DialogFooter>
             <DialogClose type="button" disabled={busy} render={<Button variant="outline" />}>
-              Cancel
+              {t("common.cancel")}
             </DialogClose>
             <Button type="submit" disabled={busy || !name.trim()}>
-              {busy && <Loader2Icon className="animate-spin" />} {isNew ? "Create group" : "Save"}
+              {busy && <Loader2Icon className="animate-spin" />} {isNew ? t("admin.createGroup") : t("common.save")}
             </Button>
           </DialogFooter>
         </form>
@@ -325,33 +327,33 @@ function Groups() {
   const [error, setError] = useState<string | null>(null);
   return (
     <SettingsSection
-      title="Groups"
-      description="Named sets of users. Give a server-wide provider or a shared MCP server to groups or single users instead of everyone."
+      title={t("admin.groups")}
+      description={t("admin.groupsDescription")}
       action={
         <Button size="sm" variant="outline" onClick={() => setEditing("new")}>
-          <PlusIcon /> New group
+          <PlusIcon /> {t("admin.newGroup")}
         </Button>
       }
     >
       {error && <p className="text-error settings-error px-4 pt-2 text-xs">{error}</p>}
-      {groups.length === 0 && <p className="text-muted-foreground px-4 py-3 text-sm">No groups yet.</p>}
+      {groups.length === 0 && <p className="text-muted-foreground px-4 py-3 text-sm">{t("admin.noGroups")}</p>}
       {groups.map((g, index) => (
         <div key={g.id} className="stagger animate-rise-in flex items-center gap-3 px-4 py-3" style={{ "--i": index } as CSSProperties}>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium">{g.name}</p>
             <p className="text-muted-foreground truncate text-xs">
-              {g.userIds.length} {g.userIds.length === 1 ? "member" : "members"}
+              {t("admin.memberCount", { count: g.userIds.length })}
             </p>
           </div>
-          <Button size="icon-sm" variant="ghost" aria-label={`Edit ${g.name}`} onClick={() => setEditing(g)}>
+          <Button size="icon-sm" variant="ghost" aria-label={t("admin.editNamed", { name: g.name })} onClick={() => setEditing(g)}>
             <PencilIcon />
           </Button>
           <Button
             size="icon-sm"
             variant="ghost"
-            aria-label={`Delete ${g.name}`}
+            aria-label={t("admin.deleteNamed", { name: g.name })}
             onClick={async () => {
-              if (!confirm(`Delete the group ${g.name}? Members lose what was shared only through it.`)) return;
+              if (!confirm(t("admin.deleteGroupConfirm", { name: g.name }))) return;
               setError(null);
               try {
                 await api(`/admin/groups/${g.id}`, { method: "DELETE" });
@@ -390,21 +392,21 @@ function PromptEditor({ item, onSaved, onClose }: { item: AdminPrompt; onSaved: 
     <div className="animate-rise-in flex flex-col gap-2 px-4 pb-3">
       <Textarea aria-label={item.label} className="max-h-[60vh] font-mono text-xs md:text-xs" value={text} onChange={(e) => setText(e.target.value)} autoFocus />
       {item.placeholders.length > 0 && (
-        <p className="text-muted-foreground text-xs">Placeholders: {item.placeholders.map((name) => `{${name}}`).join(", ")}</p>
+        <p className="text-muted-foreground text-xs">{t("admin.placeholders", { list: item.placeholders.map((name) => `{${name}}`).join(", ") })}</p>
       )}
       {error && <p className="text-error settings-error text-xs">{error}</p>}
       <div className="flex justify-end gap-2">
         {item.value !== null && (
           <Button type="button" variant="ghost" disabled={busy} onClick={() => void save(null)}>
-            Reset to default
+            {t("settings.resetToDefault")}
           </Button>
         )}
         <Button type="button" variant="ghost" onClick={onClose}>
-          Cancel
+          {t("common.cancel")}
         </Button>
         {/* Saving the unchanged default keeps the default, so later default updates still apply. */}
         <Button type="button" disabled={busy} onClick={() => void save(text === item.defaultValue ? null : text)}>
-          {busy && <Loader2Icon className="animate-spin" />} Save
+          {busy && <Loader2Icon className="animate-spin" />} {t("common.save")}
         </Button>
       </div>
     </div>
@@ -418,18 +420,18 @@ function SystemPrompts() {
     void api<AdminPrompt[]>("/admin/prompts").then(setPrompts);
   }, []);
   return (
-    <SettingsSection title="System prompts" description="Server-wide instructions sent to models for every user. Changes apply to the next request.">
+    <SettingsSection title={t("admin.systemPrompts")} description={t("admin.systemPromptsDescription")}>
       {prompts.map((item) => (
         <div key={item.key} className="flex flex-col">
           <div className="flex items-center gap-3 px-4 py-3">
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">
-                {item.label} {item.value !== null && <span className="text-muted-foreground font-normal">(customized)</span>}
+                {item.label} {item.value !== null && <span className="text-muted-foreground font-normal">{t("admin.customized")}</span>}
               </p>
               <p className="text-muted-foreground text-xs">{item.description}</p>
             </div>
             {editing !== item.key && (
-              <Button size="icon-sm" variant="ghost" aria-label={`Edit ${item.label}`} onClick={() => setEditing(item.key)}>
+              <Button size="icon-sm" variant="ghost" aria-label={t("admin.editNamed", { name: item.label })} onClick={() => setEditing(item.key)}>
                 <PencilIcon />
               </Button>
             )}
@@ -466,16 +468,16 @@ export function AdminSettings() {
   }, []);
 
   return (
-    <SettingsPage title="Admin" description="Manage who can use this server, user groups, the system prompts, and which provider keys you share.">
-      <SettingsSection title="Access">
+    <SettingsPage title={t("settings.sectionAdmin")} description={t("admin.pageDescription")}>
+      <SettingsSection title={t("admin.access")}>
         <SettingsRow
-          label="Open sign-up"
-          description="Anyone who can reach this server can create an account. Off: only admins add users."
+          label={t("admin.openSignup")}
+          description={t("admin.openSignupDescription")}
           control={
             allowSignup !== null && (
               <Switch
                 checked={allowSignup}
-                aria-label="Open sign-up"
+                aria-label={t("admin.openSignup")}
                 onCheckedChange={async (value) => setAllowSignup((await api<{ allowSignup: boolean }>("/admin/settings", { method: "PATCH", json: { allowSignup: value } })).allowSignup)}
               />
             )
@@ -486,9 +488,9 @@ export function AdminSettings() {
       <Groups />
       <SystemPrompts />
       <AdminVoiceSettings />
-      <h2 className="mt-2 text-sm font-medium">Server-wide providers</h2>
+      <h2 className="mt-2 text-sm font-medium">{t("admin.serverProviders")}</h2>
       <p className="text-muted-foreground -mt-2 text-xs">
-        Shared with everyone unless you limit a key to groups or users. A user's own key for the same provider takes precedence. Usage is still tracked per user.
+        {t("admin.serverProvidersDescription")}
       </p>
       <ProviderScopeProvider base="/admin/providers" providers={providers} refresh={refreshProviders}>
         <ProviderLists />

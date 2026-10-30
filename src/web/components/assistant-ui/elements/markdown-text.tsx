@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils";
 import { useCurrentThreadId } from "@/state/thread-meta";
 import { safeHref } from "../utils/href";
 import { MarkdownTable } from "./markdown-table";
+import { t } from "@/i18n";
 
 type MarkdownTextProps = Partial<TextMessagePartProps> & {
   components?: Parameters<typeof memoizeMarkdownComponents>[0];
@@ -147,7 +148,7 @@ const MarkdownImage: FC<ComponentProps<"img">> = ({
     );
   }
 
-  const label = alt?.trim() || "Image unavailable";
+  const label = alt?.trim() || t("thread.imageUnavailable");
   const href = safeHref(src);
   const isWebUrl = href !== undefined && /^https?:\/\//i.test(href);
 
@@ -165,7 +166,7 @@ const MarkdownImage: FC<ComponentProps<"img">> = ({
           rel="noreferrer noopener"
           className="text-foreground shrink-0 underline-offset-4 hover:underline"
         >
-          Open link
+          {t("thread.openLink")}
         </a>
       )}
     </span>

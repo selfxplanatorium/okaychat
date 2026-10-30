@@ -4,7 +4,9 @@ import type { Project } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { api, formatTokens } from "@/lib/api";
+import { api } from "@/lib/api";
+import { t } from "@/i18n";
+import { formatTokens } from "@/i18n/format";
 import { useData } from "@/state/data";
 import { ModelSelect } from "../chat/ModelPicker";
 import { SettingsPage, SettingsSection } from "./SettingsUI";
@@ -41,27 +43,27 @@ function ProjectForm({ initial, onDone }: { initial?: Project; onDone: () => voi
         void submit();
       }}
     >
-      <Input placeholder="Project name" value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
+      <Input placeholder={t("projects.namePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
       <Textarea
-        placeholder="Instructions for every chat in this project, e.g. You help me run my bakery's marketing. Write in a warm, plain voice."
+        placeholder={t("projects.instructionsPlaceholder")}
         value={instructions}
         onChange={(e) => setInstructions(e.target.value)}
         className="min-h-28"
       />
       <ModelSelect
-        aria-label="Default model"
+        aria-label={t("projects.defaultModel")}
         value={defaultModel ?? ""}
         onValueChange={(value) => setDefaultModel(value || null)}
-        choices={[{ value: "", label: "Use account default model" }]}
+        choices={[{ value: "", label: t("projects.useAccountDefault") }]}
       />
       {error && <p className="text-error settings-error text-xs">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onDone}>
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button type="submit" disabled={busy}>
           {busy && <Loader2Icon className="animate-spin" />}
-          {initial ? "Save" : "Create project"}
+          {initial ? t("common.save") : t("projects.createProject")}
         </Button>
       </div>
     </form>
@@ -99,15 +101,15 @@ function ProjectFiles({ project }: { project: Project }) {
         <div key={f.id} className="text-muted-foreground animate-fade-in flex items-center gap-2 text-xs">
           <FileTextIcon className="size-3.5 shrink-0" />
           <span className="text-foreground truncate">{f.name}</span>
-          <span className="shrink-0">~{formatTokens(Math.round(f.chars / 4))} tokens</span>
-          <button type="button" className="hover:text-foreground ms-auto transition-colors duration-(--motion-fast)" aria-label={`Remove ${f.name}`} onClick={() => void api(`/projects/${project.id}/files/${f.id}`, { method: "DELETE" }).then(refresh)}>
+          <span className="shrink-0">{t("projects.fileTokens", { tokens: formatTokens(Math.round(f.chars / 4)) })}</span>
+          <button type="button" className="hover:text-foreground ms-auto transition-colors duration-(--motion-fast)" aria-label={t("projects.removeFile", { name: f.name })} onClick={() => void api(`/projects/${project.id}/files/${f.id}`, { method: "DELETE" }).then(refresh)}>
             <TrashIcon className="size-3.5" />
           </button>
         </div>
       ))}
       <input ref={input} type="file" multiple hidden onChange={(e) => void upload(e.target.files)} />
       <Button size="xs" variant="ghost" className="w-fit" disabled={busy} onClick={() => input.current?.click()}>
-        {busy ? <Loader2Icon className="animate-spin" /> : <UploadIcon />} Pin files
+        {busy ? <Loader2Icon className="animate-spin" /> : <UploadIcon />} {t("projects.pinFiles")}
       </Button>
       {error && <p className="text-error settings-error text-xs">{error}</p>}
     </div>
@@ -120,18 +122,18 @@ export function ProjectSettings() {
   const [editing, setEditing] = useState<string | "new" | null>(null);
 
   return (
-    <SettingsPage title="Projects" description="Group chats under shared instructions, pinned files, and a default model. Switch projects at the top of the sidebar.">
+    <SettingsPage title={t("projects.title")} description={t("projects.description")}>
       <SettingsSection
         action={
           editing !== "new" && (
             <Button size="sm" variant="outline" onClick={() => setEditing("new")}>
-              <PlusIcon /> New project
+              <PlusIcon /> {t("projects.newProject")}
             </Button>
           )
         }
       >
         {editing === "new" && <ProjectForm onDone={() => setEditing(null)} />}
-        {projects.length === 0 && editing !== "new" && <p className="text-muted-foreground animate-fade-in px-4 py-6 text-sm">No projects yet.</p>}
+        {projects.length === 0 && editing !== "new" && <p className="text-muted-foreground animate-fade-in px-4 py-6 text-sm">{t("projects.empty")}</p>}
         {projects.map((p, index) =>
           editing === p.id ? (
             <ProjectForm key={p.id} initial={p} onDone={() => setEditing(null)} />
@@ -143,14 +145,14 @@ export function ProjectSettings() {
                 <ProjectFiles project={p} />
               </div>
               <div className="flex shrink-0 gap-1">
-                <Button size="icon-sm" variant="ghost" aria-label="Edit" onClick={() => setEditing(p.id)}>
+                <Button size="icon-sm" variant="ghost" aria-label={t("common.edit")} onClick={() => setEditing(p.id)}>
                   <PencilIcon />
                 </Button>
                 <Button
                   size="icon-sm"
                   variant="ghost"
-                  aria-label="Delete project"
-                  onClick={() => confirm(`Delete "${p.name}"? Its chats stay and move to All chats.`) && void api(`/projects/${p.id}`, { method: "DELETE" }).then(refresh)}
+                  aria-label={t("projects.deleteProject")}
+                  onClick={() => confirm(t("projects.confirmDelete", { name: p.name })) && void api(`/projects/${p.id}`, { method: "DELETE" }).then(refresh)}
                 >
                   <TrashIcon />
                 </Button>

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { DEFAULT_STT_ENGINE, DEFAULT_TTS_ENGINE, type SpeechSettings, type SpeechStatus, type SttEngineId, type TtsEngineId } from "@shared/speech";
 import { api } from "@/lib/api";
+import { t } from "@/i18n";
 
 /** Server-side speech availability plus the live state of recording and playback in this tab. */
 interface SpeechStore {
@@ -47,7 +48,7 @@ export async function speechFetch(path: string, init: RequestInit): Promise<Resp
   const res = await fetch(`/api${path}`, { credentials: "same-origin", ...init });
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error ?? `Speech request failed (${res.status}).`);
+    throw new Error(body?.error ?? t("speech.requestFailed", { status: res.status }));
   }
   return res;
 }
