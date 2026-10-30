@@ -87,6 +87,7 @@ import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useLongPaste } from "@/components/chat/long-paste";
 import { parseAttachmentText, splitUserMessage, typedText } from "@/runtime/message-attachments";
 import { mcpAppOf } from "@/components/chat/McpApp";
+import { ReplyFiles } from "@/components/chat/reply-files";
 import { DictationSend, ReadAloudAutoPlay, useDictateLabel, useSendDictation, VoiceNotice } from "@/speech/ChatVoice";
 import { useSpeech } from "@/speech/store";
 import { useThreadSync, type ThreadSync } from "@/state/thread-sync";
@@ -181,7 +182,8 @@ type GroupBy = typeof taskAwareGroupBy;
 /**
  * Which result a card shows. Within one reply only the last card per key stays
  * visible; earlier calls with the same key were drafts. Tools without a key
- * (searches, reads, screenshots, sub-agents) are work, not results.
+ * (searches, reads, screenshots, sub-agents, runs) are work, not results. A run's files are shown once
+ * for the whole reply by `ReplyFiles`.
  */
 const resultKey = (part: GroupablePart): string | undefined => {
   if (part.type !== "tool-call" || part.status.type === "incomplete") return undefined;
@@ -201,11 +203,6 @@ const resultKey = (part: GroupablePart): string | undefined => {
       return `widget:${String(args.title ?? "")}`;
     case "render_spec":
       return "spec";
-    case "run_code": {
-      // Only a run that wrote files is a result; the server keeps the last one's files.
-      const files = (part.result as { files?: unknown[] } | undefined)?.files;
-      return files?.length ? "run_code" : undefined;
-    }
     case "generate_image":
       return `image:${part.toolCallId}`;
     default:
@@ -1400,6 +1397,7 @@ const AssistantMessage: FC = () => {
             }
           }}
         </MessagePrimitive.GroupedParts>
+        {finished && <ReplyFiles parts={parts} verify={!entering} />}
         <StreamingIndicator waiting={waitingForFirstToken} />
         <MessageError />
       </div>

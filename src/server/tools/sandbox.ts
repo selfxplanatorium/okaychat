@@ -24,6 +24,7 @@ const TYPES: Record<string, string> = {
   ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   ".pdf": "application/pdf", ".csv": "text/csv", ".txt": "text/plain", ".md": "text/markdown", ".json": "application/json",
+  ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg", ".oga": "audio/ogg", ".opus": "audio/ogg", ".flac": "audio/flac", ".m4a": "audio/mp4",
 };
 
 const DESCRIPTION = `Run Python 3.12 or Bash in this chat's private Linux sandbox and get stdout, stderr, the exit code, and the files the run created or changed.
@@ -34,10 +35,10 @@ Use it for calculations, data analysis, charts, file conversion, OCR, media proc
 - 2 CPUs and about 2 GB of memory are shared by all runs; pass thread limits such as \`ffmpeg -threads 2\` or \`ocrmypdf --jobs 2\`.
 - The working directory persists between calls in this chat, but only for about 30 minutes after the last call; produced files are saved to the chat's storage automatically, so links keep working. Variables do not persist: each call is a new process, so save intermediate results to files. /tmp is private to each call and emptied when it ends.
 - A file the user attached carries a \`file_id\` in its <attachment> header. Pass it in \`input_files\` to copy the file into the working directory under its name.
-- Images the run writes (png, jpg, gif, webp, svg) are shown to the user, and every created file up to 50 MB gets a download link; larger files cannot be saved, so split or compress them. Save charts with plt.savefig instead of plt.show. Do not paste file contents back unless asked.
+- Images the run writes (png, jpg, gif, webp, svg) are shown to the user, audio (mp3, wav, ogg, flac, m4a) gets a player, and every created file up to 50 MB gets a download link below the run; larger files cannot be saved, so split or compress them. To point at a file in your reply, link it as \`[label](sandbox:/mnt/data/<path>)\`; do not list every file again. Save charts with plt.savefig instead of plt.show. Do not paste file contents back unless asked.
 - To check how a PDF, DOCX, XLSX, or PPTX output looks, pass its fileId to import_document, then view_artifact.
 - Processes started in the background are stopped when the call ends.
-- The last call in your reply that writes files decides what the user keeps: files first created earlier in the same reply that it does not write again are deleted when you answer. Make that final call write every file the user should get.`;
+- Every file a run creates or changes is kept for the user. Put scratch files in /tmp, or delete them in a later call: a file first created in this reply and then deleted from the working directory is removed from the user's files. Never rewrite a file only to keep it.`;
 
 export const sandboxConfigured = () => !!env.sandboxUrl && env.sandboxToken.length >= 32;
 
@@ -99,18 +100,20 @@ async function copyInputs(userId: string, ws: string, fileIds: string[]): Promis
 }
 
 /**
- * The outputs of one turn. Files first stored in this turn are drafts until the turn ends; then only the
- * last run that wrote files is kept, so retries and scratch files do not pile up in storage.
+ * The outputs of one turn. Every file a run writes is kept; a file first stored in this turn that a later run
+ * deletes from the workspace is dropped from storage too, so scratch files can be cleaned up. Files from
+ * earlier turns are never removed this way: a clean-up must not break links in earlier replies.
  */
 export class SandboxTurn {
   readonly created = new Set<string>();
-  lastFiles: string[] = [];
 
-  /** Deletes this turn's stored files that the last file-writing run did not produce. */
-  prune(userId: string): void {
-    const keep = new Set(this.lastFiles);
-    const drop = [...this.created].filter((id) => !keep.has(id));
-    if (drop.length) db.prepare(`DELETE FROM sandbox_files WHERE user_id = ? AND id IN (${drop.map(() => "?").join(", ")})`).run(userId, ...drop);
+  /** Drops this turn's stored copies of `paths`, which a run deleted from the workspace. */
+  forget(userId: string, threadId: string, paths: readonly string[]): void {
+    const remove = db.prepare("DELETE FROM sandbox_files WHERE user_id = ? AND thread_id = ? AND path = ?");
+    for (const p of paths) {
+      const id = (db.prepare("SELECT id FROM sandbox_files WHERE user_id = ? AND thread_id = ? AND path = ?").get(userId, threadId, p) as { id: string } | undefined)?.id;
+      if (id && this.created.delete(id)) remove.run(userId, threadId, p);
+    }
   }
 }
 
@@ -204,8 +207,7 @@ export async function runCode(opts: { userId: string; threadId: string; language
     result.files = result.files.filter((f) => results.has(f.path));
     // The sandbox wipes idle workspaces, so produced files move into the user's storage right away.
     const storageWarning = await storeOutputs(opts.userId, opts.threadId, ws, result.files, opts.turn);
-    const stored = result.files.flatMap((f) => (f.fileId ? [f.fileId] : []));
-    if (opts.turn && stored.length) opts.turn.lastFiles = stored;
+    opts.turn?.forget(opts.userId, opts.threadId, result.deleted ?? []);
     const base = `/api/sandbox/${encodeURIComponent(opts.threadId)}/files?path=`;
     const tooLarge = result.files.filter((f) => f.tooLarge).map((f) => ({ path: f.path, size: f.size }));
     const sizeWarning = tooLarge.length
@@ -317,6 +319,14 @@ export const sandboxRoutes = new Hono<AppEnv>()
       return c.json({ error: (error as Error).message }, 404);
     }
   })
+  // Which outputs of this chat are still stored, so a reply lists only files that can be opened.
+  .get("/sandbox/:threadId/outputs", (c) => {
+    const user = c.get("user");
+    const threadId = c.req.param("threadId");
+    if (!getThread(user.id, threadId)) return c.json({ error: "Not found" }, 404);
+    const rows = db.prepare("SELECT path FROM sandbox_files WHERE user_id = ? AND thread_id = ?").all(user.id, threadId) as Array<{ path: string }>;
+    return c.json({ paths: rows.map((r) => r.path) });
+  })
   // The durable copy of a produced file, stored in SQLite right after the run. The sandbox wipes idle
   // workspaces, so this route, not the proxy above, backs the download URLs the model hands out.
   .get("/sandbox/:threadId/stored", (c) => {
@@ -328,5 +338,7 @@ export const sandboxRoutes = new Hono<AppEnv>()
       .prepare("SELECT path, mime, data FROM sandbox_files WHERE user_id = ? AND thread_id = ? AND path = ?")
       .get(user.id, threadId, file) as { path: string; mime: string; data: Uint8Array } | undefined;
     if (!row) return c.json({ error: "Not found" }, 404);
-    return new Response(new Uint8Array(row.data), { headers: downloadHeaders(path.basename(row.path), row.mime, c.req.query("preview") === "1") });
+    // Rows saved before a type was known carry octet-stream, which some browsers refuse to play.
+    const mime = row.mime === "application/octet-stream" ? (TYPES[path.extname(row.path).toLowerCase()] ?? row.mime) : row.mime;
+    return new Response(new Uint8Array(row.data), { headers: downloadHeaders(path.basename(row.path), mime, c.req.query("preview") === "1") });
   });

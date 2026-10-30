@@ -276,8 +276,6 @@ export async function turnStream(opts: TurnOptions) {
         },
         onEnd: () => {
           if (!temporary) recordUsage({ userId: user.id, threadId, providerId: model.providerId, modelId: model.id, kind: "chat", usage: total, cost });
-          // The answer is given: drop the turn's scratch and superseded sandbox outputs.
-          sandboxTurn.prune(user.id);
         },
       });
 

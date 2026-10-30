@@ -116,6 +116,22 @@ test("import_document takes the caller's own run_code outputs by fileId, never a
   assert.equal(artifactVersions(THREAD, "deck").length, 0);
 });
 
+test("import_document re-imports a run_code output that a later run rewrote under the same fileId", async () => {
+  const insert = db.prepare("INSERT INTO sandbox_files (id, user_id, thread_id, path, mime, data, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+  const first = Buffer.from("%PDF-1.4 draft");
+  insert.run("sbf_score", USER, THREAD, "score.pdf", "application/pdf", first, first.byteLength, Date.now());
+  const tools = artifactTools(THREAD, USER);
+  const importDoc = (tools.import_document as unknown as { execute: Execute }).execute;
+  const call = () => importDoc({ file_id: "sbf_score", id: "score", title: "Score" } as never, { toolCallId: "t", messages: [] } as never) as Promise<Record<string, unknown>>;
+  assert.equal((await call()).size, first.byteLength);
+  // A retry of unchanged bytes is the same result.
+  assert.equal((await call()).size, first.byteLength);
+  const fixed = Buffer.from("%PDF-1.4 fixed score");
+  db.prepare("UPDATE sandbox_files SET data = ?, size = ? WHERE id = ?").run(fixed, fixed.byteLength, "sbf_score");
+  assert.equal((await call()).size, fixed.byteLength);
+  assert.deepEqual(Buffer.from(artifactData(THREAD, "score")!), fixed);
+});
+
 test("view_artifact is offered only to vision models and stores one screenshot per call", { skip: !worker.available && "Chromium is not installed" }, async () => {
   const blind = artifactTools(THREAD, USER, { canViewImages: false });
   assert.equal(blind.view_artifact, undefined);

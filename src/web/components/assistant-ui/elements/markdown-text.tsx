@@ -8,6 +8,7 @@ import {
   memoizeMarkdownComponents,
   useIsMarkdownCodeBlock,
 } from "@assistant-ui/react-markdown";
+import { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import {
@@ -26,6 +27,7 @@ import { InlineMath, MathBlock } from "@/components/ui/math";
 import { MermaidDiagram } from "@/components/ui/mermaid-diagram";
 import { keepLineBreaks, preprocessMarkdown } from "@/lib/markdown-math";
 import { cn } from "@/lib/utils";
+import { useCurrentThreadId } from "@/state/thread-meta";
 import { safeHref } from "../utils/href";
 import { MarkdownTable } from "./markdown-table";
 
@@ -55,6 +57,25 @@ const useShallowStable = <T extends Record<string, unknown> | undefined>(
 const remarkPlugins = [remarkGfm, remarkMath];
 
 const preprocessTyped = (text: string) => keepLineBreaks(preprocessMarkdown(text));
+
+// Models trained on ChatGPT link run_code outputs as `sandbox:/mnt/data/<path>`, and the run_code tool
+// asks for that form. react-markdown would blank the unknown scheme, so it passes through to `useSandboxUrl`.
+const SANDBOX = /^sandbox:(?:\/mnt\/data\/|\/)?/i;
+const urlTransform = (url: string) => (SANDBOX.test(url) ? url : defaultUrlTransform(url));
+
+/** The chat's stored copy of a `sandbox:` link target, or the URL unchanged. */
+const useSandboxUrl = (url: string | undefined) => {
+  const threadId = useCurrentThreadId();
+  if (!url || !SANDBOX.test(url)) return { url, sandbox: false };
+  const file = url.replace(SANDBOX, "").replace(/^\.\//, "");
+  return {
+    url: threadId ? `/api/sandbox/${encodeURIComponent(threadId)}/stored?path=${encodeURIComponent(file)}&preview=1` : undefined,
+    sandbox: true,
+    name: file.split("/").pop() || file,
+    // Only PDFs and raster images are served inline; everything else is a download.
+    opens: /\.(pdf|png|jpe?g|gif|webp)$/i.test(file),
+  };
+};
 
 const defaultComponentsByLanguage: NonNullable<
   MarkdownTextPrimitiveProps["componentsByLanguage"]
@@ -89,6 +110,7 @@ const MarkdownTextImpl: FC<MarkdownTextProps> = ({
       className="aui-md"
       components={markdownComponents}
       componentsByLanguage={markdownComponentsByLanguage}
+      urlTransform={urlTransform}
       defer
     />
   );
@@ -101,11 +123,12 @@ export const MarkdownText = memo(MarkdownTextImpl);
 // compact chip. The error is keyed to its src so a new URL retries the image.
 const MarkdownImage: FC<ComponentProps<"img">> = ({
   className,
-  src,
+  src: rawSrc,
   alt,
   onError,
   ...props
 }) => {
+  const src = useSandboxUrl(typeof rawSrc === "string" ? rawSrc : undefined).url;
   const [errorSrc, setErrorSrc] = useState<string | null>(null);
   const failed = errorSrc !== null && errorSrc === (src ?? "");
 
@@ -146,6 +169,21 @@ const MarkdownImage: FC<ComponentProps<"img">> = ({
         </a>
       )}
     </span>
+  );
+};
+
+const MarkdownLink: FC<ComponentProps<"a">> = ({ className, href, ...props }) => {
+  const file = useSandboxUrl(href);
+  return (
+    <a
+      className={cn(
+        "aui-md-a text-primary hover:text-primary/80 underline underline-offset-2",
+        className,
+      )}
+      {...props}
+      href={file.url}
+      {...(file.sandbox && (file.opens ? { target: "_blank", rel: "noopener" } : { download: file.name }))}
+    />
   );
 };
 
@@ -213,15 +251,7 @@ const defaultComponents = memoizeMarkdownComponents({
       {...props}
     />
   ),
-  a: ({ className, ...props }) => (
-    <a
-      className={cn(
-        "aui-md-a text-primary hover:text-primary/80 underline underline-offset-2",
-        className,
-      )}
-      {...props}
-    />
-  ),
+  a: MarkdownLink,
   blockquote: ({ className, ...props }) => (
     <blockquote
       className={cn(

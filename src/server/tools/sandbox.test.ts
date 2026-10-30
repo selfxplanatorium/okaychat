@@ -173,17 +173,15 @@ test("saved outputs can be restored by fileId after scratch expiry, without cros
   await assert.rejects(async () => other.execute!({ language: "python", code: "print(1)", input_files: [id] }, { toolCallId: "other", messages: [] }), /Unknown file_id/);
 });
 
-test("a finished turn keeps only the last file-writing run's new files", () => {
+test("a turn drops only the files it created and a later run deleted", () => {
   const insert = db.prepare("INSERT INTO sandbox_files (id, user_id, thread_id, path, mime, data, size, created_at) VALUES (?, 'alice', 'thr_alice', ?, 'text/plain', x'00', 1, 1)");
-  for (const id of ["sf_old", "sf_scratch", "sf_draft", "sf_final"]) insert.run(id, `${id}.txt`);
+  for (const id of ["sf_old", "sf_scratch", "sf_final"]) insert.run(id, `${id}.txt`);
   const turn = new SandboxTurn();
-  // sf_old came from an earlier turn, so it is never a draft of this one.
-  for (const id of ["sf_scratch", "sf_draft", "sf_final"]) turn.created.add(id);
-  turn.lastFiles = ["sf_final", "sf_old"];
-  turn.prune("alice");
+  // sf_old came from an earlier turn, so deleting it from the workspace keeps its stored copy.
+  for (const id of ["sf_scratch", "sf_final"]) turn.created.add(id);
+  turn.forget("alice", "thr_alice", ["sf_scratch.txt", "sf_old.txt", "missing.txt"]);
   const left = db.prepare("SELECT id FROM sandbox_files WHERE user_id = 'alice' AND id LIKE 'sf_%' ORDER BY id").all().map((r) => (r as { id: string }).id);
-  assert.ok(left.includes("sf_old") && left.includes("sf_final"));
-  assert.ok(!left.includes("sf_scratch") && !left.includes("sf_draft"));
+  assert.deepEqual(left, ["sf_final", "sf_old"]);
 });
 
 test("an output over the 50 MB transfer limit gets a size message instead of a dead link", async () => {

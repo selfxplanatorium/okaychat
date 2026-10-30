@@ -5,6 +5,7 @@ import { ArtifactCard } from "@/components/artifacts/ArtifactCard";
 import { SimpleMarkdown } from "@/components/ui/simple-markdown";
 import { formatCost } from "@/lib/api";
 import { useData } from "@/state/data";
+import { formatBytes, RunFiles, type RunFile } from "./reply-files";
 import { cn } from "@/lib/utils";
 
 type SearchResult = { title: string; url: string; snippet: string };
@@ -180,14 +181,9 @@ type RunCodeResult = {
   stderr: string;
   stopped: string | null;
   durationMs: number;
-  files: Array<{ path: string; size: number; url: string; image: boolean }>;
+  files: RunFile[];
   tooLarge?: Array<{ path: string; size: number }>;
 };
-
-const formatBytes = (n: number) => (n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 ** 2).toFixed(1)} MB`);
-
-/** A run can write many files; past this many the chips collapse behind a toggle. */
-const FILES_SHOWN = 12;
 
 function RunCodeCard({ args, result, running }: { args: unknown; result: unknown; running: boolean }) {
   const a = (args ?? {}) as { language?: "python" | "bash"; code?: string };
@@ -204,8 +200,6 @@ function RunCodeCard({ args, result, running }: { args: unknown; result: unknown
         : r.exitCode === 0
           ? `Ran ${lang} · ${seconds}`
           : `${lang} exited with ${r.exitCode} · ${seconds}`;
-  const images = r?.files.filter((f) => f.image) ?? [];
-  const [allFiles, setAllFiles] = useState(false);
   return (
     <div className="my-2">
       <ToolShell icon={<SquareTerminalIcon className="size-4" />} running={running} error={failed && typeof result === "string" ? result : undefined} label={label}>
@@ -216,25 +210,7 @@ function RunCodeCard({ args, result, running }: { args: unknown; result: unknown
           {r && !r.stdout && !r.stderr && <p className="text-muted-foreground text-xs">No output.</p>}
         </div>
       </ToolShell>
-      {images.map((f) => (
-        <img key={f.path} src={f.url} alt={f.path} className="animate-blur-in my-2 ml-6 h-auto max-h-[28rem] w-auto max-w-[calc(100%-1.5rem)] rounded-xl border bg-white" />
-      ))}
-      {r && r.files.length > 0 && (
-        <div className="ml-6 flex flex-wrap gap-1.5">
-          {(allFiles ? r.files : r.files.slice(0, FILES_SHOWN)).map((f) => (
-            <a key={f.path} href={f.url} download={f.path.split("/").pop()} className="hover:bg-muted/60 text-muted-foreground hover:text-foreground flex max-w-full items-center gap-1.5 rounded-lg border px-2 py-1 text-xs transition-colors duration-(--motion-fast) ease-out-quart">
-              <DownloadIcon className="size-3.5 shrink-0" />
-              <span className="truncate">{f.path}</span>
-              <span className="shrink-0 opacity-70">{formatBytes(f.size)}</span>
-            </a>
-          ))}
-          {r.files.length > FILES_SHOWN && (
-            <button type="button" onClick={() => setAllFiles(!allFiles)} className="hover:bg-muted/60 text-muted-foreground hover:text-foreground rounded-lg border px-2 py-1 text-xs transition-colors duration-(--motion-fast) ease-out-quart">
-              {allFiles ? "Show fewer" : `Show ${r.files.length - FILES_SHOWN} more`}
-            </button>
-          )}
-        </div>
-      )}
+      {r && <RunFiles files={r.files} className="ml-6" />}
       {r?.tooLarge?.length ? (
         <p className="text-muted-foreground ml-6 mt-1.5 text-xs">
           Not saved, over the 50 MB limit: {r.tooLarge.map((f) => `${f.path} (${formatBytes(f.size)})`).join(", ")}

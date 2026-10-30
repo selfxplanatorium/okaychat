@@ -1,5 +1,6 @@
 import { tool, type ToolSet } from "ai";
 import { Hono } from "hono";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { ArtifactKind, ArtifactToolResult, ArtifactVersion, DocumentArtifactKind, SheetPreview, TextArtifactKind } from "../shared/types.js";
 import { DOCUMENT_KINDS } from "../shared/types.js";
@@ -240,7 +241,8 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
   const shots = visual.shots;
   // Artifact ids saved in this turn. A tool set lives for one request; continuations pass the earlier ids.
   const turn = new Set<string>(visual.savedThisTurn);
-  // A retried import of the same file under the same id returns the first copy instead of storing another.
+  // A retried import of the same bytes under the same id returns the first copy instead of storing another.
+  // The key holds a content hash because a run_code output keeps its fileId when a later run rewrites it.
   const imported = new Map<string, ArtifactToolResult>();
   return {
     create_artifact: tool({
@@ -397,7 +399,7 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
       : {}),
     import_document: tool({
       description:
-        "Copy a file into this chat as an editable document artifact: an attachment (its file_id, or its filename when the header has none) or a run_code output (its fileId). PDF, DOCX, and XLSX keep their format; PPTX, PPT, and ODP presentations are converted to PDF. Then view_artifact can show it.",
+        "Copy a file into this chat as an editable document artifact: an attachment (its file_id, or its filename when the header has none) or a run_code output (its fileId). PDF, DOCX, and XLSX keep their format; PPTX, PPT, and ODP presentations are converted to PDF. Importing a new file under an existing document's id saves a new version of it. Then view_artifact can show it.",
       inputSchema: z.object({
         file_id: z.string().optional().describe("The attachment's file_id, or a run_code output's fileId"),
         name: z.string().optional().describe("The attachment's filename, used when there is no file_id"),
@@ -406,10 +408,10 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
       }),
       execute: async ({ file_id, name, id, title }, { abortSignal }) => {
         if (!file_id && !name) throw new Error("Pass the attachment's file_id or name.");
-        const key = `${file_id ?? `name:${name}`}\u0000${slug(id)}`;
+        const source = sourceBytes(userId, { fileId: file_id, name });
+        const key = `${file_id ?? `name:${name}`}\u0000${slug(id)}\u0000${createHash("sha256").update(source.data).digest("hex")}`;
         const previous = imported.get(key);
         if (previous && latestArtifact(threadId, previous.id)?.version === previous.version) return previous;
-        const source = sourceBytes(userId, { fileId: file_id, name });
         let kind = kindOfUpload(source.name);
         let data = source.data;
         if (!kind && PRESENTATION.test(source.name)) {
@@ -417,7 +419,12 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
           kind = "pdf";
         }
         if (!kind) throw new Error(`Files can be imported as pdf, docx, or xlsx, and presentations as pdf. \`${source.name}\` is none of those.`);
-        const result = createDocument(threadId, turn, { id, title, kind, source: "", data });
+        // Importing again under an existing document's id (a fixed file) adds a version instead of a second card.
+        const existing = latestArtifact(threadId, slug(id));
+        const result =
+          existing?.kind === kind
+            ? saveVersion(threadId, { id: existing.id, title: title.trim() || existing.title, kind, language: null, content: "", data }, turn)
+            : createDocument(threadId, turn, { id, title, kind, source: "", data });
         imported.set(key, result);
         return result;
       },

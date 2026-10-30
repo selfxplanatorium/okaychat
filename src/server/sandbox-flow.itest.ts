@@ -135,13 +135,13 @@ test("an output over 50 MB gets a size message instead of a dead link, and the o
   assert.equal(db.prepare("SELECT count(*) AS n FROM sandbox_files WHERE thread_id = ? AND path = 'huge.bin'").get(THREAD)!.n, 0);
 });
 
-test("a finished turn keeps the last file-writing run's outputs and earlier turns' files", async () => {
+test("a turn keeps every file it writes and drops the ones a later run deletes", async () => {
   const turn = new SandboxTurn();
-  await runCode({ userId: USER, threadId: THREAD, language: "bash", code: "echo draft > draft.txt", turn });
-  await runCode({ userId: USER, threadId: THREAD, language: "bash", code: "echo final > final.txt", turn });
-  turn.prune(USER);
+  await runCode({ userId: USER, threadId: THREAD, language: "bash", code: "echo one > one.txt && echo scratch > scratch.txt", turn });
+  await runCode({ userId: USER, threadId: THREAD, language: "bash", code: "echo two > two.txt && rm scratch.txt report.docx", turn });
   const paths = (db.prepare("SELECT path FROM sandbox_files WHERE thread_id = ? ORDER BY path").all(THREAD) as Array<{ path: string }>).map((r) => r.path);
-  assert.ok(paths.includes("final.txt") && !paths.includes("draft.txt") && paths.includes("report.docx"), paths.join(","));
+  // report.docx came from an earlier turn, so its stored copy survives the clean-up.
+  assert.ok(paths.includes("one.txt") && paths.includes("two.txt") && !paths.includes("scratch.txt") && paths.includes("report.docx"), paths.join(","));
 });
 
 test("stopping the chat cancels the run in the sandbox", async () => {
