@@ -23,6 +23,7 @@ import { StoredImageAttachmentAdapter, AudioAttachmentAdapter, DocumentAttachmen
 import { chatPrivacyFor, isTemporaryChat, useChatPrivacy, useChatPrivacyStore } from "@/state/chat-privacy";
 import { useVoiceAdapters } from "@/speech/adapters";
 import { chatSearchFor, useChatSearch, useChatSearchStore } from "@/state/chat-search";
+import { chatResearchFor, useChatResearchStore } from "@/state/chat-research";
 import { dropThread, readThread, sameRows, ServerRows, writeThread } from "./threadCache";
 import { setThreadSync, useThreadSyncStore } from "@/state/thread-sync";
 
@@ -110,12 +111,14 @@ const threadListAdapter: RemoteThreadListAdapter = {
       const remoteId = `tmp_${generateId()}`;
       useChatPrivacyStore.getState().bind(localId, remoteId);
       useChatSearchStore.getState().bind(localId, remoteId);
+      useChatResearchStore.getState().bind(localId, remoteId);
       bindModel(remoteId);
       return { remoteId, externalId: undefined };
     }
     const thread = await api<ThreadSummary>("/threads", { method: "POST", json: { projectId: useData.getState().activeProject } });
     serverRows.created(thread.id);
     useChatSearchStore.getState().bind(localId, thread.id);
+    useChatResearchStore.getState().bind(localId, thread.id);
     bindModel(thread.id);
     return { remoteId: thread.id, externalId: undefined };
   },
@@ -273,7 +276,7 @@ function ModelContextBridge() {
   useEffect(
     () =>
       aui.modelContext.register({
-        getModelContext: () => ({ config: { modelName: getActiveModel(aui.threadListItem.getState().remoteId)?.ref, reasoningEffort: effort, webSearch: chatSearchFor(aui.threadListItem.getState()), temporaryPersonalization: chatPrivacyFor(aui.threadListItem.getState()).personalized } }),
+        getModelContext: () => ({ config: { modelName: getActiveModel(aui.threadListItem.getState().remoteId)?.ref, reasoningEffort: effort, webSearch: chatSearchFor(aui.threadListItem.getState()), deepResearch: chatResearchFor(aui.threadListItem.getState()), temporaryPersonalization: chatPrivacyFor(aui.threadListItem.getState()).personalized } }),
       }),
     [aui, model?.ref, effort, webSearch, privacy.personalized, privacy.temporary],
   );

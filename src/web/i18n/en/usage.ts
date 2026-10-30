@@ -24,9 +24,10 @@ export default {
   cached: "Cached",
   output: "Out",
   byPurpose: "By purpose",
-  byPurposeDescription: "Chat replies, compaction summaries, and title generation.",
+  byPurposeDescription: "Chat replies, compaction summaries, title generation, and deep research.",
   purposeChat: "Chat",
   purposeCompaction: "Compaction",
   purposeTitle: "Title",
+  purposeResearch: "Deep research",
   requestCount: { one: "{count} request", other: "{count} requests" },
 } as const;

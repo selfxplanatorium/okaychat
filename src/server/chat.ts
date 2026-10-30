@@ -1,4 +1,5 @@
 import {
+  convertToModelMessages,
   createUIMessageStream,
   createUIMessageStreamResponse,
   generateText,
@@ -29,7 +30,8 @@ import { attachmentTools } from "./tools/attachments.js";
 import { injectScreenshots, injectToolImages, type ToolImage } from "./tools/screenshots.js";
 import type { VisualShot } from "./documents/visual.js";
 import { webTools } from "./tools/web.js";
-import { SearchBudget, searchesInCurrentTurn, agentStepsInCurrentTurn } from "./tools/search-budget.js";
+import { SearchBudget, StepBudget, searchesInCurrentTurn, agentStepsInCurrentTurn } from "./tools/search-budget.js";
+import { hasResearch, RESEARCH_PARALLEL, RESEARCH_TOOL, researchedThisTurn, researchInput, researchTool, runResearch } from "./research.js";
 import { conversationMemory, factsContext, memoryPreferences, temporaryMemory } from "./memory.js";
 import { contextText, insertTurnContexts, saveTurnContext, shownFactIds, storedTurnContexts } from "./turn-context.js";
 import { adaptPdfParts } from "./pdf-parts.js";
@@ -53,6 +55,8 @@ const chatBody = z.object({
       temporaryPersonalization: z.boolean().optional(),
       /** Per-chat web search toggle from the composer. The account's webTools setting still wins when off. */
       webSearch: z.boolean().optional(),
+      /** Per-chat Deep research toggle from the composer. Runs research before each new user message's reply. */
+      deepResearch: z.boolean().optional(),
     })
     .loose(),
   // Browser-executed tools (generative UI) and the instructions that go with them.
@@ -95,6 +99,8 @@ export interface TurnOptions {
   temporaryPersonalization?: boolean;
   /** Per-chat composer toggle; absent falls back to the account setting. */
   webSearch?: boolean;
+  /** Research before replying to a new user message. Continuations of a researched reply never research again. */
+  deepResearch?: boolean;
   /** Someone watches the stream and can answer MCP elicitation forms. Absent for scheduled runs. */
   interactive?: boolean;
   /** Leave the thread's model as it is (a schedule running in a chat the user picked). */
@@ -117,6 +123,13 @@ export async function turnStream(opts: TurnOptions) {
     if (!opts.keepThreadModel) updateThread(user.id, threadId, { modelRef });
   }
   const thread = temporary ? { projectId: null, compaction: null } : getThread(user.id, threadId)!;
+  // A retry or edit ends with a user message and researches again; a tool continuation does not.
+  const research = opts.deepResearch === true && uiMessages.at(-1)?.role === "user" && !researchedThisTurn(uiMessages);
+  if (research) {
+    if (!model.toolCall) throw new Error(`Deep research needs a model that can use tools. ${model.name} cannot.`);
+    if (!settings.webTools) throw new Error("Deep research needs web tools. Turn them on in Settings → General.");
+    if (settings.maxSearches === 0) throw new Error("Deep research needs web searches, and your search limit is 0. Raise it in Settings → General.");
+  }
 
   const stream = createUIMessageStream({
     originalMessages: uiMessages,
@@ -153,7 +166,8 @@ export async function turnStream(opts: TurnOptions) {
         ? await toolsForUser(user.id, { threadId, images: canViewImages ? toolImages : undefined, interactive: opts.interactive === true })
         : { tools: {}, subTools: {}, instructions: [], servers: [] };
       const searchBudget = new SearchBudget(settings.maxSearches, searchesInCurrentTurn(uiMessages));
-      const remainingSteps = Math.max(0, settings.maxSteps - agentStepsInCurrentTurn(uiMessages));
+      // Research workers spend from this too; the reply's own loop gets what is left.
+      const stepBudget = new StepBudget(settings.maxSteps, agentStepsInCurrentTurn(uiMessages));
       const builtInWeb = model.toolCall && settings.webTools ? webTools({ searchBudget, search: opts.webSearch ?? true }) : {};
       const lastUser = uiMessages.findLast((message) => message.role === "user");
       const query = lastUser?.parts.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n") ?? "";
@@ -192,6 +206,8 @@ export async function turnStream(opts: TurnOptions) {
         ...mcp.tools,
         // Only trimmed chats point the model at removed attachments, so others keep their tool list (and cache).
         ...(compaction?.trim ? attachmentTools(user.id, canViewImages ? toolImages : undefined) : {}),
+        // From a chat's first research on, so its tool block changes once, not with every toggle.
+        ...(model.toolCall && (research || hasResearch(uiMessages)) ? researchTool() : {}),
       };
       const applied = applyCompaction(uiMessages, compaction);
       const { messages: live, summary } = applied;
@@ -233,6 +249,43 @@ export async function turnStream(opts: TurnOptions) {
         }
         converted = insertTurnContexts(live, converted, new Map([...stored].map(([id, context]) => [id, contextText(context)])));
       }
+      // Includes research, which is part of the reply's time.
+      const startedAt = Date.now();
+      if (research) {
+        // The research part opens the reply, so the message start (and its metadata) is written here.
+        writer.write({ type: "start", messageMetadata: { modelRef, contextWindow: model.context } satisfies AssistantMetadata });
+        const toolCallId = newId("research");
+        const input = { request: researchInput(uiMessages).request.slice(0, 2000) };
+        writer.write({ type: "tool-input-available", toolCallId, toolName: RESEARCH_TOOL, input });
+        // Workers run on the default sub-agent model, in parallel, only where the account allows sub-agents.
+        const delegate = subagentModels[0] ? await resolveModel(user.id, subagentModels[0].ref) : null;
+        let output;
+        try {
+          output = await runResearch({
+            userId: user.id,
+            threadId,
+            record: !temporary,
+            lead: { model, conn, effort },
+            worker: delegate ?? { model, conn },
+            parallel: delegate ? RESEARCH_PARALLEL : 1,
+            ...researchInput(uiMessages),
+            searchBudget,
+            stepBudget,
+            signal,
+            onProgress: (progress) => writer.write({ type: "tool-output-available", toolCallId, output: progress, preliminary: true }),
+          });
+        } catch (error) {
+          writer.write({ type: "tool-output-error", toolCallId, errorText: signal?.aborted ? "Stopped." : describeProviderError(error, false) });
+          throw error;
+        }
+        writer.write({ type: "tool-output-available", toolCallId, output });
+        // Converted like a stored reply, so the next turn sends the same bytes and the prefix stays cached.
+        converted = [...converted, ...(await convertToModelMessages(
+          [{ role: "assistant", parts: [{ type: `tool-${RESEARCH_TOOL}`, toolCallId, state: "output-available", input, output }] }],
+          { tools },
+        ))];
+      }
+      const remainingSteps = stepBudget.remaining;
       const memoryInstructions = [temporary ? promptText("temporary") : "", memory.instructions].filter(Boolean).join("\n\n");
       const messages = handle.markCache([
         systemPrompt(model, personalized ? settings.systemPrompt : "", mcp.instructions, useArtifacts, useGenerativeUI ? opts.clientSystem : undefined, memoryInstructions),
@@ -242,7 +295,6 @@ export async function turnStream(opts: TurnOptions) {
         ...converted,
       ]);
 
-      const startedAt = Date.now();
       let total: TokenUsage = ZERO_USAGE;
       let cost = 0;
       let lastStep: LanguageModelUsage | undefined;
@@ -281,6 +333,7 @@ export async function turnStream(opts: TurnOptions) {
 
       writer.merge(
         result.toUIMessageStream({
+          sendStart: !research,
           sendReasoning: true,
           sendSources: true,
           onError: describeError,
@@ -376,6 +429,7 @@ export const chatRoutes = new Hono<AppEnv>()
           effort: parsed.data.config.reasoningEffort as ReasoningEffort | undefined,
           temporaryPersonalization: parsed.data.config.temporaryPersonalization ?? false,
           webSearch: parsed.data.config.webSearch,
+          deepResearch: parsed.data.config.deepResearch,
           uiMessages: parsed.data.messages as UIMessage[],
           // Temporary turns have no resumable copy and end when the request disconnects.
           signal: c.req.raw.signal,
@@ -397,6 +451,7 @@ export const chatRoutes = new Hono<AppEnv>()
         modelRef: parsed.data.config.modelName,
         effort: parsed.data.config.reasoningEffort as ReasoningEffort | undefined,
         webSearch: parsed.data.config.webSearch,
+        deepResearch: parsed.data.config.deepResearch,
         uiMessages: parsed.data.messages as UIMessage[],
         clientTools: parsed.data.tools as FrontendTools | undefined,
         clientSystem: parsed.data.system,

@@ -72,6 +72,7 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "composer.model", labelKey: "keyboard.cmdComposerModel", group: "Composer", keys: ["Alt+Shift+M"] },
   { id: "composer.effort", labelKey: "keyboard.cmdComposerEffort", group: "Composer", keys: ["Alt+Shift+T"] },
   { id: "composer.search", labelKey: "keyboard.cmdComposerSearch", group: "Composer", keys: ["Alt+Shift+W"] },
+  { id: "composer.research", labelKey: "keyboard.cmdComposerResearch", group: "Composer", keys: ["Alt+Shift+D"] },
   { id: "composer.attach", labelKey: "keyboard.cmdComposerAttach", group: "Composer", keys: ["Alt+Shift+U"] },
   { id: "composer.prompts", labelKey: "keyboard.cmdComposerPrompts", group: "Composer", keys: [] },
   { id: "composer.dictate", labelKey: "keyboard.cmdComposerDictate", group: "Composer", keys: [] },

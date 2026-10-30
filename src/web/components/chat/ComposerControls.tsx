@@ -1,6 +1,6 @@
 import { ComposerPrimitive, useAui } from "@assistant-ui/react";
-import { BrainIcon, CheckIcon, ChevronRightIcon, GlobeIcon, GlobeOffIcon, Loader2Icon, PaperclipIcon, PlusIcon, SquareSlashIcon, ZapIcon } from "lucide-react";
-import { Fragment, useState } from "react";
+import { BrainIcon, CheckIcon, ChevronRightIcon, GlobeIcon, GlobeOffIcon, Loader2Icon, PaperclipIcon, PlusIcon, SquareSlashIcon, TelescopeIcon, TriangleAlertIcon, ZapIcon } from "lucide-react";
+import { Fragment, useMemo, useState } from "react";
 import type { McpPromptInfo } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -11,7 +11,11 @@ import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 import { useChatModel } from "@/state/thread-meta";
 import { useChatSearch } from "@/state/chat-search";
-import { useCommand } from "@/keyboard/registry";
+import { useChatResearch } from "@/state/chat-research";
+import { sharedTooltip, TooltipTrigger } from "@/components/ui/tooltip";
+import { Kbd } from "@/keyboard/Kbd";
+import { ariaCombo } from "@/keyboard/keys";
+import { useCommand, useShortcut } from "@/keyboard/registry";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSubmenuRoot, MenuSubmenuTrigger, MenuTrigger } from "@/components/ui/menu";
 import { effortLabel, useEffortChoices } from "./ModelPicker";
 
@@ -40,6 +44,53 @@ export function SearchToggle() {
       {enabled ? <GlobeIcon className="size-3.5" /> : <GlobeOffIcon className="size-3.5" />}
       {t("composer.search")}
     </button>
+  );
+}
+
+/**
+ * Deep research for this chat. Hidden where the model or account has no web tools, like Search, unless it is
+ * on: then it stays visible with the reason it cannot run, because sending would be refused.
+ */
+export function ResearchToggle() {
+  const { enabled, toggle, unavailable, searches, steps } = useChatResearch();
+  const webTools = useData((s) => s.settings?.webTools ?? true);
+  const toolCall = !!useChatModel()?.toolCall;
+  // Turning it off always works; turning it on only where it can run.
+  const usable = enabled || !unavailable;
+  useCommand("composer.research", toggle, usable);
+  const combo = useShortcut("composer.research");
+  const blocked = unavailable && enabled;
+  const hint = blocked ? `${t(unavailable)} ${t("composer.researchTurnOff")}.` : unavailable ? t(unavailable) : t("composer.researchHint", { searches, steps });
+  const payload = useMemo(
+    () => ({ tooltip: combo && usable ? <span className="flex items-center gap-2">{hint}<Kbd combo={combo} /></span> : hint, side: "top" as const }),
+    [hint, combo, usable],
+  );
+  if (!enabled && !(toolCall && webTools)) return null;
+  return (
+    <TooltipTrigger
+      handle={sharedTooltip}
+      payload={payload}
+      render={
+        <button
+          type="button"
+          onClick={() => usable && toggle()}
+          aria-pressed={enabled}
+          aria-disabled={!usable || undefined}
+          aria-description={hint}
+          aria-keyshortcuts={combo && usable ? ariaCombo(combo) : undefined}
+          className={cn(
+            triggerClass,
+            "flex max-sm:hidden pointer-coarse:hidden",
+            !usable && "cursor-not-allowed opacity-50 hover:bg-transparent hover:text-muted-foreground",
+            enabled && !blocked && "bg-primary/12! text-primary! hover:bg-primary/18!",
+            blocked && "bg-warning/12! text-warning! hover:bg-warning/18!",
+          )}
+        />
+      }
+    >
+      {blocked ? <TriangleAlertIcon className="size-3.5" /> : <TelescopeIcon className="size-3.5" />}
+      {t("composer.deepResearch")}
+    </TooltipTrigger>
   );
 }
 
@@ -180,6 +231,8 @@ export function MobileComposerMenu() {
   const { enabled, toggle } = useChatSearch();
   const webTools = useData((s) => s.settings?.webTools ?? true);
   const showSearch = !!active?.toolCall && webTools;
+  const research = useChatResearch();
+  const researchBlocked = !!research.unavailable && research.enabled;
   const hasPrompts = useData((s) => s.mcpPrompts.length > 0);
   const loadPrompts = useData((s) => s.refreshMcpPrompts);
   const { pick, dialog } = usePromptPicker();
@@ -226,6 +279,21 @@ export function MobileComposerMenu() {
               {enabled ? <GlobeIcon /> : <GlobeOffIcon />}
               <span className="flex-1">{t("composer.search")}</span>
               <CheckIcon className={cn("ml-auto", enabled ? "opacity-100" : "opacity-0")} />
+            </MenuItem>
+          )}
+          {(showSearch || research.enabled) && (
+            <MenuItem
+              closeOnClick={false}
+              disabled={!!research.unavailable && !research.enabled}
+              onClick={research.toggle}
+              className={cn(research.enabled && !researchBlocked && "depth-primary text-primary-foreground", "items-start")}
+            >
+              {researchBlocked ? <TriangleAlertIcon className="text-warning mt-0.5" /> : <TelescopeIcon className="mt-0.5" />}
+              <span className="flex flex-1 flex-col">
+                <span>{t("composer.deepResearch")}</span>
+                <span className="text-xs opacity-70">{research.unavailable ? t(research.unavailable) : t("composer.researchSearchNotice")}</span>
+              </span>
+              <CheckIcon className={cn("mt-0.5 ml-auto", research.enabled ? "opacity-100" : "opacity-0")} />
             </MenuItem>
           )}
           {hasPrompts && (

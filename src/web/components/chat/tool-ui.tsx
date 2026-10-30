@@ -1,5 +1,5 @@
 import { defineToolkit, type ToolCallMessagePartComponent } from "@assistant-ui/react";
-import { BookOpenIcon, BotIcon, ChevronDownIcon, DownloadIcon, EyeIcon, FileTextIcon, GlobeIcon, ImageIcon, Loader2Icon, SearchIcon, SquareTerminalIcon, TriangleAlertIcon } from "lucide-react";
+import { BookOpenIcon, BotIcon, CheckIcon, ChevronDownIcon, CircleDashedIcon, CircleMinusIcon, DownloadIcon, EyeIcon, FileTextIcon, GlobeIcon, ImageIcon, Loader2Icon, SearchIcon, SquareTerminalIcon, TelescopeIcon, TriangleAlertIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { ArtifactCard } from "@/components/artifacts/ArtifactCard";
 import { SimpleMarkdown } from "@/components/ui/simple-markdown";
@@ -159,6 +159,10 @@ export const toolkit = defineToolkit({
       );
     },
   },
+  deep_research: {
+    type: "backend",
+    render: ({ result, status }) => <ResearchCard result={result} running={status?.type === "running"} />,
+  },
   delegate_task: {
     type: "backend",
     render: ({ args, result, status }) => <SubagentCard args={args} result={result} running={status?.type === "running"} />,
@@ -314,6 +318,134 @@ function SubagentCard({ args, result, running }: { args: unknown; result: unknow
             <div>
               <p className="text-muted-foreground mb-1 text-xs font-medium">{t("tools.report")}</p>
               <SimpleMarkdown className="max-h-96 overflow-auto">{r.text}</SimpleMarkdown>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type ResearchQuestion = { question: string; round: number; status: "queued" | "running" | "done" | "failed" | "skipped"; error?: string };
+type ResearchProgress = {
+  phase: "planning" | "researching" | "reviewing" | "done";
+  objective: string;
+  questions: ResearchQuestion[];
+  sources: Array<{ url: string; title: string }>;
+  conflicts: string[];
+  gaps: string[];
+  searches: number;
+  limited?: "searches" | "steps";
+  cost?: number;
+};
+
+function QuestionStatus({ status }: { status: ResearchQuestion["status"] }) {
+  const className = "mt-0.5 size-3.5 shrink-0";
+  if (status === "running") return <Loader2Icon className={cn(className, "animate-spin motion-reduce:animate-none")} />;
+  if (status === "done") return <CheckIcon className={cn(className, "text-primary")} />;
+  if (status === "failed") return <TriangleAlertIcon className={cn(className, "text-warning")} />;
+  if (status === "skipped") return <CircleMinusIcon className={cn(className, "text-muted-foreground")} />;
+  return <CircleDashedIcon className={cn(className, "text-muted-foreground")} />;
+}
+
+/** Live progress of a deep research run. Open while it works, so the questions are visible as they finish. */
+function ResearchCard({ result, running }: { result: unknown; running: boolean }) {
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const r = typeof result === "object" && result ? (result as ResearchProgress) : undefined;
+  const failed = !running && (typeof result === "string" || r?.phase !== "done");
+  const busy = !failed && (running || r?.phase !== "done");
+  const open = userOpen ?? busy;
+  const questions = r?.questions ?? [];
+  const done = questions.filter((q) => q.status === "done").length;
+  const label = failed
+    ? t("tools.researchFailed")
+    : !r || r.phase === "planning"
+      ? t("tools.researchPlanning")
+      : r.phase === "reviewing"
+        ? t("tools.researchReviewing")
+        : r.phase === "researching"
+          ? t("tools.researchWorking", { done, count: questions.length })
+          : t("tools.researchDone", { count: questions.length });
+  const detail = [
+    r?.searches ? t("tools.researchSearches", { count: r.searches }) : null,
+    r?.sources.length ? t("tools.researchPages", { count: r.sources.length }) : null,
+    r?.cost ? formatCost(r.cost) : null,
+  ]
+    .filter(Boolean)
+    .join(t("tools.detailSeparator"));
+  const section = "text-muted-foreground mb-1.5 text-xs font-medium";
+  return (
+    <div className="my-2 rounded-xl border text-sm">
+      <button type="button" aria-expanded={open} onClick={() => setUserOpen(!open)} className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors duration-(--motion-fast) ease-out-quart hover:bg-muted/40">
+        <span className="bg-muted relative flex size-8 shrink-0 items-center justify-center rounded-lg">
+          <Loader2Icon className={cn("absolute size-4 transition-[opacity,scale] duration-(--motion-fast) ease-out-quart motion-reduce:animate-none", busy ? "scale-100 animate-spin opacity-100" : "scale-50 opacity-0")} />
+          <span className={cn("absolute inset-0 flex items-center justify-center transition-[opacity,scale] duration-(--motion-base) ease-spring", busy ? "scale-50 opacity-0" : "scale-100 opacity-100")}>
+            {failed ? <TriangleAlertIcon className="text-warning size-4" /> : <TelescopeIcon className="size-4" />}
+          </span>
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className={cn("block truncate font-medium", busy && "shimmer")}>{label}</span>
+          <span className="text-muted-foreground block truncate text-xs">{typeof result === "string" ? result : detail || r?.objective}</span>
+        </span>
+        <ChevronDownIcon className={cn("text-muted-foreground size-4 shrink-0 transition-transform duration-(--motion-base) ease-out-expo", open && "rotate-180")} />
+      </button>
+      {open && r && (
+        <div className="animate-rise-in flex flex-col gap-4 border-t px-3 py-3">
+          {r.objective && (
+            <div>
+              <p className={section}>{t("tools.researchObjective")}</p>
+              <p className="text-pretty">{r.objective}</p>
+            </div>
+          )}
+          {questions.length > 0 && (
+            <div>
+              <p className={section}>{t("tools.researchQuestions")}</p>
+              <ol className="flex flex-col gap-1.5">
+                {questions.map((q, i) => (
+                  <li key={i} className="flex items-start gap-2">
+                    <QuestionStatus status={q.status} />
+                    <span className="min-w-0 flex-1">
+                      <span className={cn("text-pretty", q.status === "running" && "shimmer")}>{q.question}</span>
+                      {q.round > 1 && <span className="bg-muted text-muted-foreground ml-1.5 rounded px-1.5 py-px text-[0.6875rem] whitespace-nowrap">{t("tools.researchFollowUp")}</span>}
+                      {q.status === "failed" && q.error && <span className="text-muted-foreground block text-xs">{q.error}</span>}
+                      {q.status === "skipped" && <span className="text-muted-foreground block text-xs">{t("tools.researchSkipped")}</span>}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+          {r.conflicts.length > 0 && (
+            <div>
+              <p className={section}>{t("tools.researchConflicts")}</p>
+              <ul className="text-muted-foreground flex list-disc flex-col gap-1 pl-4 text-xs">
+                {r.conflicts.map((item, i) => <li key={i}>{item}</li>)}
+              </ul>
+            </div>
+          )}
+          {r.phase === "done" && r.gaps.length > 0 && (
+            <div>
+              <p className={section}>{t("tools.researchOpen")}</p>
+              <ul className="text-muted-foreground flex list-disc flex-col gap-1 pl-4 text-xs">
+                {r.gaps.map((item, i) => <li key={i}>{item}</li>)}
+              </ul>
+            </div>
+          )}
+          {r.limited && <p className="text-muted-foreground text-xs">{t(r.limited === "searches" ? "tools.researchLimitSearches" : "tools.researchLimitSteps")}</p>}
+          {r.sources.length > 0 && (
+            <div>
+              <p className={section}>{t("tools.researchSources")}</p>
+              <ul className="grid gap-x-3 gap-y-1 sm:grid-cols-2">
+                {r.sources.map((source) => (
+                  <li key={source.url} className="min-w-0">
+                    <a href={source.url} target="_blank" rel="noreferrer" className="hover:bg-muted/60 flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-xs">
+                      <Favicon url={source.url} />
+                      <span className="truncate">{source.title}</span>
+                      <span className="text-muted-foreground shrink-0">{host(source.url)}</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
         </div>

@@ -18,7 +18,7 @@ The prompt has three layers, from most stable to most variable:
 
 `cacheAffinity()` returns one stable hashed value per account for session-routing headers and OpenAI's `prompt_cache_key`. It is shared across chats and delegated tasks.
 
-Keep the tool definitions constant within a turn. Exhausted search budgets are enforced by the tool's execution guard; they do not remove its schema. The final step uses `toolChoice: "none"` rather than an empty tool list.
+Keep the tool definitions constant within a turn. The `deep_research` tool joins a chat's list at its first research turn and stays, so only that turn changes the block; see `deep-research.md`. Exhausted search budgets are enforced by the tool's execution guard; they do not remove its schema. The final step uses `toolChoice: "none"` rather than an empty tool list.
 
 ## Wire formats
 

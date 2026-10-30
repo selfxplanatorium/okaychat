@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SearchBudget, agentStepsInCurrentTurn, searchesInCurrentTurn } from "./search-budget.js";
+import { SearchBudget, SearchShare, StepBudget, agentStepsInCurrentTurn, searchesInCurrentTurn } from "./search-budget.js";
 import { webTools } from "./web.js";
 
 test("parent and delegated parallel searches share one hard limit", async (t) => {
@@ -90,4 +90,37 @@ test("agent steps include all model invocations in the current reply across requ
   assert.equal(agentStepsInCurrentTurn(messages), 4);
   assert.equal(agentStepsInCurrentTurn([...messages, { role: "user", parts: [] }]), 0);
   assert.equal(agentStepsInCurrentTurn([{ role: "assistant", parts: [null, undefined, { type: "text" }, { type: "tool-memory_save", state: "output-available" }] }]), 0);
+});
+
+test("a research worker's share caps it without exceeding or hiding the reply's budget", () => {
+  const reply = new SearchBudget(3, 1);
+  const worker = new SearchShare(reply, 1);
+  assert.equal(worker.limit, 3, "workers describe the reply's limit, so their tool block is identical");
+  assert.equal(worker.remaining, 1);
+  assert.equal(worker.reserve(), true);
+  assert.equal(worker.reserve(), false, "the share is spent");
+  assert.equal(reply.remaining, 1);
+  const greedy = new SearchShare(reply, 5);
+  assert.equal(greedy.remaining, 1, "a share never exceeds what the reply has left");
+  assert.equal(greedy.reserve(), true);
+  assert.equal(greedy.reserve(), false);
+  assert.equal(reply.remaining, 0);
+});
+
+test("deep research steps and searches count toward the reply across continuations", () => {
+  const steps = new StepBudget(4, 3);
+  assert.equal(steps.reserve(), true);
+  assert.equal(steps.reserve(), false);
+  const messages = [
+    { role: "user", parts: [] },
+    { role: "assistant", parts: [
+      { type: "tool-deep_research", output: { steps: 7, searches: 4, findings: "..." } },
+      { type: "step-start" },
+      { type: "tool-web_search" },
+    ] },
+  ];
+  assert.equal(agentStepsInCurrentTurn(messages), 8);
+  assert.equal(searchesInCurrentTurn(messages), 5);
+  // A malformed or missing output adds nothing.
+  assert.equal(agentStepsInCurrentTurn([{ role: "assistant", parts: [{ type: "tool-deep_research", output: { steps: -2 } }, { type: "tool-deep_research" }] }]), 0);
 });

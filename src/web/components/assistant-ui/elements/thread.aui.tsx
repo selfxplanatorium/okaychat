@@ -93,6 +93,7 @@ import { ReplyFiles } from "@/components/chat/reply-files";
 import { DictationSend, ReadAloudAutoPlay, useDictateLabel, useSendDictation, VoiceNotice } from "@/speech/ChatVoice";
 import { useSpeech } from "@/speech/store";
 import { useThreadSync, type ThreadSync } from "@/state/thread-sync";
+import { useChatResearch } from "@/state/chat-research";
 import { DictationWaveform } from "@/speech/Waveform";
 
 export type ThreadGroupPart = MessagePrimitive.GroupedParts.GroupPart;
@@ -150,6 +151,7 @@ const messageGroupBy = groupPartByType({
   "tool-call:render_spec": [],
   "tool-call:generate_image": [],
   "tool-call:delegate_task": [],
+  "tool-call:deep_research": [],
   "tool-call:run_code": [],
 });
 
@@ -207,6 +209,9 @@ const resultKey = (part: GroupablePart): string | undefined => {
       return "spec";
     case "generate_image":
       return `image:${part.toolCallId}`;
+    // The research card stays above its report: it holds the questions and the pages read.
+    case "deep_research":
+      return `research:${part.toolCallId}`;
     default:
       // Each MCP App call is its own result, like a generated image.
       return mcpAppOf(part.result) ? `app:${part.toolCallId}` : undefined;
@@ -948,6 +953,7 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
   // Until the server's rows replace a cached paint, a send would attach the reply to whatever the cache showed.
   const sync = useThreadSync();
   const submitMode = useSubmitMode();
+  const researching = useChatResearch().enabled;
   // The composer sits on the bottom edge, so it grows upward with the typed line held in place.
   const smoothHeight = useSmoothHeight({ pin: "bottom" });
   const longPaste = useLongPaste();
@@ -963,7 +969,7 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
           {longPaste.notice}
           <ComposerPrimitive.Input
             {...longPaste.inputProps}
-            placeholder={t("thread.messagePlaceholder")}
+            placeholder={researching ? t("thread.researchPlaceholder") : t("thread.messagePlaceholder")}
             className="aui-composer-input caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base leading-6 outline-none"
             rows={1}
             submitMode={sync ? "none" : submitMode}

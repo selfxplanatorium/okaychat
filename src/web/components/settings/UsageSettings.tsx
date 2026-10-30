@@ -13,7 +13,8 @@ const PURPOSE_LABELS = {
   chat: "usage.purposeChat",
   compaction: "usage.purposeCompaction",
   title: "usage.purposeTitle",
-} as const satisfies Record<"chat" | "compaction" | "title", PlainMessageKey>;
+  research: "usage.purposeResearch",
+} as const satisfies Record<"chat" | "compaction" | "title" | "research", PlainMessageKey>;
 
 function useUsage(days: Range, groupBy: "day" | "model" | "kind") {
   const [data, setData] = useState<{ rows: UsageRow[]; go: GoWindow[] } | null>(null);
@@ -133,8 +134,8 @@ export function UsageSettings() {
       </SettingsSection>
 
       <SettingsSection title={t("usage.byPurpose")} description={t("usage.byPurposeDescription")}>
-        <div key={`${days}-${byKind ? "data" : "loading"}`} className="animate-fade-in grid grid-cols-3 divide-x">
-          {(["chat", "compaction", "title"] as const).map((k) => {
+        <div key={`${days}-${byKind ? "data" : "loading"}`} className="animate-fade-in grid grid-cols-2 divide-x sm:grid-cols-4">
+          {(["chat", "compaction", "title", "research"] as const).map((k) => {
             const r = byKind?.rows.find((x) => x.key === k);
             return <Stat key={k} label={t(PURPOSE_LABELS[k])} value={formatCost(r?.cost ?? 0)} hint={t("usage.requestCount", { count: r?.requests ?? 0 })} />;
           })}

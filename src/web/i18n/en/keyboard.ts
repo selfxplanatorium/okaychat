@@ -35,6 +35,7 @@ export default {
   cmdComposerModel: "Choose model",
   cmdComposerEffort: "Reasoning effort",
   cmdComposerSearch: "Turn web search on or off",
+  cmdComposerResearch: "Turn deep research on or off",
   cmdComposerAttach: "Attach files",
   cmdComposerPrompts: "Insert an MCP prompt",
   cmdComposerDictate: "Start or stop voice input",

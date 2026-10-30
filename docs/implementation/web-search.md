@@ -8,6 +8,8 @@ Built-in tools live in `src/server/tools/web.ts`. They need no provider API key.
 
 Compose supplies a private SearXNG sidecar configured by `docker/searxng/`. `OKAYCHAT_SEARXNG_URL` selects it in the app. Its configuration must enable JSON responses; it is not exposed as a public search service.
 
+Each engine request also ends when the reply is stopped: the tools pass their `abortSignal` into `webSearch`/`webFetch`, which combine it with the timeout and pass it to Scrapling.
+
 The model-facing `web_search` defaults to eight results and accepts one to twenty. A turn and all delegates share the same `SearchBudget`. Page reads do not consume search queries; see `step-limits.md`.
 
 ## Page reading

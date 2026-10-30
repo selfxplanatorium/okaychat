@@ -19,6 +19,56 @@ export class SearchBudget {
   }
 }
 
+/**
+ * At most `share` queries out of a parent budget, so one research worker cannot spend what the others need.
+ * It reports the parent's limit, which keeps the web_search description (and the cached tool block) the same
+ * for every worker.
+ */
+export class SearchShare extends SearchBudget {
+  private taken = 0;
+
+  constructor(private readonly parent: SearchBudget, private readonly share: number) {
+    super(parent.limit);
+  }
+
+  override get remaining(): number { return Math.max(0, Math.min(this.share - this.taken, this.parent.remaining)); }
+
+  override reserve(): boolean {
+    if (this.taken >= this.share || !this.parent.reserve()) return false;
+    this.taken++;
+    return true;
+  }
+}
+
+/** The account's agent-step allowance for one reply, shared by the reply and its deep research workers. */
+export class StepBudget {
+  private used: number;
+
+  constructor(readonly limit: number, alreadyUsed = 0) {
+    if (!Number.isInteger(limit) || limit < 0 || !Number.isInteger(alreadyUsed) || alreadyUsed < 0) {
+      throw new RangeError("Step budget counts must be non-negative integers");
+    }
+    this.used = alreadyUsed;
+  }
+
+  get remaining(): number { return Math.max(0, this.limit - this.used); }
+
+  /** One tool-capable model invocation. A final invocation with `toolChoice: "none"` needs no reservation. */
+  reserve(): boolean {
+    if (this.remaining === 0) return false;
+    this.used++;
+    return true;
+  }
+}
+
+/** Counts a finished or stopped deep research part records about itself (`steps`, `searches`). */
+function researchCount(part: { type?: string; toolName?: string; output?: unknown }, key: "steps" | "searches"): number {
+  const name = part.type === "dynamic-tool" ? part.toolName : part.type?.startsWith("tool-") ? part.type.slice(5) : undefined;
+  if (name !== "deep_research" || !part.output || typeof part.output !== "object") return 0;
+  const value = (part.output as Record<string, unknown>)[key];
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : 0;
+}
+
 /** AI SDK emits one step-start part per model invocation; tool approvals alone add no model step. */
 export function agentStepsInCurrentTurn(messages: Array<{ role: string; parts: unknown[] }>): number {
   let steps = 0;
@@ -26,7 +76,10 @@ export function agentStepsInCurrentTurn(messages: Array<{ role: string; parts: u
     if (message.role === "user") steps = 0;
     if (message.role !== "assistant") continue;
     for (const part of message.parts) {
-      if (part && typeof part === "object" && (part as { type?: unknown }).type === "step-start") steps++;
+      if (!part || typeof part !== "object") continue;
+      if ((part as { type?: unknown }).type === "step-start") steps++;
+      // Deep research runs its workers' steps inside the reply's allowance.
+      steps += researchCount(part as { type?: string }, "steps");
     }
   }
   return steps;
@@ -47,6 +100,7 @@ export function searchesInCurrentTurn(messages: Array<{ role: string; parts: unk
         const tools = (p.output as { tools?: unknown }).tools;
         if (Array.isArray(tools)) searches += tools.filter((tool) => tool === "web_search").length;
       }
+      searches += researchCount(p, "searches");
     }
   }
   return searches;

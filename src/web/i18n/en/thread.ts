@@ -37,6 +37,7 @@ export default {
   loadingEarlier: "Loading earlier messages",
   loadingLatest: "Loading the latest messages",
   messageInput: "Message input",
+  researchPlaceholder: "What should I research?",
   messagePlaceholder: "Send a message...",
   nameLines: { one: "{name} · {count} line", other: "{name} · {count} lines" },
   notHelpful: "Not helpful",

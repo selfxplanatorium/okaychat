@@ -37,6 +37,7 @@ Not defended against: an admin (who controls the server), anyone who can run cod
 | Server rendering | Separate container. Offline by default (only the document and staged files); HTML/React previews may load from the artifact CDNs through the egress proxy. WebSocket/WebRTC/service-worker blocks, DNS limited to the CDNs, timeouts that close the job's context | `src/browser/render.ts` |
 | Office files | ZIP expansion bounded before any parser runs | `documents/zip-bounds.ts` |
 | Code execution | Separate container with no secrets. Each run in bubblewrap: own network namespace (loopback only), mount namespace (only its workspace, private `/tmp` and `/dev/shm`), IPC namespaces, inner seccomp filter, no capabilities; per-chat uid; read-only root; fails closed when the jail cannot be built | `sandbox/`, `docker-compose.yml`, `docs/implementation/code-sandbox.md` |
+| Deep research | Workers get only `web_search` and `web_fetch`, built for them; plan and review calls get no tools; the chat model cannot start research itself | `research.ts` |
 | Persistent writes | Skill installs always need approval; memory writes need approval after outside content | `skills.ts`, `memory.ts` |
 | Resource abuse | Storage quota (including message text), 4 concurrent turns, 50 schedules, 30 MCP servers | `quota.ts`, `chat.ts`, `schedules.ts`, `routes.ts` |
 | Container | App drops root to `node` after fixing `/data` ownership | `docker-entrypoint.sh` |

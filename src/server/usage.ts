@@ -47,7 +47,7 @@ export function recordUsage(entry: {
   threadId?: string;
   providerId: string;
   modelId: string;
-  kind: "chat" | "compaction" | "title" | "subagent" | "memory";
+  kind: "chat" | "compaction" | "title" | "subagent" | "memory" | "research";
   usage: TokenUsage;
   cost: number;
 }) {

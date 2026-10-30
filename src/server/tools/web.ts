@@ -20,24 +20,27 @@ const SEARXNG_URL = process.env.OKAYCHAT_SEARXNG_URL?.replace(/\/$/, "");
 const MAX_BYTES = 5 * 1024 * 1024;
 const PAGE_CHARS = 40_000;
 
+/** A request timeout that also ends when the reply is stopped. */
+const deadline = (ms: number, signal?: AbortSignal) => (signal ? AbortSignal.any([AbortSignal.timeout(ms), signal]) : AbortSignal.timeout(ms));
+
 export interface SearchResult {
   title: string;
   url: string;
   snippet: string;
 }
 
-async function searxng(query: string, limit: number): Promise<SearchResult[]> {
+async function searxng(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
   const url = `${SEARXNG_URL}/search?q=${encodeURIComponent(query)}&format=json&safesearch=1`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(12_000), headers: { Accept: "application/json" } });
+  const res = await fetch(url, { signal: deadline(12_000, signal), headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`SearXNG ${res.status}`);
   const body = (await res.json()) as { results?: Array<{ title: string; url: string; content?: string }> };
   return (body.results ?? []).slice(0, limit).map((r) => ({ title: r.title, url: r.url, snippet: r.content ?? "" }));
 }
 
-async function brave(query: string, limit: number): Promise<SearchResult[]> {
+async function brave(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
   const res = await fetch(`https://search.brave.com/search?q=${encodeURIComponent(query)}&source=web`, {
     headers: { "User-Agent": BROWSER_UA, Accept: "text/html", "Accept-Language": "en-US,en;q=0.9" },
-    signal: AbortSignal.timeout(12_000),
+    signal: deadline(12_000, signal),
   });
   if (!res.ok) throw new Error(`Brave ${res.status}`);
   const { document } = await parseHTML(await res.text());
@@ -54,12 +57,12 @@ async function brave(query: string, limit: number): Promise<SearchResult[]> {
   return out;
 }
 
-async function duckduckgoLite(query: string, limit: number): Promise<SearchResult[]> {
+async function duckduckgoLite(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
   const res = await fetch("https://lite.duckduckgo.com/lite/", {
     method: "POST",
     headers: { "User-Agent": BROWSER_UA, "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ q: query }),
-    signal: AbortSignal.timeout(12_000),
+    signal: deadline(12_000, signal),
   });
   // 202 is DuckDuckGo's bot wall.
   if (res.status !== 200) throw new Error(`DuckDuckGo ${res.status}`);
@@ -78,25 +81,27 @@ function decodeDuckUrl(href: string): string {
   return match ? decodeURIComponent(match[1]!) : href.startsWith("//") ? `https:${href}` : href;
 }
 
-export async function webSearch(query: string, limit = 8): Promise<{ engine: string; results: SearchResult[] }> {
+export async function webSearch(query: string, limit = 8, signal?: AbortSignal): Promise<{ engine: string; results: SearchResult[] }> {
   const errors: string[] = [];
   if (SEARXNG_URL) {
     try {
-      const results = await searxng(query, limit);
+      const results = await searxng(query, limit, signal);
       if (results.length) return { engine: "searxng", results };
     } catch (e) {
       errors.push((e as Error).message);
     }
   }
   for (const [engine, run] of [["brave", brave], ["duckduckgo", duckduckgoLite]] as const) {
+    signal?.throwIfAborted();
     try {
-      const results = await run(query, limit);
+      const results = await run(query, limit, signal);
       if (results.length) return { engine, results };
       errors.push(`${engine}: no results`);
     } catch (e) {
       errors.push((e as Error).message);
     }
   }
+  signal?.throwIfAborted();
   throw new Error(`Search failed: ${errors.join("; ")}`);
 }
 
@@ -130,7 +135,7 @@ function looksBlocked(status: number, text: string) {
   );
 }
 
-export async function webFetch(url: string): Promise<{ title: string; content: string; via: string }> {
+export async function webFetch(url: string, signal?: AbortSignal): Promise<{ title: string; content: string; via: string }> {
   const parsed = new URL(url);
   if (!/^https?:$/.test(parsed.protocol)) throw new Error("Only http and https URLs are allowed");
   // The model chooses this URL, and a fetched page can steer the model. Internal hosts stay unreachable.
@@ -144,10 +149,11 @@ export async function webFetch(url: string): Promise<{ title: string; content: s
     res = await publicFetch(parsed, {
       headers: { "User-Agent": BROWSER_UA, Accept: "text/html,application/xhtml+xml,application/pdf,text/plain,*/*", "Accept-Language": "en-US,en;q=0.9" },
       redirect: "follow",
-      signal: AbortSignal.timeout(20_000),
+      signal: deadline(20_000, signal),
     });
   } catch (e) {
     if (e instanceof BlockedAddressError) throw new Error(blocked);
+    signal?.throwIfAborted();
     error = (e as Error).message;
   }
 
@@ -175,7 +181,9 @@ export async function webFetch(url: string): Promise<{ title: string; content: s
   }
 
   // Scrapling runs in the browser worker, where its connections can leave only through the egress proxy.
-  const scraped = await scraplingFetch(url);
+  signal?.throwIfAborted();
+  const scraped = await scraplingFetch(url, signal);
+  signal?.throwIfAborted();
   if (scraped) return { ...scraped, via: "scrapling" };
   if (thin) return { ...thin, via: "fetch" };
   throw new Error(`Could not read ${url} (${error ?? "empty page"})`);
@@ -191,11 +199,11 @@ export function webTools(opts: { searchBudget?: SearchBudget; search?: boolean }
       query: z.string().min(1).describe("Search query, as you would type it into a search engine"),
       limit: z.number().int().min(1).max(20).optional().describe("Max results, default 8"),
     }),
-    execute: async ({ query, limit }) => {
+    execute: async ({ query, limit }, { abortSignal }) => {
       if (!searchBudget.reserve()) {
         throw new Error(`The web search limit (${searchBudget.limit} queries per reply) has been reached. Answer using the evidence already collected; you may still read known URLs with web_fetch.`);
       }
-      return webSearch(query, limit ?? 8);
+      return webSearch(query, limit ?? 8, abortSignal);
     },
   });
   return {
@@ -207,8 +215,8 @@ export function webTools(opts: { searchBudget?: SearchBudget; search?: boolean }
         url: z.string().url(),
         page: z.number().int().min(1).optional().describe("1-based page of the content, default 1"),
       }),
-      execute: async ({ url, page = 1 }) => {
-        const { title, content, via } = await webFetch(url);
+      execute: async ({ url, page = 1 }, { abortSignal }) => {
+        const { title, content, via } = await webFetch(url, abortSignal);
         const pages = Math.max(1, Math.ceil(content.length / PAGE_CHARS));
         const slice = content.slice((page - 1) * PAGE_CHARS, page * PAGE_CHARS);
         return { title, url, page, pages, via, content: slice };

@@ -8,4 +8,6 @@ One agent step is one model invocation allowed to call tools, which may make mul
 
 Browser-executed tools can continue a reply in a new chat request. `searchesInCurrentTurn` recovers search calls after the latest user message, including delegated searches recorded in the sub-agent progress output, so the continuation does not reset its search allowance. `agentStepsInCurrentTurn` counts assistant `step-start` parts across those continuations, so approval responses and browser tools cannot restart the agent-step allowance either. A new user message starts fresh allowances. Scheduled prompts use the same turn machinery.
 
+Deep research spends the same allowances: workers reserve searches from the turn's `SearchBudget` through a per-worker `SearchShare`, and every tool-capable worker step from the turn's `StepBudget`; the reply's own loop gets the steps that remain. The research part's output records `steps` and `searches`, which both continuation counters add. See `deep-research.md`.
+
 Validation: `src/server/settings.test.ts` covers account isolation, legacy defaults, validation, and invalid saved values. `src/server/tools/search-budget.test.ts` exercises actual tool execution against a fake transport, including parallel parent/delegated searches, failure consumption, zero limits, and continuation recovery.
