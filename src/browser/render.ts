@@ -309,6 +309,11 @@ export async function withBrowserPage<T>(html: string, options: RenderOptions, f
       acceptDownloads: false,
       viewport: { width: options.width ?? 1000, height: options.height ?? 800 },
     });
+    // An abort during launch or newContext fired before the listener below exists.
+    if (signal?.aborted) {
+      await context.close().catch(() => {});
+      throw new JobError("Cancelled.", 499);
+    }
     let stopped: JobError | null = null;
     let onStop!: (error: JobError) => void;
     const stop = new Promise<never>((_, reject) => (onStop = reject));

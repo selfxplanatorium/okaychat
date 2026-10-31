@@ -24,7 +24,7 @@ const withReason = (message: string, error: unknown) =>
   error instanceof Error && error.message ? t("library.withReason", { message, reason: error.message }) : message;
 
 /** Archived chats across every project, with restore, open, export, and permanent delete, one by one or selected together. */
-export function ArchivedChats({ tabs }: { tabs: ReactNode }) {
+export function ArchivedChats({ tabs, active }: { tabs: ReactNode; active: boolean }) {
   const aui = useAui();
   const [, navigate] = useLocation();
   const projects = useData((s) => s.projects);
@@ -107,7 +107,7 @@ export function ArchivedChats({ tabs }: { tabs: ReactNode }) {
     selection.setMode(on);
     setBulkError(null);
   };
-  useSelectionKeys(selection.selecting, { onExit: () => setSelecting(false), onSelectAll: () => selection.selectAll() });
+  useSelectionKeys(active && selection.selecting, { onExit: () => setSelecting(false), onSelectAll: () => selection.selectAll() });
 
   /** Runs `task` per selected chat and drops the finished ones; leaves selection mode when none failed. */
   const applyToSelection = async (verb: "restore" | "delete", task: (id: string) => Promise<unknown>, onFailed?: (count: number) => void) => {

@@ -265,6 +265,8 @@ export default {
   errLibraryWrite: "Failed to write the theme library to {key}.",
   errIdReserved: "The theme id \"{id}\" is reserved.",
   errAlreadyInstalled: "A theme named \"{name}\" is already installed.",
+  errInvalidId: "The theme id \"{id}\" is not valid.",
+  errLibraryFull: "You can install at most {count} themes. Remove one first.",
   errNotInstalled: "The theme \"{name}\" is not installed.",
   errColorsObjects: "Theme colors must be objects.",
   errUnsupportedRole: "\"{role}\" is not a supported theme color role.",

@@ -98,6 +98,38 @@ function sharedParts(message: UIMessage, token: string, resolveUI: ReturnType<ty
   return out;
 }
 
+function sharedMessages(share: { user_id: string; thread_id: string; token: string }): SharedThread["messages"] {
+  const resolveUI = generativeUI();
+  return currentBranch(share.user_id, share.thread_id)
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .map((m) => ({ id: m.id, role: m.role as "user" | "assistant", parts: sharedParts(m, share.token, resolveUI) }))
+    .filter((m) => m.parts.length > 0);
+}
+
+/**
+ * The artifacts (newest version shown) and images the shared branch displays. Asset routes serve
+ * only these, so artifacts and images from discarded branches stay private.
+ */
+function sharedAssets(share: { user_id: string; thread_id: string; token: string }) {
+  const artifacts = new Map<string, number>();
+  const images = new Set<string>();
+  const imagePrefix = `/api/public/shares/${share.token}/images/`;
+  for (const message of sharedMessages(share)) {
+    for (const part of message.parts) {
+      if (part.type === "artifact") artifacts.set(part.id, Math.max(artifacts.get(part.id) ?? 0, part.version));
+      else if (part.type === "image" && part.url.startsWith(imagePrefix)) images.add(part.url.slice(imagePrefix.length));
+    }
+  }
+  return { artifacts, images };
+}
+
+/** Versions of a shared artifact up to the newest one the shared branch shows. */
+function sharedVersions(share: { user_id: string; thread_id: string; token: string }, id: string) {
+  const newest = sharedAssets(share).artifacts.get(id);
+  if (newest === undefined) return [];
+  return artifactVersions(share.thread_id, id).filter((v) => v.version <= newest);
+}
+
 export const shareRoutes = new Hono<AppEnv>()
   .get("/threads/:id/share", (c) => {
     const row = byThread(c.get("user").id, c.req.param("id"));
@@ -124,21 +156,13 @@ export const publicShareRoutes = new Hono()
     const share = byToken(c.req.param("token"));
     const thread = share && getThread(share.user_id, share.thread_id);
     if (!share || !thread) return c.json({ error: "This link was revoked or never existed." }, 404);
-    const resolveUI = generativeUI();
-    const body: SharedThread = {
-      title: thread.title,
-      createdAt: thread.createdAt,
-      messages: currentBranch(share.user_id, share.thread_id)
-        .filter((m) => m.role === "user" || m.role === "assistant")
-        .map((m) => ({ id: m.id, role: m.role as "user" | "assistant", parts: sharedParts(m, share.token, resolveUI) }))
-        .filter((m) => m.parts.length > 0),
-    };
+    const body: SharedThread = { title: thread.title, createdAt: thread.createdAt, messages: sharedMessages(share) };
     return c.json(body);
   })
   .get("/:token/artifacts/:id", (c) => {
     const share = byToken(c.req.param("token"));
     if (!share) return c.json({ error: "Not found" }, 404);
-    const versions = artifactVersions(share.thread_id, c.req.param("id"));
+    const versions = sharedVersions(share, c.req.param("id"));
     return versions.length ? c.json(versions) : c.json({ error: "Not found" }, 404);
   })
   .get("/:token/artifacts/:id/file", (c) => {
@@ -146,9 +170,9 @@ export const publicShareRoutes = new Hono()
     if (!share) return c.json({ error: "Not found" }, 404);
     const id = c.req.param("id");
     const version = c.req.query("version") ? Number(c.req.query("version")) : undefined;
-    const data = artifactData(share.thread_id, id, version);
-    const versions = artifactVersions(share.thread_id, id);
+    const versions = sharedVersions(share, id);
     const chosen = version === undefined ? versions.at(-1) : versions.find((v) => v.version === version);
+    const data = chosen && artifactData(share.thread_id, id, chosen.version);
     if (!data || !chosen) return c.json({ error: "Not found" }, 404);
     const kind = chosen.kind as DocumentArtifactKind;
     return new Response(data as unknown as BodyInit, {
@@ -164,8 +188,9 @@ export const publicShareRoutes = new Hono()
     if (!share) return c.json({ error: "Not found" }, 404);
     const id = c.req.param("id");
     const version = c.req.query("version") ? Number(c.req.query("version")) : undefined;
-    const data = artifactData(share.thread_id, id, version);
-    const artifact = artifactVersions(share.thread_id, id).at(-1);
+    const versions = sharedVersions(share, id);
+    const artifact = version === undefined ? versions.at(-1) : versions.find((v) => v.version === version);
+    const data = artifact && artifactData(share.thread_id, id, artifact.version);
     if (!data || !artifact) return c.json({ error: "Not found" }, 404);
     if (artifact.kind !== "xlsx") return c.json({ error: "Preview is only available for spreadsheets" }, 400);
     return c.json(await previewXlsx(data));
@@ -173,7 +198,7 @@ export const publicShareRoutes = new Hono()
   .get("/:token/images/:id", (c) => {
     const share = byToken(c.req.param("token"));
     // The image must have been generated in the shared thread, not just by the same user.
-    const image = share && (db.prepare("SELECT id, mime FROM images WHERE id = ? AND user_id = ? AND thread_id = ?").get(c.req.param("id"), share.user_id, share.thread_id) as { id: string; mime: string } | undefined);
+    const image = share && sharedAssets(share).images.has(c.req.param("id")) && (db.prepare("SELECT id, mime FROM images WHERE id = ? AND user_id = ? AND thread_id = ?").get(c.req.param("id"), share.user_id, share.thread_id) as { id: string; mime: string } | undefined);
     if (!share || !image) return c.json({ error: "Not found" }, 404);
     const stream = Readable.toWeb(createReadStream(path.join(env.dataDir, "images", share.user_id, `${image.id}.png`))) as ReadableStream;
     return new Response(stream, { headers: { "Content-Type": image.mime, "Cache-Control": "public, max-age=3600" } });

@@ -73,6 +73,11 @@ function needsApproval(server: McpServerRecord, tool: RawTool): boolean {
  * `destructiveHint: false` still means a non-read-only tool, which is enough to gate it after untrusted
  * content and to keep it away from unattended delegates.
  */
+/** Only a tool that declares itself read-only may be called again after an ambiguous connection loss. */
+function readOnlyTool(server: McpServerRecord, name: string): boolean {
+  return entries.get(`${server.userId}:${server.id}`)?.tools.find((t) => t.name === name)?.annotations?.readOnlyHint === true;
+}
+
 function isDestructive(tool: RawTool): boolean {
   const a = tool.annotations;
   return a?.destructiveHint === true || a?.readOnlyHint === false;
@@ -96,6 +101,8 @@ interface Entry {
   /** Tool calls in flight, newest last. An elicitation request goes to the newest one. */
   activeCalls: ActiveCall[];
   connecting?: Promise<void>;
+  /** Set by disconnect. A connect still in flight closes what it opens instead of keeping an orphan client. */
+  disposed?: boolean;
 }
 
 interface ActiveCall {
@@ -256,15 +263,30 @@ class NeedsAuth extends Error {
   }
 }
 
-async function listAll(client: MCPClient): Promise<RawTool[]> {
-  const tools: RawTool[] = [];
+// Pagination bounds: a server that keeps returning a cursor must not hold every chat's turn forever.
+const MAX_LIST_PAGES = 50;
+const MAX_LIST_ITEMS = 2_000;
+
+/** Follows `nextCursor` within the bounds above, stopping on a repeated cursor. */
+async function paginate<T>(fetchPage: (cursor: string | undefined) => Promise<{ items: T[]; nextCursor?: string }>): Promise<T[]> {
+  const items: T[] = [];
+  const seen = new Set<string>();
   let cursor: string | undefined;
-  do {
+  for (let page = 0; page < MAX_LIST_PAGES; page++) {
+    const result = await fetchPage(cursor);
+    items.push(...result.items);
+    cursor = result.nextCursor;
+    if (!cursor || seen.has(cursor) || items.length >= MAX_LIST_ITEMS) break;
+    seen.add(cursor);
+  }
+  return items.slice(0, MAX_LIST_ITEMS);
+}
+
+async function listAll(client: MCPClient): Promise<RawTool[]> {
+  return paginate(async (cursor) => {
     const page = await client.listTools({ params: cursor ? { cursor } : undefined, options: { timeout: LIST_TIMEOUT_MS } });
-    tools.push(...(page.tools as RawTool[]));
-    cursor = page.nextCursor;
-  } while (cursor);
-  return tools;
+    return { items: page.tools as RawTool[], nextCursor: page.nextCursor };
+  });
 }
 
 async function connect(server: McpServerRecord, entry: Entry) {
@@ -276,6 +298,10 @@ async function connect(server: McpServerRecord, entry: Entry) {
   for (let attempt = 0; ; attempt++) {
     try {
       entry.client = await openClient(server, entry);
+      if (entry.disposed) {
+        await closeClient(entry);
+        return;
+      }
       entry.tools = await listAll(entry.client);
       entry.instructions = entry.client.instructions;
       const caps = entry.client.initializeResult.capabilities as { resources?: unknown; prompts?: unknown };
@@ -301,10 +327,19 @@ async function connect(server: McpServerRecord, entry: Entry) {
   }
 }
 
+const CLOSE_TIMEOUT_MS = 5_000;
+
 async function closeClient(entry: Entry) {
   const client = entry.client;
   entry.client = undefined;
-  if (client) await client.close().catch(() => {});
+  if (!client) return;
+  // Closing a session can wait on a DELETE the server never answers; local cleanup must not.
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([
+    client.close().catch(() => {}),
+    new Promise<void>((resolve) => (timer = setTimeout(resolve, CLOSE_TIMEOUT_MS))),
+  ]);
+  clearTimeout(timer);
 }
 
 function entryFor(server: McpServerRecord): Entry {
@@ -337,6 +372,14 @@ function entryFor(server: McpServerRecord): Entry {
 async function ensure(server: McpServerRecord, force = false): Promise<Entry> {
   const entry = entryFor(server);
   entry.lastUsed = Date.now();
+  // A running stdio child outlives its owner's admin role unless every use checks it again.
+  if (server.transport === "stdio" && !mayUsePrivateHosts(server.ownerId)) {
+    await closeClient(entry);
+    entry.status = "error";
+    entry.error = "Only admins can run stdio servers.";
+    entry.tools = [];
+    return entry;
+  }
   if (entry.connecting) {
     await entry.connecting;
     return entry;
@@ -404,8 +447,9 @@ export async function testServer(userId: string, serverId: string) {
 export async function disconnectServer(userId: string, serverId: string) {
   const entry = entries.get(`${userId}:${serverId}`);
   if (entry) {
-    await closeClient(entry);
+    entry.disposed = true;
     entries.delete(entry.key);
+    await closeClient(entry);
   }
 }
 
@@ -655,16 +699,12 @@ export async function listPrompts(userId: string): Promise<McpPromptInfo[]> {
       const entry = await ensure(server);
       if (entry.status !== "connected" || !entry.capabilities.prompts || !entry.client) return [];
       try {
-        const prompts: McpPromptInfo[] = [];
-        let cursor: string | undefined;
-        do {
-          const page = await entry.client.experimental_listPrompts({ params: cursor ? { cursor } : undefined, options: { timeout: LIST_TIMEOUT_MS } });
-          for (const p of page.prompts as Array<{ name: string; title?: string; description?: string; arguments?: McpPromptInfo["arguments"] }>) {
-            prompts.push({ serverId: server.id, server: server.name, name: p.name, title: p.title, description: p.description, arguments: p.arguments ?? [] });
-          }
-          cursor = page.nextCursor;
-        } while (cursor && prompts.length < 500);
-        return prompts;
+        const client = entry.client;
+        const raw = await paginate(async (cursor) => {
+          const page = await client.experimental_listPrompts({ params: cursor ? { cursor } : undefined, options: { timeout: LIST_TIMEOUT_MS } });
+          return { items: page.prompts as Array<{ name: string; title?: string; description?: string; arguments?: McpPromptInfo["arguments"] }>, nextCursor: page.nextCursor };
+        });
+        return raw.slice(0, 500).map((p) => ({ serverId: server.id, server: server.name, name: p.name, title: p.title, description: p.description, arguments: p.arguments ?? [] }));
       } catch {
         return [];
       }
@@ -765,8 +805,14 @@ export async function toolsForUser(userId: string, opts: McpTurnOptions = {}): P
         ? { metadata: { ...(isDestructive(raw) ? riskMetadata("destructive") : {}), ...(thirdPartyDescription ? externalMetadataFlag() : {}) } }
         : {}),
       needsApproval: needsApproval(server, raw),
-      execute: (args, { abortSignal, toolCallId }) =>
-        runWithElicitation(server, abortSignal, interactive, async (elicit) =>
+      execute: (args, { abortSignal, toolCallId }) => {
+        // The tool set is built once per turn; sharing, the server switch, a disabled tool, or a config
+        // change can revoke it meanwhile, and a captured record would reconnect with the old secrets.
+        const live = getVisibleServer(userId, server.id);
+        if (!live?.enabled || live.disabledTools.includes(raw.name) || fingerprintOf(live) !== fingerprintOf(server)) {
+          throw new Error(`The MCP tool "${raw.name}" from "${server.name}" is no longer available.`);
+        }
+        return runWithElicitation(server, abortSignal, interactive, async (elicit) =>
           presentResult(
             server,
             raw.name,
@@ -777,7 +823,8 @@ export async function toolsForUser(userId: string, opts: McpTurnOptions = {}): P
             // Only an interactive chat has a screen to render the app on.
             interactive ? uiMeta(raw).resourceUri : undefined,
           ),
-        ),
+        );
+      },
       toModelOutput: ({ output }) =>
         mcpModelText(output, { kind: "mcp_tool", name: `${server.name} · ${raw.name}`, server: server.name }),
     });
@@ -788,7 +835,10 @@ export async function toolsForUser(userId: string, opts: McpTurnOptions = {}): P
     const sorted = [...entry.tools].sort((a, b) => a.name.localeCompare(b.name));
     for (const raw of sorted) {
       if (server.disabledTools.includes(raw.name) || !uiMeta(raw).visibility.includes("model")) continue;
-      const name = exposedToolName(server.name, raw.name);
+      let name = exposedToolName(server.name, raw.name);
+      // Sanitizing is lossy ("a.b" and "a b" both become "a_b"); a collision must not silently replace
+      // another server's tool, so the later one gets a hash of its real pair.
+      if (tools[name]) name = `${name.slice(0, 55)}_${createHash("sha256").update(`${server.id}\0${raw.name}`).digest("hex").slice(0, 8)}`;
       tools[name] = build(server, raw, opts.interactive === true);
       // Sub-agents run unattended: no tool that waits for approval, and no destructive tool even when
       // the account's policy is "never" (the output of a web or MCP read must not reach one).
@@ -821,14 +871,22 @@ async function callTool(server: McpServerRecord, name: string, args: Record<stri
       } finally {
         call.timer.clear();
         entry.activeCalls.splice(entry.activeCalls.indexOf(call), 1);
+        entry.lastUsed = Date.now();
       }
     },
     abortSignal,
+    // A lost connection does not mean the call did not run; replaying could send or charge twice.
+    readOnlyTool(server, name),
   );
 }
 
 /** Runs one request on the server's client with its timeout. Reconnects once when the transport died. */
-async function withClient<T>(server: McpServerRecord, run: (client: MCPClient, timeout: number, entry: Entry) => Promise<T>, abortSignal?: AbortSignal): Promise<T> {
+async function withClient<T>(
+  server: McpServerRecord,
+  run: (client: MCPClient, timeout: number, entry: Entry) => Promise<T>,
+  abortSignal?: AbortSignal,
+  replayable = true,
+): Promise<T> {
   const timeout = server.config.timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS;
   const attempt = async () => {
     const entry = await ensure(server);
@@ -841,7 +899,9 @@ async function withClient<T>(server: McpServerRecord, run: (client: MCPClient, t
   } catch (error) {
     // Not after a timeout: the request may have run.
     if (!isConnectionLost(error) || abortSignal?.aborted) throw new Error(describeMcpError(error, timeout));
+    // Reconnect for later requests either way; only a read-only request runs again by itself.
     await ensure(server, true);
+    if (!replayable) throw new Error(`The connection to "${server.name}" was lost during the call, so it may or may not have run. Check before trying again.`);
     return attempt();
   }
 }
@@ -855,7 +915,8 @@ function describeMcpError(error: unknown, timeout: number): string {
 setInterval(() => {
   const now = Date.now();
   for (const entry of entries.values()) {
-    if (now - entry.lastUsed > IDLE_CLOSE_MS && entry.client) {
+    // A long call (timeouts go up to an hour) or a paused elicitation is not idle.
+    if (now - entry.lastUsed > IDLE_CLOSE_MS && entry.client && !entry.activeCalls.length && !entry.connecting) {
       void closeClient(entry);
       entry.status = "idle";
     }

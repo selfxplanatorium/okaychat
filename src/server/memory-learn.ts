@@ -7,6 +7,7 @@ import { db, tx } from "./db.js";
 import { createModel } from "./llm.js";
 import { factLine, listMemories, memoryPreferences, rankMemories, saveMemory, scopeFingerprint, summaryRow, transcriptText } from "./memory.js";
 import { promptText } from "./prompts.js";
+import { describeProviderError } from "./provider-errors.js";
 import { assertStorage } from "./quota.js";
 import { getSettings } from "./settings.js";
 import { currentBranch, getThread } from "./threads.js";
@@ -25,6 +26,16 @@ const LOOKBACK_MS = 14 * 86_400_000;
 const SUMMARY_SETTLE_MS = 60_000;
 const RETRY_MS = 30 * 60_000;
 const JOBS_PER_TICK = 3;
+const COMPLETION_TIMEOUT_MS = 2 * 60_000;
+
+/** Errors this module authored; their text is safe to store. */
+class WorkerError extends Error {}
+
+/**
+ * Provider errors can echo the submitted memories, and the error column is not encrypted, so only the
+ * safe taxonomy text is stored or logged.
+ */
+const safeMessage = (error: unknown) => (error instanceof WorkerError ? error.message : describeProviderError(error).message);
 
 async function backgroundModel(userId: string, preferred?: string | null) {
   const settings = getSettings(userId);
@@ -32,13 +43,14 @@ async function backgroundModel(userId: string, preferred?: string | null) {
     if (!ref) continue;
     try { return await resolveModel(userId, ref); } catch { /* try the next one */ }
   }
-  throw new Error("No model available for memory. Choose a utility model in General settings.");
+  throw new WorkerError("No model available for memory. Choose a utility model in General settings.");
 }
 
 async function complete(userId: string, prompt: string, opts: { threadId?: string; preferred?: string | null; maxOutputTokens: number }): Promise<string> {
   const { model, conn } = await backgroundModel(userId, opts.preferred);
   const handle = createModel(model, conn, { userId });
-  const result = await generateText({ model: handle.model, providerOptions: handle.providerOptions, maxRetries: 0, maxOutputTokens: opts.maxOutputTokens, prompt });
+  // A deadline: the worker runs one job at a time for every account, so a stalled response must not hold it.
+  const result = await generateText({ model: handle.model, providerOptions: handle.providerOptions, maxRetries: 0, maxOutputTokens: opts.maxOutputTokens, prompt, abortSignal: AbortSignal.timeout(COMPLETION_TIMEOUT_MS) });
   const usage = normalizeUsage(result.totalUsage);
   recordUsage({ userId, threadId: opts.threadId, providerId: model.providerId, modelId: model.id, kind: "memory", usage, cost: costOf(model.cost, usage) });
   return result.text;
@@ -58,7 +70,7 @@ export type MemoryOperation = z.infer<typeof operationsSchema>["operations"][num
 export function parseOperations(text: string): MemoryOperation[] {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
-  if (start < 0 || end < start) throw new Error("Memory review returned no JSON");
+  if (start < 0 || end < start) throw new WorkerError("Memory review returned no JSON");
   return operationsSchema.parse(JSON.parse(text.slice(start, end + 1))).operations;
 }
 
@@ -141,7 +153,7 @@ export async function refreshSummary(userId: string, scope: string, { force = fa
       scope: project ? `memory of the project "${project.name}", used only in that project's chats` : "account memory, used in every chat",
       memories: lines.join("\n"),
     }), { maxOutputTokens: 2000 })).trim().slice(0, 8000);
-    if (!text) throw new Error("The model returned an empty summary");
+    if (!text) throw new WorkerError("The model returned an empty summary");
     const encrypted = encrypt(text);
     const previous = summaryRow(userId, scope)?.content_enc ?? "";
     assertStorage(userId, Buffer.byteLength(encrypted) - Buffer.byteLength(previous));
@@ -150,22 +162,21 @@ export async function refreshSummary(userId: string, scope: string, { force = fa
     db.prepare("UPDATE memory_summaries SET content_enc = ?, fingerprint = ?, revision = ?, error = NULL, updated_at = ? WHERE user_id = ? AND scope = ?")
       .run(encrypted, fingerprint, preferences.revision, Date.now(), userId, scope);
   } catch (error) {
-    db.prepare("UPDATE memory_summaries SET error = ? WHERE user_id = ? AND scope = ?").run((error as Error).message.slice(0, 500), userId, scope);
+    db.prepare("UPDATE memory_summaries SET error = ? WHERE user_id = ? AND scope = ?").run(safeMessage(error).slice(0, 500), userId, scope);
     if (force) throw error;
   }
 }
 
 /** One pass of background memory work. Bounded per tick so a backlog never floods a provider. */
 export async function memoryTick(now = Date.now()): Promise<void> {
-  let jobs = 0;
+  let summaries = 0;
   const threads = db.prepare(`SELECT t.user_id, t.id FROM threads t JOIN memory_preferences p ON p.user_id = t.user_id
     WHERE p.enabled = 1 AND p.auto_save = 1 AND t.memory_disabled = 0 AND t.updated_at > t.memory_scanned_at
       AND t.updated_at < ? AND t.updated_at > ? ORDER BY t.updated_at LIMIT ?`).all(now - IDLE_MS, now - LOOKBACK_MS, JOBS_PER_TICK) as Array<{ user_id: string; id: string }>;
   for (const t of threads) {
-    jobs++;
     try { await reviewThread(t.user_id, t.id); } catch (error) {
       // Mark it reviewed anyway: retrying a failing model every minute costs more than a missed fact.
-      console.warn("[memory] chat review failed:", (error as Error).message);
+      console.warn("[memory] chat review failed:", safeMessage(error));
       db.prepare("UPDATE threads SET memory_scanned_at = updated_at WHERE id = ?").run(t.id);
     }
   }
@@ -174,13 +185,14 @@ export async function memoryTick(now = Date.now()): Promise<void> {
           UNION SELECT user_id, scope, 0 FROM memory_summaries) s ON s.user_id = p.user_id
     WHERE p.enabled = 1 GROUP BY p.user_id, s.scope HAVING MAX(s.changed) < ?`).all(now - SUMMARY_SETTLE_MS) as Array<{ user_id: string; scope: string }>;
   for (const { user_id: userId, scope } of scopes) {
-    if (jobs >= JOBS_PER_TICK * 2) break;
+    // Reviews and summaries each have their own cap; unused review slots are not extra summaries.
+    if (summaries >= JOBS_PER_TICK) break;
     const row = summaryRow(userId, scope);
     const { revision } = memoryPreferences(userId);
     const current = !!row?.content_enc && row.revision === revision && row.fingerprint === scopeFingerprint(userId, scope);
     if (current || (row?.error && now - row.attempted_at < RETRY_MS)) continue;
-    jobs++;
-    await refreshSummary(userId, scope).catch((error: Error) => console.warn("[memory] summary failed:", error.message));
+    summaries++;
+    await refreshSummary(userId, scope).catch((error: unknown) => console.warn("[memory] summary failed:", safeMessage(error)));
   }
 }
 
@@ -192,6 +204,6 @@ export function startMemoryWorker() {
   setInterval(() => {
     if (ticking) return;
     ticking = true;
-    void memoryTick().catch((error: Error) => console.warn("[memory]", error.message)).finally(() => (ticking = false));
+    void memoryTick().catch((error: unknown) => console.warn("[memory]", safeMessage(error))).finally(() => (ticking = false));
   }, 60_000).unref();
 }

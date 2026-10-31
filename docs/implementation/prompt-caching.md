@@ -24,7 +24,7 @@ Keep the tool definitions constant within a turn. The `deep_research` tool joins
 
 | Connection | What okaychat sends |
 | --- | --- |
-| Anthropic Messages | Explicit cache-control breakpoints on system message 1 and the conversation tail, through `providerOptions.anthropic.cacheControl`. |
+| Anthropic Messages | Explicit cache-control breakpoints on system message 1 and the conversation tail, through `providerOptions.anthropic.cacheControl`. Later steps of a tool loop add one more on the step's newest message (`markStep`), so tool results gathered in the reply are cached; three markers at most. |
 | OpenAI Responses, GPT-5.6 and newer | Account affinity as `promptCacheKey`, with an explicit breakpoint on system message 1 where supported. |
 | Other OpenAI Responses / Chat Completions | Account affinity as `promptCacheKey`; prefix caching is provider-managed. |
 | Google Gemini | No explicit tail breakpoint; implicit caching is provider-managed. |

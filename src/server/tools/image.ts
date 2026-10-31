@@ -304,6 +304,13 @@ export async function storeImage(userId: string, threadId: string, buf: Buffer, 
   const id = newId("img");
   mkdirSync(path.join(IMAGE_DIR, userId), { recursive: true });
   await writeFile(imagePath(userId, id), buf);
+  // Other writes may have used the space during the await; check again right before the charge is recorded.
+  try {
+    assertStorage(userId, buf.length);
+  } catch (error) {
+    await rm(imagePath(userId, id), { force: true });
+    throw error;
+  }
   db.prepare("INSERT INTO images (id, user_id, thread_id, prompt, width, height, size, mime, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
     id,
     userId,

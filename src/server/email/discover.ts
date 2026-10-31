@@ -692,18 +692,26 @@ export async function discoverEmail(opts: DiscoveryOptions): Promise<EmailDiscov
     opts.onAttempt?.(attempt);
   };
   const both = () => !!found.imap && !!found.smtp;
-  const consider = (side: Side, server: EmailDiscoveryServer | null | undefined, source: string, confidence: EmailConfidence, detail?: string) => {
+  const consider = async (side: Side, server: EmailDiscoveryServer | null | undefined, source: string, confidence: EmailConfidence, detail?: string) => {
     if (!server) return false;
+    // Check the destination before accepting it: an accepted private or unresolvable candidate would
+    // otherwise end the chain early and leave nothing once it is dropped at the end.
+    try {
+      await assertEmailHost(opts.userId, server.host);
+    } catch (error) {
+      report({ stage: "probe", status: "failed", label: `${side === "imap" ? "IMAP" : "SMTP"} ${server.host}:${server.port}`, detail: `${source}: ${(error as Error).message}` });
+      return false;
+    }
     if (side === "imap" && !found.imap) found.imap = { server, source, confidence };
     if (side === "smtp" && !found.smtp) found.smtp = { server, source, confidence };
     report({ stage: "probe", status: "ok", label: `${side === "imap" ? "IMAP" : "SMTP"} ${server.host}:${server.port}`, detail: detail ?? `${source} configuration`, confidence });
     return true;
   };
-  const mergeConfig = (stage: "thunderbird" | "microsoft", source: string, result: AutoconfigResult) => {
+  const mergeConfig = async (stage: "thunderbird" | "microsoft", source: string, result: AutoconfigResult) => {
     for (const note of result.notes) if (!notes.includes(note)) notes.push(note);
     const got: string[] = [];
-    if (result.imap && !found.imap) { consider("imap", result.imap, source, "medium"); got.push("IMAP"); }
-    if (result.smtp && !found.smtp) { consider("smtp", result.smtp, source, "medium"); got.push("SMTP"); }
+    if (result.imap && !found.imap && await consider("imap", result.imap, source, "medium")) got.push("IMAP");
+    if (result.smtp && !found.smtp && await consider("smtp", result.smtp, source, "medium")) got.push("SMTP");
     report({
       stage,
       status: got.length ? "ok" : "skipped",
@@ -729,8 +737,8 @@ export async function discoverEmail(opts: DiscoveryOptions): Promise<EmailDiscov
   if (preset) {
     for (const note of preset.notes ?? []) notes.push(note);
     report({ stage: "preset", status: "ok", label: preset.source, detail: `Known servers for ${email.domain}.`, confidence: preset.confidence });
-    consider("imap", preset.imap, preset.source, preset.confidence);
-    consider("smtp", preset.smtp, preset.source, preset.confidence);
+    await consider("imap", preset.imap, preset.source, preset.confidence);
+    await consider("smtp", preset.smtp, preset.source, preset.confidence);
   } else {
     report({ stage: "preset", status: "skipped", label: "Known providers", detail: "No built-in preset for this domain." });
   }
@@ -743,7 +751,7 @@ export async function discoverEmail(opts: DiscoveryOptions): Promise<EmailDiscov
     try {
       const bytes = await fetchBounded(opts.userId, url, { headers: { Accept: "application/xml,text/xml" } }, MAX_XML_BYTES, opts.signal);
       const parsed = parseAutoconfigXml(new TextDecoder().decode(bytes), email.email);
-      mergeConfig("thunderbird", "Thunderbird autoconfig", parsed);
+      await mergeConfig("thunderbird", "Thunderbird autoconfig", parsed);
     } catch (error) {
       const message = (error as Error).message || "No autoconfig document.";
       report({ stage: "thunderbird", status: "failed", label: "Thunderbird autoconfig", detail: `${url}: ${message}` });
@@ -761,7 +769,7 @@ export async function discoverEmail(opts: DiscoveryOptions): Promise<EmailDiscov
         headers: { "Content-Type": "text/xml; charset=utf-8", Accept: "application/xml,text/xml" },
         body: autodiscoverXmlBody(email.email),
       }, MAX_XML_BYTES, opts.signal);
-      mergeConfig("microsoft", "Microsoft Autodiscover", parseAutodiscoverXml(new TextDecoder().decode(bytes), email.email));
+      await mergeConfig("microsoft", "Microsoft Autodiscover", parseAutodiscoverXml(new TextDecoder().decode(bytes), email.email));
     } catch (error) {
       report({ stage: "microsoft", status: "failed", label: "Microsoft Autodiscover", detail: `${(error as Error).message || "No XML response."}` });
     }
@@ -772,7 +780,7 @@ export async function discoverEmail(opts: DiscoveryOptions): Promise<EmailDiscov
     report({ stage: "microsoft", status: "running", label: "Microsoft Autodiscover JSON", detail: url });
     try {
       const bytes = await fetchBounded(opts.userId, url, { headers: { Accept: "application/json" } }, MAX_JSON_BYTES, opts.signal);
-      mergeConfig("microsoft", "Microsoft Autodiscover JSON", parseAutodiscoverJson(JSON.parse(new TextDecoder().decode(bytes)), email.email));
+      await mergeConfig("microsoft", "Microsoft Autodiscover JSON", parseAutodiscoverJson(JSON.parse(new TextDecoder().decode(bytes)), email.email));
     } catch (error) {
       report({ stage: "microsoft", status: "failed", label: "Microsoft Autodiscover JSON", detail: `${(error as Error).message || "No JSON response."}` });
     }
@@ -791,8 +799,8 @@ export async function discoverEmail(opts: DiscoveryOptions): Promise<EmailDiscov
       };
       const servers = srvServers(records, email.email);
       const got: string[] = [];
-      for (const server of servers.imap) if (!found.imap) { consider("imap", server, "SRV record", "medium"); got.push("IMAP"); break; }
-      for (const server of servers.smtp) if (!found.smtp) { consider("smtp", server, "SRV record", "medium"); got.push("SMTP"); break; }
+      for (const server of servers.imap) if (!found.imap && await consider("imap", server, "SRV record", "medium")) { got.push("IMAP"); break; }
+      for (const server of servers.smtp) if (!found.smtp && await consider("smtp", server, "SRV record", "medium")) { got.push("SMTP"); break; }
       report({ stage: "srv", status: got.length ? "ok" : "skipped", label: "RFC 6186 SRV records", detail: got.length ? `Found ${got.join(" and ")} records.` : "No SRV records published." });
     } catch (error) {
       report({ stage: "srv", status: "failed", label: "RFC 6186 SRV records", detail: (error as Error).message });
@@ -808,7 +816,7 @@ export async function discoverEmail(opts: DiscoveryOptions): Promise<EmailDiscov
       try {
         await probeServer(opts.userId, candidate, opts.tls, { signal: opts.signal, timeoutMs: opts.probeTimeout });
         const { side, ...server } = candidate;
-        consider(side, { ...server, username: email.email }, "Guessed server", "low", "Server answered over verified TLS.");
+        await consider(side, { ...server, username: email.email }, "Guessed server", "low", "Server answered over verified TLS.");
       } catch (error) {
         report({ stage: "heuristic", status: "failed", label: `${candidate.side.toUpperCase()} ${candidate.host}:${candidate.port}`, detail: (error as Error).message });
       }

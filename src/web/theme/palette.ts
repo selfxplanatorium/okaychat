@@ -1084,11 +1084,18 @@ function storedThemeHasId(storedTheme: unknown, themeId: string): boolean {
   return isRecord(storedTheme) && storedTheme.id === themeId;
 }
 
+/** Matches `customThemes` in `shared/appearance.ts`; a larger library could never sync. */
+export const MAX_CUSTOM_THEMES = 100;
+
 export function installCustomTheme(theme: ThemeDefinition): ThemeDefinition {
   if (RESERVED_THEME_IDS.has(theme.id)) {
     throw new Error(t("appearance.errIdReserved", { id: theme.id }));
   }
+  if (!isThemeId(theme.id)) throw new Error(t("appearance.errInvalidId", { id: theme.id }));
   const library = getWritableCustomThemeLibrary();
+  if (library.storedThemes.length >= MAX_CUSTOM_THEMES) {
+    throw new Error(t("appearance.errLibraryFull", { count: MAX_CUSTOM_THEMES }));
+  }
   if (
     BUILT_IN_THEME_DEFINITIONS.some((existing) => existing.id === theme.id) ||
     library.storedThemes.some((storedTheme) => storedThemeHasId(storedTheme, theme.id))

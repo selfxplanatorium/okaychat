@@ -108,8 +108,14 @@ export function decodeTransferEncoding(content: Buffer | string, encoding: strin
 /** Turns an HTML mail body into readable text. The app never renders mail HTML. */
 export async function htmlToText(html: string): Promise<string> {
   const { parseHTML } = await import("linkedom");
-  const { document } = parseHTML(html);
+  // linkedom leaves a bare fragment outside document.body, so wrap anything without its own body.
+  const { document } = parseHTML(/<body[\s>]/i.test(html) ? html : `<!doctype html><html><body>${html}</body></html>`);
   for (const node of document.querySelectorAll("script, style, noscript, iframe, object, svg")) node.remove();
+  // textContent joins blocks without separators ("FirstSecond"), so mark line breaks first.
+  for (const node of document.querySelectorAll("br")) node.replaceWith(document.createTextNode("\n"));
+  for (const node of document.querySelectorAll("p, div, li, tr, h1, h2, h3, h4, h5, h6, blockquote, pre, table")) {
+    node.appendChild(document.createTextNode("\n"));
+  }
   // Keep link targets readable without loading anything remote.
   for (const anchor of document.querySelectorAll("a[href]")) {
     const href = anchor.getAttribute("href");

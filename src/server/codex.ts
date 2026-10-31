@@ -46,10 +46,32 @@ function saveAuth(userId: string, json: string) {
   ).run(userId, encrypt(json), Date.now());
 }
 
+// Bumped whenever the stored login is replaced or removed. A run that started under an older login
+// must not write its refreshed tokens over the newer one.
+const loginGeneration = new Map<string, number>();
+const generationOf = (userId: string) => loginGeneration.get(userId) ?? 0;
+const loginListeners = new Set<(userId: string) => void>();
+
+/** Called after a login is replaced or removed, for caches derived from the old account. */
+export function onLoginChange(listener: (userId: string) => void) {
+  loginListeners.add(listener);
+}
+
+function loginChanged(userId: string) {
+  loginGeneration.set(userId, generationOf(userId) + 1);
+  for (const listener of loginListeners) listener(userId);
+}
+
+/** Saves refreshed tokens only while the login they came from is still the stored one. */
+function saveRefreshed(userId: string, generation: number, json: string) {
+  if (generation === generationOf(userId) && isConnected(userId)) saveAuth(userId, json);
+}
+
 export function disconnect(userId: string) {
   db.prepare("DELETE FROM codex_auth WHERE user_id = ?").run(userId);
   pendingLogins.get(userId)?.child.kill();
   pendingLogins.delete(userId);
+  loginChanged(userId);
 }
 
 const makeHome = () => mkdtemp(path.join(TMP_ROOT, "home-"));
@@ -60,10 +82,15 @@ const queues = new Map<string, Promise<unknown>>();
 
 function serialized<T>(userId: string, run: () => Promise<T>): Promise<T> {
   const next = (queues.get(userId) ?? Promise.resolve()).then(run, run);
-  queues.set(
-    userId,
-    next.catch(() => {}),
+  // The tail holds no result (an image buffer or a token) and leaves the map once nothing follows it.
+  const tail: Promise<unknown> = next.then(
+    () => undefined,
+    () => undefined,
   );
+  queues.set(userId, tail);
+  void tail.then(() => {
+    if (queues.get(userId) === tail) queues.delete(userId);
+  });
   return next;
 }
 
@@ -76,6 +103,7 @@ function readAuth(userId: string): string {
 /** Runs `fn` with a temporary CODEX_HOME holding the user's credentials. */
 export function withCodexHome<T>(userId: string, fn: (home: string) => Promise<T>): Promise<T> {
   const run = async () => {
+    const generation = generationOf(userId);
     const auth = readAuth(userId);
     const home = await makeHome();
     const authPath = path.join(home, "auth.json");
@@ -84,7 +112,7 @@ export function withCodexHome<T>(userId: string, fn: (home: string) => Promise<T
       return await fn(home);
     } finally {
       const after = await readFile(authPath, "utf8").catch(() => null);
-      if (after && after !== auth && isConnected(userId)) saveAuth(userId, after);
+      if (after && after !== auth) saveRefreshed(userId, generation, after);
       await rm(home, { recursive: true, force: true });
     }
   };
@@ -115,6 +143,7 @@ const jwtExpiry = (token: string): number => {
 /** A current access token and account id for the ChatGPT backend. `force` refreshes even an unexpired token (after a 401). */
 export function codexAccess(userId: string, force = false): Promise<{ token: string; accountId: string }> {
   return serialized(userId, async () => {
+    const generation = generationOf(userId);
     const auth = JSON.parse(readAuth(userId)) as AuthFile;
     const tokens = auth.tokens;
     if (!tokens?.access_token || !tokens.account_id) throw new Error("The ChatGPT login has no access token. Connect it again.");
@@ -136,7 +165,7 @@ export function codexAccess(userId: string, force = false): Promise<{ token: str
       ...(fresh.refresh_token ? { refresh_token: fresh.refresh_token } : {}),
     };
     auth.last_refresh = new Date().toISOString();
-    if (isConnected(userId)) saveAuth(userId, JSON.stringify(auth, null, 2));
+    saveRefreshed(userId, generation, JSON.stringify(auth, null, 2));
     return { token: fresh.access_token, accountId: tokens.account_id };
   });
 }
@@ -171,19 +200,24 @@ export async function startLogin(userId: string): Promise<{ url: string; code: s
   pendingLogins.set(userId, pending);
   const timer = setTimeout(() => child.kill(), LOGIN_TTL);
 
-  child.on("close", async (code) => {
+  child.on("close", (code) => {
     clearTimeout(timer);
-    try {
-      const auth = code === 0 ? await readFile(path.join(home, "auth.json"), "utf8").catch(() => null) : null;
-      if (auth) {
-        saveAuth(userId, auth);
-        if (pendingLogins.get(userId) === pending) pendingLogins.delete(userId);
-      } else if (pendingLogins.get(userId) === pending) {
-        pending.error = code === null ? "Login expired. Start again." : "Login did not complete. Start again.";
+    void (async () => {
+      try {
+        const auth = code === 0 ? await readFile(path.join(home, "auth.json"), "utf8").catch(() => null) : null;
+        // A disconnect, a newer login, or a deleted account during the read invalidates this attempt.
+        if (pendingLogins.get(userId) !== pending) return;
+        if (auth) {
+          pendingLogins.delete(userId);
+          saveAuth(userId, auth);
+          loginChanged(userId);
+        } else {
+          pending.error = code === null ? "Login expired. Start again." : "Login did not complete. Start again.";
+        }
+      } finally {
+        await rm(home, { recursive: true, force: true });
       }
-    } finally {
-      await rm(home, { recursive: true, force: true });
-    }
+    })().catch((error: unknown) => console.error("codex login:", (error as Error).message));
   });
 
   return new Promise((resolve, reject) => {

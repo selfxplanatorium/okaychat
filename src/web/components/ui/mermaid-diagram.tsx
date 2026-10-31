@@ -61,7 +61,15 @@ function useThemeKey() {
   return key;
 }
 
+/**
+ * Markup that makes mermaid load something while it renders: HTML label images, image shapes, and CSS
+ * URLs. Strict mode still allows label images, and the request starts inside mermaid.render, so such a
+ * diagram is shown as code instead; remote images need the explicit Load action (prompt-injection.md).
+ */
+const NETWORK_MARKUP = /<\s*(img|image|video|audio|source|iframe|object|embed|link)\b|\b(src|srcset|href|xlink:href)\s*=|url\s*\(|@import|\bimg\s*:/i;
+
 async function renderDiagram(source: string): Promise<string | null> {
+  if (NETWORK_MARKUP.test(source)) return null;
   const mermaid = await loadMermaid();
   const run = queue.then(async () => {
     // securityLevel is in mermaid's default `secure` list, so %%{init}%% directives cannot loosen it.

@@ -115,10 +115,14 @@ export const projectRoutes = new Hono<AppEnv>()
     } catch (error) {
       return c.json({ error: `Could not read ${file.name}: ${(error as Error).message}` }, 422);
     }
-    const used = project.files.reduce((n, f) => n + f.chars, 0);
+    // Read the live state after the awaits above: a concurrent upload or delete changes both.
+    const current = getProject(c.get("user").id, project.id);
+    if (!current) return c.json({ error: "Not found" }, 404);
+    const used = current.files.reduce((n, f) => n + f.chars, 0);
     if (used + text.length > MAX_PROJECT_CHARS) {
       return c.json({ error: `Project files are limited to ${MAX_PROJECT_CHARS.toLocaleString()} characters. This file has ${text.length.toLocaleString()}, ${(MAX_PROJECT_CHARS - used).toLocaleString()} are left.` }, 413);
     }
+    // Nothing awaits between this check and the insert, so the check holds.
     tx(() => {
       const userId = c.get("user").id;
       assertStorage(userId, bytes.byteLength + Buffer.byteLength(text));

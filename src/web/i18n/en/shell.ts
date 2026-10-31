@@ -1,5 +1,6 @@
 export default {
   loadingApp: "Loading okaychat…",
+  startFailed: "okaychat could not reach the server. Check your connection and try again.",
   storageOf: "of {limit} ({percent}%)",
   storageFullMeter: "Your storage is full. New uploads, artifacts, and generated files are rejected until you delete old chats, attachments, or fonts.",
   storageFullNotice: "Your storage is full — uploads and generated files are rejected until you delete old chats, attachments, or fonts.",

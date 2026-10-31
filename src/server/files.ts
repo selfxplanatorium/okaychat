@@ -16,7 +16,8 @@ export const MAX_CHARS = 400_000;
 export async function extract(name: string, type: string, data: Uint8Array): Promise<{ text: string; pages?: number }> {
   const lower = name.toLowerCase();
   if (type === "application/pdf" || lower.endsWith(".pdf")) {
-    const pdf = await getDocumentProxy(data);
+    // pdf.js detaches the buffer it is given; a copy keeps the caller's bytes for storeUpload.
+    const pdf = await getDocumentProxy(Uint8Array.from(data));
     const { totalPages, text } = await extractText(pdf, { mergePages: false });
     const body = (text as string[]).map((page, i) => `--- page ${i + 1} ---\n${page.trim()}`).join("\n\n");
     if (!body.replace(/--- page \d+ ---/g, "").trim()) {

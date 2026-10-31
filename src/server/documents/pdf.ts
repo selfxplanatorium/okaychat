@@ -15,9 +15,10 @@ function pageNumbers(spec: string, total: number): number[] {
   for (const part of spec.split(",")) {
     const range = /^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(part);
     if (range) {
-      const from = Number(range[1]);
-      const to = Number(range[2]);
-      for (let n = Math.min(from, to); n <= Math.max(from, to); n++) if (n >= 1 && n <= total) out.add(n);
+      // Clamp before iterating: endpoints are unbounded digits, and a huge range would block the event loop.
+      const from = Math.max(1, Math.min(Number(range[1]), Number(range[2])));
+      const to = Math.min(total, Math.max(Number(range[1]), Number(range[2])));
+      for (let n = from; n <= to; n++) out.add(n);
       continue;
     }
     const single = Number(part.trim());
@@ -80,8 +81,10 @@ export async function editPdf(data: Uint8Array, ops: PdfOp[]): Promise<Uint8Arra
         }
         case "move_page": {
           if (op.from > pages.length || op.to > pages.length) throw new Error(`The document has ${pages.length} pages.`);
-          const [page] = doc.getPages().splice(op.from - 1, 1);
-          doc.getPages().splice(op.to - 1, 0, page!);
+          // getPages() is a copy; the page tree changes only through removePage/insertPage.
+          const page = doc.getPage(op.from - 1);
+          doc.removePage(op.from - 1);
+          doc.insertPage(op.to - 1, page);
           break;
         }
         case "add_text": {

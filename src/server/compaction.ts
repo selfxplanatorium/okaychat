@@ -5,6 +5,7 @@ import { createModel } from "./llm.js";
 import { promptText } from "./prompts.js";
 import { wrapUntrusted } from "./prompt-injection.js";
 import { costOf, normalizeUsage, recordUsage } from "./usage.js";
+import { adaptPdfParts } from "./pdf-parts.js";
 
 /** Rough token estimate when the provider has not told us yet. */
 export const estimateTokens = (value: unknown) => Math.ceil(JSON.stringify(value).length / 4);
@@ -161,12 +162,14 @@ export async function compact(opts: {
   previous: CompactionState | null;
   model: ModelInfo;
   conn: Connection;
+  /** Stop and schedule timeouts end the summary request; nothing is returned for a cancelled one. */
+  signal?: AbortSignal;
 }): Promise<CompactionState> {
   const applied = applyCompaction(opts.messages, opts.previous);
   const boundary = opts.messages.at(-1);
   if (!boundary) throw new Error("Nothing to compact");
   const handle = createModel(opts.model, opts.conn, { userId: opts.userId });
-  const history = [...(applied.summary ? summaryMessages(applied.summary) : []), ...(await historyMessages(applied, (tail) => tail))];
+  const history = [...(applied.summary ? summaryMessages(applied.summary) : []), ...(await historyMessages(applied, (tail) => adaptPdfParts(tail, opts.model)))];
   const result = await generateText({
     model: handle.model,
     providerOptions: handle.providerOptions,
@@ -174,6 +177,7 @@ export async function compact(opts: {
     maxRetries: 0,
     messages: [...history, { role: "user", content: promptText("compaction") }],
     maxOutputTokens: Math.min(8_000, opts.model.maxOutput),
+    abortSignal: opts.signal,
   });
   const usage = normalizeUsage(result.totalUsage);
   recordUsage({
@@ -185,6 +189,8 @@ export async function compact(opts: {
     usage,
     cost: costOf(opts.model.cost, usage),
   });
+  // The tokens were spent, so usage is recorded; a cancelled turn still must not save the summary.
+  opts.signal?.throwIfAborted();
   // The summary covers every trimmed message, so the trim boundary is dropped with them.
   return {
     boundaryMessageId: boundary.id,

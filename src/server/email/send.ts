@@ -117,6 +117,10 @@ export async function sendApprovedReply(
     inReplyTo: original.messageId ?? undefined,
     references,
   };
-  const result = await (opts.sender ?? sendEmail)(secrets, mail, { tls: opts.tls });
+  // Reading the original can take a while; the send switch, sender, signature, and credentials are
+  // checked again right before sending, like every other send.
+  const live = approvedAccount(userId, input.accountId, input.from, input.body);
+  if (live.text !== text) throw new EmailError("protocol", "The account signature changed after review. Review the reply again.");
+  const result = await (opts.sender ?? sendEmail)(accountSecrets(userId, live.account.id), mail, { tls: opts.tls });
   return { ...result, replyTo: original.messageId, originalSubject: original.subject };
 }

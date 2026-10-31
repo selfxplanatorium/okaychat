@@ -284,6 +284,11 @@ function runsOf(node: Node, inherited: InlineStyle, rules: Rule[]): ParagraphChi
       continue;
     }
     const style = inlineStyleOf(element, inherited, rules);
+    // No browser cascade supplies the default look of semantic tags here.
+    if (tag === "strong" || tag === "b") style.bold = true;
+    if (tag === "em" || tag === "i") style.italic = true;
+    if (tag === "u" || tag === "ins") style.underline = true;
+    if (tag === "s" || tag === "del" || tag === "strike") style.strike = true;
     if (tag === "code" || tag === "kbd" || tag === "samp") style.font = "Courier New";
     if (tag === "a") {
       const href = element.getAttribute("href") ?? "";
@@ -357,7 +362,8 @@ function blocksOf(parent: Element, inherited: InlineStyle, rules: Rule[], list?:
       flush(inline, inherited, rules, out);
       const s = stylesOf(element, rules);
       if (/page|always/.test(`${s["break-before"] ?? ""} ${s["page-break-before"] ?? ""}`) && out.length) {
-        out[out.length - 1] = new Paragraph({ children: [], pageBreakBefore: true });
+        // A break of its own; replacing the last block would delete the content before the break.
+        out.push(new Paragraph({ children: [], pageBreakBefore: true }));
       }
       out.push(...blocksOf(element, inherited, rules, list));
       continue;
@@ -621,6 +627,21 @@ export function readDocxText(data: Uint8Array): string {
   return `Paragraphs: ${paragraphs.length}\n${lines.join("\n")}`;
 }
 
+function occurrences(text: string, find: string): number {
+  if (!find) return 0;
+  let count = 0;
+  for (let at = text.indexOf(find); at !== -1; at = text.indexOf(find, at + find.length)) count++;
+  return count;
+}
+
+/** Removes every child of a paragraph except its properties and `keep`. */
+function dropContentExcept(paragraph: XmlElement, keep: XmlElement | undefined) {
+  for (const child of [...paragraph.childNodes]) {
+    if (child === keep || (child.nodeType === 1 && (child as XmlElement).localName === "pPr")) continue;
+    paragraph.removeChild(child);
+  }
+}
+
 function replaceInParagraph(paragraph: XmlElement, find: string, replace: string, all: boolean) {
   let { text, parts } = paragraphText(paragraph);
   let from = 0;
@@ -668,10 +689,15 @@ export function editDocx(data: Uint8Array, ops: DocxOp[]): Uint8Array {
       switch (op.op) {
         case "replace_text": {
           const targets = op.paragraph ? [at(op.paragraph)] : paragraphs();
+          if (!op.all) {
+            // Count every occurrence first: a second match in the same paragraph is just as ambiguous.
+            const matches = targets.reduce((n, paragraph) => n + occurrences(paragraphText(paragraph).text, op.find), 0);
+            if (!matches) throw new Error(`"${op.find}" was not found${op.paragraph ? ` in paragraph ${op.paragraph}` : ""}.`);
+            if (matches > 1) throw new Error(`"${op.find}" matches ${matches} times. Pass all: true, or target a paragraph.`);
+          }
           let total = 0;
           for (const paragraph of targets) total += replaceInParagraph(paragraph, op.find, op.replace, !!op.all);
           if (!total) throw new Error(`"${op.find}" was not found${op.paragraph ? ` in paragraph ${op.paragraph}` : ""}.`);
-          if (total > 1 && !op.all) throw new Error(`"${op.find}" matches ${total} times. Pass all: true, or target a paragraph.`);
           break;
         }
         case "set_text": {
@@ -679,6 +705,7 @@ export function editDocx(data: Uint8Array, ops: DocxOp[]): Uint8Array {
           const runs = [...paragraph.childNodes].filter((n) => n.nodeType === 1 && (n as XmlElement).localName === "r") as XmlElement[];
           const keep = runs[0];
           if (!keep) {
+            dropContentExcept(paragraph, undefined);
             const run = doc.createElementNS(W, "w:r");
             const text = doc.createElementNS(W, "w:t");
             writeText(text, op.text);
@@ -686,7 +713,8 @@ export function editDocx(data: Uint8Array, ops: DocxOp[]): Uint8Array {
             paragraph.appendChild(run);
             break;
           }
-          for (const run of runs.slice(1)) run.parentNode?.removeChild(run);
+          // Everything but the paragraph properties and the kept run goes, hyperlinks and other wrappers included.
+          dropContentExcept(paragraph, keep);
           const texts = [...keep.childNodes].filter((n) => n.nodeType === 1 && (n as XmlElement).localName === "t") as XmlElement[];
           if (!texts.length) {
             const text = doc.createElementNS(W, "w:t");
@@ -706,7 +734,7 @@ export function editDocx(data: Uint8Array, ops: DocxOp[]): Uint8Array {
           // Keep the original run formatting and replace its text.
           const runs = [...clone.childNodes].filter((n) => n.nodeType === 1 && (n as XmlElement).localName === "r") as XmlElement[];
           const keep = runs[0];
-          for (const run of runs.slice(1)) run.parentNode?.removeChild(run);
+          dropContentExcept(clone, keep);
           if (keep) {
             for (const child of [...keep.childNodes]) keep.removeChild(child);
             const text = doc.createElementNS(W, "w:t");

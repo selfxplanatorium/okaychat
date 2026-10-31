@@ -2,7 +2,7 @@ export default {
   title: "Scheduled prompts",
   description: "Run a prompt on a schedule, even when okaychat is closed.",
   newSchedule: "New schedule",
-  empty: "No schedules yet.",
+  emptyTitle: "No schedules yet",
   addSchedule: "Add schedule",
   namePlaceholder: "Name (e.g. Morning news brief)",
   promptPlaceholder: "Prompt, e.g. Search the web for today's top AI news and give me five bullet points with links.",

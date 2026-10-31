@@ -16,7 +16,7 @@ import { z } from "zod";
 import type { AssistantMetadata, ModelInfo, ReasoningEffort, TokenUsage, UserSettings } from "../shared/types.js";
 import { parseTurnUnavailable, type FixedServiceId, type ServiceStatus, type TurnUnavailable } from "../shared/services.js";
 import type { AppEnv } from "./auth.js";
-import { artifactsInCurrentTurn, artifactTools } from "./artifacts.js";
+import { artifactsInCurrentTurn, screenshotsInCurrentTurn, artifactTools } from "./artifacts.js";
 import { rendererAvailable } from "./documents/render.js";
 import { promptText } from "./prompts.js";
 import { listModels, resolveModel } from "./catalog/providers.js";
@@ -216,7 +216,7 @@ export async function turnStream(opts: TurnOptions) {
         // again and rewrite the history, losing the prompt cache every time.
         if (!trimmed || trimmed.trim!.tokensAfter > limit * TRIM_HEADROOM) {
           writer.write({ type: "data-compaction", data: { status: "running" }, transient: true });
-          compaction = await compact({ userId: user.id, threadId, messages: history, previous: compaction, model, conn });
+          compaction = await compact({ userId: user.id, threadId, messages: history, previous: compaction, model, conn, signal });
           setCompaction(user.id, threadId, compaction);
           writer.write({ type: "data-compaction", data: { status: "done", boundaryMessageId: compaction.boundaryMessageId, tokensBefore: compaction.tokensBefore }, transient: true });
         }
@@ -328,7 +328,7 @@ export async function turnStream(opts: TurnOptions) {
         ...email.tools,
         ...drafts,
         ...subagents,
-        ...(useArtifacts ? artifactTools(threadId, user.id, { shots, canViewImages: model.inputModalities.includes("image"), savedThisTurn: artifactsInCurrentTurn(uiMessages), browserDown }) : {}),
+        ...(useArtifacts ? artifactTools(threadId, user.id, { shots, canViewImages: model.inputModalities.includes("image"), savedThisTurn: artifactsInCurrentTurn(uiMessages), shotsThisTurn: screenshotsInCurrentTurn(uiMessages), browserDown }) : {}),
         ...(imageServices.length ? imageTools(user.id, threadId, imageServices, signal) : {}),
         ...(model.toolCall && !temporary && settings.codeExecution && sandboxConfigured() && !sandboxDown ? sandboxTools(user.id, threadId, signal, sandboxTurn) : {}),
         ...(useGenerativeUI ? frontendTools(opts.clientTools!) : {}),
@@ -458,7 +458,12 @@ export async function turnStream(opts: TurnOptions) {
       let total: TokenUsage = ZERO_USAGE;
       let cost = 0;
       let lastStep: LanguageModelUsage | undefined;
-
+      let usageSaved = false;
+      const saveUsage = () => {
+        if (usageSaved || temporary) return;
+        usageSaved = true;
+        recordUsage({ userId: user.id, threadId, providerId: model.providerId, modelId: model.id, kind: "chat", usage: total, cost });
+      };
       const result = streamText({
         model: handle.model,
         messages,
@@ -506,7 +511,8 @@ export async function turnStream(opts: TurnOptions) {
           return risk && taintedNow ? { type: "user-approval", reason: approvalRiskReason(risk, label) } : "user-approval";
         },
         prepareStep: ({ stepNumber, messages: stepMessages }) => {
-          const withShots = injectToolImages(injectScreenshots(stepMessages, shots, injectedShots), toolImages, injectedToolImages);
+          const injected = injectToolImages(injectScreenshots(stepMessages, shots, injectedShots), toolImages, injectedToolImages);
+          const withShots = stepNumber > 0 && handle.markStep ? handle.markStep(injected) : injected;
           return {
             ...(withShots !== stepMessages ? { messages: withShots } : {}),
             // The tool list is part of the cached prefix, so it never changes within a chat. The final step
@@ -530,7 +536,11 @@ export async function turnStream(opts: TurnOptions) {
           // A completed reply is evidence this account's provider works again; the registry's coarse
           // provider status clears without contacting the vendor.
           noteProviderOutcome(user.id, "ok");
-          if (!temporary) recordUsage({ userId: user.id, threadId, providerId: model.providerId, modelId: model.id, kind: "chat", usage: total, cost });
+          saveUsage();
+        },
+        // The SDK skips onEnd for a stopped stream; steps that already finished were still billed.
+        onAbort: () => {
+          if (total.input || total.output) saveUsage();
         },
       });
 
@@ -578,7 +588,7 @@ const MAX_ACTIVE_TURNS = 4;
 const activeTurns = new Map<string, number>();
 
 /** Reserves a turn slot for the user, or returns null when all are taken. The release runs once. */
-function reserveTurn(userId: string): (() => void) | null {
+export function reserveTurn(userId: string): (() => void) | null {
   const count = activeTurns.get(userId) ?? 0;
   if (count >= MAX_ACTIVE_TURNS) return null;
   activeTurns.set(userId, count + 1);
@@ -685,21 +695,30 @@ export const chatRoutes = new Hono<AppEnv>()
     const thread = getThread(user.id, threadId);
     if (!thread) return c.json({ error: "Thread not found" }, 404);
     if (body.messages.length < 2) return c.json({ error: "Not enough conversation to compact" }, 400);
-    const { model, conn } = await resolveModel(user.id, getSettings(user.id).utilityModel ?? body.modelRef).catch(() =>
-      resolveModel(user.id, body.modelRef),
-    );
-    // Provider errors explain themselves; the global handler would hide them behind a generic 500.
-    let state;
+    // Edits wait while the thread is busy, so a reply cannot change after its old text went to the summary.
+    if (threadBusy(threadId)) return c.json({ error: "This chat is busy. Try again when the reply finishes." }, 409);
+    const release = markBusy(threadId);
     try {
-      state = await compact({ userId: user.id, threadId, messages: body.messages, previous: thread.compaction, model, conn });
-    } catch (error) {
-      const failure = describeProviderError(error, { model: model.ref, provider: model.providerId });
-      // A provider 401 is not this session's 401; keep the upstream failure away from the auth handler.
-      const status = failure.code === "validation" || failure.code === "model_not_found" ? 400 : 502;
-      return errorJson(c, failure, status);
+      // A stale tab may hold text from before an edit or Undo; the stored edits are authoritative.
+      const messages = withStoredEdits(user.id, threadId, body.messages);
+      const { model, conn } = await resolveModel(user.id, getSettings(user.id).utilityModel ?? body.modelRef).catch(() =>
+        resolveModel(user.id, body.modelRef),
+      );
+      // Provider errors explain themselves; the global handler would hide them behind a generic 500.
+      let state;
+      try {
+        state = await compact({ userId: user.id, threadId, messages, previous: thread.compaction, model, conn, signal: c.req.raw.signal });
+      } catch (error) {
+        const failure = describeProviderError(error, { model: model.ref, provider: model.providerId });
+        // A provider 401 is not this session's 401; keep the upstream failure away from the auth handler.
+        const status = failure.code === "validation" || failure.code === "model_not_found" ? 400 : 502;
+        return errorJson(c, failure, status);
+      }
+      setCompaction(user.id, threadId, state);
+      return c.json(state);
+    } finally {
+      release();
     }
-    setCompaction(user.id, threadId, state);
-    return c.json(state);
   })
   .post("/threads/:id/trim", async (c) => {
     const user = c.get("user");

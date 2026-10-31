@@ -1,4 +1,4 @@
-import { FileTextIcon, Loader2Icon, PencilIcon, PlusIcon, TrashIcon, UploadIcon } from "lucide-react";
+import { FileTextIcon, FolderIcon, Loader2Icon, PencilIcon, PlusIcon, TrashIcon, UploadIcon } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useLocation, useSearch } from "wouter";
 import type { Project } from "@shared/types";
@@ -137,7 +137,7 @@ export function ProjectSettings() {
     <SettingsPage title={t("projects.title")} description={t("projects.description")}>
       <SettingsSection
         action={
-          editing !== "new" && (
+          editing !== "new" && projects.length > 0 && (
             <Button size="sm" variant="outline" onClick={() => setEditing("new")}>
               <PlusIcon /> {t("projects.newProject")}
             </Button>
@@ -146,9 +146,10 @@ export function ProjectSettings() {
       >
         {editing === "new" && <ProjectForm onDone={done} />}
         {projects.length === 0 && editing !== "new" && (
-          <div className="flex flex-col items-center gap-3 px-4 py-6 text-center">
-            <p className="text-muted-foreground animate-fade-in text-sm">{t("projects.empty")}</p>
-            <Button size="sm" variant="outline" onClick={() => setEditing("new")}>
+          <div className="animate-fade-in flex flex-col items-center gap-3 px-4 py-10 text-center">
+            <FolderIcon aria-hidden className="text-muted-foreground size-7" />
+            <h2 className="font-medium">{t("projects.emptyTitle")}</h2>
+            <Button onClick={() => setEditing("new")}>
               <PlusIcon /> {t("projects.newProject")}
             </Button>
           </div>

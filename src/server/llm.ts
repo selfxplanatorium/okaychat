@@ -27,6 +27,11 @@ export interface ModelHandle {
    * shared by every chat of the account, `system[1]` the chat's own context. See docs/implementation/prompt-caching.md.
    */
   markCache: (system: string[], messages: ModelMessage[]) => ModelMessage[];
+  /**
+   * Moves the conversation breakpoint to the newest message of a later step in a tool loop, so the
+   * tool results gathered so far are cached too. Only formats with explicit breakpoints set it.
+   */
+  markStep?: (messages: ModelMessage[]) => ModelMessage[];
 }
 
 const isOpencode = (providerId: string) => providerId === "opencode-go" || providerId === "opencode";
@@ -104,19 +109,28 @@ export function createModel(info: ModelInfo, conn: Connection, opts: CreateModel
       const provider = createAnthropic({ apiKey, baseURL, headers, fetch });
       const anthropic: Record<string, JSONValue> = {};
       if (effort && effort !== "none") {
-        if (info.reasoningEfforts?.length) anthropic.effort = effort === "minimal" ? "low" : effort;
-        else anthropic.thinking = { type: "enabled", budgetTokens: effortBudget(effort) };
+        if (info.reasoningEfforts?.length) {
+          anthropic.effort = effort === "minimal" ? "low" : effort;
+          // Effort alone does not turn thinking on; adaptive-thinking models need it requested.
+          if (ADAPTIVE_THINKING.test(info.id)) anthropic.thinking = { type: "adaptive" };
+        } else anthropic.thinking = { type: "enabled", budgetTokens: effortBudget(effort) };
         anthropic.sendReasoning = true;
       }
-      return { model: provider(info.id), providerOptions: { anthropic }, markCache: anthropicBreakpoints };
+      return { model: provider(info.id), providerOptions: { anthropic }, markCache: anthropicBreakpoints, markStep: anthropicStepBreakpoint };
     }
     case "google": {
       const provider = createGoogleGenerativeAI({ apiKey, baseURL, headers, fetch });
       const google: Record<string, JSONValue> = {};
       if (info.reasoning) {
+        // Gemini 2.5 takes a token budget (0 turns Flash's thinking off; Pro cannot turn it off);
+        // later models take a named level.
+        const budgeted = /gemini-2\.5/.test(info.id);
+        const level = effort === "minimal" || effort === "low" ? "low" : effort === "medium" ? "medium" : "high";
         google.thinkingConfig = {
           includeThoughts: true,
-          ...(effort && effort !== "none" ? { thinkingLevel: effort === "minimal" ? "low" : effort === "low" ? "low" : effort === "medium" ? "medium" : "high" } : {}),
+          ...(effort && effort !== "none"
+            ? budgeted ? { thinkingBudget: Math.min(effortBudget(effort), /pro/.test(info.id) ? 32_768 : 24_576) } : { thinkingLevel: level }
+            : effort === "none" && budgeted && !/pro/.test(info.id) ? { thinkingBudget: 0, includeThoughts: false } : {}),
         };
       }
       return { model: provider(info.id), providerOptions: { google }, markCache: passthrough };
@@ -166,6 +180,9 @@ function effortBudget(effort: ReasoningEffort): number {
   return { none: 0, minimal: 1024, low: 2048, medium: 8192, high: 16384, xhigh: 32768, max: 64000 }[effort];
 }
 
+/** Claude models that think only when adaptive thinking is requested (4.6 and later). */
+const ADAPTIVE_THINKING = /^claude-(?:opus|sonnet|haiku|fable)-(?:4-[6-9]|[5-9])(?!\d)/;
+
 const EPHEMERAL = { anthropic: { cacheControl: { type: "ephemeral" } } } as const;
 const OPENAI_BREAKPOINT = { openai: { promptCacheBreakpoint: { mode: "explicit" } } } as const;
 /** OpenAI models that cache only at breakpoints (GPT-5.6 and later). */
@@ -175,6 +192,20 @@ const EXPLICIT_BREAKPOINTS = /^gpt-(5\.([6-9]|\d{2,})|[6-9]|\d{2,})(\b|[.-])/;
 function systemMessages(system: string[], breakpoint?: ModelMessage["providerOptions"]): ModelMessage[] {
   return system.filter((text) => text.trim()).map((content, index) =>
     ({ role: "system", content, ...(index === 0 && breakpoint ? { providerOptions: breakpoint } : {}) }) as ModelMessage);
+}
+
+/**
+ * One extra breakpoint on a step's last message. The SDK rebuilds each step from the initial (already
+ * marked) messages plus the responses, so only the system marker, the initial tail, and this one are
+ * present: within Anthropic's limit of four.
+ */
+function anthropicStepBreakpoint(messages: ModelMessage[]): ModelMessage[] {
+  const lastIndex = messages.length - 1;
+  const last = messages[lastIndex];
+  if (!last || last.role === "system") return messages;
+  const out = [...messages];
+  out[lastIndex] = { ...last, providerOptions: { ...last.providerOptions, ...EPHEMERAL } } as ModelMessage;
+  return out;
 }
 
 /**

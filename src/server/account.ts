@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import type { AppEnv } from "./auth.js";
-import { accountProfile, limited, passwordSchema, recordFailure } from "./auth.js";
+import { accountProfile, limited, passwordSchema, forgiveFailure, recordFailure } from "./auth.js";
 import { hashPassword, verifyPassword } from "./crypto.js";
 import { db } from "./db.js";
 import { errorJson } from "./errors.js";
@@ -78,11 +78,16 @@ export const accountRoutes = new Hono<AppEnv>()
     const key = `password:${id}`;
     if (limited(key, 10)) return c.json({ error: "Too many failed attempts. Try again in 15 minutes." }, 429);
     const row = db.prepare("SELECT password_hash FROM users WHERE id = ?").get(id) as { password_hash: string };
+    // Counted before the await, so parallel guesses cannot all pass the limit.
+    recordFailure(key);
     if (!(await verifyPassword(parsed.data.current, row.password_hash))) {
-      recordFailure(key);
       return c.json({ error: "Your current password is incorrect." }, 403);
     }
-    db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(await hashPassword(parsed.data.next), id);
+    forgiveFailure(key);
+    const nextHash = await hashPassword(parsed.data.next);
+    // Another change that finished meanwhile wins; this request verified a password that is gone.
+    const changed = db.prepare("UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?").run(nextHash, id, row.password_hash);
+    if (!changed.changes) return c.json({ error: "Your password was just changed. Sign in again." }, 409);
     // Every other device signs in again with the new password.
     db.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?").run(id, c.get("session"));
     return c.json({ ok: true });

@@ -183,11 +183,12 @@ function pack(text: string, ceiling: number): Span[] {
     }
   }
   if (current && current.end > current.start) spans.push(current);
-  // A trailing fragment is easier to cite together with the passage before it.
+  // A trailing fragment is easier to cite together with the passage before it. The merged span includes
+  // the gap between them, so the gap counts toward the ceiling too.
   if (spans.length > 1) {
     const last = spans.at(-1)!;
     const previous = spans.at(-2)!;
-    if (estimateTokens(text.slice(last.start, last.end)) < 120 && previous.end - previous.start + (last.end - last.start) <= ceiling * 1.1) {
+    if (estimateTokens(text.slice(last.start, last.end)) < 120 && last.end - previous.start <= ceiling * 1.1) {
       previous.end = last.end;
       spans.pop();
     }

@@ -59,7 +59,7 @@ function ComposerToolbar() {
     <>
       <MobileComposerMenu />
       <ModelPicker />
-      <div className="flex max-sm:hidden pointer-coarse:hidden">
+      <div className="flex shrink-0 max-sm:hidden pointer-coarse:hidden">
         <EffortPicker />
       </div>
       <SearchToggle />

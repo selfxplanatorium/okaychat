@@ -161,8 +161,11 @@ const threadListAdapter: RemoteThreadListAdapter = {
   },
   async initialize(localId) {
     // The new chat's composer choice becomes the thread's own, so later new-chat choices cannot change it.
+    // Read it now: the first request already captured it, and another new chat may pick a different
+    // model while the thread POST below is in flight.
+    const chosen = getActiveModel()?.ref;
     const bindModel = (remoteId: string) => {
-      const ref = getActiveModel()?.ref;
+      const ref = chosen;
       if (ref) useData.setState((s) => ({ threadModels: { ...s.threadModels, [remoteId]: ref } }));
     };
     if (chatPrivacyFor({ id: localId }).temporary) {
@@ -281,9 +284,9 @@ const threadListAdapter: RemoteThreadListAdapter = {
                       const ids = serverIds.get(remoteId);
                       // A message on screen that the server lacks (its write failed) must not become a parent.
                       const complete = shown.every((id) => ids?.has(id));
-                      if (complete && !(shown.length === rows.length && rows.every((row, i) => row.id === shown[i]))) {
-                        aui.thread.importExternalState(decode(rows));
-                      }
+                      // Same ids can still carry newer content (an edit made in another tab while this one showed
+                      // cached rows), so complete server rows always replace what is on screen.
+                      if (complete) aui.thread.importExternalState(decode(rows));
                       setThreadSync(remoteId, complete ? null : "stale");
                     },
                     () => setThreadSync(remoteId, "stale"),
@@ -363,19 +366,35 @@ addEventListener("pagehide", () => (unloading = true));
 addEventListener("pageshow", () => (unloading = false));
 
 const cancellableFetch = (onCancel: () => void): typeof fetch => async (input, init) => {
-  let streamId: string | undefined;
-  const cancel = () => {
-    if (unloading) return;
-    onCancel();
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  // A resume names its stream in the URL, so a Stop before the headers can still reach it.
+  let streamId: string | undefined = url.match(/\/api\/chat\/resume\/([\w-]+)/)?.[1];
+  const outer = init?.signal;
+  const sendCancel = () => {
     if (streamId) void fetch(`/api/chat/${streamId}/cancel`, { method: "POST", credentials: "same-origin", keepalive: true }).catch(() => {});
   };
-  // Listen before the first byte arrives, so a Stop also clears the live retry notice while the
-  // provider is still deciding. The cancel endpoint only exists once the response names its stream.
-  if (init?.signal?.aborted) cancel();
-  else init?.signal?.addEventListener("abort", cancel, { once: true });
-  const res = await fetch(input, init);
-  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  streamId = res.headers.get(RESUMABLE_STREAM_ID_HEADER) ?? url.match(/\/api\/chat\/resume\/([\w-]+)/)?.[1];
+  // The request itself is aborted only once its stream id is known. Aborting a send before its headers
+  // arrive would lose the id, and the server keeps generating a stored turn when its request drops.
+  const inner = new AbortController();
+  const cancel = () => {
+    if (unloading) return;
+    // Clear the live retry notice at once, even while the provider is still deciding.
+    onCancel();
+    if (streamId) {
+      sendCancel();
+      inner.abort(outer?.reason);
+    }
+  };
+  if (outer?.aborted) cancel();
+  else outer?.addEventListener("abort", cancel, { once: true });
+  const res = await fetch(input, { ...init, signal: inner.signal });
+  streamId = res.headers.get(RESUMABLE_STREAM_ID_HEADER) ?? streamId;
+  if (outer?.aborted && !inner.signal.aborted) {
+    if (!unloading) sendCancel();
+    inner.abort(outer.reason);
+    void res.body?.cancel().catch(() => {});
+    throw outer.reason instanceof Error ? outer.reason : new DOMException("Aborted", "AbortError");
+  }
   // A send that never opened the stream still carries the wire JSON; keep it for the error block.
   const failure = await structuredResponseError(res);
   if (failure) throw new Error(failure);

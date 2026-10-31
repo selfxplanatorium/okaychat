@@ -1,5 +1,5 @@
 import type { ModelInfo, ReasoningEffort } from "../../shared/types.js";
-import { codexAccess, codexVersion, isConnected } from "../codex.js";
+import { codexAccess, codexVersion, isConnected, onLoginChange } from "../codex.js";
 
 // Chat through the user's own ChatGPT plan: the Codex CLI login, sent straight to the backend the CLI uses.
 // That backend speaks the Responses API with a few constraints the fetch below enforces.
@@ -71,6 +71,8 @@ export async function chatgptModels(userId: string): Promise<ModelInfo[]> {
 }
 
 export const forgetChatgptModels = (userId: string) => modelCache.delete(userId);
+// Another ChatGPT account can have a different plan, so its models are fetched again.
+onLoginChange(forgetChatgptModels);
 
 /**
  * Adds the login's bearer token and account header, retries once with a refreshed token on 401, and adapts

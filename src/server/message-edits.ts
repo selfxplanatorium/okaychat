@@ -10,7 +10,7 @@ import { AppError, errorJson } from "./errors.js";
 import { assertStorage, messageBytes } from "./quota.js";
 import { getSettings } from "./settings.js";
 import { threadBusy } from "./thread-runs.js";
-import { getThread, isTemporaryThread, setCompaction } from "./threads.js";
+import { ancestry, getThread, isTemporaryThread, setCompaction } from "./threads.js";
 
 // User edits of finished assistant replies. Only text parts change; every other part (reasoning, tools, files,
 // sources), the id, the parent, and the position stay as stored. The first original text parts are kept
@@ -60,8 +60,7 @@ function editableReply(userId: string, threadId: string, messageId: string): Edi
   if (content.role !== "assistant") throw invalid("Only assistant replies can be edited. Edit your own message to send it again.");
   // The current branch (newest message and its ancestors) is what later turns, exports, and shares use.
   const byId = new Map(rows.map((r) => [r.id, r]));
-  const branch: string[] = [];
-  for (let r = rows.at(-1); r; r = r.parent_id ? byId.get(r.parent_id) : undefined) branch.unshift(r.id);
+  const branch = ancestry(byId, rows.at(-1)).map((r) => r.id);
   const index = branch.indexOf(messageId);
   if (index === -1) throw conflict("This reply is not on the chat's latest branch. Switch to that branch to edit it.");
   const parts = Array.isArray(content.parts) ? content.parts : [];

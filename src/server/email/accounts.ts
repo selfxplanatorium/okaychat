@@ -360,6 +360,8 @@ export async function updateAccount(userId: string, id: string, input: unknown):
     smtp.host !== currentSmtp.host ||
     smtp.port !== currentSmtp.port ||
     smtp.username !== currentSmtp.username;
+  // Transport security is part of what a connection check tested.
+  const configChanged = endpointChanged || imap.security !== currentImap.security || smtp.security !== currentSmtp.security;
   const password = data.password?.length ? data.password : undefined;
   // A stored secret never follows a new destination. The user must confirm it by re-entering it.
   if (endpointChanged && !password) {
@@ -377,6 +379,11 @@ export async function updateAccount(userId: string, id: string, input: unknown):
     ? JSON.parse(row.security_json) as { allowInsecureProbe?: boolean }
     : { allowInsecureProbe: data.allowInsecureProbe };
   tx(() => {
+    // The host check above awaits DNS; a concurrent save in that window would be overwritten with
+    // this request's stale copy (a re-enabled send switch, an old password), so it wins instead.
+    if (configFingerprint(rowOf(userId, id)) !== configFingerprint(row)) {
+      invalid("This email account changed while saving. Reload it and try again.", 409);
+    }
     if (nextDefault && !row.is_default) db.prepare("UPDATE email_accounts SET is_default = 0 WHERE user_id = ?").run(userId);
     db.prepare(
       `UPDATE email_accounts SET
@@ -396,9 +403,9 @@ export async function updateAccount(userId: string, id: string, input: unknown):
       Number(nextDefault),
       data.signature ?? row.signature,
       // Any config change invalidates the last successful check until it is tested again.
-      endpointChanged || password ? null : row.last_check_at,
-      endpointChanged || password ? null : row.last_check_status,
-      endpointChanged || password ? null : row.last_check_error,
+      configChanged || password ? null : row.last_check_at,
+      configChanged || password ? null : row.last_check_status,
+      configChanged || password ? null : row.last_check_error,
       now,
       id,
       userId,
@@ -433,16 +440,29 @@ function ensureDefault(userId: string): void {
   if (next) db.prepare("UPDATE email_accounts SET is_default = 1 WHERE id = ? AND user_id = ?").run(next.id, userId);
 }
 
-export function recordCheck(userId: string, id: string, status: "ok" | "failed", error: string | null): EmailAccount {
-  rowOf(userId, id);
-  db.prepare("UPDATE email_accounts SET last_check_at = ?, last_check_status = ?, last_check_error = ?, updated_at = ? WHERE id = ? AND user_id = ?").run(
-    Date.now(),
-    status,
-    status === "ok" ? null : (error ?? "Connection failed."),
-    Date.now(),
-    id,
-    userId,
-  );
+/** Every stored field a save or a connection check depends on; encrypted columns change on each write. */
+function configFingerprint(row: EmailRow): string {
+  return JSON.stringify([row.label, row.address, row.imap_enc, row.smtp_enc, row.password_enc, row.security_json, row.read_enabled, row.send_enabled, row.is_default, row.signature]);
+}
+
+/** The configuration a connection test is about to check, for `recordCheck`. */
+export function checkFingerprint(userId: string, id: string): string {
+  const row = rowOf(userId, id);
+  return JSON.stringify([row.imap_enc, row.smtp_enc, row.password_enc]);
+}
+
+/** Stores a test result, unless the tested configuration was replaced while the test ran. */
+export function recordCheck(userId: string, id: string, status: "ok" | "failed", error: string | null, tested?: string): EmailAccount {
+  if (tested === undefined || checkFingerprint(userId, id) === tested) {
+    db.prepare("UPDATE email_accounts SET last_check_at = ?, last_check_status = ?, last_check_error = ?, updated_at = ? WHERE id = ? AND user_id = ?").run(
+      Date.now(),
+      status,
+      status === "ok" ? null : (error ?? "Connection failed."),
+      Date.now(),
+      id,
+      userId,
+    );
+  }
   return getAccount(userId, id);
 }
 

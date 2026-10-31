@@ -31,6 +31,23 @@ export function DocumentPreview({ kind, fileUrl, previewUrl, title, className }:
 // Also used by the Library for uploaded Word files, which have no sheet-preview endpoint.
 export { DocxPreview };
 
+/** Removes active or network-bearing content docx-preview may emit: frames, script URLs, and remote images. */
+function sanitizeDocx(root: HTMLElement) {
+  for (const node of root.querySelectorAll("iframe, frame, object, embed, script, link[rel]")) node.remove();
+  for (const anchor of root.querySelectorAll("a[href]")) {
+    const href = anchor.getAttribute("href") ?? "";
+    if (!/^(https?:|mailto:|#)/i.test(href.trim())) anchor.removeAttribute("href");
+    else if (!href.startsWith("#")) {
+      anchor.setAttribute("target", "_blank");
+      anchor.setAttribute("rel", "noopener noreferrer");
+    }
+  }
+  for (const image of root.querySelectorAll("img[src], image[href]")) {
+    const src = image.getAttribute("src") ?? image.getAttribute("href") ?? "";
+    if (!/^(data:image\/|blob:)/i.test(src)) image.remove();
+  }
+}
+
 function DocxPreview({ url, title, className }: { url: string; title: string; className?: string }) {
   const container = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,14 +62,20 @@ function DocxPreview({ url, title, className }: { url: string; title: string; cl
       const data = await response.arrayBuffer();
       const { renderAsync } = await import("docx-preview");
       if (cancelled || !container.current) return;
-      container.current.replaceChildren();
-      await renderAsync(data, container.current, undefined, {
+      // Render detached and clean up before anything is live: a DOCX is untrusted, and docx-preview puts
+      // embedded HTML (altChunk) in an unsandboxed iframe and copies link targets verbatim.
+      const staging = document.createElement("div");
+      await renderAsync(data, staging, undefined, {
         className: "docx",
         inWrapper: true,
         breakPages: true,
         renderHeaders: true,
         renderFooters: true,
+        renderAltChunks: false,
       });
+      if (cancelled || !container.current) return;
+      sanitizeDocx(staging);
+      container.current.replaceChildren(...staging.childNodes);
     })()
       .catch((e: Error) => !cancelled && setError(e.message))
       .finally(() => !cancelled && setLoading(false));

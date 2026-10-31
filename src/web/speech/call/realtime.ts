@@ -117,6 +117,13 @@ export function createRealtimeAdapter(options: RealtimeAdapterOptions): Realtime
         };
         const fail = (reason: string) => {
           if (closed) return;
+          // A session that already ended belongs to an old call; its late failure must not reach the
+          // bridge, which now serves the next call.
+          if (session.isDisposed()) {
+            stopReadyWait?.(new Error(reason));
+            cleanup();
+            return;
+          }
           session.end("error", new Error(reason));
           options.onFailure?.(reason);
           stopReadyWait?.(new Error(reason));

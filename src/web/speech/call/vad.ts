@@ -43,6 +43,8 @@ export class VoiceActivity {
   private attack = 0;
   private quiet = 0;
   private speechFrames = 0;
+  /** Frames above the threshold; trailing silence must not count toward the minimum. */
+  private voicedFrames = 0;
   private received = 0;
   private preRoll: Float32Array[] = [];
   private lastLevel = -160;
@@ -90,6 +92,7 @@ export class VoiceActivity {
       this.speaking = true;
       this.quiet = 0;
       this.speechFrames = this.attack;
+      this.voicedFrames = this.attack;
       this.attack = 0;
       const preRoll = this.preRoll;
       this.preRoll = [];
@@ -98,11 +101,12 @@ export class VoiceActivity {
 
     this.quiet = speech ? 0 : this.quiet + 1;
     this.speechFrames++;
+    if (speech) this.voicedFrames++;
     const tooLong = this.speechFrames >= this.maxFrames;
     if (this.quiet >= this.silenceFrames || tooLong) {
       const speechMs = Math.round(this.speechFrames * this.frameMs);
       // A forced stop still transcribes what was said; the caller also tells the server to end the utterance.
-      const accepted = speechMs >= this.minSpeechMs;
+      const accepted = this.voicedFrames * this.frameMs >= this.minSpeechMs;
       this.reset();
       return { type: "end", speechMs, accepted };
     }
@@ -114,6 +118,7 @@ export class VoiceActivity {
     this.attack = 0;
     this.quiet = 0;
     this.speechFrames = 0;
+    this.voicedFrames = 0;
     this.preRoll = [];
   }
 

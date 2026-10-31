@@ -38,9 +38,15 @@ export function useDirectory(): Directory {
     return () => void listeners.delete(listener);
   }, []);
   useEffect(() => {
-    directory ??= Promise.all([api<AdminUser[]>("/admin/users"), api<UserGroup[]>("/admin/groups")]).then(([users, groups]) => ({ users, groups }));
+    const request = (directory ??= Promise.all([api<AdminUser[]>("/admin/users"), api<UserGroup[]>("/admin/groups")]).then(([users, groups]) => ({ users, groups })));
     let live = true;
-    void directory.then((d) => live && setValue(d));
+    request.then(
+      (d) => live && setValue(d),
+      () => {
+        // A failed load is not cached, so the next picker that opens tries again.
+        if (directory === request) directory = null;
+      },
+    );
     return () => {
       live = false;
     };

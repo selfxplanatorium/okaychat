@@ -98,12 +98,17 @@ function ResizeHandle({ width, onResize }: { width: number; onResize: (width: nu
       document.querySelectorAll("iframe").forEach((f) => f.style.removeProperty("pointer-events"));
       removeEventListener("pointermove", move);
       removeEventListener("pointerup", up);
+      removeEventListener("pointercancel", up);
+      removeEventListener("blur", up);
     };
     document.body.style.cursor = "col-resize";
     // Iframes swallow pointer events mid-drag.
     document.querySelectorAll("iframe").forEach((f) => (f.style.pointerEvents = "none"));
     addEventListener("pointermove", move);
     addEventListener("pointerup", up);
+    // A cancelled gesture or a release outside the window sends no pointerup.
+    addEventListener("pointercancel", up);
+    addEventListener("blur", up);
   };
   // A focusable separator, so arrow keys resize the panel too (Shift for bigger steps).
   return (

@@ -303,8 +303,12 @@ async function realtimeSpeech(cred: ResolvedCredential, text: string, model: str
   const url = new URL(`${cred.baseURL}/realtime`);
   url.protocol = url.protocol === "http:" ? "ws:" : "wss:";
   url.searchParams.set("model", model);
-  // WebSockets bypass publicFetch, so a non-admin's own base URL is checked here.
-  if (cred.conn?.guarded) await assertPublicHost(new URL(cred.baseURL!), "That base URL points to a private address.");
+  // WebSockets bypass publicFetch, so a non-admin's own base URL is checked here. The socket does its
+  // own DNS lookup, so only TLS keeps a rebinding host from reaching a private plain-HTTP service.
+  if (cred.conn?.guarded) {
+    if (url.protocol !== "wss:") throw new HTTPException(400, { message: "OpenAI Realtime needs an https base URL." });
+    await assertPublicHost(new URL(cred.baseURL!), "That base URL points to a private address.");
+  }
   const instructions = promptText("speechRealtime", { style: style ? `Speak in this style: ${style}` : "" }).trim();
   const pcm: Buffer[] = [];
   await new Promise<void>((resolve, reject) => {
@@ -336,6 +340,8 @@ async function realtimeSpeech(cred: ResolvedCredential, text: string, model: str
       } catch {
         return;
       }
+      // A listener that throws becomes an uncaught exception, so a non-object event is ignored.
+      if (!event || typeof event !== "object") return;
       switch (event.type) {
         case "session.created":
           ws.send(JSON.stringify({

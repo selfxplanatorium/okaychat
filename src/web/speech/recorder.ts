@@ -142,57 +142,67 @@ export class RecorderDictationAdapter implements DictationAdapter {
         stream.getTracks().forEach((t) => t.stop());
         return end("cancelled");
       }
-      const mimeType = MIME_TYPES.find((t) => MediaRecorder.isTypeSupported(t));
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType, audioBitsPerSecond: 32_000 } : undefined);
-      const chunks: Blob[] = [];
-      recorder.addEventListener("dataavailable", (e) => e.data.size && chunks.push(e.data));
-      recorder.addEventListener("stop", () => {
-        const type = recorder.mimeType || mimeType || "audio/webm";
-        const ext = type.includes("mp4") ? "m4a" : type.includes("ogg") ? "ogg" : type.includes("wav") ? "wav" : "webm";
-        void transcribe(new Blob(chunks, { type }), `recording.${ext}`);
-        chunks.length = 0;
-      });
+      let context: AudioContext | null = null;
+      try {
+        const mimeType = MIME_TYPES.find((t) => MediaRecorder.isTypeSupported(t));
+        const recorder = new MediaRecorder(stream, mimeType ? { mimeType, audioBitsPerSecond: 32_000 } : undefined);
+        const chunks: Blob[] = [];
+        recorder.addEventListener("dataavailable", (e) => e.data.size && chunks.push(e.data));
+        recorder.addEventListener("stop", () => {
+          const type = recorder.mimeType || mimeType || "audio/webm";
+          const ext = type.includes("mp4") ? "m4a" : type.includes("ogg") ? "ogg" : type.includes("wav") ? "wav" : "webm";
+          void transcribe(new Blob(chunks, { type }), `recording.${ext}`);
+          chunks.length = 0;
+        });
 
-      // Silence detection and the length cap.
-      const context = new AudioContext();
-      const analyser = context.createAnalyser();
-      analyser.fftSize = 2048;
-      context.createMediaStreamSource(stream).connect(analyser);
-      const samples = new Float32Array(analyser.fftSize);
-      const started = Date.now();
-      let heard = false;
-      let quietSince = Date.now();
-      const tick = setInterval(() => {
-        const db = levelDb(analyser, samples);
-        if (db > SPEECH_DB) {
-          if (!heard) speechStart.forEach((cb) => cb());
-          heard = true;
-          quietSince = Date.now();
-        }
-        const silent = opts.silenceSeconds > 0 && heard && Date.now() - quietSince > opts.silenceSeconds * 1000;
-        if (silent || Date.now() - started > opts.maxSeconds * 1000) stopRecording();
-      }, 100);
+        // Silence detection and the length cap.
+        context = new AudioContext();
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 2048;
+        context.createMediaStreamSource(stream).connect(analyser);
+        const samples = new Float32Array(analyser.fftSize);
+        const started = Date.now();
+        let heard = false;
+        let quietSince = Date.now();
+        const tick = setInterval(() => {
+          const db = levelDb(analyser, samples);
+          if (db > SPEECH_DB) {
+            if (!heard) speechStart.forEach((cb) => cb());
+            heard = true;
+            quietSince = Date.now();
+          }
+          const silent = opts.silenceSeconds > 0 && heard && Date.now() - quietSince > opts.silenceSeconds * 1000;
+          if (silent || Date.now() - started > opts.maxSeconds * 1000) stopRecording();
+        }, 100);
 
-      const levelSamples = new Float32Array(analyser.fftSize);
-      const level = () => displayLevel(levelDb(analyser, levelSamples));
-      liveLevel = level;
-      const dropLevel = () => void (liveLevel === level && (liveLevel = null));
+        const levelSamples = new Float32Array(analyser.fftSize);
+        const level = () => displayLevel(levelDb(analyser, levelSamples));
+        liveLevel = level;
+        const dropLevel = () => void (liveLevel === level && (liveLevel = null));
 
-      cleanup = () => {
-        clearInterval(tick);
-        dropLevel();
-        if (recorder.state !== "inactive") recorder.stop();
+        cleanup = () => {
+          clearInterval(tick);
+          dropLevel();
+          if (recorder.state !== "inactive") recorder.stop();
+          stream.getTracks().forEach((t) => t.stop());
+          void context?.close().catch(() => {});
+        };
+        stopRecording = () => {
+          clearInterval(tick);
+          dropLevel();
+          stream.getTracks().forEach((t) => t.stop());
+          if (recorder.state !== "inactive") recorder.stop();
+        };
+        recorder.start(250);
+        session.status = { type: "running" };
+      } catch {
+        // Recorder or audio graph setup failed after permission: release the microphone and end.
+        cleanup();
         stream.getTracks().forEach((t) => t.stop());
-        void context.close().catch(() => {});
-      };
-      stopRecording = () => {
-        clearInterval(tick);
-        dropLevel();
-        stream.getTracks().forEach((t) => t.stop());
-        if (recorder.state !== "inactive") recorder.stop();
-      };
-      recorder.start(250);
-      session.status = { type: "running" };
+        void context?.close().catch(() => {});
+        useSpeech.getState().setError(t("speech.noMic"));
+        end("error");
+      }
     })();
     return session;
   }

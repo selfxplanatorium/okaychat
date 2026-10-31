@@ -341,8 +341,14 @@ const TAGS_TTL_MS = 60_000;
 const SHOW_TTL_MS = 10 * 60_000;
 const LIMIT = 256;
 const tagCache = new Map<string, { models: ModelInfo[]; at: number }>();
-const tagInflight = new Map<string, Promise<ModelInfo[]>>();
+const tagInflight = new Map<string, { promise: Promise<ModelInfo[]>; generation: string }>();
 const showCache = new Map<string, { show: RawShow; at: number }>();
+
+// Bumped by invalidation. A request that began under an older generation read the daemon before a pull
+// or delete, so it must not write that snapshot back into the caches.
+const generations = new Map<string, number>();
+let globalGeneration = 0;
+const generationOf = (daemon: string) => `${globalGeneration}:${generations.get(daemon) ?? 0}`;
 
 function remember<T>(cache: Map<string, T>, key: string, value: T) {
   cache.set(key, value);
@@ -448,12 +454,14 @@ async function showModel(conn: OllamaConnection, model: string, signal?: AbortSi
   const key = `${keyOf(conn)}|${model}`;
   const hit = showCache.get(key);
   if (hit && Date.now() - hit.at < SHOW_TTL_MS) return hit.show;
+  const generation = generationOf(keyOf(conn));
   const show = await ollamaShow(conn, model, signal);
-  remember(showCache, key, { show, at: Date.now() });
+  if (generation === generationOf(keyOf(conn))) remember(showCache, key, { show, at: Date.now() });
   return show;
 }
 
 async function fetchModels(conn: OllamaConnection, signal?: AbortSignal): Promise<ModelInfo[]> {
+  const generation = generationOf(keyOf(conn));
   const tags = await ollamaTags(conn, signal);
   const out: ModelInfo[] = [];
   // A daemon with many models would otherwise make the first model list serial and slow.
@@ -473,21 +481,26 @@ async function fetchModels(conn: OllamaConnection, signal?: AbortSignal): Promis
     );
     out.push(...rows.filter((row): row is ModelInfo => row !== null));
   }
-  remember(tagCache, keyOf(conn), { models: out, at: Date.now() });
+  if (generation === generationOf(keyOf(conn))) remember(tagCache, keyOf(conn), { models: out, at: Date.now() });
   return out;
 }
 
 function refreshModels(conn: OllamaConnection): Promise<ModelInfo[]> {
   const key = keyOf(conn);
-  const pending = tagInflight.get(key) ?? (async () => {
+  const generation = generationOf(key);
+  // An in-flight refresh from before an invalidation is not reused; it may list a deleted model.
+  const inflight = tagInflight.get(key);
+  if (inflight && inflight.generation === generation) return inflight.promise;
+  const entry = { generation } as { promise: Promise<ModelInfo[]>; generation: string };
+  entry.promise = (async () => {
     try {
       return await fetchModels(conn);
     } finally {
-      tagInflight.delete(key);
+      if (tagInflight.get(key) === entry) tagInflight.delete(key);
     }
   })();
-  tagInflight.set(key, pending);
-  return pending;
+  tagInflight.set(key, entry);
+  return entry.promise;
 }
 
 /** Installed chat models. Never waits on a stale list; a failed refresh keeps the last good list. */
@@ -497,6 +510,8 @@ export async function ollamaModels(
 ): Promise<ModelInfo[]> {
   const key = keyOf(conn);
   const hit = tagCache.get(key);
+  // Strict callers tell an unreachable daemon from an unknown model, so a cached list cannot answer them.
+  if (hit && opts.strict) return refreshModels(conn);
   if (hit && Date.now() - hit.at < TAGS_TTL_MS) return hit.models;
   if (hit) {
     refreshModels(conn).catch(() => {});
@@ -516,6 +531,7 @@ export async function ollamaModels(
 
 /** Fresh metadata for the management panel, including embedding models and loaded state. */
 export async function ollamaInventory(conn: OllamaConnection, signal?: AbortSignal): Promise<OllamaInventory> {
+  const generation = generationOf(keyOf(conn));
   const [version, tags, ps] = await Promise.all([ollamaVersion(conn, signal), ollamaTags(conn, signal), ollamaPs(conn, signal)]);
   const loaded = new Map<string, RawPsModel>();
   for (const model of ps) {
@@ -543,7 +559,7 @@ export async function ollamaInventory(conn: OllamaConnection, signal?: AbortSign
     }
   }
   // The provider row and the picker can reuse what the panel just fetched.
-  remember(tagCache, keyOf(conn), { models: chatModels, at: Date.now() });
+  if (generation === generationOf(keyOf(conn))) remember(tagCache, keyOf(conn), { models: chatModels, at: Date.now() });
   return {
     status: { url: ollamaBaseURL(conn), version, modelCount: tags.length, loadedCount: ps.length },
     models,
@@ -553,12 +569,14 @@ export async function ollamaInventory(conn: OllamaConnection, signal?: AbortSign
 /** Drops cached metadata for one daemon after a pull, delete, or connection change. */
 export function invalidateOllama(conn: OllamaConnection) {
   const prefix = `${keyOf(conn)}|`;
+  generations.set(keyOf(conn), (generations.get(keyOf(conn)) ?? 0) + 1);
   tagCache.delete(keyOf(conn));
   for (const key of showCache.keys()) if (key.startsWith(prefix)) showCache.delete(key);
 }
 
 /** Drops every daemon's cache when the stored connections change. */
 export function forgetOllamaModels() {
+  globalGeneration++;
   tagCache.clear();
   showCache.clear();
 }

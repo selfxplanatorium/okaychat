@@ -108,7 +108,11 @@ function ChatUrlSync() {
       // The runtime's initial thread does not report a chat it cannot open, so the first render switches too.
       const next = { id: linked, from: stored };
       pending.current = next;
-      void Promise.resolve(aui.threads.switchToThread(linked)).catch(() => {
+      void Promise.resolve(aui.threads.switchToThread(linked)).catch(async () => {
+        if (pending.current !== next) return;
+        // Open a new chat before going to "/": with the old chat still open, the sync below would
+        // put its URL right back.
+        await Promise.resolve(aui.threads.switchToNewThread()).catch(() => {});
         if (pending.current !== next) return;
         pending.current = undefined;
         navigate("/", { replace: true });

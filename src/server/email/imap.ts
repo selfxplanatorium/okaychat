@@ -63,9 +63,15 @@ async function withClient<T>(secrets: EmailSecrets, run: (client: ImapFlow) => P
   }
   active.set(id, count + 1);
   const client = clientFor(secrets, target, tls);
+  // After connect, imapflow reports socket and timeout failures only as an "error" event; without a
+  // listener that event throws and takes the process down.
+  let broken: (error: unknown) => void = () => {};
+  const failure = new Promise<never>((_, reject) => (broken = reject));
+  failure.catch(() => {});
+  client.on("error", (error: unknown) => broken(error));
   try {
     await client.connect();
-    return await run(client);
+    return await Promise.race([run(client), failure]);
   } catch (error) {
     throw mapEmailError(error);
   } finally {
@@ -110,6 +116,14 @@ function walk(part: MessageStructureObject | undefined, out: MessageStructureObj
   if (!part) return out;
   out.push(part);
   for (const child of part.childNodes ?? []) walk(child, out);
+  return out;
+}
+
+/** Parts that can be the message body: attachments and attached messages are skipped with their children. */
+function bodyParts(part: MessageStructureObject | undefined, out: MessageStructureObject[] = []): MessageStructureObject[] {
+  if (!part || isAttachment(part) || (out.length > 0 && part.type.toLowerCase() === "message/rfc822")) return out;
+  out.push(part);
+  for (const child of part.childNodes ?? []) bodyParts(child, out);
   return out;
 }
 
@@ -326,7 +340,7 @@ export async function readMessage(secrets: EmailSecrets, messageId: string, tls?
       if ((message.size ?? 0) > MAX_MESSAGE_ATTACHMENT_BYTES && attachmentsOf(message.bodyStructure).length === 0) {
         throw new EmailError("too_large", "That message is larger than 50 MB.");
       }
-      const parts = walk(message.bodyStructure);
+      const parts = bodyParts(message.bodyStructure);
       const single = !message.bodyStructure?.childNodes;
       const plain = parts.find((part) => part.type.toLowerCase() === "text/plain" && !isAttachment(part) && (part.part || single));
       const html = parts.find((part) => part.type.toLowerCase() === "text/html" && !isAttachment(part) && (part.part || single));

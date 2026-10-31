@@ -36,6 +36,8 @@ test("silence ends an accepted utterance after the hangover", () => {
   const vad = new VoiceActivity(SAMPLES, { startFrames: 2, endSilenceMs: 400, minSpeechMs: 160 });
   vad.push(speech());
   assert.equal(vad.push(speech())?.type, "start");
+  // Only voiced frames count toward the minimum, so the speech itself must reach 160 ms.
+  for (let i = 0; i < 2; i++) assert.equal(vad.push(speech()), null);
   let end: ReturnType<VoiceActivity["push"]> = null;
   for (let i = 0; i < 10 && !end; i++) end = vad.push(silence());
   assert.equal(end?.type, "end");

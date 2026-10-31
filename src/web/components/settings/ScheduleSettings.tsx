@@ -1,5 +1,5 @@
 import { useAui } from "@assistant-ui/react";
-import { Loader2Icon, MessageSquareIcon, PencilIcon, PlayIcon, PlusIcon, TrashIcon } from "lucide-react";
+import { CalendarClockIcon, Loader2Icon, MessageSquareIcon, PencilIcon, PlayIcon, PlusIcon, TrashIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { useLocation, useSearch } from "wouter";
 import type { Schedule, ScheduleSpec, ThreadSummary } from "@shared/types";
@@ -87,7 +87,8 @@ function ScheduleForm({ initial, initialThreadId, onDone }: { initial?: Schedule
     if (target === "existing" && !threadId) return setError(t("schedules.pickChatError"));
     setBusy(true);
     setError(null);
-    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    // Editing keeps the zone the schedule was made in; the form has no zone control.
+    const timeZone = initial?.spec.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
     const spec: ScheduleSpec =
       kind === "daily" ? { kind, time, weekdays, timeZone } : { kind, minutes: Number(minutes), timeZone };
     try {
@@ -253,7 +254,7 @@ export function ScheduleSettings() {
     <SettingsPage title={t("schedules.title")} description={t("schedules.description")}>
       <SettingsSection
         action={
-          editing !== "new" && (
+          editing !== "new" && schedules?.length !== 0 && (
             <Button size="sm" variant="outline" onClick={() => setEditing("new")}>
               <PlusIcon /> {t("schedules.newSchedule")}
             </Button>
@@ -270,9 +271,10 @@ export function ScheduleSettings() {
           />
         )}
         {schedules?.length === 0 && editing !== "new" && (
-          <div className="flex flex-col items-center gap-3 px-4 py-6 text-center">
-            <p className="text-muted-foreground animate-fade-in text-sm">{t("schedules.empty")}</p>
-            <Button size="sm" variant="outline" onClick={() => setEditing("new")}>
+          <div className="animate-fade-in flex flex-col items-center gap-3 px-4 py-10 text-center">
+            <CalendarClockIcon aria-hidden className="text-muted-foreground size-7" />
+            <h2 className="font-medium">{t("schedules.emptyTitle")}</h2>
+            <Button onClick={() => setEditing("new")}>
               <PlusIcon /> {t("schedules.newSchedule")}
             </Button>
           </div>

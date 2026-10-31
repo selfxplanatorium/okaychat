@@ -356,6 +356,8 @@ async function collectSkillFiles(readText: (path: string) => Promise<string | nu
     if (files.length >= MAX_FILES) { skipped.push(`${path} (file limit)`); continue; }
     const text = await readText(path);
     if (text === null || text.length > MAX_FILE_CHARS) { skipped.push(`${path} (binary or too large)`); continue; }
+    // Stored skill files need content, so an empty reference is skipped rather than failing the install.
+    if (!text) { skipped.push(`${path} (empty)`); continue; }
     if (total + text.length > MAX_SKILL_CHARS) { skipped.push(`${path} (skill size limit)`); continue; }
     total += text.length;
     files.push({ name: path, content: text });
@@ -571,7 +573,8 @@ function findSource(userId: string, ref: string): SourceRow {
 const tokenOf = (row: SourceRow) => (row.token_enc ? decrypt(row.token_enc) : null);
 
 const sourceInput = z.object({
-  name: z.string().trim().max(40).regex(/^[\w .-]+$/, "Letters, numbers, spaces, dot, dash").optional(),
+  // Slashes are allowed because generated names look like "owner/repo"; a round trip must validate.
+  name: z.string().trim().max(120).regex(/^[\w ./-]+$/, "Letters, numbers, spaces, dot, dash, slash").optional(),
   url: z.string().trim().min(1).max(2000),
   branch: z.string().trim().max(120).optional(),
   subpath: z.string().trim().max(300).optional(),
@@ -596,6 +599,7 @@ export function saveSource(userId: string, input: unknown, id?: string): SkillSo
   } else {
     name = name || `${new URL(url).hostname.replace(/^www\./, "")}/${new URL(url).pathname.split("/").pop() ?? ""}`.replace(/\.(zip|md)$/i, "");
   }
+  name = name.replace(/[^\w ./-]+/g, "-").slice(0, 120);
   if (!name) invalid("Give the source a name.");
   const dup = db.prepare("SELECT id FROM skill_sources WHERE user_id = ? AND name = ?").get(userId, name) as { id: string } | undefined;
   if (dup && dup.id !== id) invalid("A source with that name exists.", 409);

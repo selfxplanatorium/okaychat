@@ -109,13 +109,38 @@ export function McpAppCard({ app, toolName, input, result }: { app: AppRef; tool
     const post = (message: object) => frame.current?.contentWindow?.postMessage({ jsonrpc: "2.0", ...message }, "*");
     const notify = (method: string, params: unknown) => post({ method, params });
 
+    // One confirmation slot: concurrent gated calls wait their turn, and unmounting declines the rest.
+    let approvals = Promise.resolve();
+    const pending = new Set<(ok: boolean) => void>();
+    let disposed = false;
+    const askUser = (message: string) => {
+      const asked = approvals.then(
+        () =>
+          new Promise<boolean>((answer) => {
+            if (disposed) return answer(false);
+            const settle = (ok: boolean) => {
+              pending.delete(settle);
+              setConfirm(null);
+              answer(ok);
+            };
+            pending.add(settle);
+            setConfirm({ message, answer: settle });
+          }),
+      );
+      approvals = asked.then(() => undefined);
+      return asked;
+    };
+    const disposeApprovals = () => {
+      disposed = true;
+      for (const settle of [...pending]) settle(false);
+    };
+
     const callTool = async (params: Record<string, unknown>, confirmed = false): Promise<unknown> => {
       try {
         return await api(`/mcp/${app.serverId}/app/call`, { method: "POST", json: { name: params.name, arguments: params.arguments ?? {}, confirmed } });
       } catch (e) {
         if (!(e instanceof ApiError) || e.status !== 409 || confirmed) throw e;
-        const ok = await new Promise<boolean>((answer) => setConfirm({ message: e.message, answer }));
-        setConfirm(null);
+        const ok = await askUser(e.message);
         if (!ok) throw new Error("The user declined this action.");
         return callTool(params, true);
       }
@@ -189,6 +214,7 @@ export function McpAppCard({ app, toolName, input, result }: { app: AppRef; tool
     return () => {
       window.removeEventListener("message", onMessage);
       observer.disconnect();
+      disposeApprovals();
     };
   }, [resource, app.serverId, aui]);
 

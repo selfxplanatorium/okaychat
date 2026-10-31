@@ -23,6 +23,7 @@ import {
   getCustomThemes,
   getThemeModes,
   installCustomTheme,
+  MAX_CUSTOM_THEMES,
   isReservedThemeId,
   updateCustomTheme,
   parseThemeFile,
@@ -89,7 +90,8 @@ function isTakenThemeId(id: string): boolean {
 
 function uniqueThemeId(base: string): string {
   let candidate = base;
-  for (let n = 2; isTakenThemeId(candidate); n += 1) candidate = `${base}-${n}`;
+  // Theme ids are at most 48 characters, so the base shrinks to make room for the suffix.
+  for (let n = 2; isTakenThemeId(candidate); n += 1) candidate = `${base.slice(0, 48 - `-${n}`.length).replace(/-+$/, "")}-${n}`;
   return candidate;
 }
 
@@ -161,6 +163,13 @@ function ThemeImportBody({ onClose }: { onClose: () => void }) {
   };
 
   const install = (themes: ReadonlyArray<ThemeDefinition>, strategy: "keep" | "update") => {
+    const library = getCustomThemes();
+    const added = themes.filter((theme) => strategy !== "update" || !library.some((t) => t.id === theme.id)).length;
+    if (library.length + added > MAX_CUSTOM_THEMES) {
+      setError(t("appearance.errLibraryFull", { count: MAX_CUSTOM_THEMES }));
+      setConflicts(null);
+      return;
+    }
     try {
       const saved = themes.map((theme) => {
         if (strategy === "update" && getCustomThemes().some((t) => t.id === theme.id)) return updateCustomTheme(theme);
@@ -438,18 +447,20 @@ function InstalledFontsRow() {
   };
 
   const remove = async (font: InstalledFont) => {
-    // Settings that still point at the removed family fall back to their defaults.
-    const patch: Partial<Pick<AppearanceSettings, "fontFamilySans" | "fontFamilyComposer" | "fontFamilyCode">> = {};
-    if (s.fontFamilySans === font.family) patch.fontFamilySans = "";
-    if (s.fontFamilyComposer === font.family) patch.fontFamilyComposer = "";
-    if (s.fontFamilyCode === font.family) patch.fontFamilyCode = "";
-    if (Object.keys(patch).length > 0) update(patch);
     setError(null);
     try {
       await removeFont(font.id);
     } catch (caught) {
       setError(errorText(caught, "appearance.fontRemoveFailed"));
+      return;
     }
+    // Settings that still point at the removed family fall back to their defaults.
+    const current = useAppearance.getState();
+    const patch: Partial<Pick<AppearanceSettings, "fontFamilySans" | "fontFamilyComposer" | "fontFamilyCode">> = {};
+    if (current.fontFamilySans === font.family) patch.fontFamilySans = "";
+    if (current.fontFamilyComposer === font.family) patch.fontFamilyComposer = "";
+    if (current.fontFamilyCode === font.family) patch.fontFamilyCode = "";
+    if (Object.keys(patch).length > 0) update(patch);
   };
 
   return (

@@ -6,6 +6,7 @@ import type { AppEnv } from "../auth.js";
 import {
   accountSecrets,
   authMethods,
+  checkFingerprint,
   createAccount,
   deleteAccount,
   getAccount,
@@ -142,13 +143,15 @@ export const emailRoutes = new Hono<AppEnv>()
     const userId = c.get("user").id;
     // getAccount enforces ownership before any secret is decrypted.
     getAccount(userId, c.req.param("id"));
+    // An edit during the test must not be marked with the old configuration's result.
+    const tested = checkFingerprint(userId, c.req.param("id"));
     try {
       const result = await verifyAccount(accountSecrets(userId, c.req.param("id")));
-      recordCheck(userId, c.req.param("id"), "ok", null);
+      recordCheck(userId, c.req.param("id"), "ok", null, tested);
       return c.json({ ok: true, folders: result.folders, account: getAccount(userId, c.req.param("id")) });
     } catch (error) {
       const friendly = message(error);
-      const account = recordCheck(userId, c.req.param("id"), "failed", friendly);
+      const account = recordCheck(userId, c.req.param("id"), "failed", friendly, tested);
       return c.json({ error: friendly, account }, 422);
     }
   });

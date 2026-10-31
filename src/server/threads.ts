@@ -103,7 +103,16 @@ export function updateThread(
   if (patch.projectId !== undefined) sets.push("project_id = ?"), values.push(patch.projectId);
   if (patch.knowledgeIds !== undefined) sets.push("knowledge_ids = ?"), values.push(JSON.stringify(patch.knowledgeIds.slice(0, 20)));
   if (!sets.length) return;
-  db.prepare(`UPDATE threads SET ${sets.join(", ")} WHERE user_id = ? AND id = ?`).run(...values, userId, id);
+  tx(() => {
+    if (patch.projectId !== undefined) {
+      const before = db.prepare("SELECT project_id FROM threads WHERE user_id = ? AND id = ?").get(userId, id) as { project_id: string | null } | undefined;
+      // Replayed memory blocks can hold the old project's facts; only global and current-project memory may enter a turn.
+      if (before && before.project_id !== patch.projectId) {
+        db.prepare("UPDATE turn_context SET memory_enc = NULL WHERE user_id = ? AND thread_id = ?").run(userId, id);
+      }
+    }
+    db.prepare(`UPDATE threads SET ${sets.join(", ")} WHERE user_id = ? AND id = ?`).run(...values, userId, id);
+  });
 }
 
 export function setCompaction(userId: string, id: string, state: CompactionState | null) {
@@ -134,13 +143,26 @@ function editStates(threadId: string): Map<string, EditState> {
  * keys are per thread) and the source's settings. Compaction carries over only when its boundary is inside
  * the copied branch.
  */
+/**
+ * `start` and its ancestors, oldest first. Parent ids come from clients, so a cycle stops the walk
+ * instead of looping forever on the one event loop every account shares.
+ */
+export function ancestry<T extends { id: string; parent_id: string | null }>(byId: Map<string, T>, start: T | undefined): T[] {
+  const out: T[] = [];
+  const seen = new Set<string>();
+  for (let row = start; row && !seen.has(row.id); row = row.parent_id ? byId.get(row.parent_id) : undefined) {
+    seen.add(row.id);
+    out.unshift(row);
+  }
+  return out;
+}
+
 export function branchThread(userId: string, sourceId: string, messageId: string, id: string, modelRef?: string): ThreadSummary {
   const source = getThread(userId, sourceId);
   if (!source) throw new HTTPException(404, { message: "Thread not found" });
   const rows = listMessages(userId, sourceId);
   const byId = new Map(rows.map((r) => [r.id, r]));
-  const chain: MessageRow[] = [];
-  for (let row = byId.get(messageId); row; row = row.parent_id ? byId.get(row.parent_id) : undefined) chain.unshift(row);
+  const chain = ancestry(byId, byId.get(messageId));
   if (!chain.length) throw new HTTPException(404, { message: "Message not found" });
   const edits = editStates(sourceId);
   const boundaries = [source.compaction?.boundaryMessageId, source.compaction?.trim?.throughMessageId];
@@ -165,8 +187,37 @@ export function branchThread(userId: string, sourceId: string, messageId: string
       insert.run(m.id, id, m.parent_id, m.format, json, messageBytes(json), now - chain.length + i, editedAt, original));
     // Draft cards in the copied messages keep working in the fork.
     copyDraftsForBranch(userId, sourceId, id, copies.map(({ json }) => json));
+    copyArtifactsForBranch(userId, sourceId, id, chain.map((m) => m.content));
   });
   return getThread(userId, id)!;
+}
+
+const ARTIFACT_TOOLS = new Set(["create_artifact", "update_artifact", "create_document", "edit_document", "import_document"]);
+
+/**
+ * Copies the artifact versions the copied messages show, up to the newest one they reference, so the
+ * fork's cards open and the model can keep editing them. Versions made after the fork point stay behind.
+ */
+function copyArtifactsForBranch(userId: string, sourceId: string, targetId: string, contents: unknown[]): void {
+  const newest = new Map<string, number>();
+  for (const content of contents) {
+    for (const part of (content as { parts?: unknown[] }).parts ?? []) {
+      const p = part as { type?: string; toolName?: string; output?: { id?: unknown; version?: unknown } };
+      const name = p.toolName ?? p.type?.replace(/^tool-/, "");
+      const out = p.output;
+      if (!name || !ARTIFACT_TOOLS.has(name) || typeof out?.id !== "string" || typeof out.version !== "number") continue;
+      newest.set(out.id, Math.max(newest.get(out.id) ?? 0, out.version));
+    }
+  }
+  if (!newest.size) return;
+  const columns = (db.prepare("PRAGMA table_info(artifacts)").all() as Array<{ name: string }>).map((c) => c.name).filter((n) => n !== "thread_id");
+  const list = columns.join(", ");
+  const size = db.prepare("SELECT COALESCE(SUM(length(CAST(content AS BLOB)) + size), 0) AS n FROM artifacts WHERE thread_id = ? AND id = ? AND version <= ?");
+  const copy = db.prepare(`INSERT INTO artifacts (thread_id, ${list}) SELECT ?, ${list} FROM artifacts WHERE thread_id = ? AND id = ? AND version <= ?`);
+  let bytes = 0;
+  for (const [artifactId, version] of newest) bytes += (size.get(sourceId, artifactId, version) as { n: number }).n;
+  assertStorage(userId, bytes);
+  for (const [artifactId, version] of newest) copy.run(targetId, sourceId, artifactId, version);
 }
 
 export interface MessageRow {
@@ -202,6 +253,9 @@ export function appendMessage(userId: string, threadId: string, row: MessageRow)
   tx(() => {
     ensureThread(userId, threadId);
     const previous = db.prepare("SELECT content, bytes, edited_at, original_enc FROM messages WHERE thread_id = ? AND id = ?").get(threadId, row.id) as { content: string; bytes: number; edited_at: number | null; original_enc: string | null } | undefined;
+    if (row.parent_id !== null && createsCycle(threadId, row.id, row.parent_id)) {
+      throw new HTTPException(400, { message: "A message cannot be its own ancestor." });
+    }
     const json = JSON.stringify(row.content);
     const bytes = messageBytes(json);
     // A user edit changes a reply only through the edit route. A tab still holding text from before it (or from
@@ -233,25 +287,28 @@ export function appendMessage(userId: string, threadId: string, row: MessageRow)
   });
 }
 
+function createsCycle(threadId: string, id: string, parentId: string): boolean {
+  const parent = db.prepare("SELECT parent_id FROM messages WHERE thread_id = ? AND id = ?");
+  const seen = new Set<string>();
+  for (let current: string | null = parentId; current !== null && !seen.has(current); ) {
+    if (current === id) return true;
+    seen.add(current);
+    current = (parent.get(threadId, current) as { parent_id: string | null } | undefined)?.parent_id ?? null;
+  }
+  return false;
+}
+
 /** The branch the user last extended: newest message and its ancestors, oldest first. */
 export function currentBranch(userId: string, threadId: string): UIMessage[] {
   const rows = listMessages(userId, threadId);
   const byId = new Map(rows.map((r) => [r.id, r]));
-  const out: UIMessage[] = [];
-  for (let row = rows.at(-1); row; row = row.parent_id ? byId.get(row.parent_id) : undefined) {
-    out.unshift({ id: row.id, ...(row.content as Omit<UIMessage, "id">) });
-  }
-  return out;
+  return ancestry(byId, rows.at(-1)).map((row) => ({ id: row.id, ...(row.content as Omit<UIMessage, "id">) }));
 }
 
 /** `messageId` and its ancestors, oldest first: the branch the client is showing. */
 export function branchMessages(userId: string, threadId: string, messageId: string): UIMessage[] {
   const byId = new Map(listMessages(userId, threadId).map((r) => [r.id, r]));
-  const out: UIMessage[] = [];
-  for (let row = byId.get(messageId); row; row = row.parent_id ? byId.get(row.parent_id) : undefined) {
-    out.unshift({ id: row.id, ...(row.content as Omit<UIMessage, "id">) });
-  }
-  return out;
+  return ancestry(byId, byId.get(messageId)).map((row) => ({ id: row.id, ...(row.content as Omit<UIMessage, "id">) }));
 }
 
 /** Stored user messages carry attachments as `<attachment name="…">` text parts. Returns the name, or undefined for normal text. */

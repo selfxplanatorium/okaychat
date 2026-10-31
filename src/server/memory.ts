@@ -419,10 +419,13 @@ export function conversationMemory(userId: string, threadId: string, query: stri
   const thread = getThread(userId, threadId);
   if (!preferences.enabled || !thread || thread.memoryDisabled) return { context: "", tools: {} };
   const scope = thread.projectId;
+  // The revision these tools were offered under. A correction made by these tools bumps it too and moves
+  // this forward, so the rest of the turn may keep correcting; any other change still revokes them.
+  let revision = preferences.revision;
   const allowed = () => {
     const current = memoryPreferences(userId);
     const currentThread = getThread(userId, threadId);
-    return current.enabled && current.revision === preferences.revision && !!currentThread && currentThread.projectId === scope && !currentThread.memoryDisabled;
+    return current.enabled && current.revision === revision && !!currentThread && currentThread.projectId === scope && !currentThread.memoryDisabled;
   };
   const accessible = () => allowed() ? listMemories(userId, scope) : [];
   const canWrite = () => { if (!allowed()) invalid("Memory settings changed. Continue without writing memory until the next reply.", 409); };
@@ -447,7 +450,14 @@ export function conversationMemory(userId: string, threadId: string, query: stri
         canWrite();
         const previous = id ? accessible().find((entry) => entry.id === id) : undefined;
         if (id && !previous) return invalid("Memory not found in this conversation's scope", 404);
-        return saveMemory(userId, { content, scope: previous ? previous.scope : scope }, "conversation", id).entry;
+        const saved = saveMemory(userId, { content, scope: previous ? previous.scope : scope }, "conversation", id).entry;
+        // A correction withdraws the old text like a manual edit: its summary and replayed blocks must go.
+        if (previous) {
+          dropSummary(userId, previous.scope ?? "");
+          invalidate(userId);
+          if (memoryPreferences(userId).revision === revision + 1) revision += 1;
+        }
+        return saved;
       },
     }),
     memory_forget: tool({

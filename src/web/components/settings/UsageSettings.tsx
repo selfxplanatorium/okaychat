@@ -19,7 +19,13 @@ const PURPOSE_LABELS = {
 function useUsage(days: Range, groupBy: "day" | "model" | "kind") {
   const [data, setData] = useState<{ rows: UsageRow[]; go: GoWindow[] } | null>(null);
   useEffect(() => {
-    void api<{ rows: UsageRow[]; go: GoWindow[] }>(`/usage?days=${days}&groupBy=${groupBy}`).then(setData);
+    let live = true;
+    void api<{ rows: UsageRow[]; go: GoWindow[] }>(`/usage?days=${days}&groupBy=${groupBy}`).then((next) => {
+      if (live) setData(next);
+    });
+    return () => {
+      live = false;
+    };
   }, [days, groupBy]);
   return data;
 }

@@ -22,12 +22,33 @@ export function quotaMessage(used: number, limit: number): string {
   return `Storage quota exceeded: ${gb(used)} of ${gb(limit)} already used. Delete old chats, attachments, or fonts to make room.`;
 }
 
+/** Matches what `storeInlineAttachments` copies into `uploads`: base64 data URLs up to 25 MB. */
+const INLINE_ATTACHMENT = /^data:[\w.+-]+\/[\w.+-]+;base64,[A-Za-z0-9+/=\r\n]*$/;
+const MAX_INLINE_LENGTH = Math.ceil((25 * 1024 * 1024) / 3) * 4 + 300;
+
 /**
- * Stored bytes of one message. Inline data URLs are left out: those attachments are also kept in
- * `uploads` and charged there, so counting them here would bill the same file twice.
+ * Stored bytes of one message. Inline attachments of user file/image parts are left out: those are
+ * also kept in `uploads` and charged there, so counting them here would bill the same file twice.
+ * Everything else counts in full, including text that merely contains "data:".
  */
 export function messageBytes(contentJson: string): number {
-  return Buffer.byteLength(contentJson.replace(/data:[^"]*/g, ""));
+  const total = Buffer.byteLength(contentJson);
+  let content: { role?: unknown; parts?: unknown };
+  try {
+    content = JSON.parse(contentJson) as typeof content;
+  } catch {
+    return total;
+  }
+  if (!content || content.role !== "user" || !Array.isArray(content.parts)) return total;
+  let inline = 0;
+  for (const part of content.parts as Array<{ type?: unknown; url?: unknown; image?: unknown; data?: unknown }>) {
+    if (!part || (part.type !== "file" && part.type !== "image")) continue;
+    const url = part.url ?? part.image ?? part.data;
+    if (typeof url !== "string" || url.length > MAX_INLINE_LENGTH || !INLINE_ATTACHMENT.test(url)) continue;
+    // The JSON form without its quotes is what the stored text holds.
+    inline += Buffer.byteLength(JSON.stringify(url)) - 2;
+  }
+  return total - inline;
 }
 
 /** SQL for one user's stored bytes. The argument is either `@user` or a users alias like `u.id`. */

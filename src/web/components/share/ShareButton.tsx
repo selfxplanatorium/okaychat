@@ -1,13 +1,14 @@
 import { useAuiState } from "@assistant-ui/react";
 import { CheckIcon, CopyIcon, Link2Icon, Loader2Icon, Share2Icon } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/error-text";
 import { cn } from "@/lib/utils";
 import { useCurrentThreadId } from "@/state/thread-meta";
-import { t } from "@/i18n";
+import { t, type PlainMessageKey } from "@/i18n";
 
 /** Top-right of a chat: create, copy, or revoke the thread's public read-only link. */
 export function ShareButton() {
@@ -34,18 +35,31 @@ export function ShareButton() {
 export function SharePanel({ threadId, title = t("share.shareThisChat") }: { threadId: string; title?: ReactNode | null }) {
   const [token, setToken] = useState<string | null | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const { isCopied, copyToClipboard } = useCopyToClipboard();
+  // The panel can stay open across a chat switch; an answer for the previous chat must not land here.
+  const current = useRef(threadId);
+  current.current = threadId;
 
   useEffect(() => {
     setToken(undefined);
-    void api<{ token: string | null }>(`/threads/${threadId}/share`).then((r) => setToken(r.token)).catch(() => setToken(null));
+    setError(null);
+    void api<{ token: string | null }>(`/threads/${threadId}/share`)
+      .then((r) => r.token)
+      .catch(() => null)
+      .then((next) => current.current === threadId && setToken(next));
   }, [threadId]);
 
   const url = token ? `${location.origin}/share/${token}` : "";
-  const run = async (fn: () => Promise<void>) => {
+  const run = async (fn: () => Promise<string | null>, failed: PlainMessageKey) => {
+    const id = threadId;
     setBusy(true);
+    setError(null);
     try {
-      await fn();
+      const next = await fn();
+      if (current.current === id) setToken(next);
+    } catch (cause) {
+      if (current.current === id) setError(errorText(cause, failed));
     } finally {
       setBusy(false);
     }
@@ -80,7 +94,7 @@ export function SharePanel({ threadId, title = t("share.shareThisChat") }: { thr
             variant="ghost"
             className="text-error w-full"
             disabled={busy}
-            onClick={() => run(async () => void (await api(`/threads/${threadId}/share`, { method: "DELETE" }), setToken(null)))}
+            onClick={() => void run(async () => (await api(`/threads/${threadId}/share`, { method: "DELETE" }), null), "share.stopFailed")}
           >
             {t("share.stopSharing")}
           </Button>
@@ -90,10 +104,15 @@ export function SharePanel({ threadId, title = t("share.shareThisChat") }: { thr
           size="sm"
           className="animate-rise-in w-full"
           disabled={busy || token === undefined}
-          onClick={() => run(async () => setToken((await api<{ token: string }>(`/threads/${threadId}/share`, { method: "POST" })).token))}
+          onClick={() => void run(async () => (await api<{ token: string }>(`/threads/${threadId}/share`, { method: "POST" })).token, "share.createFailed")}
         >
           {busy ? <Loader2Icon className="animate-spin" /> : <Link2Icon />} {t("share.createLink")}
         </Button>
+      )}
+      {error && (
+        <p role="alert" className="text-error mt-2 text-xs">
+          {error}
+        </p>
       )}
     </>
   );

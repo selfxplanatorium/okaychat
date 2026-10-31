@@ -134,6 +134,8 @@ export function ModelList({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
+            // Enter that confirms an IME candidate is not a selection.
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return;
             if (e.key !== "ArrowDown" && e.key !== "Enter") return;
             const first = e.currentTarget.closest("[data-slot=model-picker]")?.querySelector<HTMLElement>("[role=option]");
             if (!first) return;
@@ -238,7 +240,7 @@ export function ModelPicker() {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
-        className="group hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 pointer-coarse:h-9 max-w-56 min-w-0 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart"
+        className="group hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 pointer-coarse:h-9 max-w-56 sm:max-w-72 min-w-0 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart"
         aria-label={t("composer.chooseModel")}
         aria-live="polite"
         data-command="composer.model"

@@ -342,7 +342,9 @@ function CollectionDetail({ id, onBack, onChanged }: { id: string; onBack: () =>
   const load = useCallback(async () => {
     try {
       setDetail(await api<KnowledgeCollectionDetail>(`/knowledge/collections/${encodeURIComponent(id)}`));
-      setError(null);
+      // Clear only a previous load failure; an upload or action error stays until the user acts again.
+      const loadFailed = t("knowledge.loadFailed");
+      setError((previous) => (previous === loadFailed ? null : previous));
     } catch {
       setError(t("knowledge.loadFailed"));
     }

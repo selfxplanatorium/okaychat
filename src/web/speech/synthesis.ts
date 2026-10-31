@@ -74,6 +74,8 @@ export class ServerSpeechAdapter implements SpeechSynthesisAdapter {
       const blob = await (
         await speechFetch("/speech/synthesize", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: piece, engine }), signal: controller.signal })
       ).blob();
+      // The utterance can end while this prefetch runs; a URL made after cleanup would never be revoked.
+      if (controller.signal.aborted) throw new DOMException("aborted", "AbortError");
       const url = URL.createObjectURL(blob);
       urls.push(url);
       return url;
@@ -122,7 +124,10 @@ export class ServerSpeechAdapter implements SpeechSynthesisAdapter {
         useSpeech.getState().setError((error as Error).message);
         res.set({ type: "ended", reason: "error", error });
       } finally {
-        if (res.status.type === "ended") urls.forEach((u) => URL.revokeObjectURL(u));
+        if (res.status.type === "ended") {
+          controller.abort();
+          urls.forEach((u) => URL.revokeObjectURL(u));
+        }
       }
     })();
     return res;

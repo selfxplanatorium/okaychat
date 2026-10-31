@@ -211,8 +211,18 @@ function abortIfStale(userId: string, sourceId: string, generation: number, sign
   if (!row || row.generation !== generation) throw new DOMException("Superseded", "AbortError");
 }
 
+/** Pasted and fetched text skips extraction, so the readability check runs on every source's text. */
+function readable(text: string): string {
+  // A decoded binary usually has NULs or a very high replacement-character rate; FTS stops at a NUL.
+  const sample = text.slice(0, 20_000);
+  if (text.includes("\u0000") || (sample.match(/\uFFFD/g)?.length ?? 0) > sample.length * 0.02) {
+    throw new KnowledgeInputError("This file does not contain readable text. Use a text, PDF, DOCX, or spreadsheet file.");
+  }
+  return text;
+}
+
 async function extractSource(row: SourceRow): Promise<string> {
-  if (row.text) return row.text;
+  if (row.text) return readable(row.text);
   if (!row.upload_id) throw new KnowledgeInputError("The original file is gone. Add it again.");
   const upload = db.prepare("SELECT name, mime, data FROM uploads WHERE id = ? AND user_id = ?").get(row.upload_id, row.user_id) as
     | { name: string; mime: string; data: Uint8Array }
@@ -224,12 +234,7 @@ async function extractSource(row: SourceRow): Promise<string> {
     throw new KnowledgeInputError("This PDF has no text layer (it is probably scanned images). No OCR is available; add a text version instead.");
   }
   if (!text.trim()) throw new KnowledgeInputError("No text could be read from this file.");
-  // A decoded binary usually has NULs or a very high replacement-character rate.
-  const sample = text.slice(0, 20_000);
-  if (sample.includes("\u0000") || (sample.match(/\uFFFD/g)?.length ?? 0) > sample.length * 0.02) {
-    throw new KnowledgeInputError("This file does not contain readable text. Use a text, PDF, DOCX, or spreadsheet file.");
-  }
-  return text;
+  return readable(text);
 }
 
 const isSuperseded = (error: unknown) => error instanceof DOMException && error.message === "Superseded";

@@ -13,6 +13,14 @@ import { htmlToMarkdown } from "../tools/web.js";
 export const MAX_URL_BYTES = 10 * 1024 * 1024;
 /** Extracted-text cap. The original bytes stay complete; this bounds chunking and embedding work. */
 export const MAX_URL_TEXT = 400_000;
+
+/** A page longer than the limit is refused; cutting it would report a source as indexed that is only partly searchable. */
+function bounded(text: string): string {
+  if (text.length > MAX_URL_TEXT) {
+    throw new KnowledgeInputError(`That page has more than ${MAX_URL_TEXT.toLocaleString("en-US")} characters of text. Save the part you need as a file instead.`);
+  }
+  return text;
+}
 export const URL_TIMEOUT_MS = 20_000;
 const BROWSER_UA =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36";
@@ -100,7 +108,7 @@ export async function fetchKnowledgeUrl(raw: string, opts: { signal?: AbortSigna
     if (!text.trim() || text.startsWith("[This PDF has no text layer")) {
       throw new KnowledgeInputError("That PDF has no text layer. No OCR is available; add a text version instead.");
     }
-    return { title: name, mime: "application/pdf", bytes, text: text.slice(0, MAX_URL_TEXT) };
+    return { title: name, mime: "application/pdf", bytes, text: bounded(text) };
   }
 
   const body = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
@@ -108,12 +116,12 @@ export async function fetchKnowledgeUrl(raw: string, opts: { signal?: AbortSigna
   if (html) {
     const page = await htmlToMarkdown(body, res.url || parsed.href);
     if (!page.markdown.trim()) throw new KnowledgeInputError("That page had no readable text.");
-    return { title: (page.title || name).slice(0, 200), mime: type === "application/xhtml+xml" ? "application/xhtml+xml" : "text/html", bytes, text: page.markdown.slice(0, MAX_URL_TEXT) };
+    return { title: (page.title || name).slice(0, 200), mime: type === "application/xhtml+xml" ? "application/xhtml+xml" : "text/html", bytes, text: bounded(page.markdown) };
   }
 
   const textMime = type.startsWith("text/") || type === "application/json";
   if (type && !textMime) throw new KnowledgeInputError(`That URL returned ${type}, which is not a readable document. Use a text, HTML, or PDF page.`);
   const text = body.trim();
   if (!text) throw new KnowledgeInputError("That page had no readable text.");
-  return { title: name.slice(0, 200), mime: type || "text/plain", bytes, text: text.slice(0, MAX_URL_TEXT) };
+  return { title: name.slice(0, 200), mime: type || "text/plain", bytes, text: bounded(text) };
 }

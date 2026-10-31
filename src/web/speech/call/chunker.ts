@@ -22,6 +22,8 @@ function findCut(text: string): Cut | null {
   let fence = false;
   let lineStart = true;
   let lastSpace = -1;
+  // Fenced spans as [start, end); end is Infinity while the fence is still open.
+  const fences: { start: number; end: number }[] = [];
   for (let i = 0; i < text.length; i++) {
     const char = text[i]!;
     // A fence opens or closes only at the start of a line, after optional spaces.
@@ -30,6 +32,8 @@ function findCut(text: string): Cut | null {
       // Wait for the newline after the marker; the marker itself is safe to leave in the buffer.
       const end = text.indexOf("\n", i);
       if (end < 0) return null;
+      if (fence) fences[fences.length - 1]!.end = end + 1;
+      else fences.push({ start: i, end: Infinity });
       fence = !fence;
       i = end;
       lineStart = true;
@@ -51,8 +55,17 @@ function findCut(text: string): Cut | null {
   }
   if (text.length > MAX_CHUNK) {
     // Cut before the hard cap, at a word boundary where possible.
-    const at = text.lastIndexOf(" ", MAX_CHUNK);
-    return { at: at > SOFT_CHUNK ? at : SOFT_CHUNK, blank: false };
+    const space = text.lastIndexOf(" ", MAX_CHUNK);
+    let at = space > SOFT_CHUNK ? space : SOFT_CHUNK;
+    // Never split a fence: spokenText can only drop code it sees whole. Cut before it, or after it,
+    // or wait for an open fence at the start of the buffer to close.
+    const inside = fences.find((f) => at > f.start && at < f.end);
+    if (inside) {
+      if (inside.start > 0) at = inside.start;
+      else if (inside.end !== Infinity) at = inside.end;
+      else return null;
+    }
+    return { at, blank: false };
   }
   return null;
 }

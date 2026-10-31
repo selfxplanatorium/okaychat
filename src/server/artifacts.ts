@@ -79,7 +79,6 @@ function saveVersion(
   // One version per artifact per turn: edits within a turn replace that turn's version, so the
   // version list follows the user's requests instead of the agent's drafts.
   const replace = prev !== null && turn.has(a.id);
-  turn.add(a.id);
   const version = replace ? prev.version : (prev?.version ?? 0) + 1;
   const bytes = (a.data?.byteLength ?? 0) + Buffer.byteLength(a.content, "utf8");
   const freed = replace ? prev.size + Buffer.byteLength(prev.content, "utf8") : 0;
@@ -99,6 +98,8 @@ function saveVersion(
     a.data?.byteLength ?? 0,
     Date.now(),
   );
+  // Only a saved version belongs to this turn; a rejected first save must not claim the previous one.
+  turn.add(a.id);
   return { id: a.id, version, title: a.title, kind: a.kind, size: a.data?.byteLength ?? 0 };
 }
 
@@ -149,14 +150,17 @@ function workbookFrom(source: string) {
 }
 
 /** Builds the bytes for a document from its source text. */
-async function buildDocument(kind: DocumentArtifactKind, source: string, title: string): Promise<Uint8Array> {
+async function buildDocument(kind: DocumentArtifactKind, source: string, title: string, signal?: AbortSignal): Promise<Uint8Array> {
+  let data: Uint8Array;
   if (kind === "pdf") {
     // The browser worker renders the PDF; Word and Excel are built in-process and keep working without it.
     if (!rendererAvailable()) throw serviceUnavailable("browser");
     const { body, headerTemplate, footerTemplate } = pageFurniture(source);
-    return htmlToPdf(printDocument(body), { headerTemplate, footerTemplate });
-  }
-  return kind === "docx" ? createDocx(source, title) : createXlsx(workbookFrom(source));
+    data = await htmlToPdf(printDocument(body), { headerTemplate, footerTemplate }, signal);
+  } else data = kind === "docx" ? await createDocx(source, title) : await createXlsx(workbookFrom(source));
+  // A stopped reply must not save a version that finished rendering after Stop.
+  signal?.throwIfAborted();
+  return data;
 }
 
 function documentOf(threadId: string, id: string) {
@@ -215,6 +219,8 @@ export interface ArtifactToolOptions {
   canViewImages?: boolean;
   /** Artifact ids already saved in this turn by an earlier request (browser-tool continuations). */
   savedThisTurn?: Iterable<string>;
+  /** Screenshots an earlier request of this turn already took; they count toward the per-reply limit. */
+  shotsThisTurn?: number;
   /**
    * The browser worker is down, so the visual check cannot run in this turn. The tool is omitted (with the
    * reason stored on the reply) instead of failing after the model calls it.
@@ -241,13 +247,31 @@ export function artifactsInCurrentTurn(messages: Array<{ role: string; parts: un
   return ids;
 }
 
+/** view_artifact results since the latest user message, for the per-reply screenshot limit across continuations. */
+export function screenshotsInCurrentTurn(messages: Array<{ role: string; parts: unknown[] }>): number {
+  let count = 0;
+  for (const message of messages) {
+    if (message.role === "user") count = 0;
+    if (message.role !== "assistant") continue;
+    for (const part of message.parts) {
+      const p = part as { type?: string; state?: string } | null;
+      if (p?.type === "tool-view_artifact" && p.state === "output-available") count++;
+    }
+  }
+  return count;
+}
+
 export function artifactTools(threadId: string, userId: string, visual: ArtifactToolOptions = {}): ToolSet {
   const shots = visual.shots;
+  // Calls rendering now, plus screenshots from earlier requests of this turn.
+  const shotsPending = { value: visual.shotsThisTurn ?? 0 };
   // Artifact ids saved in this turn. A tool set lives for one request; continuations pass the earlier ids.
   const turn = new Set<string>(visual.savedThisTurn);
   // A retried import of the same bytes under the same id returns the first copy instead of storing another.
   // The key holds a content hash because a run_code output keeps its fileId when a later run rewrites it.
-  const imported = new Map<string, ArtifactToolResult>();
+  // Versions are overwritten within a turn, so a cached import also remembers the bytes it saved.
+  const imported = new Map<string, { result: ArtifactToolResult; saved: string }>();
+  const digest = (data: Uint8Array | null) => (data ? createHash("sha256").update(data).digest("hex") : "");
   return {
     create_artifact: tool({
       description: "Create an artifact shown in a side panel. See the Artifacts section of the system prompt for when to use it.",
@@ -317,8 +341,8 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
             "For pdf and docx: HTML and CSS. For xlsx: JSON of the form {\"sheets\":[{\"name\":\"Sheet1\",\"header\":true,\"rows\":[[\"Item\",\"Cost\"],[\"Hosting\",{ \"v\": 120, \"numFmt\": \"\\\"€\\\"#,##0.00\" }]]}]}. A string starting with `=` is a formula.",
           ),
       }),
-      execute: async ({ id, title, kind, content }) => {
-        const data = await buildDocument(kind, content, title);
+      execute: async ({ id, title, kind, content }, { abortSignal }) => {
+        const data = await buildDocument(kind, content, title, abortSignal);
         return createDocument(threadId, turn, { id, title, kind, source: content, data });
       },
     }),
@@ -337,7 +361,7 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
         xlsx_ops: z.array(xlsxOp).optional().describe("Spreadsheet edits: set_cells, format, rows, columns, sheets"),
         pdf_ops: z.array(pdfOp).optional().describe("PDF edits: rotate_pages, delete_pages, move_page, add_text, fill_form, set_metadata"),
       }),
-      execute: async ({ id, title, edits, content, docx_ops, xlsx_ops, pdf_ops }) => {
+      execute: async ({ id, title, edits, content, docx_ops, xlsx_ops, pdf_ops }, { abortSignal }) => {
         const prev = latestArtifact(threadId, id);
         if (!prev) throw new Error(`No artifact with id \`${id}\` in this chat.`);
         const kind = prev.kind;
@@ -347,7 +371,7 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
         const changedSource = content ?? (edits?.length ? applyEdits(prev.content, edits) : undefined);
 
         if (changedSource !== undefined) {
-          const data = await buildDocument(docKind, changedSource, title ?? prev.title);
+          const data = await buildDocument(docKind, changedSource, title ?? prev.title, abortSignal);
           return saveVersion(threadId, { ...prev, title: title ?? prev.title, content: changedSource, data }, turn);
         }
         if (!ops?.length) throw new Error("Pass `edits`, `content`, or the format's `ops`.");
@@ -391,19 +415,20 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
               sheet: z.string().optional().describe("Spreadsheet sheet name. Default the first sheet."),
             }),
             execute: async ({ id, page, sheet }, { toolCallId }) => {
-              if (shots.size >= MAX_SHOTS_PER_TURN) {
+              // Reserve before rendering, so parallel calls cannot all pass the limit.
+              if (shots.size + shotsPending.value >= MAX_SHOTS_PER_TURN) {
                 throw new Error(`This reply has used its ${MAX_SHOTS_PER_TURN} screenshots. Finish from what you have already seen, or ask the user to check the artifact.`);
               }
               const artifact = latestArtifact(threadId, id);
               if (!artifact) throw new Error(`No artifact with id \`${id}\` in this chat.`);
               const data = artifact.size ? artifactData(threadId, id) : null;
-              const shot = await screenshotArtifact({
-                kind: artifact.kind,
-                content: artifact.content,
-                data,
-                page,
-                sheet,
-              });
+              shotsPending.value++;
+              let shot: VisualShot;
+              try {
+                shot = await screenshotArtifact({ kind: artifact.kind, content: artifact.content, data, page, sheet });
+              } finally {
+                shotsPending.value--;
+              }
               shots.set(toolCallId, shot);
               return {
                 id,
@@ -433,7 +458,9 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
         const source = sourceBytes(userId, { fileId: file_id, name });
         const key = `${file_id ?? `name:${name}`}\u0000${slug(id)}\u0000${createHash("sha256").update(source.data).digest("hex")}`;
         const previous = imported.get(key);
-        if (previous && latestArtifact(threadId, previous.id)?.version === previous.version) return previous;
+        if (previous && latestArtifact(threadId, previous.result.id)?.version === previous.result.version && digest(artifactData(threadId, previous.result.id)) === previous.saved) {
+          return previous.result;
+        }
         let kind = kindOfUpload(source.name);
         let data = source.data;
         if (!kind && PRESENTATION.test(source.name)) {
@@ -447,7 +474,7 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
           existing?.kind === kind
             ? saveVersion(threadId, { id: existing.id, title: title.trim() || existing.title, kind, language: null, content: "", data }, turn)
             : createDocument(threadId, turn, { id, title, kind, source: "", data });
-        imported.set(key, result);
+        imported.set(key, { result, saved: digest(data) });
         return result;
       },
     }),
@@ -457,7 +484,8 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
 const fileHeaders = (filename: string, mime: string) => ({
   "Content-Type": mime,
   "Content-Disposition": `inline; filename="${filename}"`,
-  "Cache-Control": "private, max-age=60",
+  // A version's bytes change while its turn keeps editing it, and the URL carries only the version number.
+  "Cache-Control": "private, no-cache",
 });
 
 export const artifactRoutes = new Hono<AppEnv>()

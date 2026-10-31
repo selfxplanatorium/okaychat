@@ -5,6 +5,8 @@ export default {
   copyLink: "Copy link",
   stopSharing: "Stop sharing",
   createLink: "Create link",
+  createFailed: "The link could not be created. Try again.",
+  stopFailed: "Sharing could not be stopped, so the link still works. Try again.",
   sharedChat: "Shared chat",
   sharedReadOnly: "Shared chat · read only",
   usedTool: "Used {name}",

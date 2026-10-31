@@ -114,14 +114,16 @@ async function call(route: string, init: RequestInit = {}, timeoutMs = 30_000, s
 }
 
 /** Copies attachments from the uploads table into the workspace. Names are reduced to a safe basename. */
-async function copyInputs(userId: string, ws: string, fileIds: string[]): Promise<string[]> {
+async function copyInputs(userId: string, ws: string, fileIds: string[], signal?: AbortSignal): Promise<string[]> {
   const names: string[] = [];
   for (const id of fileIds) {
+    // Stop ends the copy too; later files must not keep overwriting the workspace.
+    signal?.throwIfAborted();
     const row = (db.prepare("SELECT name, data FROM uploads WHERE id = ? AND user_id = ?").get(id, userId) ??
       db.prepare("SELECT path AS name, data FROM sandbox_files WHERE id = ? AND user_id = ?").get(id, userId)) as { name: string; data: Uint8Array } | undefined;
     if (!row) throw new Error(`Unknown file_id \`${id}\`. Use the file_id from an <attachment> header.`);
     const name = path.basename(row.name).replace(/[^\w.() -]+/g, "_").replace(/^[.\s]+/, "") || id;
-    await call(`/workspaces/${ws}/files?path=${encodeURIComponent(name)}`, { method: "PUT", body: Buffer.from(row.data) }, 60_000);
+    await call(`/workspaces/${ws}/files?path=${encodeURIComponent(name)}`, { method: "PUT", body: Buffer.from(row.data) }, 60_000, signal);
     names.push(name);
   }
   return names;
@@ -207,7 +209,7 @@ export async function runCode(opts: { userId: string; threadId: string; language
   opts.signal?.throwIfAborted();
   if (opts.threadId.startsWith("tmp_") || !getThread(opts.userId, opts.threadId)) throw new Error("Chat not found");
   const ws = workspaceId(opts.userId, opts.threadId);
-  const inputs = await copyInputs(opts.userId, ws, opts.inputFiles ?? []);
+  const inputs = await copyInputs(opts.userId, ws, opts.inputFiles ?? [], opts.signal);
   opts.signal?.throwIfAborted();
   const timeout = Math.min(opts.timeoutS ?? 60, MAX_TIMEOUT_S);
   // The job id lets a cancel reach the run even while it still queues, or before its request arrives.

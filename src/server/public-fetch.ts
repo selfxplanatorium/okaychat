@@ -2,7 +2,7 @@ import dns from "node:dns/promises";
 import http from "node:http";
 import https from "node:https";
 import { isIP } from "node:net";
-import { Readable } from "node:stream";
+import { pipeline, Readable } from "node:stream";
 import zlib from "node:zlib";
 
 /** Only addresses on the public internet: no loopback, private, link-local, CGNAT, multicast, or documentation ranges. */
@@ -80,18 +80,27 @@ export function pinnedRequest(
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 
 function decoded(response: http.IncomingMessage): Readable {
-  switch (response.headers["content-encoding"]?.trim().toLowerCase()) {
-    case "gzip":
-    case "x-gzip":
-      return response.pipe(zlib.createGunzip());
-    case "deflate":
-      return response.pipe(zlib.createInflate());
-    case "br":
-      return response.pipe(zlib.createBrotliDecompress());
-    default:
-      return response;
-  }
+  const decoder = (() => {
+    switch (response.headers["content-encoding"]?.trim().toLowerCase()) {
+      case "gzip":
+      case "x-gzip":
+        return zlib.createGunzip();
+      case "deflate":
+        return zlib.createInflate();
+      case "br":
+        return zlib.createBrotliDecompress();
+      default:
+        return null;
+    }
+  })();
+  if (!decoder) return response;
+  // pipeline, not pipe: a dropped connection errors the body, and cancelling the body closes the socket.
+  pipeline(response, decoder, () => {});
+  return decoder;
 }
+
+/** Headers that may follow a redirect to another origin; anything else may carry a credential. */
+const CROSS_ORIGIN_HEADERS = new Set(["accept", "accept-language", "content-type", "content-length", "user-agent"]);
 
 /**
  * Drop-in `fetch` for URLs a user or model chose. Every hop, redirects included, must resolve to a
@@ -116,8 +125,8 @@ export const publicFetch: typeof fetch = async (input, init) => {
       if (hop === 5) break;
       const next = new URL(location, target);
       if (next.origin !== target.origin) {
-        delete headers.authorization;
-        delete headers.cookie;
+        // Provider keys also travel as x-api-key, x-goog-api-key, or custom headers, not only Authorization.
+        for (const name of Object.keys(headers)) if (!CROSS_ORIGIN_HEADERS.has(name)) delete headers[name];
       }
       if (status === 303 || ((status === 301 || status === 302) && method === "POST")) {
         method = "GET";

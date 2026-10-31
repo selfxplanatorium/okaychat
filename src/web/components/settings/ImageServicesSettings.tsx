@@ -92,6 +92,7 @@ function OwnKey({ service: s, onChange }: { service: ImageServiceStatus; onChang
         <Button size="sm" variant="outline" onClick={() => send("DELETE")} disabled={busy}>
           {t("providers.removeKey")}
         </Button>
+        {error && <span className="text-error mt-1 block text-xs">{error}</span>}
       </div>
     );
   }

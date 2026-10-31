@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { UIMessage } from "ai";
 import type { ModelInfo } from "../shared/types.js";
 import { extract } from "./files.js";
@@ -8,7 +9,9 @@ import { extract } from "./files.js";
 const cache = new Map<string, string>();
 const CACHE_SIZE = 50;
 
-async function pdfText(key: string, name: string, dataUrl: string): Promise<string> {
+async function pdfText(name: string, dataUrl: string): Promise<string> {
+  // Keyed by the bytes and name, never by client-chosen message ids, so one account's PDF cannot answer another's.
+  const key = createHash("sha256").update(name).update("\0").update(dataUrl).digest("hex");
   const hit = cache.get(key);
   if (hit) return hit;
   const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
@@ -25,9 +28,9 @@ export async function adaptPdfParts(messages: UIMessage[], model: ModelInfo): Pr
     messages.map(async (m) => {
       if (!m.parts.some((p) => p.type === "file" && p.mediaType === "application/pdf")) return m;
       const parts = await Promise.all(
-        m.parts.map(async (p, i) =>
+        m.parts.map(async (p) =>
           p.type === "file" && p.mediaType === "application/pdf" && p.url.startsWith("data:")
-            ? { type: "text" as const, text: await pdfText(`${m.id}:${i}`, p.filename ?? "document.pdf", p.url).catch((e: Error) => `[Could not read ${p.filename}: ${e.message}]`) }
+            ? { type: "text" as const, text: await pdfText(p.filename ?? "document.pdf", p.url).catch((e: Error) => `[Could not read ${p.filename}: ${e.message}]`) }
             : p,
         ),
       );

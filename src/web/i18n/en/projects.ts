@@ -10,7 +10,7 @@ export default {
   removeFile: "Remove {name}",
   pinFiles: "Pin files",
   newProject: "New project",
-  empty: "No projects yet.",
+  emptyTitle: "No projects yet",
   deleteProject: "Delete project",
   confirmDelete: "Delete \"{name}\"? Its chats stay and move to All chats.",
 } as const;

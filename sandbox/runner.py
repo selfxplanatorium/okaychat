@@ -25,6 +25,7 @@ import re
 import secrets
 import shutil
 import signal
+import stat
 import subprocess
 import threading
 import time
@@ -133,10 +134,17 @@ def private_dir(path: str, uid: int) -> str:
 
 def write_owned(full: str, data: bytes, uid: int) -> None:
     """Root writes into a user's directory. Never follow a symlink the user planted."""
-    if os.path.islink(full):
-        os.unlink(full)
-    fd = os.open(full, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
     try:
+        # A planted FIFO or device would block or misdirect the write, so only regular files stay.
+        if not stat.S_ISREG(os.lstat(full).st_mode):
+            os.unlink(full)
+    except FileNotFoundError:
+        pass
+    fd = os.open(full, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise Failure(400, "refusing to write over a special file")
+        os.ftruncate(fd, 0)
         os.fchown(fd, uid, uid)
         view = memoryview(data)
         while view:
@@ -403,12 +411,8 @@ def cancel(ws: str, job: str | None) -> None:
         targets = [job] if job else [name for name, owner in queued.items() if owner == ws]
         for name in targets:
             cancelled_jobs[name] = now + CANCEL_TTL
-        victim = running.get(ws)
-    if victim is not None and victim in targets:
-        try:
-            kill_uid(os.lstat(ws_path(ws)).st_uid)
-        except FileNotFoundError:
-            pass
+    # The running job's monitor sees the mark within 50 ms and kills its uid while it still owns the
+    # workspace; killing here could hit a successor that already took the same uid.
 
 
 def wait_for(acquire, job: str, seconds: float, busy: str) -> None:

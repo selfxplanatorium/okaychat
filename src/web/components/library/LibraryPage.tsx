@@ -333,14 +333,14 @@ export function LibraryPage() {
   return (
     <>
       <div hidden={section !== "files"} className="contents">
-        <LibraryFiles tabs={tabs} />
+        <LibraryFiles tabs={tabs} active={section === "files"} />
       </div>
       <div hidden={section !== "archived"} className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 pt-6 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-6">
         <header>
           <h1 className="text-xl font-semibold tracking-tight">{t("library.title")}</h1>
           <p className="text-muted-foreground mt-1 text-sm">{t("library.archivedIntro")}</p>
         </header>
-        <ArchivedChats tabs={tabs} />
+        <ArchivedChats tabs={tabs} active={section === "archived"} />
       </div>
     </>
   );
@@ -367,7 +367,7 @@ function LibrarySectionSwitch({ section, onChange }: { section: LibrarySection; 
   );
 }
 
-function LibraryFiles({ tabs }: { tabs: ReactNode }) {
+function LibraryFiles({ tabs, active }: { tabs: ReactNode; active: boolean }) {
   const projects = useData((s) => s.projects);
   const [view, setView] = useState<"grid" | "list">(() => (localStorage.getItem(VIEW_KEY) === "list" ? "list" : "grid"));
   const [kind, setKind] = useState<LibraryKind | "all">("all");
@@ -384,6 +384,8 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
   const [open, setOpen] = useState<LibraryItem | null>(null);
   const sentinel = useRef<HTMLDivElement>(null);
   const requestId = useRef(0);
+  const deletedIds = useRef(new Set<string>());
+  const clearSelection = useRef<() => void>(() => {});
 
   const params = useMemo(() => {
     const p = new URLSearchParams({ sort });
@@ -411,7 +413,8 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
           ? await api<LibraryPage>(`/library?${params}&cursor=${encodeURIComponent(nextCursor)}`)
           : await fetchLibraryFirstPage(params.toString());
         if (id !== requestId.current) return;
-        setItems((prev) => (nextCursor && prev ? [...prev, ...page.items] : page.items));
+        const fresh = page.items.filter((i) => !deletedIds.current.has(i.id));
+        setItems((prev) => (nextCursor && prev ? [...prev, ...fresh] : fresh));
         setCursor(page.nextCursor);
       } catch (cause) {
         if (id === requestId.current) { setItems((prev) => prev ?? []); setError(cause instanceof Error ? cause.message : t("library.loadFilesFailed")); }
@@ -426,6 +429,10 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
   // arrives, so a filter switch never blanks the grid into a skeleton.
   useEffect(() => {
     setCursor(null);
+    // This supersedes a running Select all, which would otherwise keep its spinner.
+    setLoadingAll(false);
+    // A selection belongs to the previous filter's results (library.md).
+    clearSelection.current();
     void load(null);
   }, [load]);
 
@@ -444,6 +451,8 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
   }, [cursor, loading, load]);
 
   const removeItem = (id: string) => {
+    // A page request already in flight may still list it.
+    deletedIds.current.add(id);
     forgetLibraryPages();
     setItems((prev) => prev?.filter((i) => i.id !== id) ?? null);
     setOpen((prev) => (prev?.id === id ? null : prev));
@@ -451,6 +460,7 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
 
   const order = useMemo(() => items?.map((i) => i.id) ?? [], [items]);
   const selection = useSelection(order);
+  clearSelection.current = selection.clear;
   const [bulkBusy, setBulkBusy] = useState(false);
   const [loadingAll, setLoadingAll] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
@@ -467,6 +477,8 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
   };
 
   const selectEverything = async () => {
+    // While a new filter's first page loads, the visible items belong to the previous filter.
+    if (refreshing) return;
     if (!cursor || !items) return selection.selectAll();
     const id = ++requestId.current;
     setLoading(true);
@@ -477,7 +489,7 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
       for (let next: string | null = cursor; next; ) {
         const page: LibraryPage = await api<LibraryPage>(`/library?${params}&cursor=${encodeURIComponent(next)}`);
         if (id !== requestId.current) return;
-        all = [...all, ...page.items];
+        all = [...all, ...page.items.filter((i) => !deletedIds.current.has(i.id))];
         next = page.nextCursor;
       }
       setItems(all);
@@ -493,7 +505,8 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
     }
   };
 
-  useSelectionKeys(selection.selecting, { onExit: () => setSelecting(false), onSelectAll: () => void selectEverything() });
+  // The hidden section stays mounted; only the visible one may take Ctrl/⌘+A and Escape.
+  useSelectionKeys(active && selection.selecting, { onExit: () => setSelecting(false), onSelectAll: () => void selectEverything() });
 
   const downloadSelected = async () => {
     const files = selectedItems.filter(downloadable);
@@ -508,6 +521,7 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
   const deleteSelected = async () => {
     const { failed, error } = await runBatch(deletable, deleteItem);
     const gone = new Set(deletable.filter((i) => !failed.includes(i)).map((i) => i.id));
+    for (const id of gone) deletedIds.current.add(id);
     forgetLibraryPages();
     setItems((prev) => prev?.filter((i) => !gone.has(i.id)) ?? null);
     if (gone.size) void useData.getState().refreshStorage().catch(() => {});
@@ -522,7 +536,7 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-4 pt-6 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-6">
       {error && <p role="alert" className="text-destructive text-sm">{error}</p>}
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+        <div className="min-w-0 flex-1">
           <h1 className="text-xl font-semibold tracking-tight">{t("library.title")}</h1>
           <p className="text-muted-foreground mt-1 text-sm">{t("library.filesIntro")}</p>
         </div>
@@ -572,14 +586,14 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
             </button>
           ))}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative min-w-0 flex-1 basis-56">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+          <div className="relative col-span-2 min-w-0 sm:col-auto sm:flex-1 sm:basis-56">
             <SearchIcon className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
             <Input value={search} onChange={(e) => setSearch(e.currentTarget.value)} placeholder={t("library.searchPlaceholder")} aria-label={t("library.searchLabel")} className="pl-8" />
           </div>
           <Select
             aria-label={t("library.sourceLabel")}
-            className="w-40"
+            className="w-full sm:w-40"
             value={source}
             onValueChange={setSource}
             options={[
@@ -590,14 +604,14 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
           />
           <Select
             aria-label={t("library.projectLabel")}
-            className="w-44"
+            className="w-full sm:w-44"
             value={project}
             onValueChange={setProject}
             options={[{ value: "all", label: t("library.allProjects") }, ...projects.map((p) => ({ value: p.id, label: p.name }))]}
           />
           <Select
             aria-label={t("library.sortLabel")}
-            className="w-40"
+            className="col-span-2 w-full sm:col-auto sm:w-40"
             value={sort}
             onValueChange={setSort}
             options={[

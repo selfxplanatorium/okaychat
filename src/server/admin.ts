@@ -8,6 +8,7 @@ import { requireAdmin, signupAllowed, type AppEnv } from "./auth.js";
 import { deleteConnection, getSharedConnection, listProviders, listSharedModels, saveConnection } from "./catalog/providers.js";
 import { ollamaManagementRoutes } from "./catalog/ollama-routes.js";
 import { hashPassword, newId } from "./crypto.js";
+import { disconnect as disconnectCodex } from "./codex.js";
 import { db } from "./db.js";
 import {
   clearModelAccessPoliciesForUser,
@@ -87,8 +88,14 @@ export const adminRoutes = new Hono<AppEnv>()
     const id = c.req.param("id");
     const target = db.prepare("SELECT role FROM users WHERE id = ?").get(id) as { role: string } | undefined;
     if (!target) return c.json({ error: "Not found" }, 404);
-    // The requester is always an admin, so blocking self-demotion also keeps at least one admin.
     if (body.data.role === "user" && id === c.get("user").id) return c.json({ error: "You cannot remove your own admin role." }, 400);
+    // The role was checked before the body was read; two admins demoting each other must not both win.
+    const requester = db.prepare("SELECT role FROM users WHERE id = ?").get(c.get("user").id) as { role: string } | undefined;
+    if (requester?.role !== "admin") return c.json({ error: "Forbidden" }, 403);
+    if (body.data.role === "user" && target.role === "admin") {
+      const { n } = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin'").get() as { n: number };
+      if (n <= 1) return c.json({ error: "Keep at least one admin." }, 400);
+    }
     if (body.data.name) db.prepare("UPDATE users SET name = ? WHERE id = ?").run(body.data.name, id);
     if (body.data.role) db.prepare("UPDATE users SET role = ? WHERE id = ?").run(body.data.role, id);
     if (body.data.storageLimit !== undefined) db.prepare("UPDATE users SET storage_limit = ? WHERE id = ?").run(body.data.storageLimit, id);
@@ -104,6 +111,8 @@ export const adminRoutes = new Hono<AppEnv>()
     if (id === c.get("user").id) return c.json({ error: "You cannot delete your own account here." }, 400);
     if (!db.prepare("SELECT 1 FROM users WHERE id = ?").get(id)) return c.json({ error: "Not found" }, 404);
     clearModelAccessPoliciesForUser(id);
+    // A pending ChatGPT login would otherwise save credentials for the deleted user when it completes.
+    disconnectCodex(id);
     db.prepare("DELETE FROM users WHERE id = ?").run(id);
     await rm(path.join(env.dataDir, "images", id), { recursive: true, force: true });
     return c.json({ ok: true });

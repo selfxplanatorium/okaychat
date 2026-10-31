@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { HTTPException } from "hono/http-exception";
 import type { ModelInfo, ProviderConnectionInput, ProviderInfo } from "../../shared/types.js";
 import { decrypt, encrypt } from "../crypto.js";
@@ -300,17 +301,21 @@ export async function listProviders(scope: ConnectionScope): Promise<ProviderInf
   return out.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 }
 
-// Live `/models` lists, keyed by URL. Short TTL because providers add models often.
+// Live `/models` lists, keyed by URL, a fingerprint of the key, and the transport: an authenticated
+// list belongs to its key, so another account must not read it. Short TTL because providers add models often.
+const liveKey = (url: string, apiKey: string | undefined, guarded: boolean) =>
+  `${guarded ? "g" : "d"}:${apiKey ? createHash("sha256").update(apiKey).digest("hex").slice(0, 32) : "-"}:${url}`;
 const liveCache = new Map<string, { ids: string[]; at: number }>();
 const LIVE_TTL_MS = 15 * 60 * 1000;
 
 const liveInflight = new Map<string, Promise<string[] | null>>();
 
 function fetchLive(url: string, apiKey?: string, guarded = false): Promise<string[] | null> {
-  let pending = liveInflight.get(url);
+  const key = liveKey(url, apiKey, guarded);
+  let pending = liveInflight.get(key);
   if (!pending) {
     pending = (async () => {
-      const hit = liveCache.get(url);
+      const hit = liveCache.get(key);
       try {
         const res = await (guarded ? publicFetch : fetch)(url, {
           headers: { "User-Agent": USER_AGENT, ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
@@ -319,21 +324,21 @@ function fetchLive(url: string, apiKey?: string, guarded = false): Promise<strin
         if (!res.ok) return hit?.ids ?? null;
         const body = (await res.json()) as { data?: Array<{ id: string }> };
         const ids = (body.data ?? []).map((m) => m.id);
-        liveCache.set(url, { ids, at: Date.now() });
+        liveCache.set(key, { ids, at: Date.now() });
         return ids;
       } catch {
         return hit?.ids ?? null;
       } finally {
-        liveInflight.delete(url);
+        liveInflight.delete(key);
       }
     })();
-    liveInflight.set(url, pending);
+    liveInflight.set(key, pending);
   }
   return pending;
 }
 
 async function fetchLiveIds(url: string, apiKey?: string, guarded = false): Promise<string[] | null> {
-  const hit = liveCache.get(url);
+  const hit = liveCache.get(liveKey(url, apiKey, guarded));
   if (!hit) return fetchLive(url, apiKey, guarded);
   // A known list answers at once. An expired one is refreshed behind the request instead of delaying it.
   if (Date.now() - hit.at >= LIVE_TTL_MS) void fetchLive(url, apiKey, guarded);

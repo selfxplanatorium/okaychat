@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { Schedule, ScheduleSpec } from "../shared/types.js";
 import type { AppEnv } from "./auth.js";
-import { turnStream } from "./chat.js";
+import { reserveTurn, turnStream } from "./chat.js";
 import { markBusy, threadBusy } from "./thread-runs.js";
 import { newId } from "./crypto.js";
 import { db } from "./db.js";
@@ -74,18 +74,34 @@ export function nextRun(spec: ScheduleSpec, after: number): number | null {
   for (let d = 0; d <= 7; d++) {
     const day = new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() + d, hh, mm));
     if (spec.weekdays.length && !spec.weekdays.includes(day.getUTCDay())) continue;
-    // Convert the local wall time to UTC with the offset that applies on that day (DST changes it).
-    const guess = day.getTime() - offset * 60_000;
-    const at = day.getTime() - offsetMinutes(spec.timeZone, guess) * 60_000;
+    const at = wallTimeToUtc(spec.timeZone, day.getTime());
     if (at > after) return at;
   }
   return null;
 }
 
+/**
+ * The UTC instant of a local wall time (given as a UTC-labelled timestamp). Tries the zone's offsets
+ * before and after any change that day: a repeated time (autumn) takes its first occurrence, and a
+ * skipped time (the spring gap) moves forward by the gap, never back before it.
+ */
+function wallTimeToUtc(timeZone: string, wall: number): number {
+  const offsets = new Set([offsetMinutes(timeZone, wall - 14 * 3_600_000), offsetMinutes(timeZone, wall + 14 * 3_600_000)]);
+  const candidates = [...offsets].map((offset) => wall - offset * 60_000);
+  const valid = candidates.filter((at) => at + offsetMinutes(timeZone, at) * 60_000 === wall);
+  return valid.length ? Math.min(...valid) : Math.max(...candidates);
+}
+
 const running = new Set<string>();
 
-export async function runSchedule(row: Row): Promise<void> {
-  if (running.has(row.id)) return;
+/**
+ * Runs one schedule. It takes one of the account's turn slots (the same limit as interactive chat)
+ * unless the caller already reserved it; without a free slot the run stays due for the next tick.
+ */
+export async function runSchedule(row: Row, reserved?: () => void): Promise<void> {
+  if (running.has(row.id)) return reserved?.();
+  const release = reserved ?? reserveTurn(row.user_id);
+  if (!release) return;
   running.add(row.id);
   const startedAt = Date.now();
   db.prepare("UPDATE schedules SET last_status = 'running', last_error = NULL, next_run_at = ? WHERE id = ?").run(
@@ -129,6 +145,8 @@ export async function runSchedule(row: Row): Promise<void> {
     for await (const message of readUIMessageStream({ stream })) assistant = message;
     if (!assistant) throw new AppError({ code: "tool_failed", message: "The model returned nothing." });
     const failed = assistant.parts.length === 0;
+    // appendMessage creates a missing thread; a chat deleted during the run must stay deleted.
+    if (!getThread(row.user_id, threadId)) throw new AppError({ code: "not_found", message: "Its chat was deleted while the run was replying." });
     appendMessage(row.user_id, threadId, { id: assistant.id || generateId(), parent_id: userMessage.id, format: "ai-sdk/v6", content: withoutId(assistant) });
     db.prepare("UPDATE schedules SET last_run_at = ?, last_status = ?, last_error = ? WHERE id = ?").run(
       startedAt,
@@ -142,6 +160,7 @@ export async function runSchedule(row: Row): Promise<void> {
   } finally {
     releaseThread?.();
     running.delete(row.id);
+    release();
   }
 }
 
@@ -161,7 +180,11 @@ const blocked = (row: Row) => row.thread_mode === "same" && !!row.thread_id && t
 async function tick() {
   const due = db.prepare("SELECT * FROM schedules WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?").all(Date.now()) as unknown as Row[];
   // One at a time keeps a burst of schedules from hammering a provider. Blocked runs stay due and retry next tick.
-  for (const row of due) if (!blocked(row)) await runSchedule(row);
+  for (const { id } of due) {
+    // Earlier runs can take minutes; a schedule deleted, disabled, or edited meanwhile uses its current row.
+    const row = db.prepare("SELECT * FROM schedules WHERE id = ? AND enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?").get(id, Date.now()) as Row | undefined;
+    if (row && !blocked(row)) await runSchedule(row);
+  }
 }
 
 let ticking = false;
@@ -259,7 +282,9 @@ export const scheduleRoutes = new Hono<AppEnv>()
     const row = getRow(c.get("user").id, c.req.param("id"));
     if (!row) return c.json({ error: "Not found" }, 404);
     if (blocked(row)) return c.json({ error: "Its chat is replying. Try again when it finishes." }, 409);
-    void runSchedule(row);
+    const release = reserveTurn(row.user_id);
+    if (!release) return c.json({ error: "Too many replies are running for this account. Try again when one finishes." }, 429);
+    void runSchedule(row, release);
     return c.json({ ok: true });
   })
   .delete("/schedules/:id", (c) => {

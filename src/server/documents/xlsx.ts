@@ -274,30 +274,61 @@ const colName = (n: number): string => (n <= 0 ? "" : colName(Math.floor((n - 1)
  * (count < 0) at `at`. exceljs does not do this, so formulas would otherwise point at the wrong cells.
  */
 function shiftReferences(wb: ExcelJS.Workbook, target: ExcelJS.Worksheet, axis: "row" | "col", at: number, count: number) {
-  const ref = /('(?:[^']|'')+'|[A-Za-z_][\w.]*)?(!)?(\$?)([A-Z]{1,3})(\$?)(\d+)(?![\w(])/g;
+  // An optional sheet qualifier (which covers both ends of a range), a cell, and an optional range end.
+  const ref = /(?<![\w.$'])(?:('(?:[^']|'')+'|[A-Za-z_][\w.]*)!)?(\$?)([A-Z]{1,3})(\$?)(\d+)(?::(\$?)([A-Z]{1,3})(\$?)(\d+))?(?![\w(])/g;
+  const removed = count < 0 ? -count : 0;
+  // Where a row/column index lands; null when it was deleted.
+  const moved = (n: number): number | null => (n < at ? n : count > 0 ? n + count : n >= at + removed ? n - removed : null);
   const shift = (formula: string, home: ExcelJS.Worksheet) =>
-    formula
-      .split(/("(?:[^"]|"")*")/)
-      .map((chunk, i) =>
-        i % 2
-          ? chunk
-          : chunk.replace(ref, (m, sheet: string | undefined, bang, d1, col: string, d2, row: string) => {
-              if (sheet && !bang) return m;
-              const sheetName = sheet?.replace(/^'|'$/g, "").replaceAll("''", "'");
-              if ((sheetName ?? home.name) !== target.name) return m;
-              let r = +row;
-              let c = colNum(col);
-              if (axis === "row" && r >= at) r = count > 0 ? r + count : r < at - count ? at : r + count;
-              if (axis === "col" && c >= at) c = count > 0 ? c + count : c < at - count ? at : c + count;
-              return `${sheet ? `${sheet}!` : ""}${d1}${colName(c)}${d2}${r}`;
-            }),
-      )
-      .join("");
+    formulaChunks(formula, (chunk) =>
+      chunk.replace(ref, (m, sheet: string | undefined, d1: string, col: string, d2: string, row: string, e1?: string, endCol?: string, e2?: string, endRow?: string) => {
+        if ((sheetLabel(sheet) ?? home.name) !== target.name) return m;
+        const prefix = sheet ? `${sheet}!` : "";
+        const index = (c: string, r: string) => (axis === "row" ? +r : colNum(c));
+        const cell = (c: string, r: string, n: number, dc: string, dr: string) =>
+          axis === "row" ? `${dc}${c}${dr}${n}` : `${dc}${colName(n)}${dr}${r}`;
+        if (endCol === undefined || endRow === undefined) {
+          const n = moved(index(col, row));
+          // A reference to a deleted cell is broken, as in Excel; clamping it would point at other data.
+          return n === null ? "#REF!" : `${prefix}${cell(col, row, n, d1, d2)}`;
+        }
+        const first = index(col, row);
+        const last = index(endCol, endRow);
+        // A range shrinks around deleted rows or columns and breaks only when all of it is gone.
+        const start = moved(first) ?? at;
+        const end = moved(last) ?? at - 1;
+        if (end < start) return "#REF!";
+        return `${prefix}${cell(col, row, start, d1, d2)}:${cell(endCol, endRow, end, e1 ?? "", e2 ?? "")}`;
+      }),
+    );
   for (const ws of wb.worksheets) {
     ws.eachRow({ includeEmpty: false }, (row) =>
       row.eachCell({ includeEmpty: false }, (cell) => {
         const v = cell.value as ExcelJS.CellFormulaValue | null;
         if (cell.type === ExcelJS.ValueType.Formula && v && "formula" in v && v.formula) cell.value = { ...v, formula: shift(v.formula, ws) };
+      }),
+    );
+  }
+}
+
+/** Applies `edit` to the parts of a formula outside string literals. */
+const formulaChunks = (formula: string, edit: (chunk: string) => string) =>
+  formula.split(/("(?:[^"]|"")*")/).map((chunk, i) => (i % 2 ? chunk : edit(chunk))).join("");
+
+const sheetLabel = (sheet: string | undefined) => sheet?.replace(/^'|'$/g, "").replaceAll("''", "'");
+const quoteSheet = (name: string) => (/^[A-Za-z_][\w.]*$/.test(name) ? name : `'${name.replaceAll("'", "''")}'`);
+
+/** exceljs renames only the sheet; formulas on every sheet that name it must follow. */
+function renameReferences(wb: ExcelJS.Workbook, from: string, to: string) {
+  const qualifier = /(?<![\w.$'])('(?:[^']|'')+'|[A-Za-z_][\w.]*)!/g;
+  for (const ws of wb.worksheets) {
+    ws.eachRow({ includeEmpty: false }, (row) =>
+      row.eachCell({ includeEmpty: false }, (cell) => {
+        const v = cell.value as ExcelJS.CellFormulaValue | null;
+        if (cell.type !== ExcelJS.ValueType.Formula || !v || !("formula" in v) || !v.formula) return;
+        const formula = formulaChunks(v.formula, (chunk) =>
+          chunk.replace(qualifier, (m, sheet: string) => (sheetLabel(sheet)!.toLowerCase() === from.toLowerCase() ? `${quoteSheet(to)}!` : m)));
+        if (formula !== v.formula) cell.value = { ...v, formula };
       }),
     );
   }
@@ -372,9 +403,13 @@ function applyOp(wb: ExcelJS.Workbook, op: XlsxOp) {
       }
       return;
     }
-    case "rename_sheet":
-      sheetOf(wb, op.sheet).name = op.name.slice(0, 31);
+    case "rename_sheet": {
+      const ws = sheetOf(wb, op.sheet);
+      const from = ws.name;
+      ws.name = op.name.slice(0, 31);
+      renameReferences(wb, from, ws.name);
       return;
+    }
     case "delete_sheet":
       if (wb.worksheets.length === 1) throw new Error("A workbook needs at least one sheet");
       wb.removeWorksheet(sheetOf(wb, op.sheet).id);

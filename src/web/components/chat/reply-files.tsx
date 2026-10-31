@@ -1,5 +1,6 @@
 import { DownloadIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { AudioPlayer } from "@/components/assistant-ui/elements/media-player";
 import { t } from "@/i18n";
 import { formatBytes } from "@/i18n/format";
 import { api } from "@/lib/api";
@@ -24,10 +25,9 @@ export function RunFiles({ files, className }: { files: readonly RunFile[]; clas
         <img key={f.path} src={f.url} alt={f.path} className="animate-blur-in my-2 h-auto max-h-[28rem] w-auto max-w-full rounded-xl border bg-white" />
       ))}
       {audio.map((f) => (
-        <figure key={f.path} className="my-2 flex max-w-md flex-col gap-1">
-          <audio controls preload="metadata" src={f.url} className="w-full" />
-          <figcaption className="text-muted-foreground truncate text-xs">{f.path}</figcaption>
-        </figure>
+        <div key={f.path} className="my-2 max-w-md">
+          <AudioPlayer src={f.url} title={f.path} />
+        </div>
       ))}
       <div className="flex flex-wrap gap-1.5">
         {(all ? files : files.slice(0, FILES_SHOWN)).map((f) => (
@@ -47,7 +47,7 @@ export function RunFiles({ files, className }: { files: readonly RunFile[]; clas
   );
 }
 
-type Part = { type: string; toolName?: string; args?: unknown; result?: unknown };
+type Part = { type: string; toolName?: string; args?: unknown; result?: unknown; isError?: boolean };
 
 /**
  * What a reply's runs left for the user: every file any run wrote (the latest copy per path), minus files a
@@ -58,7 +58,8 @@ export function replyFiles(parts: readonly Part[]): RunFile[] {
   const imported = new Set<string>();
   for (const part of parts) {
     if (part.type !== "tool-call") continue;
-    if (part.toolName === "import_document") {
+    // Only a successful import has an artifact card; a failed one leaves the file here as its only link.
+    if (part.toolName === "import_document" && !part.isError && typeof (part.result as { id?: unknown } | undefined)?.id === "string") {
       const id = (part.args as { file_id?: unknown } | undefined)?.file_id;
       if (typeof id === "string") imported.add(id);
     }

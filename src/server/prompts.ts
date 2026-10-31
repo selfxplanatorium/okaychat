@@ -262,7 +262,7 @@ Write dense, factual bullets. Merge duplicates. When memories conflict, keep the
 export const PROMPT_KEYS = Object.keys(DEFS) as PromptKey[];
 export const MAX_PROMPT_CHARS = 50_000;
 
-const isKey = (key: string): key is PromptKey => key in DEFS;
+const isKey = (key: string): key is PromptKey => Object.hasOwn(DEFS, key);
 
 function override(key: PromptKey): string | null {
   const row = db.prepare("SELECT value FROM server_settings WHERE key = ?").get(`prompt:${key}`) as { value: string } | undefined;
@@ -273,7 +273,7 @@ function override(key: PromptKey): string | null {
 export function promptText(key: PromptKey, values: Record<string, string | number> = {}): string {
   const text = override(key) ?? DEFS[key].defaultValue;
   const filled: Record<string, string | number> = key === "artifacts" ? { maxShots: MAX_SHOTS_PER_TURN, ...values } : values;
-  return text.replace(/\{(\w+)\}/g, (match, name: string) => (name in filled ? String(filled[name]) : match));
+  return text.replace(/\{(\w+)\}/g, (match, name: string) => (Object.hasOwn(filled, name) ? String(filled[name]) : match));
 }
 
 export function listPrompts(): AdminPrompt[] {
@@ -283,6 +283,8 @@ export function listPrompts(): AdminPrompt[] {
 /** null removes the override. Returns false for an unknown key. */
 export function setPrompt(key: string, value: string | null): boolean {
   if (!isKey(key)) return false;
+  // Saving the default text stores no override, so a later release's new default still applies.
+  if (value === DEFS[key].defaultValue) value = null;
   if (value === null) db.prepare("DELETE FROM server_settings WHERE key = ?").run(`prompt:${key}`);
   else
     db.prepare("INSERT INTO server_settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(`prompt:${key}`, value);

@@ -1,5 +1,5 @@
 import { Loader2Icon } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { SPEECH_KEY_SERVICES, type AdminSpeechSettings, type SpeechKeyService, type SpeechOptionList } from "@shared/speech";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
@@ -46,23 +46,38 @@ const WHISPER_SIZES: Record<string, PlainMessageKey> = {
 export function AdminVoiceSettings() {
   const [data, setData] = useState<AdminSpeech | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const refresh = useCallback(() => api<AdminSpeech>("/admin/speech").then(setData), []);
+  // The PUT replaces the whole configuration, so saves run one at a time on the latest saved state.
+  const saved = useRef<AdminSpeechSettings | null>(null);
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  const refresh = useCallback(
+    () =>
+      api<AdminSpeech>("/admin/speech").then((next) => {
+        saved.current = next.settings;
+        setData(next);
+      }),
+    [],
+  );
   useEffect(() => {
     void refresh();
   }, [refresh]);
   if (!data) return null;
   const s = data.settings;
-  const save = async (patch: Partial<Omit<AdminSpeechSettings, "local">> & { local?: Partial<AdminSpeechSettings["local"]> }) => {
+  const save = (patch: Partial<Omit<AdminSpeechSettings, "local">> & { local?: Partial<AdminSpeechSettings["local"]> }) => {
     setError(null);
-    try {
-      const next = await api<AdminSpeechSettings>("/admin/speech", { method: "PUT", json: { ...s, ...patch, local: { ...s.local, ...patch.local } } });
-      setData({ ...data, settings: next });
-      // The admin's own Voice page reads availability from the same status.
-      void useSpeech.getState().load();
-      if (patch.retentionHours !== undefined) void refresh();
-    } catch (e) {
-      setError((e as Error).message);
-    }
+    queue.current = queue.current.then(async () => {
+      const base = saved.current ?? s;
+      try {
+        const next = await api<AdminSpeechSettings>("/admin/speech", { method: "PUT", json: { ...base, ...patch, local: { ...base.local, ...patch.local } } });
+        saved.current = next;
+        setData((current) => (current ? { ...current, settings: next } : current));
+        // The admin's own Voice page reads availability from the same status.
+        void useSpeech.getState().load();
+        if (patch.retentionHours !== undefined) void refresh();
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    });
+    return queue.current;
   };
   const w = data.worker;
   const workerState = !w.configured

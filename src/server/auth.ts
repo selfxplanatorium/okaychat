@@ -122,6 +122,14 @@ export function recordFailure(key: string) {
   else failures.set(key, { count: 1, resetAt: now + WINDOW_MS });
 }
 
+/** Gives back an attempt recorded up front by a request that turned out to succeed. */
+export function forgiveFailure(key: string) {
+  const entry = failures.get(key);
+  if (!entry) return;
+  if (entry.count <= 1) failures.delete(key);
+  else entry.count--;
+}
+
 /** Test hook: forget failed attempts. */
 export const resetLoginLimits = () => failures.clear();
 
@@ -184,12 +192,15 @@ export const authRoutes = new Hono<AppEnv>()
     const row = db.prepare("SELECT id, password_hash FROM users WHERE lower(email) = ? ORDER BY created_at LIMIT 1").get(body.data.email) as
       | { id: string; password_hash: string }
       | undefined;
+    // Count the attempt before awaiting scrypt, so a burst of parallel guesses cannot all pass the check.
+    recordFailure(client);
+    recordFailure(account);
     const valid = await verifyPassword(body.data.password, row?.password_hash ?? (await dummyHash));
-    if (!row || !valid) {
-      recordFailure(client);
-      recordFailure(account);
-      return c.json({ error: "Invalid email or password." }, 401);
-    }
+    if (!row || !valid) return c.json({ error: "Invalid email or password." }, 401);
+    // A password reset during verification revokes sessions; the old password must not mint a new one.
+    const current = db.prepare("SELECT password_hash FROM users WHERE id = ?").get(row.id) as { password_hash: string } | undefined;
+    if (current?.password_hash !== row.password_hash) return c.json({ error: "Invalid email or password." }, 401);
+    forgiveFailure(client);
     failures.delete(account);
     createSession(c, row.id);
     return c.json({ ok: true });

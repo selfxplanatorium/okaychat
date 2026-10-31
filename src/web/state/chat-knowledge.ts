@@ -21,6 +21,8 @@ interface ChatKnowledgeState {
   loadCollections: (projectId: string | null) => Promise<KnowledgeCollection[]>;
 }
 
+let collectionsRequest = 0;
+
 export const useChatKnowledgeStore = create<ChatKnowledgeState>((set, get) => ({
   byId: {},
   collections: null,
@@ -34,14 +36,16 @@ export const useChatKnowledgeStore = create<ChatKnowledgeState>((set, get) => ({
     set((state) => ({ byId: { ...state.byId, [remoteId]: [...ids] } }));
   },
   loadCollections: async (projectId) => {
+    // Only the newest request may write: an older project's answer would offer collections this chat cannot use.
+    const request = ++collectionsRequest;
     set({ loading: true });
     try {
       const path = projectId ? `/knowledge/collections?project=${encodeURIComponent(projectId)}` : "/knowledge/collections?project=none";
       const { collections } = await api<{ collections: KnowledgeCollection[] }>(path);
-      set({ collections, loading: false });
+      if (request === collectionsRequest) set({ collections, loading: false });
       return collections;
     } catch (error) {
-      set({ loading: false });
+      if (request === collectionsRequest) set({ loading: false });
       throw error;
     }
   },

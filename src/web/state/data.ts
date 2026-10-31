@@ -40,6 +40,7 @@ interface DataState {
 
 const SELECTED_KEY = "okaychat:selected-model";
 const PROJECT_KEY = "okaychat:active-project";
+let settingsWrite = 0;
 let promptRequest = 0;
 
 export const useData = create<DataState>((set, get) => ({
@@ -99,8 +100,26 @@ export const useData = create<DataState>((set, get) => ({
   },
   refreshStorage: async () => set({ storage: await api<StorageInfo>("/storage") }),
   updateSettings: async (patch) => {
-    set({ settings: { ...get().settings!, ...patch } });
-    set({ settings: await api<UserSettings>("/settings", { method: "PATCH", json: patch }) });
+    const before = get().settings!;
+    const request = ++settingsWrite;
+    set({ settings: { ...before, ...patch } });
+    let saved: UserSettings;
+    try {
+      saved = await api<UserSettings>("/settings", { method: "PATCH", json: patch });
+    } catch (error) {
+      // Roll back only the fields this patch set and nothing changed since.
+      const current = get().settings;
+      if (current) {
+        const restored: Record<string, unknown> = { ...current };
+        for (const key of Object.keys(patch) as (keyof UserSettings)[]) {
+          if (current[key] === patch[key]) restored[key] = before[key];
+        }
+        set({ settings: restored as unknown as UserSettings });
+      }
+      throw error;
+    }
+    // An older response must not overwrite a newer optimistic edit.
+    if (request === settingsWrite) set({ settings: saved });
     if (Object.hasOwn(patch, "defaultModel")) get().resetModel();
   },
   selectModel: (ref, threadId) => {

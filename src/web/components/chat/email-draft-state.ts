@@ -142,6 +142,8 @@ export class DraftAutosave {
   private error: string | null = null;
   private timer: unknown = null;
   private inFlight: Promise<void> | null = null;
+  /** The whole flush, including saves queued while one was in flight. */
+  private draining: Promise<void> | null = null;
   private flushAgain = false;
   private controller: AbortController | null = null;
   private disposed = false;
@@ -196,7 +198,9 @@ export class DraftAutosave {
       this.emit();
       return;
     }
-    if (options.preserveLocal && this.dirty) {
+    // A save in flight is local work too: its text must survive the model's newer revision.
+    if (options.preserveLocal && (this.dirty || this.inFlight)) {
+      this.dirty = true;
       this.draft = draft;
       this.revision = draft.revision;
       this.error = null;
@@ -280,11 +284,35 @@ export class DraftAutosave {
   async flush(): Promise<void> {
     this.clearPendingTimer();
     if (this.disposed) return;
-    if (this.inFlight) {
+    // Joining callers wait for the whole drain, not only the request already in flight.
+    if (this.draining) {
       this.flushAgain = true;
-      return this.inFlight;
+      return this.draining;
     }
     if (!this.dirty || this.status === "conflict") return;
+    this.draining = this.drain();
+    try {
+      await this.draining;
+    } finally {
+      this.draining = null;
+    }
+  }
+
+  private async drain(): Promise<void> {
+    for (;;) {
+      await this.saveOnce();
+      if (this.disposed) return;
+      if (this.flushAgain) {
+        this.flushAgain = false;
+        if (this.dirty && this.status !== "conflict") continue;
+      } else if (this.dirty && (this.status as DraftSaveStatus) === "pending") {
+        this.schedule();
+      }
+      return;
+    }
+  }
+
+  private async saveOnce(): Promise<void> {
     this.dirty = false;
     this.status = "saving";
     this.error = null;
@@ -297,7 +325,8 @@ export class DraftAutosave {
       try {
         const saved = await this.options.save({ revision, fields, signal: controller.signal });
         if (this.disposed) return;
-        if (saved.revision < this.revision) {
+        // Compare with the newest record seen too: a model write applied meanwhile can be newer than the base.
+        if (saved.revision < Math.max(this.revision, this.draft.revision)) {
           // A newer model write won the race after this request left. Keep it instead of moving back.
           this.status = this.dirty ? "pending" : "saved";
           if (this.dirty) writeOutbox(this.storage, this.options.key, { revision: this.revision, fields: this.fields, savedAt: this.now() });
@@ -312,7 +341,9 @@ export class DraftAutosave {
         } else {
           this.fields = fieldsOf(saved);
           this.status = "saved";
-          clearOutbox(this.storage, this.options.key);
+          // Another card or tab of the same draft may have written newer text to the shared entry.
+          const stored = readOutbox(this.storage, this.options.key);
+          if (!stored || JSON.stringify(stored.fields) === JSON.stringify(fields)) clearOutbox(this.storage, this.options.key);
         }
       } catch (error) {
         if (this.disposed || controller.signal.aborted) return;
@@ -330,12 +361,6 @@ export class DraftAutosave {
     this.inFlight = null;
     if (this.disposed) return;
     this.emit();
-    if (this.flushAgain) {
-      this.flushAgain = false;
-      if (this.dirty) await this.flush();
-    } else if (this.dirty && (this.status as DraftSaveStatus) === "pending") {
-      this.schedule();
-    }
   }
 
   /** Manual retry: a conflict first adopts the latest revision, keeping the user's text. */

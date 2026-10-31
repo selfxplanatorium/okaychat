@@ -575,32 +575,63 @@ const AUTO_REVEAL = 80;
 const MANUAL_REVEAL = 50;
 const MESSAGE_COMPONENTS = { Message: ThreadMessage };
 
-/** Message ids in order, with a stable identity while only message content changes (streaming). */
-const useMessageIds = (): readonly string[] => {
+/**
+ * Message ids in order, with a stable identity while only message content changes (streaming), and a
+ * React key per message. A sent message first shows assistant-ui's optimistic reply placeholder, which
+ * the streamed reply replaces under the server's id. The reply inherits the placeholder's key, or it
+ * remounts mid-send: its fade replays and the top-anchor reserve collapses and regrows.
+ */
+const useMessageIds = (): { ids: readonly string[]; keys: readonly string[] } => {
   const messages = useAuiState((s) => s.thread.messages);
-  const ids = useRef<readonly string[]>([]);
-  const prev = ids.current;
-  if (prev.length !== messages.length || messages.some((m, i) => m.id !== prev[i])) {
-    ids.current = messages.map((m) => m.id);
+  const state = useRef<{
+    ids: readonly string[];
+    keys: readonly string[];
+    aliases: Map<string, string>;
+    optimisticTail: boolean;
+  }>({ ids: [], keys: [], aliases: new Map(), optimisticTail: false });
+  const prev = state.current;
+  if (prev.ids.length !== messages.length || messages.some((m, i) => m.id !== prev.ids[i])) {
+    const ids = messages.map((m) => m.id);
+    const tail = ids.length - 1;
+    const replacesPlaceholder =
+      prev.optimisticTail &&
+      prev.ids.length === ids.length &&
+      messages[tail]?.role === "assistant" &&
+      ids.every((id, i) => i === tail || id === prev.ids[i]);
+    // Kept for the reply's lifetime: dropping the alias later would remount it on the next send.
+    const aliases = new Map<string, string>();
+    for (const id of ids) {
+      const key = prev.aliases.get(id);
+      if (key) aliases.set(id, key);
+    }
+    if (replacesPlaceholder) aliases.set(ids[tail]!, prev.keys[tail]!);
+    state.current = { ids, keys: ids.map((id) => aliases.get(id) ?? id), aliases, optimisticTail: false };
   }
-  return ids.current;
+  state.current.optimisticTail = messages.at(-1)?.metadata.isOptimistic === true;
+  return state.current;
 };
 
 /** `start`: first rendered index. `floor`: how far back slices reveal without a click. */
-type MessageWindow = { firstId: string | undefined; start: number; floor: number };
+type MessageWindow = { firstId: string | undefined; length: number; start: number; floor: number };
 const openWindow = (ids: readonly string[]): MessageWindow => ({
   firstId: ids[0],
+  length: ids.length,
   start: Math.max(0, ids.length - FIRST_PAINT),
   floor: Math.max(0, ids.length - AUTO_REVEAL),
 });
 
 const WindowedMessages: FC<{ viewportRef: RefObject<HTMLDivElement | null> }> = ({ viewportRef }) => {
-  const ids = useMessageIds();
+  const { ids, keys } = useMessageIds();
   const [stored, setWindow] = useState(() => openWindow(ids));
   // Another thread or branch: start over from its newest messages. New messages at the end keep the window.
+  // A shorter list with the same first id is another branch too (a fork keeps its source's message ids),
+  // and its indices would otherwise point past its end.
   let win = stored;
-  if (stored.firstId !== ids[0]) {
+  if (stored.firstId !== ids[0] || ids.length < stored.length) {
     win = openWindow(ids);
+    setWindow(win);
+  } else if (ids.length !== stored.length) {
+    win = { ...stored, length: ids.length };
     setWindow(win);
   }
   const { start, floor } = win;
@@ -718,8 +749,8 @@ const WindowedMessages: FC<{ viewportRef: RefObject<HTMLDivElement | null> }> = 
           />
         )}
       </span>
-      {ids.slice(start).map((id, i) => (
-        <ThreadPrimitive.MessageByIndex key={id} index={start + i} components={MESSAGE_COMPONENTS} />
+      {keys.slice(start).map((key, i) => (
+        <ThreadPrimitive.MessageByIndex key={key} index={start + i} components={MESSAGE_COMPONENTS} />
       ))}
     </>
   );
@@ -1205,7 +1236,9 @@ const StreamingIndicator: FC<{ waiting: boolean }> = ({ waiting }) => {
       role="status"
       aria-label={t("thread.assistantWorking")}
       className={cn(
-        "mt-1 ms-1 inline-flex items-center gap-1",
+        // Out of flow: removing it would shrink a short reply at the bottom of the scroller, which clamps
+        // the scroll position before the top-anchor reserve can grow, so the whole chat drops for a moment.
+        "absolute mt-1 ms-1 inline-flex items-center gap-1",
         leaving ? "chat-wait-out" : "chat-wait-in",
       )}
     >
@@ -1485,7 +1518,7 @@ const AssistantActionBar: FC = () => {
       hideWhenRunning
       autohide="not-last"
       // Mounted on hover: a short delay keeps a passing cursor from flashing it.
-      className="aui-assistant-action-bar-root text-muted-foreground animate-fade-in col-start-3 row-start-2 -ms-1 flex shrink-0 gap-1 [animation-delay:80ms]"
+      className="aui-assistant-action-bar-root text-muted-foreground animate-fade-in col-start-3 row-start-2 -ms-1 flex shrink-0 gap-1 max-sm:gap-0 [animation-delay:80ms]"
     >
       <CopyActionButton />
       <ReplyEditAction />
