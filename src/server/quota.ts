@@ -1,18 +1,19 @@
-import { HTTPException } from "hono/http-exception";
 import { db } from "./db.js";
 import { env } from "./env.js";
+import { AppError } from "./errors.js";
 
 // Per-user storage quota. Every byte a user owns — uploads, artifact versions (source + built file),
 // generated images, run_code outputs, fonts, the profile picture, memories, project files — counts
 // against one limit, so the database volume cannot fill up invisibly. Enforced on every write path:
 // HTTP routes answer 413, tools throw and the model sees the message.
 
-export class QuotaError extends HTTPException {
+export class QuotaError extends AppError {
   constructor(
     readonly used: number,
     readonly limit: number,
   ) {
-    super(413, { message: quotaMessage(used, limit) });
+    // The used/limit numbers are safe to show and make the inline upload error actionable.
+    super({ code: "storage_quota", message: quotaMessage(used, limit), details: { used, limit } });
   }
 }
 

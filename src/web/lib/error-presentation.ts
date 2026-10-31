@@ -1,0 +1,163 @@
+import type { ErrorCode, ErrorWire } from "@shared/errors";
+import type { PlainMessageKey } from "@/i18n";
+import type { SettingsDestinationId } from "@/lib/settings-link";
+
+/**
+ * One pure decision for how an error is shown. Components render the result; they never choose a
+ * surface, an action, or a message themselves. Keep every message/hint in `i18n/en/errors.ts`.
+ */
+export type ErrorContext = "chat" | "tool" | "settings" | "upload" | "background" | "render";
+
+export interface ErrorActions {
+  retry: boolean;
+  switchModel: boolean;
+  settings?: SettingsDestinationId;
+  copyDetails: boolean;
+  reload: boolean;
+}
+
+export interface ErrorPresentation {
+  surface: "inline" | "page";
+  messageKey: PlainMessageKey;
+  hintKey: PlainMessageKey;
+  /** A safe, specific server message for inline field/row errors. Never shown as raw detail in chat. */
+  detail?: string;
+  actions: ErrorActions;
+  retryable: boolean;
+  code: ErrorCode;
+}
+
+const MESSAGES: Record<ErrorCode, PlainMessageKey> = {
+  provider_auth: "errors.providerAuthMessage",
+  provider_rate_limit: "errors.providerRateLimitMessage",
+  provider_quota: "errors.providerQuotaMessage",
+  model_not_found: "errors.modelNotFoundMessage",
+  context_length: "errors.contextLengthMessage",
+  provider_overloaded: "errors.providerOverloadedMessage",
+  network: "errors.networkMessage",
+  timeout: "errors.timeoutMessage",
+  aborted: "errors.abortedMessage",
+  tool_failed: "errors.toolFailedMessage",
+  service_unavailable: "errors.serviceUnavailableMessage",
+  storage_quota: "errors.storageQuotaMessage",
+  validation: "errors.validationMessage",
+  not_found: "errors.notFoundMessage",
+  forbidden: "errors.forbiddenMessage",
+  conflict: "errors.conflictMessage",
+  unknown: "errors.unknownMessage",
+};
+
+const HINTS: Record<ErrorCode, PlainMessageKey> = {
+  provider_auth: "errors.providerAuthHint",
+  provider_rate_limit: "errors.providerRateLimitHint",
+  provider_quota: "errors.providerQuotaHint",
+  model_not_found: "errors.modelNotFoundHint",
+  context_length: "errors.contextLengthHint",
+  provider_overloaded: "errors.providerOverloadedHint",
+  network: "errors.networkHint",
+  timeout: "errors.timeoutHint",
+  aborted: "errors.abortedHint",
+  tool_failed: "errors.toolFailedHint",
+  service_unavailable: "errors.serviceUnavailableHint",
+  storage_quota: "errors.storageQuotaHint",
+  validation: "errors.validationHint",
+  not_found: "errors.notFoundHint",
+  forbidden: "errors.forbiddenHint",
+  conflict: "errors.conflictHint",
+  unknown: "errors.unknownHint",
+};
+
+/** The one setting a user can change to fix this class of failure. */
+export function settingsForError(code: ErrorCode): SettingsDestinationId | undefined {
+  switch (code) {
+    case "provider_auth":
+    case "provider_quota":
+    case "model_not_found":
+      return "providers";
+    case "context_length":
+      return "compaction";
+    case "storage_quota":
+      return "account";
+    default:
+      return undefined;
+  }
+}
+
+const SWITCH_MODEL: ReadonlySet<ErrorCode> = new Set([
+  "provider_auth",
+  "provider_rate_limit",
+  "provider_quota",
+  "model_not_found",
+  "context_length",
+  "provider_overloaded",
+  "network",
+  "timeout",
+  "unknown",
+]);
+
+const FIELD_DETAIL: ReadonlySet<ErrorCode> = new Set(["validation", "not_found", "forbidden", "conflict", "storage_quota", "unknown"]);
+
+const safeDetail = (message: string | undefined) =>
+  message && message.trim() && message.length <= 300 ? message.trim() : undefined;
+
+export function presentError(error: ErrorWire, context: ErrorContext): ErrorPresentation {
+  const settings = settingsForError(error.code);
+  const base = {
+    messageKey: MESSAGES[error.code],
+    hintKey: HINTS[error.code],
+    retryable: error.retryable,
+    code: error.code,
+  } as const;
+  if (context === "render") {
+    return {
+      surface: "page",
+      messageKey: "errors.renderTitle",
+      hintKey: "errors.renderBody",
+      actions: { retry: false, switchModel: false, copyDetails: true, reload: true },
+      retryable: false,
+      code: "unknown",
+    };
+  }
+  if (context === "chat") {
+    return {
+      surface: "inline",
+      ...base,
+      actions: {
+        // Automatic retries are limited to transient codes; a manual Retry is always a valid next step.
+        retry: error.code !== "aborted",
+        switchModel: SWITCH_MODEL.has(error.code),
+        ...(settings ? { settings } : {}),
+        copyDetails: true,
+        reload: false,
+      },
+    };
+  }
+  if (context === "tool") {
+    return {
+      surface: "inline",
+      ...base,
+      actions: { retry: false, switchModel: false, copyDetails: false, reload: false },
+    };
+  }
+  // Settings, uploads, and background rows stay where the failure happened; no toast and no alert.
+  const detail = FIELD_DETAIL.has(error.code) ? safeDetail(error.message) : undefined;
+  return {
+    surface: "inline",
+    ...base,
+    ...(detail ? { detail } : {}),
+    actions: { retry: false, switchModel: false, copyDetails: false, reload: false },
+  };
+}
+
+/**
+ * The "Copy details" payload. It is an allowlist, not a serialization: a poisoned wire object with
+ * apiKey, prompt, file, or stack fields contributes none of them.
+ */
+export function errorDetails(error: ErrorWire): string {
+  const lines = [`code: ${error.code}`];
+  if (error.ref) lines.push(`ref: ${error.ref}`);
+  if (error.model) lines.push(`model: ${error.model}`);
+  if (error.provider) lines.push(`provider: ${error.provider}`);
+  if (error.requestId) lines.push(`requestId: ${error.requestId}`);
+  return lines.join("\n");
+}

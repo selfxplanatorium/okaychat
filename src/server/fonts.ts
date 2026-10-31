@@ -4,6 +4,7 @@ import type { InstalledFont } from "../shared/types.js";
 import type { AppEnv } from "./auth.js";
 import { newId } from "./crypto.js";
 import { db } from "./db.js";
+import { errorJson } from "./errors.js";
 import { assertStorage, QuotaError } from "./quota.js";
 
 // Fonts a user uploads. Files live in SQLite so they travel with the account and the one volume.
@@ -56,7 +57,7 @@ export const fontRoutes = new Hono<AppEnv>()
     try {
       assertStorage(userId, data.byteLength);
     } catch (error) {
-      if (error instanceof QuotaError) return c.json({ error: error.message }, 413);
+      if (error instanceof QuotaError) return errorJson(c, error);
       throw error;
     }
     const id = newId("fnt");

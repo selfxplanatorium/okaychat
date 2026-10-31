@@ -6,7 +6,9 @@ import type { AppEnv } from "./auth.js";
 import { threadBusy, turnStream } from "./chat.js";
 import { newId } from "./crypto.js";
 import { db } from "./db.js";
+import { AppError } from "./errors.js";
 import { getProject } from "./projects.js";
+import { describeBoundaryError } from "./provider-errors.js";
 import { appendMessage, currentBranch, ensureThread, getThread, updateThread } from "./threads.js";
 
 // Scheduled prompts run on the server with nobody watching: append the prompt to the schedule's thread (or a new
@@ -95,7 +97,7 @@ export async function runSchedule(row: Row): Promise<void> {
       // A chat the user picked is theirs to delete; recreating it would surprise them.
       if (row.thread_attached) {
         db.prepare("UPDATE schedules SET enabled = 0, next_run_at = NULL, thread_id = NULL, thread_attached = 0 WHERE id = ?").run(row.id);
-        throw new Error("Its chat was deleted, so the schedule was turned off.");
+        throw new AppError({ code: "not_found", message: "Its chat was deleted, so the schedule was turned off." });
       }
       threadId = null;
     }
@@ -121,7 +123,7 @@ export async function runSchedule(row: Row): Promise<void> {
     });
     let assistant: UIMessage | undefined;
     for await (const message of readUIMessageStream({ stream })) assistant = message;
-    if (!assistant) throw new Error("The model returned nothing.");
+    if (!assistant) throw new AppError({ code: "tool_failed", message: "The model returned nothing." });
     const failed = assistant.parts.length === 0;
     appendMessage(row.user_id, threadId, { id: assistant.id || generateId(), parent_id: userMessage.id, format: "ai-sdk/v6", content: withoutId(assistant) });
     db.prepare("UPDATE schedules SET last_run_at = ?, last_status = ?, last_error = ? WHERE id = ?").run(
@@ -131,7 +133,8 @@ export async function runSchedule(row: Row): Promise<void> {
       row.id,
     );
   } catch (error) {
-    db.prepare("UPDATE schedules SET last_run_at = ?, last_status = 'error', last_error = ? WHERE id = ?").run(startedAt, String((error as Error).message).slice(0, 500), row.id);
+    const failure = describeBoundaryError(error, { log: true, kind: "background", model: row.model_ref });
+    db.prepare("UPDATE schedules SET last_run_at = ?, last_status = 'error', last_error = ? WHERE id = ?").run(startedAt, failure.message.slice(0, 500), row.id);
   } finally {
     running.delete(row.id);
   }

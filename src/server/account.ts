@@ -5,6 +5,7 @@ import type { AppEnv } from "./auth.js";
 import { accountProfile, limited, passwordSchema, recordFailure } from "./auth.js";
 import { hashPassword, verifyPassword } from "./crypto.js";
 import { db } from "./db.js";
+import { errorJson } from "./errors.js";
 import { assertStorage, QuotaError } from "./quota.js";
 
 export const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
@@ -103,7 +104,7 @@ export const accountRoutes = new Hono<AppEnv>()
       const previousBytes = (db.prepare("SELECT length(data) AS n FROM user_avatars WHERE user_id = ?").get(userId) as { n: number } | undefined)?.n ?? 0;
       assertStorage(userId, data.byteLength - previousBytes);
     } catch (error) {
-      if (error instanceof QuotaError) return c.json({ error: error.message }, 413);
+      if (error instanceof QuotaError) return errorJson(c, error);
       throw error;
     }
     const previous = db.prepare("SELECT updated_at FROM user_avatars WHERE user_id = ?").get(userId) as { updated_at: number } | undefined;

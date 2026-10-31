@@ -14,7 +14,7 @@ import { createAssistantStream } from "assistant-stream";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { ThreadSummary } from "@shared/types";
 import { t } from "@/i18n";
-import { api, takePrefetched } from "@/lib/api";
+import { api, structuredResponseError, takePrefetched } from "@/lib/api";
 import { toolkit, widgetHelperRenders } from "@/components/chat/tool-ui";
 import { WidgetInstructions, widgets } from "@/components/genui/toolkit";
 import { chatIdFromPath, getActiveModel, selectedThreadKey, threadsPath, useData } from "@/state/data";
@@ -26,6 +26,7 @@ import { chatSearchFor, useChatSearch, useChatSearchStore } from "@/state/chat-s
 import { chatResearchFor, useChatResearchStore } from "@/state/chat-research";
 import { dropThread, readThread, sameRows, ServerRows, writeThread } from "./threadCache";
 import { setThreadSync, useThreadSyncStore } from "@/state/thread-sync";
+import { applyRetryNotice, clearRetryNotice } from "@/state/retry-status";
 
 /** Thread metadata the sidebar reads from `threadListItem.custom`. */
 export type ThreadCustom = { pinned: boolean; projectId: string | null };
@@ -296,6 +297,9 @@ addEventListener("pageshow", () => (unloading = false));
 
 const cancellableFetch = (onCancel: () => void): typeof fetch => async (input, init) => {
   const res = await fetch(input, init);
+  // A send that never opened the stream still carries the wire JSON; keep it for the error block.
+  const failure = await structuredResponseError(res);
+  if (failure) throw new Error(failure);
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   const streamId = res.headers.get(RESUMABLE_STREAM_ID_HEADER) ?? url.match(/\/api\/chat\/resume\/([\w-]+)/)?.[1];
   init?.signal?.addEventListener(
@@ -364,17 +368,28 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         // Session storage may be disabled.
       }
     },
-    runtimeHook: () =>
+    runtimeHook: () => {
       // eslint-disable-next-line react-hooks/rules-of-hooks
-      useChatRuntime({
-        // eslint-disable-next-line react-hooks/rules-of-hooks
-        transport: useThreadTransport(),
-        // eslint-disable-next-line react-hooks/rules-of-hooks
-        adapters: useVoiceAdapters(),
-        onFinish: () => { void useData.getState().refreshStorage().catch(() => {}); },
+      const aui = useAui();
+      // eslint-disable-next-line react-hooks/rules-of-hooks
+      const transport = useThreadTransport();
+      // eslint-disable-next-line react-hooks/rules-of-hooks
+      const adapters = useVoiceAdapters();
+      // eslint-disable-next-line react-hooks/rules-of-hooks
+      return useChatRuntime({
+        transport,
+        adapters,
+        // A provider retry is a live wait, not a message part: the server sends transient data-retry chunks.
+        onData: (chunk) => applyRetryNotice(aui.threads.getState().mainThreadId, (chunk as { data?: unknown }).data),
+        onError: () => clearRetryNotice(aui.threads.getState().mainThreadId),
+        onFinish: () => {
+          clearRetryNotice(aui.threads.getState().mainThreadId);
+          void useData.getState().refreshStorage().catch(() => {});
+        },
         // Browser-executed tools (generative UI) and tool approvals resolve locally; this sends them back to finish the turn.
         sendAutomaticallyWhen: (options) => lastAssistantMessageIsCompleteWithToolCalls(options) || lastAssistantMessageIsCompleteWithApprovalResponses(options),
-      }),
+      });
+    },
     adapter: threadListAdapter,
   });
   const config = useMemo(() => {

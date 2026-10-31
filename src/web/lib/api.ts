@@ -1,29 +1,87 @@
+import { parseErrorWire, unknownWire, type ErrorCode, type ErrorWire } from "@shared/errors";
+
+/** A request failure with the safe structured fields the server sends. Never a raw provider body. */
 export class ApiError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-  ) {
+  readonly code: ErrorCode;
+  readonly hint?: string;
+  readonly retryable: boolean;
+  readonly retryAfterMs?: number;
+  readonly ref?: string;
+  readonly model?: string;
+  readonly provider?: string;
+  readonly requestId?: string;
+
+  constructor(message: string, readonly status: number, wire?: Partial<ErrorWire>) {
     super(message);
+    this.name = "ApiError";
+    this.code = wire?.code ?? "unknown";
+    if (wire?.hint) this.hint = wire.hint;
+    this.retryable = wire?.retryable === true;
+    if (wire?.retryAfterMs !== undefined) this.retryAfterMs = wire.retryAfterMs;
+    if (wire?.ref) this.ref = wire.ref;
+    if (wire?.model) this.model = wire.model;
+    if (wire?.provider) this.provider = wire.provider;
+    if (wire?.requestId) this.requestId = wire.requestId;
   }
 }
+
+const httpFallback = (status: number) => `The request failed (HTTP ${status}).`;
+
+/** Turns a JSON error body or a legacy `{ error }` body into an ApiError without echoing unknown shapes. */
+export function apiErrorFromBody(body: unknown, status: number, fallback = httpFallback(status)): ApiError {
+  const wire = parseErrorWire(body);
+  if (wire) return new ApiError(wire.message, status, wire);
+  const legacy = typeof body === "object" && body !== null && typeof (body as { error?: unknown }).error === "string"
+    ? (body as { error: string }).error.slice(0, 2_000)
+    : undefined;
+  return new ApiError(legacy || fallback, status);
+}
+
+const aborted = (error: unknown) => (error as { name?: string })?.name === "AbortError";
 
 export async function api<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
   const { json, ...rest } = init ?? {};
-  const res = await fetch(`/api${path}`, {
-    credentials: "same-origin",
-    ...rest,
-    headers: { ...(json !== undefined ? { "Content-Type": "application/json" } : {}), ...rest.headers },
-    body: json !== undefined ? JSON.stringify(json) : rest.body,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`/api${path}`, {
+      credentials: "same-origin",
+      ...rest,
+      headers: { ...(json !== undefined ? { "Content-Type": "application/json" } : {}), ...rest.headers },
+      body: json !== undefined ? JSON.stringify(json) : rest.body,
+    });
+  } catch (error) {
+    if (aborted(error) || rest.signal?.aborted) {
+      throw new ApiError("The request was stopped.", 499, { code: "aborted", message: "The request was stopped.", retryable: false });
+    }
+    throw new ApiError("The server could not be reached.", 0, { code: "network", message: "The server could not be reached.", retryable: true });
+  }
   if (res.status === 401 && !path.startsWith("/auth")) {
     window.dispatchEvent(new Event("okaychat:unauthorized"));
   }
-  const body = res.headers.get("content-type")?.includes("json") ? await res.json() : await res.text();
+  const body = res.headers.get("content-type")?.includes("json") ? await res.json().catch(() => undefined) : await res.text().catch(() => "");
   if (typeof window !== "undefined" && init?.method && init.method !== "GET" && !path.startsWith("/auth")) window.dispatchEvent(new Event("okaychat:storage-changed"));
-  if (!res.ok) throw new ApiError((body as { error?: string })?.error ?? res.statusText, res.status);
+  if (!res.ok) throw apiErrorFromBody(body, res.status);
   return body as T;
 }
 
+/** A non-OK chat response carries the same wire JSON; throw it so the message error can parse it. */
+export async function structuredResponseError(res: Response): Promise<string | undefined> {
+  if (res.ok) return undefined;
+  const body = await res.clone().text().catch(() => "");
+  const wire = parseErrorWire(body);
+  return wire ? JSON.stringify(wire) : undefined;
+}
+
+/** A streamed chat error is the same wire JSON in a string; assistant-ui may wrap it in an Error. */
+export function parseChatError(error: unknown): ErrorWire {
+  const direct = parseErrorWire(error);
+  if (direct) return direct;
+  if (error instanceof Error) {
+    const wrapped = parseErrorWire(error.message);
+    if (wrapped) return wrapped;
+  }
+  return unknownWire();
+}
 
 const prefetched = new Map<string, { promise: Promise<unknown>; at: number }>();
 // A prefetch serves the screen that is mounting now. An older one could show stale data.

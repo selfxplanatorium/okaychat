@@ -1,5 +1,7 @@
 import { defineToolkit, type ToolCallMessagePartComponent } from "@assistant-ui/react";
+import { parseErrorWire } from "@shared/errors";
 import type { InjectionReport } from "@shared/types";
+import { presentError } from "@/lib/error-presentation";
 import { BookOpenIcon, BotIcon, CheckIcon, ChevronDownIcon, CircleDashedIcon, CircleMinusIcon, DownloadIcon, EyeIcon, FileTextIcon, GlobeIcon, ImageIcon, Loader2Icon, SearchIcon, SquareTerminalIcon, TelescopeIcon, TriangleAlertIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { ArtifactCard } from "@/components/artifacts/ArtifactCard";
@@ -43,6 +45,10 @@ export function InjectionBadge({ report, className }: { report?: InjectionReport
 
 function ToolShell({ icon, label, running, error, injection, children }: { icon: ReactNode; label: ReactNode; running: boolean; error?: string; injection?: InjectionReport; children?: ReactNode }) {
   const [open, setOpen] = useState(false);
+  const wire = parseErrorWire(error);
+  const shown = wire ? presentError(wire, "tool") : undefined;
+  const failure = shown ? { message: t(shown.messageKey), hint: t(shown.hintKey) } : undefined;
+  const plain = !wire && error && error.length <= 300 && !/^\s*[{[]/.test(error) && !/\bat\s+\S+:\d+/.test(error) ? error : undefined;
   return (
     <div className="my-2 text-sm">
       <button type="button" onClick={() => setOpen(!open)} className="text-muted-foreground hover:text-foreground flex max-w-full items-center gap-2 transition-colors duration-(--motion-fast) ease-out-quart" disabled={!children}>
@@ -57,7 +63,14 @@ function ToolShell({ icon, label, running, error, injection, children }: { icon:
         {children && <ChevronDownIcon className={cn("size-3.5 shrink-0 transition-transform duration-(--motion-base) ease-out-expo", open && "rotate-180")} />}
       </button>
       {injection?.flagged ? <InjectionBadge report={injection} className="mt-1 ml-6" /> : null}
-      {error && <p className="text-muted-foreground animate-rise-in mt-1 ml-6 text-xs">{error}</p>}
+      {failure ? (
+        <div className="animate-rise-in mt-1 ml-6 text-xs">
+          <p className="text-foreground">{failure.message}</p>
+          <p className="text-muted-foreground">{failure.hint}</p>
+        </div>
+      ) : plain ? (
+        <p className="text-muted-foreground animate-rise-in mt-1 ml-6 text-xs break-words">{plain}</p>
+      ) : null}
       {open && children && <div className="animate-rise-in mt-2 ml-6">{children}</div>}
     </div>
   );

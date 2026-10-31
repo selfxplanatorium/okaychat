@@ -2,7 +2,9 @@ import { generateText, stepCountIs, streamText, tool, type ToolSet, type UIMessa
 import { z } from "zod";
 import type { InjectionReport, ModelInfo, PromptKey, ReasoningEffort, TokenUsage } from "../shared/types.js";
 import type { Connection } from "./catalog/providers.js";
+import { AppError } from "./errors.js";
 import { createModel } from "./llm.js";
+import { describeProviderError } from "./provider-errors.js";
 import { promptText } from "./prompts.js";
 import { scanForInjection, wrapUntrusted } from "./prompt-injection.js";
 import { SearchShare, type SearchBudget, type StepBudget } from "./tools/search-budget.js";
@@ -174,8 +176,6 @@ export function researchTool(): ToolSet {
 }
 
 const isAbort = (error: unknown, signal?: AbortSignal) => signal?.aborted || (error instanceof Error && error.name === "AbortError");
-const message = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0, 300);
-
 /** Runs the research loop and returns its final progress, with `findings` for the chat model. */
 export async function runResearch(o: ResearchOptions): Promise<ResearchProgress> {
   const date = promptText("date", { date: new Date().toISOString().slice(0, 10) });
@@ -225,6 +225,7 @@ export async function runResearch(o: ResearchOptions): Promise<ResearchProgress>
       providerOptions: lead.providerOptions,
       messages: lead.markCache([promptText(key, values)], [{ role: "user", content: `${date}\n\n${content}` }]),
       allowSystemInMessages: true,
+      maxRetries: 0,
       maxOutputTokens: o.lead.model.maxOutput,
       abortSignal: o.signal,
     });
@@ -253,6 +254,7 @@ export async function runResearch(o: ResearchOptions): Promise<ResearchProgress>
         ].join("\n\n"),
       }]),
       allowSystemInMessages: true,
+      maxRetries: 0,
       tools: webTools({ searchBudget: new SearchShare(o.searchBudget, searchShare), search: true }),
       stopWhen: stepCountIs(stepShare + 1),
       // Every tool-capable step comes out of the reply's allowance. The last one forbids calls instead of
@@ -302,7 +304,13 @@ export async function runResearch(o: ResearchOptions): Promise<ResearchProgress>
         } catch (error) {
           if (isAbort(error, o.signal)) throw error;
           question.status = "failed";
-          question.error = message(error);
+          // The card shows a safe code message; the raw worker/provider text stays in the log.
+          question.error = describeProviderError(error, {
+            log: false,
+            model: o.worker.model.ref,
+            provider: o.worker.model.providerId,
+            kind: "tool",
+          }).message;
         }
         emit(true);
       }
@@ -339,7 +347,11 @@ export async function runResearch(o: ResearchOptions): Promise<ResearchProgress>
       await collect(questions);
       if (!notes.size) {
         const failure = progress.questions.find((question) => question.error)?.error;
-        throw new Error(failure ? `Deep research could not collect evidence: ${failure}` : "Deep research could not collect evidence within the search and step limits.");
+        throw new AppError({
+          code: "tool_failed",
+          message: failure ? "Deep research could not collect evidence." : "Deep research could not collect evidence within the search and step limits.",
+          details: { failure },
+        });
       }
 
       progress.phase = "reviewing";

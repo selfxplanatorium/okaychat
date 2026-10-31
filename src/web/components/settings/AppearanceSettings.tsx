@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Select, type SelectOption } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { errorText } from "@/lib/error-text";
 import { cn } from "@/lib/utils";
 import { DEFAULT_APPEARANCE, useAppearance } from "@/state/appearance";
 import { MOTION_GROUPS, type AppearanceSettings, type MotionGroup } from "@shared/appearance";
@@ -430,7 +431,7 @@ function InstalledFontsRow() {
     try {
       await installFont(file);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("appearance.fontInstallFailed"));
+      setError(errorText(caught, "appearance.fontInstallFailed"));
     } finally {
       setBusy(false);
     }
@@ -447,7 +448,7 @@ function InstalledFontsRow() {
     try {
       await removeFont(font.id);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("appearance.fontRemoveFailed"));
+      setError(errorText(caught, "appearance.fontRemoveFailed"));
     }
   };
 

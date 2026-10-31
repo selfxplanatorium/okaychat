@@ -2,6 +2,7 @@ import { ActionBarMorePrimitive, useAui, useAuiState } from "@assistant-ui/react
 import { Repeat2Icon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
+import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent } from "@/components/ui/popover";
 import { t } from "@/i18n";
 import { metadataOf } from "@/state/context-usage";
@@ -15,7 +16,7 @@ import { retryRun } from "./retry-run";
  * branch menu: no `/threads/:id/branch` call and no thread switch, so the answer replaces the old one
  * as a sibling branch of the same user message. `message.parentId` is that user message.
  */
-export function RetryWithModel() {
+export function RetryWithModel({ inline = false }: { inline?: boolean }) {
   const aui = useAui();
   const role = useAuiState((s) => s.message.role);
   const parentId = useAuiState((s) => s.message.parentId);
@@ -64,24 +65,47 @@ export function RetryWithModel() {
     }
   };
 
+  const trigger = inline ? (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      data-command="message.retryWithModel"
+      aria-label={t("ux.retryWithModel")}
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      aria-disabled={blocked || undefined}
+      disabled={blocked}
+      onClick={() => !blocked && setOpen((value) => !value)}
+      className="aria-expanded:bg-accent"
+    >
+      <Repeat2Icon aria-hidden />
+      {t("errors.switchModel")}
+    </Button>
+  ) : (
+    <TooltipIconButton
+      tooltip={t("ux.retryWithModel")}
+      command="message.retryWithModel"
+      aria-label={t("ux.retryWithModel")}
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      aria-disabled={blocked || undefined}
+      disabled={blocked}
+      onClick={() => !blocked && setOpen((value) => !value)}
+      className="aria-expanded:bg-accent"
+    >
+      <Repeat2Icon />
+    </TooltipIconButton>
+  );
+
   return (
     <span ref={anchor} className="relative inline-flex">
       {/* Only for its interaction lock: an older message's hover action bar stays mounted while this is open. */}
-      <ActionBarMorePrimitive.Root open={open || !!error} onOpenChange={setOpen}>
-        <TooltipIconButton
-          tooltip={t("ux.retryWithModel")}
-          command="message.retryWithModel"
-          aria-label={t("ux.retryWithModel")}
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          aria-disabled={blocked || undefined}
-          disabled={blocked}
-          onClick={() => !blocked && setOpen((value) => !value)}
-          className="aria-expanded:bg-accent"
-        >
-          <Repeat2Icon />
-        </TooltipIconButton>
-      </ActionBarMorePrimitive.Root>
+      {inline ? trigger : (
+        <ActionBarMorePrimitive.Root open={open || !!error} onOpenChange={setOpen}>
+          {trigger}
+        </ActionBarMorePrimitive.Root>
+      )}
       <Popover open={open} onOpenChange={(next) => (!next || !blocked) && setOpen(next)}>
         <PopoverContent
           anchor={anchor}
@@ -97,7 +121,7 @@ export function RetryWithModel() {
         {status}
       </span>
       {error && (
-        <span role="alert" className="text-destructive absolute start-0 top-full mt-1 w-max max-w-64 text-xs">
+        <span role="alert" className={inline ? "text-destructive mt-1 block w-full text-xs" : "text-destructive absolute start-0 top-full mt-1 w-max max-w-64 text-xs"}>
           {error}
         </span>
       )}

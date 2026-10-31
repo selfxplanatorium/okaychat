@@ -1,0 +1,99 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { ERROR_CODES, parseErrorWire, type ErrorWire } from "@shared/errors";
+import { errorDetails, presentError, settingsForError } from "./error-presentation.js";
+
+const wire = (code: ErrorWire["code"], extra: Partial<ErrorWire> = {}): ErrorWire => ({
+  code,
+  message: "server fallback",
+  retryable: true,
+  ...extra,
+});
+
+test("every taxonomy code has a message and hint decision, including unknown", () => {
+  assert.equal(ERROR_CODES.length, 17);
+  for (const code of ERROR_CODES) {
+    const chat = presentError(wire(code), "chat");
+    assert.match(chat.messageKey, /^errors\./, code);
+    assert.match(chat.hintKey, /^errors\./, code);
+    assert.equal(chat.surface, "inline");
+  }
+});
+
+test("chat failures offer retry only when retrying can help", () => {
+  const rate = presentError(wire("provider_rate_limit"), "chat");
+  assert.equal(rate.actions.retry, true);
+  assert.equal(rate.actions.switchModel, true);
+  assert.equal(rate.actions.copyDetails, true);
+
+  const auth = presentError(wire("provider_auth", { retryable: false }), "chat");
+  assert.equal(auth.actions.retry, true, "a manual retry is still available");
+  assert.equal(auth.actions.settings, "providers");
+
+  const stopped = presentError(wire("aborted", { retryable: false }), "chat");
+  assert.equal(stopped.actions.retry, false);
+  assert.equal(stopped.actions.switchModel, false);
+
+  const context = presentError(wire("context_length", { retryable: false }), "chat");
+  assert.equal(context.actions.settings, "compaction");
+  assert.equal(settingsForError("storage_quota"), "account");
+});
+
+test("tool cards stay a plain message and hint with no actions", () => {
+  const tool = presentError(wire("tool_failed", { retryable: false }), "tool");
+  assert.deepEqual(tool.actions, { retry: false, switchModel: false, copyDetails: false, reload: false });
+});
+
+test("settings and uploads are inline with a safe specific detail only where it helps", () => {
+  const validation = presentError(wire("validation", { message: "Enter a display name between 1 and 80 characters." }), "settings");
+  assert.equal(validation.surface, "inline");
+  assert.equal(validation.detail, "Enter a display name between 1 and 80 characters.");
+  assert.equal(validation.actions.copyDetails, false);
+
+  const auth = presentError(wire("provider_auth", { message: "raw provider text" }), "settings");
+  assert.equal(auth.detail, undefined);
+
+  const upload = presentError(wire("storage_quota", { message: "Storage quota exceeded: 1 GB of 1 GB used." }), "upload");
+  assert.match(upload.detail ?? "", /Storage quota exceeded/);
+});
+
+test("the render boundary shows a page with reload and copy", () => {
+  const render = presentError(wire("unknown"), "render");
+  assert.equal(render.surface, "page");
+  assert.equal(render.actions.reload, true);
+  assert.equal(render.actions.copyDetails, true);
+  assert.equal(render.messageKey, "errors.renderTitle");
+});
+
+test("Copy details is an allowlist and ignores planted secrets", () => {
+  const poisoned = {
+    code: "provider_rate_limit",
+    message: "raw provider message with PROMPT_SECRET",
+    retryable: true,
+    ref: "abc12345",
+    model: "openai/gpt-5",
+    provider: "openai",
+    requestId: "req_1",
+    apiKey: "sk-proj-SECRET1234567890",
+    prompt: "PROMPT_SECRET",
+    file: "FILE_SECRET",
+    stack: "at SECRET_STACK",
+  } as unknown as ErrorWire;
+  const details = errorDetails(poisoned);
+  assert.equal(details, "code: provider_rate_limit\nref: abc12345\nmodel: openai/gpt-5\nprovider: openai\nrequestId: req_1");
+  for (const secret of ["SECRET", "PROMPT_SECRET", "FILE_SECRET", "stack", "apiKey"]) assert.ok(!details.includes(secret), secret);
+});
+
+test("wire parsing rejects unknown codes and drops every unknown field", () => {
+  const parsed = parseErrorWire(JSON.stringify({
+    code: "network",
+    message: "The server could not reach the provider.",
+    retryable: true,
+    apiKey: "sk-proj-SECRET1234567890",
+    prompt: "PROMPT_SECRET",
+    stack: "SECRET_STACK",
+  }));
+  assert.deepEqual(parsed, { code: "network", message: "The server could not reach the provider.", retryable: true });
+  assert.equal(parseErrorWire({ code: "made_up", message: "x", retryable: false }), undefined);
+  assert.equal(parseErrorWire("not json"), undefined);
+});

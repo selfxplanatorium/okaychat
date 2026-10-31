@@ -38,6 +38,8 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "app.toggleSidebar", labelKey: "keyboard.cmdAppToggleSidebar", group: "General", keys: ["Alt+Shift+S"] },
   { id: "app.colorScheme", labelKey: "keyboard.cmdAppColorScheme", group: "General", keys: [] },
   { id: "app.logout", labelKey: "keyboard.cmdAppLogout", group: "General", keys: [] },
+  { id: "app.reload", labelKey: "keyboard.cmdAppReload", group: "General", keys: [] },
+  { id: "error.copyDetails", labelKey: "keyboard.cmdErrorCopyDetails", group: "General", keys: [] },
 
   { id: "nav.newChat", labelKey: "keyboard.cmdNavNewChat", group: "Navigation", keys: ["Alt+Shift+N"] },
   { id: "nav.temporaryChat", labelKey: "keyboard.cmdNavTemporaryChat", group: "Navigation", keys: ["Alt+Shift+G"] },

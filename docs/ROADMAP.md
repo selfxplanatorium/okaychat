@@ -51,6 +51,7 @@ Status as of 2026-10-31. Update this file when a feature ships or a plan changes
 
 - Startup path: the session check starts the shell chunk, appearance, account data, chat list, and restored chat messages in parallel. Preloaded routes avoid a Suspense hold. The startup loader appears only after 700 ms. Production assets are precompressed and cached; model catalogs warm at boot and refresh without blocking requests. See `docs/implementation/web-bundle.md`.
 - Prompt-injection defenses: provenance envelopes, heuristic badges, per-turn approval gating for destructive/outbound actions, stable instruction hierarchy, and consent-gated remote Markdown images. See `docs/implementation/prompt-injection.md`.
+- Plain-language errors: one server taxonomy with safe wire fields, provider status/body mapping and `Retry-After`, capped jittered abortable retries with a visible "Retrying in Ns…" state, actionable chat errors (Retry, Switch model, Open setting, Copy details), plain tool errors, inline settings/upload failures, and a mounted render boundary. See `docs/implementation/errors.md`.
 - Current implementation guides live in `docs/implementation/`. Obsolete research snapshots and copied vendor components have been removed; generated build output and design working files are excluded from version control.
 
 ## Pass 3: UX flows (built)

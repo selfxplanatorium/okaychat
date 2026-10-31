@@ -6,6 +6,7 @@ import type { AppEnv } from "./auth.js";
 import { newId } from "./crypto.js";
 import { db } from "./db.js";
 import { readXlsx } from "./documents/lazy.js";
+import { AppError, errorJson, redactSecrets } from "./errors.js";
 import { assertStorage, QuotaError } from "./quota.js";
 
 export const MAX_BYTES = 25 * 1024 * 1024;
@@ -78,21 +79,21 @@ export const fileRoutes = new Hono<AppEnv>()
   .post("/files/store", bodyLimit({ maxSize: MAX_BYTES + 64 * 1024 }), async (c) => {
     const form = await c.req.formData();
     const file = form.get("file");
-    if (!(file instanceof File)) return c.json({ error: "No file" }, 400);
-    if (file.size > MAX_BYTES) return c.json({ error: "File is larger than 25 MB" }, 413);
+    if (!(file instanceof File)) return errorJson(c, new AppError({ code: "validation", message: "No file was uploaded." }));
+    if (file.size > MAX_BYTES) return errorJson(c, new AppError({ code: "validation", message: "File is larger than 25 MB", status: 413 }));
     if (c.req.query("temporary") === "1") return c.json({ fileId: null });
     try {
       return c.json({ fileId: storeUpload(c.get("user").id, file.name, file.type, new Uint8Array(await file.arrayBuffer())) });
     } catch (error) {
-      if (error instanceof QuotaError) return c.json({ error: error.message }, 413);
+      if (error instanceof QuotaError) return errorJson(c, error);
       throw error;
     }
   })
   .post("/files/extract", bodyLimit({ maxSize: MAX_BYTES + 64 * 1024 }), async (c) => {
   const form = await c.req.formData();
   const file = form.get("file");
-  if (!(file instanceof File)) return c.json({ error: "No file" }, 400);
-  if (file.size > MAX_BYTES) return c.json({ error: "File is larger than 25 MB" }, 413);
+  if (!(file instanceof File)) return errorJson(c, new AppError({ code: "validation", message: "No file was uploaded." }));
+  if (file.size > MAX_BYTES) return errorJson(c, new AppError({ code: "validation", message: "File is larger than 25 MB", status: 413 }));
   const bytes = new Uint8Array(await file.arrayBuffer());
   try {
     const { text, pages } = await extract(file.name, file.type, bytes);
@@ -105,7 +106,15 @@ export const fileRoutes = new Hono<AppEnv>()
       truncated,
     });
   } catch (error) {
-    if (error instanceof QuotaError) return c.json({ error: error.message }, 413);
-    return c.json({ error: `Could not read ${file.name}: ${(error as Error).message}` }, 422);
+    if (error instanceof QuotaError) return errorJson(c, error);
+    // Parser messages can include paths and internal detail. Keep them in the log, show a plain row error.
+    console.error("[files] extract failed", redactSecrets(String((error as Error)?.message ?? error)).slice(0, 500));
+    return errorJson(c, new AppError({
+      code: "validation",
+      status: 422,
+      message: `Could not read ${file.name.slice(0, 200)}. It may be damaged or use an unsupported format.`,
+      details: { name: file.name, message: (error as Error)?.message },
+      cause: error,
+    }));
   }
 });
