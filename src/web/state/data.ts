@@ -170,6 +170,8 @@ export function preloadData(userId: string) {
   const promise = useData.getState().load();
   promise.catch(() => {});
   prefetch(threadsPath(useData.getState().activeProject));
+  // The composer's call button appears only when the server can run a call; the check downloads no model.
+  prefetch("/voice");
   // RuntimeProvider opens the chat in the URL (or this tab's selected chat); its messages are needed for the first paint.
   try {
     const saved = chatIdFromPath(location.pathname) || new URLSearchParams(location.search).get("thread") || sessionStorage.getItem(selectedThreadKey(userId));

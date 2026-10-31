@@ -79,6 +79,7 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "chat.compactNow", labelKey: "keyboard.cmdChatCompactNow", group: "Chat", keys: [] },
   { id: "chat.trimContext", labelKey: "keyboard.cmdChatTrimContext", group: "Chat", keys: [] },
   { id: "chat.loadImage", labelKey: "keyboard.cmdChatLoadImage", group: "Chat", keys: [] },
+  { id: "chat.voiceCall", labelKey: "keyboard.cmdChatVoiceCall", group: "Chat", keys: [] },
 
   { id: "composer.model", labelKey: "keyboard.cmdComposerModel", group: "Composer", keys: ["Alt+Shift+M"] },
   { id: "composer.effort", labelKey: "keyboard.cmdComposerEffort", group: "Composer", keys: ["Alt+Shift+T"] },
@@ -141,6 +142,13 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "email.draftRewrite", labelKey: "keyboard.cmdEmailDraftRewrite", group: "Messages", keys: [] },
   { id: "email.draftSignature", labelKey: "keyboard.cmdEmailDraftSignature", group: "Messages", keys: [] },
   { id: "email.draftDiscard", labelKey: "keyboard.cmdEmailDraftDiscard", group: "Messages", keys: [] },
+  // Voice calls: reachable by name; Space/Escape act inside the call view. They are global so they also run
+  // from the command list while the call's modal is open.
+  { id: "call.start", labelKey: "keyboard.cmdCallStart", group: "Chat", keys: [], scope: "global" },
+  { id: "call.mute", labelKey: "keyboard.cmdCallMute", group: "Chat", keys: [], scope: "global" },
+  { id: "call.end", labelKey: "keyboard.cmdCallEnd", group: "Chat", keys: [], scope: "global" },
+  { id: "call.retry", labelKey: "keyboard.cmdCallRetry", group: "Chat", keys: [], scope: "global" },
+  { id: "call.refresh", labelKey: "keyboard.cmdCallRefresh", group: "Chat", keys: [], scope: "global" },
 ];
 
 export const COMMAND_GROUPS: readonly CommandGroup[] = ["General", "Navigation", "Chat", "Composer", "Messages", "Settings"];

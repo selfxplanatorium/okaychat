@@ -68,6 +68,14 @@ export const speechSettingsSchema = z
       })
       .strict()
       .optional(),
+    call: z
+      .object({
+        engine: z.enum(["local", "realtime"]).optional(),
+        realtimeVoice: choice.optional(),
+        ding: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

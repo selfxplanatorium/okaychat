@@ -215,4 +215,10 @@ export default {
   cmdKnowledgePreviewChunks: "Preview passages in the selected knowledge collection",
   cmdKnowledgeSearch: "Test knowledge search",
   cmdKnowledgeReindex: "Reindex the selected knowledge collection",
+  cmdChatVoiceCall: "Start a voice call",
+  cmdCallStart: "Start the voice call",
+  cmdCallMute: "Mute or unmute the microphone",
+  cmdCallEnd: "End the voice call",
+  cmdCallRetry: "Retry the voice call",
+  cmdCallRefresh: "Refresh voice availability",
 } as const;

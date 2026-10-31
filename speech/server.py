@@ -9,6 +9,7 @@ See docs/implementation/speech.md. Rules:
   library memory at all. Python does not reliably return freed memory to the system; exiting does. On a GPU
   the child also owns the CUDA context, so exiting returns its VRAM.
 - One transcription and one synthesis run at a time each; later requests wait for a slot or time out.
+  Partial transcripts for voice calls never wait: a busy engine answers 409 and the app skips that partial.
 - Every request needs the app's bearer token. The worker holds no app secrets or data.
 """
 
@@ -201,10 +202,18 @@ class SttEngine:
         if language and not LANG_RE.match(language):
             raise Failure(400, "language must be an ISO 639-1 code.")
         max_seconds = min(float(q.get("max_seconds", "900")), 3600)
-        try:
-            samples = decode_audio(io.BytesIO(audio), sampling_rate=16000)
-        except Exception:
-            raise Failure(400, "The audio could not be decoded.")
+        if q.get("format") == "pcm16":
+            # Voice calls send raw 16 kHz mono PCM16, so no container has to be decoded.
+            import numpy as np
+
+            if len(audio) % 2:
+                raise Failure(400, "PCM16 audio must have an even number of bytes.")
+            samples = np.frombuffer(audio, dtype=np.int16).astype(np.float32) / 32768.0
+        else:
+            try:
+                samples = decode_audio(io.BytesIO(audio), sampling_rate=16000)
+            except Exception:
+                raise Failure(400, "The audio could not be decoded.")
         seconds = len(samples) / 16000
         if seconds > max_seconds:
             raise Failure(413, f"The recording is {duration(seconds)} long; the limit is {duration(max_seconds)}.")
@@ -217,6 +226,18 @@ class SttEngine:
         from faster_whisper.utils import download_model
 
         download_model(name, cache_dir=os.path.join(MODELS, "whisper"))
+
+    def warm(self, name: str):
+        """Loads the model now (downloading it if needed), so a voice call's first utterance does not wait."""
+        if name not in WHISPER_MODELS:
+            raise Failure(400, f"Unknown Whisper model {name}.")
+        try:
+            self.load(name)
+        except Failure:
+            raise
+        except Exception as error:
+            print(f"stt warm {name} failed: {type(error).__name__}", flush=True)
+            raise Failure(503, f"The Whisper model {name} could not be downloaded or loaded.")
 
 
 class TtsEngine:
@@ -268,6 +289,11 @@ class TtsEngine:
     def preload(self, voice: str):
         self.download(voice)
 
+    def warm(self, voice: str):
+        if not VOICE_RE.match(voice):
+            raise Failure(400, "Unknown Piper voice.")
+        self.load(voice)
+
 
 def engine_main(kind: str, conn, plan: dict | None = None):
     """Child process: answers (op, args) messages with ("ok", value) or ("err", status, message)."""
@@ -306,7 +332,10 @@ class Engine:
         self.report = None
 
     def call(self, op: str, *args, wait: float = SLOT_WAIT):
-        if not self.lock.acquire(timeout=wait):
+        if wait <= 0:
+            if not self.lock.acquire(blocking=False):
+                raise Failure(409, f"The local {self.label} engine is busy.")
+        elif not self.lock.acquire(timeout=wait):
             raise Failure(503, f"The local {self.label} engine is busy. Try again in a moment.")
         try:
             if self.proc is None or not self.proc.is_alive():
@@ -348,6 +377,20 @@ class Engine:
 
     def running(self) -> bool:
         return self.proc is not None and self.proc.is_alive()
+
+    def release(self) -> bool:
+        """Stops the child now unless a job is running. The app calls this when its last voice call ends."""
+        if self.proc is None or not self.lock.acquire(blocking=False):
+            return False
+        try:
+            try:
+                self.stop()
+            except OSError:
+                # A child that already exited needs no kill; dropping the pipe is enough.
+                self.proc, self.conn = None, None
+            return True
+        finally:
+            self.lock.release()
 
     def stop_if_idle(self):
         if self.proc is None or not self.lock.acquire(blocking=False):
@@ -467,7 +510,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self.authorized():
             return self.json(401, {"error": "Unauthorized"})
         if method == "POST" and url.path == "/transcribe":
-            return self.json(200, stt.call("transcribe", self.body(MAX_AUDIO), q))
+            wait = 0 if q.get("partial") == "1" else SLOT_WAIT
+            return self.json(200, stt.call("transcribe", self.body(MAX_AUDIO), q, wait=wait))
         if method == "POST" and url.path == "/speak":
             text = self.body(MAX_TEXT * 4).decode("utf-8", "replace").strip()
             if not text or len(text) > MAX_TEXT:
@@ -487,6 +531,18 @@ class Handler(BaseHTTPRequestHandler):
             engine = stt if kind == "stt" else tts
             threading.Thread(target=lambda: self.quiet(engine, name), daemon=True).start()
             return self.json(202, {"ok": True})
+        if method == "POST" and url.path == "/warm":
+            kind, name = q.get("kind"), q.get("name", "")
+            if not ((kind == "stt" and name in WHISPER_MODELS) or (kind == "tts" and VOICE_RE.match(name))):
+                raise Failure(400, "Unknown model.")
+            engine = stt if kind == "stt" else tts
+            engine.call("warm", name, wait=CALL_TIMEOUT[engine.kind])
+            return self.json(200, {"ok": True})
+        if method == "POST" and url.path == "/release":
+            kind = q.get("kind")
+            if kind not in ("stt", "tts"):
+                raise Failure(400, "kind must be stt or tts.")
+            return self.json(200, {"released": (stt if kind == "stt" else tts).release()})
         return self.json(404, {"error": "Not found"})
 
     @staticmethod

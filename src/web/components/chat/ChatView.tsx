@@ -14,6 +14,7 @@ import { useChatPrivacy } from "@/state/chat-privacy";
 import { useKnowledgeCitationStore } from "@/state/chat-knowledge";
 import { ThreadMetaSync, useCurrentThreadId } from "@/state/thread-meta";
 import { closeReplyEditor } from "@/state/message-edits";
+import { CallView } from "@/speech/call/CallView";
 
 function Welcome() {
   const privacy = useChatPrivacy();
@@ -103,6 +104,7 @@ export function ChatView() {
       <ReplyEditorSync />
       <Thread components={{ Welcome, ComposerToolbar, MessageMeta, AfterMessage, BeforeMessages, BranchAction: BranchMenu }} />
       <KnowledgeCitationHost />
+      <CallView />
     </>
   );
 }

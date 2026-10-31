@@ -64,8 +64,11 @@ export function VoiceSettings() {
   }, []);
   if (!settings || !status) return null;
   const speech = settings.speech ?? {};
+  // `call` rides along untouched: these sections only edit the read-aloud and dictation halves.
   const save = (patch: SpeechSettings) =>
-    update({ speech: { stt: { ...speech.stt, ...patch.stt }, tts: { ...speech.tts, ...patch.tts } } });
+    update({ speech: { stt: { ...speech.stt, ...patch.stt }, tts: { ...speech.tts, ...patch.tts }, ...(speech.call ? { call: speech.call } : {}) } });
+  const saveCall = (call: NonNullable<SpeechSettings["call"]>) =>
+    update({ speech: { stt: speech.stt, tts: speech.tts, call } });
 
   return (
     <SettingsPage title={t("voice.title")} description={t("voice.description")}>
@@ -73,6 +76,7 @@ export function VoiceSettings() {
       <ServiceAvailability id="speech" messageKey="services.voiceLocalNote" describeId="speech-service-availability" />
       <ReadAloud speech={speech} status={status} save={save} onStatus={setStatus} />
       <SpeechToText speech={speech} status={status} save={save} onStatus={setStatus} />
+      <VoiceCalls speech={speech} save={saveCall} />
       <Privacy status={status} />
     </SettingsPage>
   );
@@ -341,6 +345,36 @@ function TryDictation() {
       )}
       {result && <span className="text-muted-foreground text-right text-xs">{result}</span>}
     </div>
+  );
+}
+
+function VoiceCalls({ speech, save }: { speech: SpeechSettings; save: (call: NonNullable<SpeechSettings["call"]>) => Promise<void> }) {
+  const call = speech.call ?? {};
+  return (
+    <SettingsSection title={t("voice.callSettingsTitle")}>
+      <SettingsRow
+        label={t("voice.callDefaultEngine")}
+        description={t("voice.callDefaultEngineDescription")}
+        control={
+          <Select<"local" | "realtime">
+            aria-label={t("voice.callDefaultEngine")}
+            className="w-full md:w-56"
+            value={call.engine ?? "local"}
+            onValueChange={(engine) => void save({ ...call, engine })}
+            options={[
+              { value: "local", label: t("voice.callEngineLocal") },
+              { value: "realtime", label: t("voice.callEngineRealtime") },
+            ]}
+          />
+        }
+      />
+      <SettingsRow
+        label={t("voice.callDing")}
+        description={t("voice.callDingDescription")}
+        control={<Switch checked={!!call.ding} onCheckedChange={(ding) => void save({ ...call, ding })} aria-label={t("voice.callDing")} />}
+      />
+      <p className="text-muted-foreground px-4 pb-3 text-xs">{t("voice.callSettingsDescription")}</p>
+    </SettingsSection>
   );
 }
 

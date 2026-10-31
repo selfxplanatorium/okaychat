@@ -48,6 +48,11 @@ function userFromToken(token: string | undefined): Me | null {
   return row ? accountProfile(row.id) : null;
 }
 
+/** True while the session row behind a socket's cold hash still exists. Voice calls check this on every ping. */
+export function sessionAlive(tokenHash: string, now = Date.now()): boolean {
+  return !!db.prepare("SELECT 1 FROM sessions WHERE token_hash = ? AND expires_at > ?").get(tokenHash, now);
+}
+
 export function accountProfile(userId: string): Me | null {
   const row = db.prepare(`SELECT u.id, u.email, u.name, u.role, a.updated_at AS avatarVersion
     FROM users u LEFT JOIN user_avatars a ON a.user_id = u.id WHERE u.id = ?`).get(userId) as (Me & { avatarVersion: number | null }) | undefined;

@@ -38,7 +38,7 @@ Server-wide settings live in `server_settings` key `speech` (`AdminSpeechSetting
 
 ## Client
 
-- `adapters.ts` (`useVoiceAdapters`) gives the chat runtime a `speech` adapter only when read aloud is on and its engine is ready, and a `dictation` adapter only when dictation can work here. A missing adapter hides its button. The adapters are created once and read the current settings when they start.
+- `adapters.ts` (`useVoiceAdapters`) gives the chat runtime a `speech` adapter only when read aloud is on and its engine is ready, and a `dictation` adapter only when dictation can work here. A missing adapter hides its button. The adapters are created once and read the current settings when they start. It also registers the optional Realtime voice adapter; see `docs/implementation/voice-calls.md`.
 - `synthesis.ts`: `ServerSpeechAdapter` cleans the Markdown (`text.ts`: code, tables, links, math), splits it, and fetches the next piece while the current one plays. Pieces under 50 characters or 4 words join the previous one; none exceeds 1500 characters. One shared `<audio>` element is unlocked on the first user gesture, which lets automatic playback start later (WebKit). `BrowserSpeechAdapter` applies the chosen voice and rate.
 - `recorder.ts`: `RecorderDictationAdapter` records with MediaRecorder (Opus in WebM or Ogg, 32 kb/s), stops on silence below −45 dB after speech was heard (when `silenceSeconds` > 0) or at the admin's length limit, then uploads the recording. Without a secure context there is no microphone: the button opens a file picker with `capture`, which records on phones, and its tooltip says so.
 - Stopping dictation never sends. The send button stays enabled while dictating, even with an empty composer: it stops the recording, sets `sendAfterDictation`, and `DictationSend` sends once dictation ends with text and no speech error. There is no auto-send setting; old saves may still carry `stt.autoSend`, which the schema accepts and ignores.
@@ -46,6 +46,7 @@ Server-wide settings live in `server_settings` key `speech` (`AdminSpeechSetting
 - `ChatVoice.tsx`: send-after-dictation, auto-play of finished replies (keyed by thread, so switching chats does not trigger it), the "Transcribing…" line, and speech errors under the composer.
 - `AudioAttachmentAdapter` (`runtime/attachments.ts`) transcribes attached audio files with the dictation engine, or the first ready server engine when dictation runs in the browser, and sends the text in a `<transcript>` block. The original is stored like other uploads, except in temporary chats.
 - Shortcuts: `S` on a focused message reads it or stops; Alt+Shift+V reads the last answer.
+- Voice calls use the same worker in a streaming shape: raw 16 kHz PCM16 partial/final transcription, sentence streaming, `/warm` (download and load before the first utterance), and `/release` (stop an idle child after the last call). Calls never write recordings. See `docs/implementation/voice-calls.md`.
 
 ## Server
 
@@ -125,6 +126,7 @@ and put the header line back on top of `requirements.txt`.
 ## Tests
 
 - `src/server/speech.test.ts`: request shapes for every cloud engine against fakes (including a minimal WebSocket server for Realtime), settings validation, keys and sharing, retention and purge, limits, attached-file fallback, list parsing.
+- `src/server/voice/*.test.ts` and `src/web/speech/call/*.test.ts`: voice-call protocol, limits, engine fallback, state machine, VAD, sentence chunking, and playback jitter; see `docs/implementation/voice-calls.md`.
 - `src/web/speech/text.test.ts`: Markdown cleanup and splitting.
 - `speech/test_device.py`: pure device-resolution and fallback tests (`python3 -m unittest discover -s speech -p 'test_*.py'`), run by `test/integration/speech.sh`.
 - `test/integration/speech.sh`: the real CPU worker container: auth, forced CPU health, Piper in two languages, a Piper → Whisper round trip, limits, read-only root, and that memory returns to baseline after the idle timeout.
@@ -134,4 +136,4 @@ and put the header line back on top of `requirements.txt`.
 
 Covered: every Open WebUI STT engine (local Whisper, OpenAI-compatible, browser, Deepgram, Azure, Mistral) and TTS engine (browser, OpenAI-compatible, OpenAI Realtime, ElevenLabs, Azure, Mistral, plus local neural voices in place of Transformers/Kokoro.js), sentence/paragraph/whole splitting, auto-send, auto-playback, playback speed, per-user voice, audio-file transcription, the admin Whisper model, VAD, and language. From LibreChat: silence-based auto-stop, Groq and ElevenLabs STT, style instructions, and an address check for self-hosted engines. Beyond both: recordings are not stored by default (Open WebUI keeps every upload and TTS file without cleanup), a retention policy with encryption and purge, and engines that free their memory when idle.
 
-Not covered yet: voice calls (continuous conversation with barge-in, and Realtime speech-to-speech).
+Covered separately: voice calls (continuous conversation with barge-in, and optional Realtime speech-to-speech) in `docs/implementation/voice-calls.md`.

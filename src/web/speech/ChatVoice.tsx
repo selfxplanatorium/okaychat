@@ -6,6 +6,8 @@ import { t } from "@/i18n";
 import { chatPrivacyFor } from "@/state/chat-privacy";
 import { useData } from "@/state/data";
 import { useThreadSyncStore } from "@/state/thread-sync";
+import { isActive } from "./call/state";
+import { useCall } from "./call/store";
 import { canRecord } from "./recorder";
 import { useLocalSpeechUnavailable } from "./adapters";
 import { sttEngineOf, ttsEngineOf, useSpeech } from "./store";
@@ -67,8 +69,14 @@ const AutoPlay: FC = () => {
   const running = useAuiState((s) => s.thread.isRunning);
   const canSpeak = useAuiState((s) => s.thread.capabilities.speech);
   const autoPlay = useData((s) => ttsEngineOf(s.settings?.speech) !== "off" && !!s.settings?.speech?.tts?.autoPlay);
+  // During a call the call itself speaks the reply; a second read-aloud would double every sentence.
+  const inCall = useCall((s) => s.open && isActive(s.call.phase));
   const wasRunning = useRef(running);
   useEffect(() => {
+    if (inCall) {
+      wasRunning.current = running;
+      return;
+    }
     // A click on send counts as the gesture that lets the reply play later.
     if (autoPlay && running) primeAudio();
     if (wasRunning.current && !running && autoPlay && canSpeak) {
@@ -76,7 +84,7 @@ const AutoPlay: FC = () => {
       if (last?.role === "assistant" && last.status?.type === "complete") aui.thread().message({ id: last.id }).speak();
     }
     wasRunning.current = running;
-  }, [running, autoPlay, canSpeak, aui]);
+  }, [running, autoPlay, canSpeak, aui, inCall]);
   return null;
 };
 

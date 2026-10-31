@@ -4,6 +4,7 @@ import { useData } from "@/state/data";
 import { availabilityOf } from "@/state/services-derive";
 import { useServices } from "@/state/services";
 import { RecorderDictationAdapter } from "./recorder";
+import { realtimeVoiceAdapter } from "./call/controller";
 import { sttEngineOf, ttsEngineOf, useSpeech } from "./store";
 import { BrowserSpeechAdapter, browserSpeechSupported, ServerSpeechAdapter, speechPrefs } from "./synthesis";
 
@@ -54,6 +55,8 @@ export function useVoiceAdapters() {
     () => ({
       ...(ttsReady ? { speech: tts === "browser" ? browserSpeech : serverSpeech } : {}),
       ...(sttReady ? { dictation: stt === "browser" ? new WebSpeechDictationAdapter({ language }) : recorder } : {}),
+      // Registered for the optional Realtime engine. The adapter connects only after a call sets its bridge.
+      voice: realtimeVoiceAdapter,
     }),
     [tts, stt, ttsReady, sttReady, language],
   );
