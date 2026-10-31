@@ -51,10 +51,20 @@ export class BrowserJobError extends Error {
   }
 }
 
+/**
+ * Rendering needs Chromium; page reading needs Scrapling. They are separate registry entries because one can
+ * fail while the other still works, so a job checks and reports only the capability it uses.
+ */
+const ROUTE_SERVICE: Record<string, "browser" | "scrapling"> = {
+  "/v1/render": "browser",
+  "/v1/fetch": "scrapling",
+};
+
 export async function browserJob<T>(route: string, body: unknown, timeoutMs: number, signal?: AbortSignal): Promise<T> {
-  if (!browserConfigured()) throw new BrowserJobError("The browser worker is not configured on this server (OKAYCHAT_BROWSER_URL).", false);
+  if (!browserConfigured()) throw serviceUnavailable("browser");
+  const service = ROUTE_SERVICE[route] ?? "browser";
   // A worker that just failed to connect, or failed its health probe, answers at once instead of after a timeout.
-  assertServiceAvailable("browser");
+  assertServiceAvailable(service);
   const timeout = AbortSignal.timeout(timeoutMs);
   let res: Response;
   try {
@@ -67,14 +77,26 @@ export async function browserJob<T>(route: string, body: unknown, timeoutMs: num
   } catch (error) {
     if (signal?.aborted) throw new Error("Cancelled.");
     console.error("browser worker request failed:", (error as Error).message);
-    // A long job running out of time says nothing about the worker; a refused connection does.
+    // A long job running out of time says nothing about the worker; a refused connection does. A refused
+    // connection is transport-level, so both capabilities of that worker are unreachable, not just this route.
     if (timeout.aborted) throw new BrowserJobError("The browser worker did not answer in time.", false);
     reportServiceFailure("browser");
-    throw serviceUnavailable("browser");
+    reportServiceFailure("scrapling");
+    throw serviceUnavailable(service);
   }
-  reportServiceSuccess("browser");
   const value = (await res.json().catch(() => ({}))) as T & { error?: string; model?: boolean };
-  if (!res.ok) throw new BrowserJobError(value.error ?? `The browser worker failed (${res.status}).`, !!value.model);
+  if (!res.ok) {
+    // A cancellation stays a cancellation, and page/format validation (422) is the worker answering:
+    // neither is an outage. A 503 is the worker refusing work, which the registry should remember.
+    if (res.status === 499) throw new Error("Cancelled.");
+    if (res.status === 503) {
+      reportServiceFailure(service);
+      throw serviceUnavailable(service);
+    }
+    reportServiceSuccess(service);
+    throw new BrowserJobError(value.error ?? `The browser worker failed (${res.status}).`, !!value.model);
+  }
+  reportServiceSuccess(service);
   return value;
 }
 

@@ -79,6 +79,8 @@ export const FIX_KEYS: Record<ServiceFix | "mcp", PlainMessageKey> = {
 
 /** The settings page that owns the fix, when one exists. A compose command has no settings page. */
 export const FIX_SETTINGS: Partial<Record<ServiceFix | "mcp", SettingsDestinationId>> = {
+  // A speech outage has two fixes: start the worker (the command text) or pick another engine here.
+  startSpeech: "voice",
   providers: "providers",
   email: "email",
   voice: "voice",
@@ -122,40 +124,147 @@ const TOOL_SERVICE: Record<string, ServiceId> = {
   web_search: "searxng",
 };
 
+/**
+ * The assistant-ui `PartState` shape for a tool call, with only what this module reads. `status` comes from
+ * the message state wrapper (`PartState`), while a result tool error arrives as `isError` plus
+ * `result: { error }` from `@assistant-ui/ai-sdk`'s converter. See docs/implementation/service-health.md.
+ */
 export interface ToolPartLike {
   type?: string;
+  toolCallId?: string;
   toolName?: string;
-  state?: string;
-  output?: unknown;
-  errorText?: unknown;
+  args?: unknown;
+  result?: unknown;
+  isError?: boolean;
+  status?: { type?: string; reason?: string; error?: unknown };
 }
 
-const toolNameOf = (part: ToolPartLike): string | undefined =>
-  typeof part.toolName === "string" ? part.toolName : part.type?.startsWith("tool-") ? part.type.slice(5) : undefined;
+const objectOf = (value: unknown): Record<string, unknown> | undefined =>
+  value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
+
+/** The text a failed tool carries, wherever assistant-ui put it. */
+function toolErrorText(part: ToolPartLike): string | undefined {
+  const error = objectOf(part.result)?.error;
+  if (typeof error === "string") return error;
+  const statusError = part.status?.type === "incomplete" ? part.status.error : undefined;
+  if (typeof statusError === "string") return statusError;
+  const nested = objectOf(statusError);
+  return nested && typeof nested.message === "string" ? nested.message : undefined;
+}
+
+/**
+ * A small, stable identity for a tool result. It must change when the final result arrives (so the watcher
+ * re-evaluates) and stay put while text streams, and it must carry the fields the use rules read: a
+ * document's kind, a page's fetch method, and an email account id. Never the whole result: the signature is
+ * a selector value.
+ */
+function resultIdentity(result: unknown): string {
+  if (result === undefined) return "";
+  const value = objectOf(result);
+  if (!value) return "value";
+  const bits: string[] = [];
+  if (typeof value.kind === "string") bits.push(`kind=${value.kind}`);
+  if (typeof value.via === "string") bits.push(`via=${value.via}`);
+  const account = objectOf(value.account);
+  if (typeof account?.id === "string") bits.push(`account=${account.id}`);
+  if (Array.isArray(value.accounts)) {
+    const ids = value.accounts.flatMap((entry) => {
+      const id = objectOf(entry)?.id;
+      return typeof id === "string" ? [id] : [];
+    });
+    if (ids.length) bits.push(`accounts=${ids.join(",")}`);
+  }
+  return bits.length ? bits.join(",") : "object";
+}
+
+/**
+ * Changes when a tool starts, finishes, or fails, and not for a text delta. `useAuiState` selectors must
+ * return a primitive, so this is one string.
+ */
+export function toolPartsSignature(parts: readonly ToolPartLike[]): string {
+  const out: string[] = [];
+  for (const part of parts) {
+    if (part.type !== "tool-call") continue;
+    const status = part.status;
+    out.push([
+      part.toolCallId ?? "",
+      part.toolName ?? "",
+      status?.type ?? "",
+      status?.type === "incomplete" ? status.reason ?? "" : "",
+      part.isError ? "error" : "",
+      resultIdentity(part.result),
+      part.isError ? toolErrorText(part)?.includes("service_unavailable") ? "service" : "" : "",
+    ].join(":"));
+  }
+  return out.join("|");
+}
+
+/** The email account a call reached: its explicit argument, or the account its result names. */
+function emailAccountId(part: ToolPartLike, result: Record<string, unknown> | undefined): string | undefined {
+  const args = objectOf(part.args);
+  if (typeof args?.accountId === "string" && args.accountId) return args.accountId;
+  const account = objectOf(result?.account);
+  return typeof account?.id === "string" && account.id ? account.id : undefined;
+}
 
 /**
  * Services a reply actually exercised. Called for the message being written, never for stored history, so
  * reopening an old chat does not raise a notice. A document tool counts only when it produced a PDF, the
- * one document format that needs the browser worker.
+ * one document format that needs the browser worker. Page reading counts Scrapling only when the fallback
+ * actually served the page. Email counts the account the call used.
  */
 export function usedServicesFromParts(parts: readonly ToolPartLike[]): ServiceId[] {
   const used = new Set<ServiceId>();
   for (const part of parts) {
-    const name = toolNameOf(part);
-    if (!name) continue;
+    if (part.type !== "tool-call" || typeof part.toolName !== "string") continue;
+    const name = part.toolName;
+    const result = objectOf(part.result);
     const direct = TOOL_SERVICE[name];
     if (direct) used.add(direct);
+    if (name === "web_fetch" && result?.via === "scrapling") used.add("scrapling");
     if (name === "create_document" || name === "edit_document" || name === "import_document") {
-      const kind = part.output && typeof part.output === "object" ? (part.output as { kind?: unknown }).kind : undefined;
-      if (kind === "pdf") used.add("browser");
+      if (result?.kind === "pdf" || objectOf(part.args)?.kind === "pdf") used.add("browser");
+    }
+    if (name.startsWith("email_")) {
+      if (name === "email_folders" && Array.isArray(result?.accounts)) {
+        for (const entry of result.accounts) {
+          const id = objectOf(entry)?.id;
+          if (typeof id === "string" && id) used.add(`email:${id}`);
+        }
+      } else {
+        const id = emailAccountId(part, result);
+        if (id) used.add(`email:${id}`);
+      }
     }
     // A service failure names its tool; mark it so the banner can explain a call that never started.
-    if (part.state === "output-error" && typeof part.errorText === "string" && part.errorText.includes("service_unavailable")) {
+    if ((part.isError === true || part.status?.type === "incomplete") && toolErrorText(part)?.includes("service_unavailable")) {
       if (direct) used.add(direct);
       else if (name === "create_document" || name === "edit_document" || name === "import_document") used.add("browser");
     }
   }
   return [...used];
+}
+
+/** A running reply itself is chat activity: the account's provider row is in use, and so is a Codex login. */
+export function usedServicesForReply(parts: readonly ToolPartLike[], modelRef: string | undefined): ServiceId[] {
+  const used = new Set<ServiceId>(usedServicesFromParts(parts));
+  used.add("providers");
+  if (modelRef?.startsWith("chatgpt/")) used.add("codex");
+  return [...used];
+}
+
+/** True when a call failed because a registry service was down, which is a reason to re-check now. */
+export function hasServiceFailure(parts: readonly ToolPartLike[]): boolean {
+  return parts.some((part) =>
+    part.type === "tool-call" &&
+    (part.isError === true || part.status?.type === "incomplete") &&
+    !!toolErrorText(part)?.includes("service_unavailable"),
+  );
+}
+
+/** A custom panel note describes a down service; a degraded one explains its own limitation instead. */
+export function customServiceMessageKey(state: ServiceAvailability, messageKey?: PlainMessageKey): PlainMessageKey | undefined {
+  return state === "down" ? messageKey : undefined;
 }
 
 /** The status of a service, for an inline panel that must explain why it is unavailable. */

@@ -1,13 +1,30 @@
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { Loader2Icon, XIcon } from "lucide-react";
 import { useEffect, useRef, type FC } from "react";
+import { ServiceAvailability } from "@/components/ServiceAvailability";
 import { t } from "@/i18n";
 import { chatPrivacyFor } from "@/state/chat-privacy";
 import { useData } from "@/state/data";
 import { useThreadSyncStore } from "@/state/thread-sync";
 import { canRecord } from "./recorder";
+import { useLocalSpeechUnavailable } from "./adapters";
 import { sttEngineOf, ttsEngineOf, useSpeech } from "./store";
 import { primeAudio } from "./synthesis";
+
+/** The reason the local voice controls are disabled, with a direct link to pick another engine. */
+export const SpeechServiceHint: FC = () => {
+  const sttDown = useLocalSpeechUnavailable("stt");
+  const ttsDown = useLocalSpeechUnavailable("tts");
+  if (!sttDown && !ttsDown) return null;
+  return (
+    <ServiceAvailability
+      id="speech"
+      describeId="speech-service-availability"
+      messageKey="services.composerSpeechNote"
+      className="mx-0.5"
+    />
+  );
+};
 
 /** Sends the message once a dictation stopped by the send button has its transcript, and tells dictation whether this chat is temporary. */
 export const DictationSend: FC = () => {

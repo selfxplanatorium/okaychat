@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { DEFAULT_STT_ENGINE, DEFAULT_TTS_ENGINE, type SpeechSettings, type SpeechStatus, type SttEngineId, type TtsEngineId } from "@shared/speech";
-import { api } from "@/lib/api";
+import { api, responseError } from "@/lib/api";
 import { t } from "@/i18n";
 
 /** Server-side speech availability plus the live state of recording and playback in this tab. */
@@ -43,12 +43,12 @@ export const useSpeech = create<SpeechStore>((set) => ({
 export const sttEngineOf = (speech: SpeechSettings | undefined): SttEngineId | "off" => speech?.stt?.engine ?? DEFAULT_STT_ENGINE;
 export const ttsEngineOf = (speech: SpeechSettings | undefined): TtsEngineId | "off" => speech?.tts?.engine ?? DEFAULT_TTS_ENGINE;
 
-/** POSTs to /api with a raw body and returns the response; errors carry the server's message. */
+/**
+ * POSTs to /api with a raw body (audio in, audio out) and returns the response. A non-OK answer goes through
+ * the shared safe error helper, so a speech outage both carries the translated fix and refreshes the registry.
+ */
 export async function speechFetch(path: string, init: RequestInit): Promise<Response> {
   const res = await fetch(`/api${path}`, { credentials: "same-origin", ...init });
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error ?? t("speech.requestFailed", { status: res.status }));
-  }
+  if (!res.ok) throw await responseError(res, path, t("speech.requestFailed", { status: res.status }));
   return res;
 }

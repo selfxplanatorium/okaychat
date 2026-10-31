@@ -17,6 +17,7 @@ import type { AssistantMetadata, ModelInfo, ReasoningEffort, TokenUsage, UserSet
 import { parseTurnUnavailable, type FixedServiceId, type ServiceStatus, type TurnUnavailable } from "../shared/services.js";
 import type { AppEnv } from "./auth.js";
 import { artifactsInCurrentTurn, artifactTools } from "./artifacts.js";
+import { rendererAvailable } from "./documents/render.js";
 import { promptText } from "./prompts.js";
 import { listModels, resolveModel } from "./catalog/providers.js";
 import { newId } from "./crypto.js";
@@ -223,18 +224,24 @@ export async function turnStream(opts: TurnOptions) {
       // mid-turn cannot change the cached prefix. A new user message probes once, through the shared cache.
       const continuation = uiMessages.at(-1)?.role !== "user";
       const priorUnavailable = continuation ? turnUnavailableOf(uiMessages.at(-1)) : [];
-      const sidecars = continuation
+      const useArtifacts = model.toolCall && settings.artifacts && !temporary;
+      // Ask only about services whose tools this turn could actually offer. A plain reply, a temporary chat,
+      // a non-tool model, or artifacts/code execution switched off must not probe or repeat a down note.
+      const wantsBrowser = useArtifacts && canViewImages && rendererAvailable();
+      const wantsSandbox = model.toolCall && !temporary && settings.codeExecution && sandboxConfigured();
+      const sidecarIds: FixedServiceId[] = [...(wantsBrowser ? ["browser" as const] : []), ...(wantsSandbox ? ["sandbox" as const] : [])];
+      const sidecars = continuation || !sidecarIds.length
         ? Promise.resolve(new Map<FixedServiceId, ServiceStatus | undefined>())
-        : turnServiceStates(["browser", "sandbox"]);
+        : turnServiceStates(sidecarIds);
       const mcp = model.toolCall && !temporary
         ? await toolsForUser(user.id, { threadId, images: canViewImages ? toolImages : undefined, interactive: opts.interactive === true })
         : { tools: {}, subTools: {}, instructions: [], servers: [] };
       const sidecarStates = await sidecars;
       const omitted = new Set<TurnUnavailable["service"]>(priorUnavailable.map((entry) => entry.service));
-      // Only a configured service that is down is withheld. An unconfigured optional service keeps its
-      // existing absence (no note on every reply); a call that needs it fails with the fix instead.
-      const browserDown = continuation ? omitted.has("browser") : sidecarStates.get("browser")?.state === "down";
-      const sandboxDown = continuation ? omitted.has("sandbox") : sidecarStates.get("sandbox")?.state === "down";
+      // Only an enabled tool whose configured service is down is withheld and noted. An unconfigured optional
+      // service keeps its existing absence (no note on every reply); a call that needs it fails with the fix.
+      const browserDown = wantsBrowser && (continuation ? omitted.has("browser") : sidecarStates.get("browser")?.state === "down");
+      const sandboxDown = wantsSandbox && (continuation ? omitted.has("sandbox") : sidecarStates.get("sandbox")?.state === "down");
       const unavailable: TurnUnavailable[] = [...priorUnavailable];
       if (!continuation) {
         if (browserDown) unavailable.push(unavailableEntry("browser", sidecarStates.get("browser"), ["view_artifact"]));
@@ -295,7 +302,6 @@ export async function turnStream(opts: TurnOptions) {
         ...mcp.subTools,
       };
       const subagentModels = model.toolCall && settings.subagents && !temporary ? await allowedSubagentModels(user.id, settings, model.ref) : [];
-      const useArtifacts = model.toolCall && settings.artifacts && !temporary;
       const useGenerativeUI = model.toolCall && settings.generativeUI && !!opts.clientTools && !temporary;
       const subagents = subagentModels.length
         ? subagentTools({ userId: user.id, threadId, allowed: subagentModels, subTools: readOnlyTools, maxSteps: settings.maxSteps, searchBudget, signal: signal })

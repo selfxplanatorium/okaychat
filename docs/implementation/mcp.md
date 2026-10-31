@@ -21,8 +21,10 @@ Per-server policy in `config.approval` (Settings → MCP servers → edit): `des
 
 A server that cannot connect is named on the reply: `AssistantMetadata.unavailable` carries one entry per failed
 server (`service: "mcp"`, `name`, `mcpError` or `mcpNeedsAuth`, fix link to Settings → MCP servers). The server's own
-error text never leaves the server. The reason is stored with the turn and replayed on continuations, so the tool
-list stays stable. See `docs/implementation/service-health.md`.
+error text never leaves the server. The note is stored with the turn and replayed, but it does not pin the MCP tool
+block: `toolsForUser()` runs again on every request (including a continuation), so a server that reconnects can add
+its tools, and one that fails can drop them. That is the existing MCP lifecycle; only the sidecar `browser`/`sandbox`
+tools are held stable across a continuation. See `docs/implementation/service-health.md`.
 
 ## Resources, prompts, and app rendering
 

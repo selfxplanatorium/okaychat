@@ -54,10 +54,18 @@ Server-wide settings live in `server_settings` key `speech` (`AdminSpeechSetting
 `GET /api/speech` reports each engine as ready or not with a reason; `GET /api/speech/options` loads voice and model lists from the provider (cached one hour per key and address, built-in list on failure). Admin routes are under `/api/admin/speech`.
 
 The service registry (`docs/implementation/service-health.md`) probes the worker's `/health` on demand and reports
-`degraded` when CUDA failed and the worker serves on the CPU (still usable), `down` when it cannot be reached, and
-`unconfigured` when there is no worker. A refused connection marks it down and the next request fails fast with
-`service_unavailable`; the failure hint points at the compose service or another engine. Admin → Voice reads the same
-cached probe, so the page and `/api/services` never disagree.
+`degraded` when CUDA failed and the worker serves on the CPU (still usable), `down` when it cannot be reached or
+answers 503 (busy/loading/refusing), and `unconfigured` when there is no worker. A refused connection or 503 marks it
+down and the next request fails fast with `service_unavailable`; the failure hint points at the compose service or
+another engine. Admin → Voice reads the same cached probe (a forced refresh shares the registry's per-source
+cooldown), so the page and `/api/services` never disagree.
+
+The chat does not hide voice controls when that probe says `down`: adapters are created from the account's engine
+configuration, and the composer microphone and message read-aloud button are disabled with the composer's
+explanation (compose fix plus a Voice settings link). Stop-recording and stop-speaking stay enabled so an active
+capture or playback is never trapped. Cloud and browser engines keep working, and a `degraded` CPU fallback is still
+offered. A custom panel note is used for `down` only, so Settings → Voice does not claim the server voice is
+unavailable while it is merely slower.
 
 ## Recordings and retention
 

@@ -58,11 +58,18 @@ async function call(pathAndQuery: string, init: { method?: string; body?: BodyIn
     reportServiceFailure("speech");
     throw serviceUnavailable("speech");
   }
-  reportServiceSuccess("speech");
   if (!res.ok) {
     const message = ((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? `The speech worker answered ${res.status}.`;
-    throw new HTTPException(res.status === 413 ? 413 : res.status === 503 ? 503 : 502, { message: message.slice(0, 300) });
+    // 503 means the worker is up but cannot serve (busy, loading, refusing): an outage with the registry's
+    // fix, not a raw worker sentence. 413 is request validation and other statuses stay ordinary failures.
+    if (res.status === 503) {
+      reportServiceFailure("speech");
+      throw serviceUnavailable("speech");
+    }
+    reportServiceSuccess("speech");
+    throw new HTTPException(res.status === 413 ? 413 : 502, { message: message.slice(0, 300) });
   }
+  reportServiceSuccess("speech");
   return res;
 }
 

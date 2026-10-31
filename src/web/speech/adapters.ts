@@ -21,9 +21,17 @@ const recorder = new RecorderDictationAdapter(() => {
 
 export const browserDictationSupported = () => WebSpeechDictationAdapter.isSupported() && window.isSecureContext;
 
+/** True when the chosen engine is the local one and the registry knows the speech worker is down. */
+export function useLocalSpeechUnavailable(kind: "stt" | "tts"): boolean {
+  const speech = useData((s) => s.settings?.speech);
+  const down = useServices((s) => availabilityOf(s, "speech") === "down");
+  return down && (kind === "stt" ? sttEngineOf(speech) : ttsEngineOf(speech)) === "local";
+}
+
 /**
  * Read aloud and dictation for the chat runtime. Read aloud is off until chosen in Settings → Voice. An adapter is
- * left out when its engine cannot work here, which hides its button.
+ * left out when its engine cannot work in this browser (for example no Web Speech support), not when a worker is
+ * merely unreachable.
  */
 export function useVoiceAdapters() {
   const speech = useData((s) => s.settings?.speech);
@@ -35,11 +43,11 @@ export function useVoiceAdapters() {
 
   const tts = ttsEngineOf(speech);
   const stt = sttEngineOf(speech);
-  // The speech worker's own readiness is configuration, not reachability. A registry `down` hides the local
-  // engine's button instead of offering a call that fails; cloud and browser engines are unaffected.
-  const speechDown = useServices((s) => availabilityOf(s, "speech") === "down");
-  const ttsReady = tts === "browser" ? browserSpeechSupported() : tts !== "off" && !(tts === "local" && speechDown) && !!status?.tts.find((e) => e.id === tts)?.ready;
-  const sttReady = stt === "browser" ? browserDictationSupported() : stt !== "off" && !(stt === "local" && speechDown) && !!status?.stt.find((e) => e.id === stt)?.ready;
+  // Readiness is configuration, never reachability: a registry `down` disables the visible control with an
+  // explanation, but must not remove it or stop an active recording/playback. Cloud and browser engines are
+  // unaffected; a CPU fallback is still up.
+  const ttsReady = tts === "browser" ? browserSpeechSupported() : tts !== "off" && !!status?.tts.find((e) => e.id === tts)?.ready;
+  const sttReady = stt === "browser" ? browserDictationSupported() : stt !== "off" && !!status?.stt.find((e) => e.id === stt)?.ready;
   const language = speech?.stt?.language || navigator.language;
 
   return useMemo(

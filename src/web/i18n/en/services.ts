@@ -54,4 +54,7 @@ export default {
   exportPdfNote: "PDF export needs the browser worker. Markdown export keeps working.",
   librarySandboxNote: "Code execution is unavailable. Saved outputs still download, and every other file works.",
   voiceLocalNote: "Server voices and Whisper are unavailable. Cloud and browser engines keep working.",
+  composerSpeechNote: "The local server voice and Whisper are unavailable, so these controls are off. Pick a cloud or browser engine in Voice settings, or start the speech worker.",
+  dictationUnavailable: "Local dictation is unavailable",
+  readAloudUnavailable: "Local read aloud is unavailable",
 } as const;

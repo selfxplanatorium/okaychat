@@ -417,11 +417,18 @@ export async function listModels(userId: string): Promise<ModelInfo[]> {
 }
 
 /**
+ * A connection that can serve a chat request. Speech-only (`speech-*`) and image-only (`image-*`) keys share
+ * the provider table but never appear in the chat model list, so they must not turn `providers` up.
+ */
+const isChatConnection = (providerId: string) => !/^(?:speech|image)-/.test(providerId);
+
+/**
  * Enabled connections the user may chat through, from the database only: no model list is fetched and no
  * vendor is contacted. A shared key whose policy grants this user no model does not count.
  */
 export function usableConnectionCount(userId: string): number {
   return [...readConnections(userId).values()].filter((conn) => {
+    if (!isChatConnection(conn.providerId)) return false;
     if (!conn.enabled || !(conn.providerId === OLLAMA || conn.apiKey || conn.baseURL)) return false;
     if (!conn.shared) return true;
     const access = sharedModelAccess(userId, conn.providerId);

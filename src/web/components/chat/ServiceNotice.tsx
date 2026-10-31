@@ -1,9 +1,10 @@
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { CircleAlertIcon, RefreshCwIcon, SettingsIcon, XIcon } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Link } from "wouter";
 import type { ServiceId } from "@shared/services";
 import { t } from "@/i18n";
+import { notifyServiceFailure } from "@/lib/api";
 import { settingsHref } from "@/lib/settings-link";
 import { useCommand } from "@/keyboard/registry";
 import { markUsedServices, useServices } from "@/state/services";
@@ -13,11 +14,14 @@ import {
   REASON_KEYS,
   TURN_REASON_KEYS,
   availabilityOf,
+  hasServiceFailure,
   noticeServices,
   serviceNameKey,
-  usedServicesFromParts,
+  toolPartsSignature,
+  usedServicesForReply,
   type ToolPartLike,
 } from "@/state/services-derive";
+import { getActiveModel } from "@/state/data";
 import { metadataOf } from "@/state/context-usage";
 import { parseTurnUnavailable } from "@shared/services";
 
@@ -49,24 +53,31 @@ export function ServiceHealthWatcher() {
 export function ServiceUsageWatcher() {
   const aui = useAui();
   const running = useAuiState((s) => s.thread.isRunning);
-  // Part types and tool states, not text: the signature changes when a call starts, finishes, or fails,
-  // and stays put while the answer streams.
+  // The reply this watcher saw live. It lets the last state change (a tool result arriving with the
+  // message's completion) still count, then clears, so a stored chat opened later is never scanned.
+  const live = useRef<string | null>(null);
+  // A tool part carries its own identity through `toolCallId`, `toolName`, `status`, `isError`, and a small
+  // result marker. The signature changes when a call finishes or fails, never for a text delta.
   const signature = useAuiState((s) => {
     const last = s.thread.messages.at(-1);
-    if (!last) return "";
-    return last.parts.map((part) => `${part.type}:${(part as { state?: string }).state ?? ""}`).join("|");
+    return last ? toolPartsSignature(last.parts as unknown as ToolPartLike[]) : "";
   });
   useEffect(() => {
-    if (!running) return;
     const last = aui.thread.getState().messages.at(-1);
-    if (last?.role !== "assistant") return;
+    if (last?.role !== "assistant") {
+      live.current = null;
+      return;
+    }
+    if (!running && live.current !== last.id) return;
+    if (running) live.current = last.id;
     const parts = last.parts as unknown as ToolPartLike[];
-    const used = usedServicesFromParts(parts);
+    const remoteId = aui.threadListItem.getState().remoteId;
+    const used = usedServicesForReply(parts, getActiveModel(remoteId)?.ref);
     if (used.length) markUsedServices(used);
     // A call that failed because its service is down is a real use, and a reason to re-check now.
-    if (parts.some((part) => part.state === "output-error" && typeof part.errorText === "string" && part.errorText.includes("service_unavailable"))) {
-      void useServices.getState().refresh(true);
-    }
+    // The shared signal goes through the same client cooldown as a failed request.
+    if (hasServiceFailure(parts)) notifyServiceFailure();
+    if (!running) live.current = null;
   }, [aui, signature, running]);
   return null;
 }

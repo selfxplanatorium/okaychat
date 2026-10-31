@@ -107,6 +107,17 @@ interface Cached {
 const cache = new Map<ServiceSource, Cached>();
 const inflight = new Map<ServiceSource, Promise<Cached>>();
 
+// Real request outcomes are stronger evidence than a probe that started before them. Each id carries a
+// version; a probe merges only the ids whose version did not move while it was in flight. Without this a
+// failure reported during a probe was overwritten by that older probe's answer (result.at is completion time).
+const evidence = new Map<FixedServiceId, { version: number; status: ServiceStatus }>();
+let evidenceVersion = 0;
+
+/** A forced refresh shares one per-source cooldown, so ten tabs (or accounts) cannot fan out. */
+export const FORCE_COOLDOWN_MS = 5_000;
+let forceCooldownMs = FORCE_COOLDOWN_MS;
+const lastForced = new Map<ServiceSource, number>();
+
 const unconfigured = (source: ServiceSource, at: number): ServiceStatus[] =>
   SOURCE_IDS[source].map((id) => ({ id, state: "unconfigured", reasonKey: "notConfigured", checkedAt: at }));
 
@@ -159,15 +170,32 @@ const fresh = (entry: Cached | undefined, now = Date.now()) => !!entry && now - 
 /** A cached result within the TTL, or one probe shared by every concurrent caller. */
 function sourceStatus(source: ServiceSource, force = false): Promise<Cached> {
   const cached = cache.get(source);
+  if (force) {
+    const now = Date.now();
+    if (now - (lastForced.get(source) ?? 0) >= forceCooldownMs) lastForced.set(source, now);
+    else force = false;
+  }
   if (!force && fresh(cached)) return Promise.resolve(cached!);
   let pending = inflight.get(source);
   if (!pending) {
+    // Snapshot before starting: a report that lands while this probe runs is newer than its answer.
+    const versions = new Map(SOURCE_IDS[source].map((id) => [id, evidence.get(id)?.version ?? 0]));
     pending = runProbe(source)
       .then((result) => {
-        // A request that failed after this probe started is newer evidence than the probe's own answer.
-        const current = cache.get(source);
-        if (!current || current.at <= result.at) cache.set(source, result);
-        return cache.get(source)!;
+        const statuses = SOURCE_IDS[source].map((id) => {
+          const newer = evidence.get(id);
+          if (newer && newer.version > (versions.get(id) ?? 0)) return newer.status;
+          return result.statuses.find((status) => status.id === id) ?? {
+            id,
+            state: "down" as const,
+            reasonKey: "refuses" as const,
+            fixKey: FIX[source],
+            checkedAt: result.at,
+          };
+        });
+        const merged: Cached = { statuses, at: result.at, detail: result.detail };
+        cache.set(source, merged);
+        return merged;
       })
       .finally(() => inflight.delete(source));
     inflight.set(source, pending);
@@ -217,16 +245,45 @@ export async function speechWorkerDetail<T>(force = false): Promise<T | null> {
   return ((await sourceStatus("speech", force)).detail as T | undefined) ?? null;
 }
 
-/** A request to the service could not connect. Marks it down until the TTL passes or a probe says otherwise. */
-export function reportServiceFailure(id: FixedServiceId, reasonKey: "unreachable" | "timeout" = "unreachable") {
+/** Stores newer evidence for one id, keeping the other ids of the same worker untouched. */
+function reportEvidence(id: FixedServiceId, status: ServiceStatus) {
+  evidence.set(id, { version: ++evidenceVersion, status });
   const source = SOURCE_OF[id];
-  if (source) cache.set(source, { statuses: failed(source, reasonKey, Date.now()), at: Date.now() });
+  if (!source) return;
+  const current = cache.get(source);
+  const statuses = current
+    ? [...current.statuses.filter((entry) => entry.id !== id), status]
+    : [status];
+  cache.set(source, { statuses, at: status.checkedAt, detail: current?.detail });
 }
 
-/** A request succeeded. A cached `down` is wrong now; the next probe establishes the real state. */
-export function reportServiceSuccess(id: FixedServiceId) {
+/**
+ * A request to the service could not connect. Only the id the call needed goes down: a failed page fetch
+ * says nothing about PDF rendering, and a busy render says nothing about Scrapling.
+ */
+export function reportServiceFailure(id: FixedServiceId, reasonKey: "unreachable" | "timeout" = "unreachable") {
   const source = SOURCE_OF[id];
-  if (source && cache.get(source)?.statuses.some((status) => status.state === "down")) cache.delete(source);
+  if (!source) return;
+  reportEvidence(id, {
+    id,
+    state: "down",
+    reasonKey,
+    fixKey: FIX[source],
+    checkedAt: Date.now(),
+  });
+}
+
+/** A request succeeded. A cached `down` for this id is wrong now; the next probe establishes the real state. */
+export function reportServiceSuccess(id: FixedServiceId) {
+  if (!SOURCE_OF[id]) return;
+  const source = SOURCE_OF[id]!;
+  const current = cache.get(source)?.statuses.find((status) => status.id === id);
+  // A successful call proves the worker answers, not that a known limitation (the CPU fallback) is gone.
+  if (current?.state === "degraded") {
+    reportEvidence(id, current);
+    return;
+  }
+  reportEvidence(id, { id, state: "up", reasonKey: "ok", checkedAt: Date.now() });
 }
 
 /** Server-side English for the model and the wire fallback. The web app translates by code and service. */
@@ -234,6 +291,10 @@ const UNAVAILABLE: Partial<Record<FixedServiceId, { message: string; hint: strin
   browser: {
     message: "The browser worker is not reachable, so PDF rendering and screenshots are unavailable right now.",
     hint: "Ask an admin to start the browser service (docker compose up -d browser). Word and Excel documents still work.",
+  },
+  scrapling: {
+    message: "The browser worker's page-reading fallback is not reachable right now.",
+    hint: "Plain page reading still works when possible. Ask an admin to start the browser service (docker compose up -d browser).",
   },
   speech: {
     message: "The speech worker is not reachable, so server voices and Whisper are unavailable right now.",
@@ -320,17 +381,11 @@ export async function servicesFor(userId: string, force = false): Promise<Servic
   return [...SERVICE_IDS.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : [])), ...account];
 }
 
-// A forced refresh still shares the in-flight probe; this only bounds how often one account can force one.
-const lastForced = new Map<string, number>();
-
 export const serviceRoutes = new Hono<AppEnv>().get("/services", async (c) => {
   const userId = c.get("user").id;
-  let force = c.req.query("refresh") === "1";
-  if (force) {
-    const last = lastForced.get(userId) ?? 0;
-    if (Date.now() - last < 5_000) force = false;
-    else lastForced.set(userId, Date.now());
-  }
+  // The per-source cooldown in sourceStatus bounds a forced refresh across accounts and tabs; one account
+  // cannot multiply probes, and the shared worker health stays one path.
+  const force = c.req.query("refresh") === "1";
   c.header("Cache-Control", "private, no-store");
   return c.json({ services: await servicesFor(userId, force) } satisfies ServicesResponse);
 });
@@ -343,15 +398,19 @@ export function setServiceProbeForTests(source: ServiceSource, probe: ProbeFn | 
 export function resetServicesForTests() {
   cache.clear();
   inflight.clear();
+  evidence.clear();
+  evidenceVersion = 0;
   providerRejections.clear();
   lastForced.clear();
   probes = { ...DEFAULT_PROBES };
   ttlMs = SERVICE_TTL_MS;
   probeTimeoutMs = PROBE_TIMEOUT_MS;
+  forceCooldownMs = FORCE_COOLDOWN_MS;
 }
 
-/** Tests only: shorten the cache lifetime and the per-probe deadline. */
-export function setServiceTimingForTests(timing: { ttlMs?: number; probeTimeoutMs?: number }) {
+/** Tests only: shorten the cache lifetime, the per-probe deadline, and the forced-refresh cooldown. */
+export function setServiceTimingForTests(timing: { ttlMs?: number; probeTimeoutMs?: number; forceCooldownMs?: number }) {
   if (timing.ttlMs !== undefined) ttlMs = timing.ttlMs;
   if (timing.probeTimeoutMs !== undefined) probeTimeoutMs = timing.probeTimeoutMs;
+  if (timing.forceCooldownMs !== undefined) forceCooldownMs = timing.forceCooldownMs;
 }

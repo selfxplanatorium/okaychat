@@ -13,7 +13,19 @@ process.env.OKAYCHAT_DATA_DIR = dataDir;
 process.env.OKAYCHAT_SECRET = "chat-services-test-secret-only-not-for-production";
 process.env.OKAYCHAT_SANDBOX_URL = "http://127.0.0.1:9";
 process.env.OKAYCHAT_SANDBOX_TOKEN = "sandbox-test-token-0123456789abcdef";
-writeFileSync(path.join(dataDir, "models-dev.json"), JSON.stringify({ data: {}, fetchedAt: Date.now() }));
+// A text-only OpenAI-compatible catalog model (tool_call false) proves a plain reply never pays for a
+// sidecar probe.
+writeFileSync(path.join(dataDir, "models-dev.json"), JSON.stringify({
+  data: {
+    xai: {
+      id: "xai",
+      name: "xAI",
+      api: "https://api.x.ai/v1",
+      models: { "text-only": { id: "text-only", name: "Text Only", tool_call: false, limit: { context: 128_000, output: 4_096 } } },
+    },
+  },
+  fetchedAt: Date.now(),
+}));
 const { db } = await import("./db.js");
 const { saveConnection } = await import("./catalog/providers.js");
 const { updateSettings } = await import("./settings.js");
@@ -60,15 +72,29 @@ function provider(t: TestContext) {
 }
 
 type Chunk = { type: string; messageMetadata?: { unavailable?: TurnUnavailable[] }; delta?: string };
-async function run(threadId: string, messages: UIMessage[]) {
+async function run(threadId: string, messages: UIMessage[], modelRef = "custom-test/mock") {
   const chunks: Chunk[] = [];
-  const stream = await turnStream({ userId: "alice", threadId, modelRef: "custom-test/mock", uiMessages: messages });
+  const stream = await turnStream({ userId: "alice", threadId, modelRef, uiMessages: messages });
   for await (const chunk of stream) chunks.push(chunk as Chunk);
   return chunks;
 }
 
 const turn = (id = "u1", text = "Hello there") => ({ id, role: "user", parts: [{ type: "text", text }] }) as UIMessage;
 const unavailableOf = (chunks: Chunk[]) => chunks.find((chunk) => chunk.type === "start")?.messageMetadata?.unavailable ?? [];
+
+/** Down sidecars, so any probe this turn makes would also leave a note. */
+function countProbes() {
+  const counts = { browser: 0, sandbox: 0 };
+  services.setServiceProbeForTests("browser", async () => {
+    counts.browser++;
+    return { results: { browser: { state: "down", reasonKey: "refuses", fixKey: "startBrowser" } } };
+  });
+  services.setServiceProbeForTests("sandbox", async () => {
+    counts.sandbox++;
+    return { results: { sandbox: { state: "down", reasonKey: "refuses", fixKey: "startSandbox" } } };
+  });
+  return counts;
+}
 
 test("a down sandbox withholds run_code, records the reason, and the chat still answers", async (t) => {
   services.setServiceProbeForTests("sandbox", async () => ({ results: { sandbox: { state: "down", reasonKey: "refuses", fixKey: "startSandbox" } } }));
@@ -122,6 +148,35 @@ test("a turn that started with every service up keeps its tools when one fails l
   services.setServiceProbeForTests("sandbox", async () => ({ results: { sandbox: { state: "down", reasonKey: "refuses" } } }));
   await run("stable-tools", [user, assistant]);
   assert.ok(toolNames(requests[1]!).includes("run_code"), "the tool block is identical within the turn");
+});
+
+test("a temporary chat never probes or notes a sidecar it cannot use", async (t) => {
+  const probes = countProbes();
+  provider(t);
+  const chunks = await run("tmp_probe_free", [turn()]);
+  assert.deepEqual(probes, { browser: 0, sandbox: 0 });
+  assert.deepEqual(unavailableOf(chunks), []);
+});
+
+test("a stored chat with artifacts and code execution off never probes a sidecar", async (t) => {
+  updateSettings("alice", { codeExecution: false, artifacts: false });
+  const probes = countProbes();
+  provider(t);
+  ensureThread("alice", "no-tools");
+  const chunks = await run("no-tools", [turn()]);
+  assert.deepEqual(probes, { browser: 0, sandbox: 0 });
+  assert.deepEqual(unavailableOf(chunks), []);
+});
+
+test("a model without tool calling never probes a sidecar, even with both features on", async (t) => {
+  saveConnection("alice", "xai", { apiKey: "sk-test-not-real", baseURL: "http://mock.test/v1" });
+  const probes = countProbes();
+  provider(t);
+  ensureThread("alice", "plain-text");
+  const chunks = await run("plain-text", [turn()], "xai/text-only");
+  assert.deepEqual(probes, { browser: 0, sandbox: 0 });
+  assert.deepEqual(unavailableOf(chunks), []);
+  assert.ok(chunks.some((chunk) => chunk.type === "text-delta" && chunk.delta?.includes("does not need a sandbox")), "the plain reply still streams");
 });
 
 test("a document tool withholds only PDF, and says so with the service error", async () => {

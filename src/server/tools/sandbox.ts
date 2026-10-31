@@ -98,11 +98,18 @@ async function call(route: string, init: RequestInit = {}, timeoutMs = 30_000, s
     reportServiceFailure("sandbox");
     throw serviceUnavailable("sandbox");
   }
-  reportServiceSuccess("sandbox");
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
+    // 503 is the runner saying it cannot run anything (no slot, isolation failed). That is a service outage
+    // with the registry's fix. A 400/409/422 is the model's request or its code, not the service.
+    if (res.status === 503) {
+      reportServiceFailure("sandbox");
+      throw serviceUnavailable("sandbox");
+    }
+    reportServiceSuccess("sandbox");
     throw new Error(body.error ? `Sandbox: ${body.error}` : `Sandbox request failed (${res.status}).`);
   }
+  reportServiceSuccess("sandbox");
   return res;
 }
 

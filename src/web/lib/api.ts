@@ -30,6 +30,36 @@ export class ApiError extends Error {
 
 const httpFallback = (status: number) => t("errors.httpFailure", { status });
 
+/** The registry refresh signal. Raised only by a real outage response, never by the health request itself. */
+const SERVICE_FAILED_EVENT = "okaychat:service-failed";
+
+export function notifyServiceFailure(): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(SERVICE_FAILED_EVENT));
+}
+
+/**
+ * A `service_unavailable` failure asks the store to re-check. `/services` is excluded: a failing health
+ * request is not evidence and must not start a refresh loop.
+ */
+export function notifyServiceFailureForWire(wire: ErrorWire | undefined, path: string): void {
+  if (wire?.code !== "service_unavailable") return;
+  // `/services?refresh=1` is still the health request; it must never trigger another one.
+  if (path.split("?")[0] !== "/services") notifyServiceFailure();
+}
+
+/**
+ * The same safe error and refresh signal for a raw fetch boundary (speech audio, PDF export) that cannot
+ * use `api()`. The response body is parsed only into known wire fields; raw worker text never reaches the UI.
+ */
+export async function responseError(res: Response, path: string, fallback?: string): Promise<ApiError> {
+  const body = res.headers.get("content-type")?.includes("json")
+    ? await res.json().catch(() => undefined)
+    : await res.text().catch(() => "");
+  const wire = parseErrorWire(body);
+  notifyServiceFailureForWire(wire, path);
+  return apiErrorFromBody(body, res.status, fallback ?? httpFallback(res.status));
+}
+
 /** A legacy `{ error }` body is trusted only as authored 4xx validation, never as upstream detail. */
 function legacyMessage(body: unknown, status: number): string | undefined {
   if (status < 400 || status >= 500) return undefined;
@@ -90,7 +120,7 @@ export async function api<T>(path: string, init?: RequestInit & { json?: unknown
   if (typeof window !== "undefined" && init?.method && init.method !== "GET" && !path.startsWith("/auth")) window.dispatchEvent(new Event("okaychat:storage-changed"));
   if (!res.ok) {
     // A service outage is also a signal to re-check the registry; the store debounces and single-flights it.
-    if (typeof window !== "undefined" && parseErrorWire(body)?.code === "service_unavailable") window.dispatchEvent(new Event("okaychat:service-failed"));
+    notifyServiceFailureForWire(parseErrorWire(body), path);
     throw apiErrorFromBody(body, res.status);
   }
   return body as T;

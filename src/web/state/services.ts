@@ -26,10 +26,13 @@ interface ServicesState extends ServiceView {
 
 const DISMISS_KEY = "okaychat:services-dismissed";
 const CHECK_COOLDOWN_MS = 10_000;
+/** A failed action may ask for a fresh probe, but a burst of them must not fan out. */
+const FORCE_COOLDOWN_MS = 5_000;
 
 let generation = 0;
 let inflight: { accountId: string; promise: Promise<void> } | null = null;
 let lastCheck = 0;
+let lastForced = 0;
 
 const session = (fn: (storage: Storage) => void) => {
   try {
@@ -64,6 +67,7 @@ export const useServices = create<ServicesState>((set, get) => ({
     generation++;
     inflight = null;
     lastCheck = 0;
+    lastForced = 0;
     set({ accountId, statuses: null, used: {}, dismissed: readDismissed(accountId), loading: true, error: false });
     void get().refresh();
   },
@@ -72,10 +76,15 @@ export const useServices = create<ServicesState>((set, get) => ({
     const accountId = get().accountId;
     if (!accountId) return;
     if (inflight?.accountId === accountId) return inflight.promise;
+    // A forced refresh still has a floor: a burst of failed actions (or a health request that fails) cannot
+    // fan out, and the server shares one probe per source anyway.
+    const now = Date.now();
+    const forced = force && now - lastForced >= FORCE_COOLDOWN_MS;
+    if (forced) lastForced = now;
     // The server's own answer lives for 15 s; asking more often only adds requests.
-    if (!force && get().statuses && Date.now() - lastCheck < CHECK_COOLDOWN_MS) return;
+    if (!forced && get().statuses && now - lastCheck < CHECK_COOLDOWN_MS) return;
     const request = generation;
-    const promise: Promise<void> = api<unknown>(`/services${force ? "?refresh=1" : ""}`)
+    const promise: Promise<void> = api<unknown>(`/services${forced ? "?refresh=1" : ""}`)
       .then((payload) => {
         if (request !== generation || get().accountId !== accountId) return;
         const statuses = parseServices(payload);
@@ -109,6 +118,7 @@ export const useServices = create<ServicesState>((set, get) => ({
     generation++;
     inflight = null;
     lastCheck = 0;
+    lastForced = 0;
     set({ accountId: null, statuses: null, used: {}, dismissed: {}, loading: false, error: false });
   },
 }));

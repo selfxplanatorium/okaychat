@@ -214,6 +214,66 @@ test("a rejected provider request degrades that account's providers until a succ
   assert.equal(byId(await services.servicesFor("alice")).get("providers")?.state, "up");
 });
 
+test("a failure reported during a probe survives that probe's older answer", async () => {
+  let release: (() => void) | undefined;
+  services.setServiceProbeForTests("sandbox", async () => {
+    await new Promise<void>((resolve) => (release = resolve));
+    return { results: { sandbox: { state: "up", reasonKey: "ok" } } };
+  });
+  const pending = services.servicesFor("alice");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  services.reportServiceFailure("sandbox");
+  release?.();
+  const statuses = byId(await pending);
+  assert.equal(statuses.get("sandbox")?.state, "down", "a real failure is newer than the probe that was already running");
+  assert.equal(services.serviceDown("sandbox"), true);
+});
+
+test("a success reported during a probe is not overwritten either", async () => {
+  let release: (() => void) | undefined;
+  services.setServiceProbeForTests("sandbox", async () => {
+    await new Promise<void>((resolve) => (release = resolve));
+    return { results: { sandbox: { state: "down", reasonKey: "refuses" } } };
+  });
+  const pending = services.servicesFor("alice");
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  services.reportServiceSuccess("sandbox");
+  release?.();
+  const statuses = byId(await pending);
+  assert.equal(statuses.get("sandbox")?.state, "up");
+  assert.equal(services.serviceDown("sandbox"), false);
+});
+
+test("a successful request does not erase a known degraded state", async () => {
+  services.setServiceProbeForTests("speech", async () => ({ results: { speech: { state: "degraded", reasonKey: "cpuFallback" } } }));
+  await services.servicesFor("alice");
+  assert.equal(services.serviceSnapshot("speech")?.state, "degraded");
+  services.reportServiceSuccess("speech");
+  assert.equal(services.serviceSnapshot("speech")?.state, "degraded", "a CPU fallback is still degraded after a successful request");
+});
+
+test("a forced refresh is cooldown-limited per source across accounts", async () => {
+  let probes = 0;
+  services.setServiceProbeForTests("sandbox", async () => {
+    probes++;
+    return { results: { sandbox: { state: "up", reasonKey: "ok" } } };
+  });
+  await services.servicesFor("alice", true);
+  assert.equal(probes, 1);
+  // Another account's ten tabs cannot force a second probe inside the shared cooldown.
+  await services.servicesFor("bob", true);
+  await services.servicesFor("alice", true);
+  assert.equal(probes, 1, "one probe per source per cooldown, not one per account");
+});
+
+test("speech-only and image-only keys do not count as chat providers", async () => {
+  saveConnection("alice", "speech-openai", { apiKey: "sk-speech-only" });
+  saveConnection("alice", "image-black-forest-labs", { apiKey: "sk-image-only" });
+  assert.equal(byId(await services.servicesFor("alice")).get("providers")?.state, "unconfigured");
+  saveConnection("alice", "openai", { apiKey: "sk-chat" });
+  assert.equal(byId(await services.servicesFor("alice", true)).get("providers")?.state, "up");
+});
+
 test("a shared key the user is not entitled to does not count as a provider", async () => {
   saveConnection(null, "openai", { apiKey: "sk-shared-not-real" });
   const { setAudience } = await import("./groups.js");

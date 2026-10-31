@@ -5,7 +5,7 @@ import { t, type PlainMessageKey } from "@/i18n";
 import { settingsHref } from "@/lib/settings-link";
 import { useCommand } from "@/keyboard/registry";
 import { useServices } from "@/state/services";
-import { FIX_KEYS, FIX_SETTINGS, REASON_KEYS, availabilityOf, serviceNameKey, statusOf } from "@/state/services-derive";
+import { FIX_KEYS, FIX_SETTINGS, REASON_KEYS, availabilityOf, customServiceMessageKey, serviceNameKey, statusOf } from "@/state/services-derive";
 import { cn } from "@/lib/utils";
 
 
@@ -19,7 +19,9 @@ export function ServiceAvailability({ id, className, describeId, messageKey }: {
   useCommand("services.checkAgain", check, state === "down" || state === "degraded");
   if (state === "up" || state === "unknown" || state === "unconfigured") return null;
   const status = statusOf(services, id);
-  const fix = status?.fixKey ? FIX_SETTINGS[status.fixKey] : undefined;
+  // A speech outage has a compose fix and a "pick another engine" link; a CPU fallback still offers the
+  // latter because a user may prefer a cloud voice.
+  const fix = status?.fixKey ? FIX_SETTINGS[status.fixKey] : id === "speech" ? FIX_SETTINGS.voice : undefined;
   if (state === "checking") {
     return (
       <p id={describeId} role="status" className={cn("text-muted-foreground text-xs", className)}>
@@ -28,6 +30,9 @@ export function ServiceAvailability({ id, className, describeId, messageKey }: {
     );
   }
   const name = t(serviceNameKey(id));
+  // A caller's note describes an outage; a degraded service explains its own limitation (a CPU fallback is
+  // slower, not unavailable). Otherwise Settings → Voice would claim server voices are unavailable while up.
+  const custom = customServiceMessageKey(state, messageKey);
   return (
     <div
       id={describeId}
@@ -37,8 +42,8 @@ export function ServiceAvailability({ id, className, describeId, messageKey }: {
       <p className="flex items-start gap-2">
         <CircleAlertIcon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
         <span>
-          {messageKey
-            ? t(messageKey)
+          {custom
+            ? t(custom)
             : state === "degraded"
               ? t("services.degraded", { service: name, reason: t(REASON_KEYS[status?.reasonKey ?? "unreachable"]) })
               : t("services.unavailable", { service: name, reason: t(REASON_KEYS[status?.reasonKey ?? "unreachable"]) })}

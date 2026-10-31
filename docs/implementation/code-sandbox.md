@@ -9,9 +9,11 @@ container, one workspace per chat. Runs have no network at all.
 - The app container is never used to run code: it holds `OKAYCHAT_SECRET`, `/data`, and the network route to SearXNG.
 - `sandbox/runner.py` is a stdlib HTTP service and the only root process. The app calls it with `OKAYCHAT_SANDBOX_TOKEN` (bearer). `src/server/tools/sandbox.ts` holds the tool, the download routes, conversion, and workspace deletion.
 - `GET /api/sandbox` answers from the service registry's cached probe (never a second health request); Settings →
-  General reads `configured`, `reachable`, and `refuses` (the isolation check failed). A refused connection marks the
-  service down, so the next run fails fast with `service_unavailable`; cancel and workspace deletion skip that guard
-  so cleanup still reaches a runner the registry has marked down. See `docs/implementation/service-health.md`.
+  General reads `configured`, `reachable`, and `refuses` (the isolation check failed). A refused connection or an
+  application 503 from the runner (busy, no free slot, isolation unavailable) marks the service down and answers the
+  existing `service_unavailable` with its fix; a 400/409/422 is the model's request or code and stays an ordinary
+  tool error. Cancel and workspace deletion skip the fail-fast guard so cleanup still reaches a runner the registry
+  has marked down. See `docs/implementation/service-health.md`.
 - Workspace id = first 32 hex chars of `sha256("sandbox:" + userId + ":" + threadId)`. The sandbox never sees user or thread ids.
 - Every run is started as its workspace's uid inside **bubblewrap** (`bwrap`, Debian's 0.8), which gives it new user, network, IPC, UTS, and cgroup namespaces and its own mount namespace. bubblewrap is the sandbox Flatpak uses; the boundary is the kernel's namespaces, not a syscall blacklist.
 
