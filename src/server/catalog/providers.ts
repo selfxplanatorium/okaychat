@@ -2,6 +2,7 @@ import { HTTPException } from "hono/http-exception";
 import type { ModelInfo, ProviderConnectionInput, ProviderInfo } from "../../shared/types.js";
 import { decrypt, encrypt } from "../crypto.js";
 import { db } from "../db.js";
+import { modelAccessMessage, sharedModelAccess, type SharedModelAccess } from "../entitlements.js";
 import { audienceIncludes, clearAudience, getAudience } from "../groups.js";
 import { USER_AGENT } from "../env.js";
 import { assertPublicHost, BlockedAddressError, publicFetch } from "../public-fetch.js";
@@ -204,11 +205,22 @@ function supportedProviders(catalog: Record<string, RawProvider>): RawProvider[]
 export async function listProviders(scope: ConnectionScope): Promise<ProviderInfo[]> {
   const catalog = await getCatalog();
   const connections = scope === null ? readScope(null) : readConnections(scope);
+  // A restricted shared connection with no currently entitled model is hidden like one outside the audience.
+  const accessOf = (conn: Connection | undefined): SharedModelAccess | null =>
+    scope !== null && conn?.shared ? sharedModelAccess(scope, conn.providerId) : null;
   const out: ProviderInfo[] = [];
   for (const provider of supportedProviders(catalog)) {
     // Ollama is listed below from its native API, never from models.dev's generic entry.
     if (provider.id === OLLAMA) continue;
     const conn = connections.get(provider.id);
+    const access = accessOf(conn);
+    let modelCount = Object.keys(provider.models).length;
+    if (access && !access.all) {
+      if (!access.ids.size) continue;
+      const granted = (await modelsForProvider(provider, conn!)).filter((model) => access.ids.has(model.id));
+      if (!granted.length) continue;
+      modelCount = granted.length;
+    }
     out.push({
       id: provider.id,
       name: NAMES[provider.id] ?? provider.name,
@@ -220,28 +232,32 @@ export async function listProviders(scope: ConnectionScope): Promise<ProviderInf
       enabled: conn?.enabled ?? false,
       shared: scope !== null && !!conn?.shared,
       baseURL: conn?.baseURL ?? provider.api,
-      modelCount: Object.keys(provider.models).length,
+      modelCount,
       ...(scope === null && conn ? { audience: getAudience("provider", provider.id) } : {}),
     });
   }
   {
     const conn = connections.get(OLLAMA);
+    const access = accessOf(conn);
     // Shown even when disconnected, so Ollama is discoverable next to the hosted providers.
     const installed = conn?.enabled ? await ollamaModels(conn, { wait: false }) : [];
-    out.push({
-      id: OLLAMA,
-      name: OLLAMA_NAME,
-      doc: OLLAMA_DOC,
-      primary: false,
-      custom: false,
-      needsBaseURL: true,
-      connected: !!conn,
-      enabled: conn?.enabled ?? false,
-      shared: scope !== null && !!conn?.shared,
-      baseURL: conn?.baseURL ?? OLLAMA_DEFAULT_URL,
-      modelCount: installed.length,
-      ...(scope === null && conn ? { audience: getAudience("provider", OLLAMA) } : {}),
-    });
+    const granted = access && !access.all ? installed.filter((model) => access.ids.has(model.id)) : installed;
+    if (!(conn?.shared && access && !access.all && !granted.length)) {
+      out.push({
+        id: OLLAMA,
+        name: OLLAMA_NAME,
+        doc: OLLAMA_DOC,
+        primary: false,
+        custom: false,
+        needsBaseURL: true,
+        connected: !!conn,
+        enabled: conn?.enabled ?? false,
+        shared: scope !== null && !!conn?.shared,
+        baseURL: conn?.baseURL ?? OLLAMA_DEFAULT_URL,
+        modelCount: granted.length,
+        ...(scope === null && conn ? { audience: getAudience("provider", OLLAMA) } : {}),
+      });
+    }
   }
   if (scope !== null) {
     const conn = connections.get(CHATGPT);
@@ -259,6 +275,13 @@ export async function listProviders(scope: ConnectionScope): Promise<ProviderInf
   }
   for (const conn of connections.values()) {
     if (!isCustom(conn.providerId)) continue;
+    const access = accessOf(conn);
+    let modelCount = 0;
+    if (access && !access.all) {
+      if (!access.ids.size) continue;
+      modelCount = (await modelsForCustom(conn)).filter((model) => access.ids.has(model.id)).length;
+      if (!modelCount) continue;
+    }
     out.push({
       id: conn.providerId,
       name: conn.name ?? conn.providerId,
@@ -269,7 +292,7 @@ export async function listProviders(scope: ConnectionScope): Promise<ProviderInf
       enabled: conn.enabled,
       shared: scope !== null && !!conn.shared,
       baseURL: conn.baseURL,
-      modelCount: 0,
+      modelCount,
       ...(scope === null ? { audience: getAudience("provider", conn.providerId) } : {}),
     });
   }
@@ -359,19 +382,35 @@ async function modelsForCustom(conn: Connection): Promise<ModelInfo[]> {
   return ids.filter((id) => isChatModelId(id)).map((id) => ({ ...unknownModel(conn.providerId, id, "openai-chat", conn.baseURL), name: id }));
 }
 
-export async function listModels(userId: string): Promise<ModelInfo[]> {
+/** Every model one connection offers, independent of a viewer. Used by the admin policy dialog. */
+export async function listModelsForConnection(conn: Connection): Promise<ModelInfo[]> {
+  if (isCustom(conn.providerId)) return modelsForCustom(conn);
+  if (conn.providerId === CHATGPT) return [];
+  if (conn.providerId === OLLAMA) return ollamaModels(conn);
   const catalog = await getCatalog();
+  const provider = catalog[conn.providerId];
+  return provider ? modelsForProvider(provider, conn) : [];
+}
+
+/** The admin's view of a shared connection's catalog. Never reads the admin's own key for the same provider. */
+export async function listSharedModels(providerId: string): Promise<ModelInfo[]> {
+  const conn = getSharedConnection(providerId);
+  return conn ? listModelsForConnection(conn) : [];
+}
+
+export async function listModels(userId: string): Promise<ModelInfo[]> {
   // Ollama needs no key and may use its default URL, so it is connected without either field.
   const connections = [...readConnections(userId).values()].filter(
     (c) => c.enabled && (c.providerId === OLLAMA || c.apiKey || c.baseURL),
   );
   const lists = await Promise.all(
-    connections.map((conn) => {
-      if (isCustom(conn.providerId)) return modelsForCustom(conn);
-      if (conn.providerId === CHATGPT) return chatgptModels(userId);
-      if (conn.providerId === OLLAMA) return ollamaModels(conn);
-      const provider = catalog[conn.providerId];
-      return provider ? modelsForProvider(provider, conn) : Promise.resolve([]);
+    connections.map(async (conn) => {
+      const models = conn.providerId === CHATGPT
+        ? await chatgptModels(userId)
+        : await listModelsForConnection(conn);
+      // Own connections override the shared one in readConnections, so only a shared row carries a policy.
+      const access = conn.shared ? sharedModelAccess(userId, conn.providerId) : null;
+      return access && !access.all ? models.filter((model) => access.ids.has(model.id)) : models;
     }),
   );
   return lists.flat();
@@ -380,11 +419,20 @@ export async function listModels(userId: string): Promise<ModelInfo[]> {
 export async function resolveModel(userId: string, ref: string): Promise<{ model: ModelInfo; conn: Connection }> {
   const slash = ref.indexOf("/");
   const providerId = ref.slice(0, slash);
+  const modelId = ref.slice(slash + 1);
   const conn = getConnection(userId, providerId);
-  if (!conn || !conn.enabled) throw new HTTPException(400, { message: `Provider ${providerId} is not connected` });
+  const access = sharedModelAccess(userId, providerId);
+  const denied = !access.all && (access.ids.size === 0 || !access.ids.has(modelId));
+  if (!conn || !conn.enabled) {
+    // Audience revocation must also explain why a saved chat can no longer use its server key.
+    if (!conn && getSharedConnection(providerId)?.enabled) throw new HTTPException(403, { message: modelAccessMessage(ref) });
+    throw new HTTPException(400, { message: `Provider ${providerId} is not connected` });
+  }
+  if (conn.shared && denied) throw new HTTPException(403, { message: modelAccessMessage(ref) });
   const models = await listModels(userId);
   const model = models.find((m) => m.ref === ref);
   if (!model) {
+    if (conn.shared && !access.all) throw new HTTPException(403, { message: modelAccessMessage(ref) });
     if (providerId === OLLAMA) {
       // listModels keeps the last good list when the daemon is down. For a model that was not found,
       // ask once more so a stopped daemon or a broken address produces an actionable error.

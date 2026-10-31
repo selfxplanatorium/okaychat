@@ -460,3 +460,21 @@ test("management errors are surfaced instead of swallowed", async () => {
 test("the native error type is used for actionable failures", () => {
   assert.ok(new OllamaError("x") instanceof Error);
 });
+
+
+test("shared Ollama inventory follows model policies while admin and own inventories stay complete", async () => {
+  const { setModelAccessPolicies } = await import("../entitlements.js");
+  saveConnection(null, "ollama", { baseURL, enabled: true });
+  setModelAccessPolicies("ollama", [{ target: { kind: "everyone", id: "" }, mode: "selected", modelIds: ["qwen3:8b"] }]);
+  const inventory = await json(await as("alice", "/providers/ollama/models"));
+  assert.deepEqual((inventory.models as Array<{ name: string }>).map((model) => model.name), ["qwen3:8b"]);
+  assert.equal((inventory.status as { modelCount: number }).modelCount, 1);
+  assert.equal((inventory.status as { loadedCount: number }).loadedCount, 0);
+  const adminApp = new Hono().use(requireUser).route("/", adminRoutes);
+  const adminInventory = await json(await adminApp.request("/admin/providers/ollama/models", { headers: { Cookie: "okaychat_session=admin" } }));
+  assert.equal((adminInventory.models as unknown[]).length, 4);
+  saveConnection("admin", "ollama", { baseURL, enabled: true });
+  assert.equal(((await json(await as("admin", "/providers/ollama/models"))).models as unknown[]).length, 4);
+  setModelAccessPolicies("ollama", [{ target: { kind: "everyone", id: "" }, mode: "selected", modelIds: [] }]);
+  assert.deepEqual((await json(await as("alice", "/providers/ollama/models"))).models, []);
+});

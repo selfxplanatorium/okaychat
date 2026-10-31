@@ -108,6 +108,7 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "settings.ollamaPull", labelKey: "keyboard.cmdSettingsOllamaPull", group: "Settings", keys: [] },
   { id: "settings.ollamaCancelPull", labelKey: "keyboard.cmdSettingsOllamaCancelPull", group: "Settings", keys: [] },
   { id: "settings.ollamaDelete", labelKey: "keyboard.cmdSettingsOllamaDelete", group: "Settings", keys: [] },
+  { id: "settings.providerModels", labelKey: "keyboard.cmdSettingsProviderModels", group: "Settings", keys: ["Alt+Shift+K"] },
 ];
 
 export const COMMAND_GROUPS: readonly CommandGroup[] = ["General", "Navigation", "Chat", "Composer", "Messages", "Settings"];

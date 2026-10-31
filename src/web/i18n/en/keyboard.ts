@@ -39,6 +39,7 @@ export default {
   cmdChatTrimContext: "Trim earlier messages",
   cmdUxDismissHints: "Dismiss shortcut hints",
   cmdChatLoadImage: "Load a remote image in the chat",
+  cmdSettingsProviderModels: "Choose which models a server key shares",
   cmdComposerModel: "Choose model",
   cmdComposerEffort: "Reasoning effort",
   cmdComposerSearch: "Turn web search on or off",

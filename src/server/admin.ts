@@ -3,13 +3,20 @@ import path from "node:path";
 import { env } from "./env.js";
 import { Hono } from "hono";
 import { z } from "zod";
-import type { AdminUser } from "../shared/types.js";
+import type { AdminUser, ModelAccessPolicy } from "../shared/types.js";
 import { requireAdmin, signupAllowed, type AppEnv } from "./auth.js";
-import { deleteConnection, listProviders, saveConnection } from "./catalog/providers.js";
+import { deleteConnection, getSharedConnection, listProviders, listSharedModels, saveConnection } from "./catalog/providers.js";
 import { ollamaManagementRoutes } from "./catalog/ollama-routes.js";
 import { hashPassword, newId } from "./crypto.js";
 import { db } from "./db.js";
-import { createGroup, deleteGroup, listGroups, setAudience, updateGroup } from "./groups.js";
+import {
+  clearModelAccessPoliciesForUser,
+  listModelAccessPolicies,
+  modelTargetKey,
+  providerAudienceTargets,
+  setModelAccessPolicies,
+} from "./entitlements.js";
+import { createGroup, deleteGroup, getAudience, listGroups, setAudience, updateGroup } from "./groups.js";
 import { listPrompts, MAX_PROMPT_CHARS, setPrompt } from "./prompts.js";
 import { storageUsedSql } from "./quota.js";
 
@@ -38,6 +45,13 @@ const providerInput = z.object({
 const ids = z.array(z.string().max(100)).max(10_000);
 const groupInput = z.object({ name: z.string().trim().min(1).max(60), userIds: ids.optional() });
 export const audienceInput = z.object({ mode: z.enum(["all", "selected"]), userIds: ids.default([]), groupIds: ids.default([]) });
+
+const modelAccessPolicyInput = z.object({
+  target: z.object({ kind: z.enum(["everyone", "user", "group"]), id: z.string().max(200).default("") }),
+  mode: z.enum(["all", "selected"]),
+  modelIds: z.array(z.string().min(1).max(300)).max(5000).default([]),
+});
+const modelAccessInput = z.object({ policies: z.array(modelAccessPolicyInput).max(2000) });
 
 export const adminRoutes = new Hono<AppEnv>()
   .use("/admin/*", requireAdmin)
@@ -89,6 +103,7 @@ export const adminRoutes = new Hono<AppEnv>()
     const id = c.req.param("id");
     if (id === c.get("user").id) return c.json({ error: "You cannot delete your own account here." }, 400);
     if (!db.prepare("SELECT 1 FROM users WHERE id = ?").get(id)) return c.json({ error: "Not found" }, 404);
+    clearModelAccessPoliciesForUser(id);
     db.prepare("DELETE FROM users WHERE id = ?").run(id);
     await rm(path.join(env.dataDir, "images", id), { recursive: true, force: true });
     return c.json({ ok: true });
@@ -124,6 +139,49 @@ export const adminRoutes = new Hono<AppEnv>()
     const id = c.req.param("id");
     if (!db.prepare("SELECT 1 FROM shared_connections WHERE provider_id = ?").get(id)) return c.json({ error: "Not found" }, 404);
     setAudience("provider", id, body.data);
+    return c.json({ ok: true });
+  })
+  .get("/admin/providers/:id/entitlements", async (c) => {
+    const id = c.req.param("id");
+    if (!getSharedConnection(id)) return c.json({ error: "Not found" }, 404);
+    return c.json({
+      providerId: id,
+      audience: getAudience("provider", id),
+      policies: listModelAccessPolicies(id),
+      models: await listSharedModels(id),
+    });
+  })
+  .put("/admin/providers/:id/entitlements", async (c) => {
+    const body = modelAccessInput.safeParse(await c.req.json());
+    if (!body.success) return c.json({ error: body.error.issues[0]?.message }, 400);
+    const id = c.req.param("id");
+    // Admin scope: configure the shared row even when the admin's own audience does not include it.
+    if (!getSharedConnection(id)) return c.json({ error: "Not found" }, 404);
+    const targets = new Map(providerAudienceTargets(id).map((target) => [modelTargetKey(target), target]));
+    const existing = new Map(listModelAccessPolicies(id).map((policy) => [modelTargetKey(policy.target), new Set(policy.modelIds)]));
+    const catalog = new Set((await listSharedModels(id)).map((model) => model.id));
+    const seen = new Set<string>();
+    const policies: ModelAccessPolicy[] = [];
+    for (const item of body.data.policies) {
+      const { target, mode } = item;
+      if (target.kind === "everyone" ? target.id !== "" : target.id === "") {
+        return c.json({ error: "Choose an audience and a model policy." }, 400);
+      }
+      const key = modelTargetKey(target);
+      if (!targets.has(key)) return c.json({ error: "That audience is no longer part of this connection. Reload and try again." }, 400);
+      if (seen.has(key)) return c.json({ error: "Each audience can appear only once." }, 400);
+      seen.add(key);
+      // Duplicates in one selection are harmless; store each id once.
+      const modelIds = mode === "all" ? [] : [...new Set(item.modelIds)];
+      if (mode === "selected") {
+        // Keep ids that are already stored (stale after a catalog change) but reject new invented ones.
+        const kept = existing.get(key) ?? new Set<string>();
+        const unknown = modelIds.find((modelId) => !catalog.has(modelId) && !kept.has(modelId));
+        if (unknown) return c.json({ error: `Model ${unknown} is not available from ${id}.` }, 400);
+      }
+      policies.push({ target: { kind: target.kind, id: target.id }, mode, modelIds });
+    }
+    setModelAccessPolicies(id, policies);
     return c.json({ ok: true });
   })
   .get("/admin/groups", (c) => c.json(listGroups()))

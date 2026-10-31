@@ -1,4 +1,4 @@
-import { CheckCircle2Icon, ExternalLinkIcon, PlusIcon, SearchIcon, TrashIcon } from "lucide-react";
+import { CheckCircle2Icon, ExternalLinkIcon, PlusIcon, SearchIcon, SlidersHorizontalIcon, TrashIcon } from "lucide-react";
 import { createContext, useContext, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import type { ProviderInfo } from "@shared/types";
 import { Button } from "@/components/ui/button";
@@ -6,11 +6,13 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { t } from "@/i18n";
 import { formatNumber } from "@/i18n/format";
+import { useCommand } from "@/keyboard/registry";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 import { AudienceButton } from "./Audience";
 import { CodexConnect } from "./CodexConnect";
+import { ModelEntitlementsDialog } from "./ModelEntitlements";
 import { OllamaSettings } from "./OllamaSettings";
 import { SettingsPage, SettingsSection } from "./SettingsUI";
 
@@ -93,13 +95,13 @@ export function ProviderForm({ provider, onSaved, autoFocus }: { provider: Provi
   );
 }
 
-function ProviderRow({ provider, index, expanded, onToggle }: { provider: ProviderInfo; index: number; expanded: boolean; onToggle: () => void }) {
+function ProviderRow({ provider, index, expanded, onToggle, onModels }: { provider: ProviderInfo; index: number; expanded: boolean; onToggle: () => void; onModels?: () => void }) {
   const { base, refresh } = useScope();
   const chatgpt = provider.id === CHATGPT;
   return (
     <div className="stagger animate-rise-in px-4 py-3" style={{ "--i": index } as CSSProperties}>
-      <div className="flex items-center gap-3">
-        <button type="button" onClick={onToggle} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="button" onClick={onToggle} className="flex min-w-24 flex-1 items-center gap-2 text-left">
           <span className="truncate text-sm font-medium">{provider.name}</span>
           {provider.id === "opencode-go" && <span className="bg-primary/10 text-primary rounded px-1.5 py-0.5 text-[10px] font-medium">{t("providers.recommended")}</span>}
           {provider.connected && <CheckCircle2Icon className="text-success animate-pop-in size-3.5 shrink-0" aria-label={t("providers.connected")} />}
@@ -118,6 +120,11 @@ function ProviderRow({ provider, index, expanded, onToggle }: { provider: Provid
                   await refresh();
                 }}
               />
+            )}
+            {base === "/admin/providers" && !chatgpt && onModels && (
+              <Button size="xs" variant="outline" onClick={onModels} data-command="settings.providerModels" aria-label={t("entitlements.title", { name: provider.name })}>
+                <SlidersHorizontalIcon /> {t("entitlements.modelsButton")}
+              </Button>
             )}
             <Switch
               checked={provider.enabled}
@@ -221,10 +228,11 @@ export function ProvidersSettings() {
 
 /** Connected and available providers for the current scope. */
 export function ProviderLists() {
-  const { providers } = useScope();
+  const { base, providers, refresh } = useScope();
   const [expanded, setExpanded] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [addingCustom, setAddingCustom] = useState(false);
+  const [modelsFor, setModelsFor] = useState<ProviderInfo | null>(null);
 
   const { connected, primary, rest } = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -236,13 +244,35 @@ export function ProviderLists() {
     };
   }, [providers, query]);
 
+  // The command opens the row the admin expanded, else the first connected server key. The per-row
+  // Models… button remains the direct target.
+  useCommand(
+    "settings.providerModels",
+    () => {
+      const openable = connected.filter((p) => p.id !== CHATGPT);
+      const target = openable.find((p) => p.id === expanded) ?? openable[0];
+      if (!target) return false;
+      setModelsFor(target);
+      return true;
+    },
+    base === "/admin/providers",
+  );
+
   const rows = (list: ProviderInfo[]) =>
     list.map((p, index) => (
-      <ProviderRow key={p.id} index={index} provider={p} expanded={expanded === p.id} onToggle={() => setExpanded(expanded === p.id ? null : p.id)} />
+      <ProviderRow
+        key={p.id}
+        index={index}
+        provider={p}
+        expanded={expanded === p.id}
+        onToggle={() => setExpanded(expanded === p.id ? null : p.id)}
+        onModels={base === "/admin/providers" && p.id !== CHATGPT ? () => setModelsFor(p) : undefined}
+      />
     ));
 
   return (
     <div className="flex flex-col gap-8">
+      {modelsFor && <ModelEntitlementsDialog provider={modelsFor} onClose={() => setModelsFor(null)} onSaved={refresh} />}
       {connected.length > 0 && <SettingsSection title={t("providers.connected")}>{rows(connected)}</SettingsSection>}
       <SettingsSection
         title={t("providers.addAProvider")}

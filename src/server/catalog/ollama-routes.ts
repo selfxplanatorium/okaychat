@@ -2,6 +2,7 @@ import { Hono, type Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { AppEnv } from "../auth.js";
+import { sharedModelAccess } from "../entitlements.js";
 import {
   ollamaBaseURL,
   ollamaDelete,
@@ -127,7 +128,16 @@ export function ollamaManagementRoutes(scope: OllamaScope) {
     .get("/models", async (c) => {
       const conn = storedConnection(scope, c.get("user").id);
       try {
-        return c.json(await ollamaInventory(conn));
+        const inventory = await ollamaInventory(conn);
+        if (scope === "user" && conn.shared) {
+          const access = sharedModelAccess(c.get("user").id, "ollama");
+          if (!access.all) {
+            inventory.models = inventory.models.filter((model) => access.ids.has(model.name));
+            inventory.status.modelCount = inventory.models.length;
+            inventory.status.loadedCount = inventory.models.filter((model) => model.loaded).length;
+          }
+        }
+        return c.json(inventory);
       } catch (error) {
         return failure(c, error);
       }
