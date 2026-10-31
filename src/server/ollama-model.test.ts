@@ -329,7 +329,8 @@ test("native generation retries a transient daemon response too", async () => {
   assert.equal(flakyCalls, 2);
 });
 
-test("factory effort reaches native think and num_ctx through chat streaming and generation", async () => {  const info = { ...modelInfo("thinker"), reasoningEfforts: ["none", "high"] };
+test("factory effort reaches native think and num_ctx through chat streaming and generation", async () => {
+  const info = { ...modelInfo("thinker"), reasoningEfforts: ["none", "high"] };
   const prompt = [{ role: "user" as const, content: [{ type: "text" as const, text: "Hi" }] }];
   for (const effort of ["none", "high"] as const) {
     calls.length = 0;

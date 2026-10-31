@@ -145,7 +145,8 @@ async function peek(response: Response): Promise<{ text: string; response: Respo
   } catch {
     // Keep whatever arrived; the status still decides.
   } finally {
-    await reader.cancel().catch(() => {});
+    // A tee cancellation resolves only after both branches stop. The kept branch is still live.
+    void reader.cancel().catch(() => {});
     reader.releaseLock();
   }
   const copy = new Response(kept, { status: response.status, statusText: response.statusText, headers: response.headers });

@@ -111,7 +111,9 @@ transport, so a mutation is never retried.
   because sending it consumes the body; a plain URL plus a string `init.body` is replayable.
 - A failed attempt's body is read through a bounded (16 KiB) tee only to decide whether the failure is
   permanent. The untouched branch becomes the returned `Response` on a terminal failure, so the SDK
-  still sees the provider's own body and status. Once response streaming has started, nothing retries,
+  still sees the provider's own body and status. Cancel the inspected tee branch without awaiting it:
+  that promise needs the kept branch to finish too, and awaiting it can deadlock an open response.
+  Once response streaming has started, nothing retries,
   so emitted text and tool side effects cannot be duplicated.
 - While a chat waits, the server writes a transient `data-retry` chunk with `attempt`, `delayMs`, and
   `code`. The client stores it per chat (`state/retry-status.ts`) and the thread footer shows
@@ -155,6 +157,9 @@ transport, so a mutation is never retried.
 "Copy details" is an allowlist (`code`, `ref`, `model`, `provider`, `requestId`). It is not a
 serialization: a poisoned wire object with `apiKey`, `prompt`, `file`, or `stack` contributes nothing.
 The reference is also shown in the chat error block so support can match the server log.
+assistant-ui projects SDK errors into plain `{ code, message }` objects; `parseChatError` decodes
+the wire JSON inside `message` before accepting the outer generic code, preserving the actual
+provider code, reference, and recovery actions for both early HTTP and streamed failures.
 
 ## Diagnostics
 

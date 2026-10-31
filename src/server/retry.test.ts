@@ -251,6 +251,22 @@ test("a real timer wait is used between attempts under a fake clock", async (t) 
   assert.equal(calls, 2);
 });
 
+test("retry inspection does not wait for an open tee branch to close", { timeout: 2_000 }, async () => {
+  let calls = 0;
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(new TextEncoder().encode("x".repeat(20_000))); },
+    cancel() { cancelled = true; },
+  });
+  const wrapper = createRetryingFetch({
+    fetchImpl: (async () => ++calls === 1 ? new Response(body, { status: 503 }) : ok()) as typeof fetch,
+    sleep: async () => {},
+  });
+  assert.equal((await wrapper("https://provider.test/chat")).status, 200);
+  assert.equal(calls, 2);
+  assert.equal(cancelled, true);
+});
+
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 

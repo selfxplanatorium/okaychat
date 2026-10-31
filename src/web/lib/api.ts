@@ -97,12 +97,14 @@ export async function structuredResponseError(res: Response): Promise<string | u
 
 /** A streamed chat error is the same wire JSON in a string; assistant-ui may wrap it in an Error. */
 export function parseChatError(error: unknown): ErrorWire {
+  // assistant-ui projects Error instances into plain { code, message } objects.
+  // Decode the nested wire before accepting its generic outer code.
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const nested = parseErrorWire(error.message);
+    if (nested) return nested;
+  }
   const direct = parseErrorWire(error);
   if (direct) return direct;
-  if (error instanceof Error) {
-    const wrapped = parseErrorWire(error.message);
-    if (wrapped) return wrapped;
-  }
   return unknownWire();
 }
 

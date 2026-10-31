@@ -119,6 +119,7 @@ test("streamed errors parse from wire JSON, an Error wrapper, and nothing at all
   const text = JSON.stringify({ code: "timeout", message: "The provider took too long to respond.", retryable: true });
   assert.equal(parseChatError(text).code, "timeout");
   assert.equal(parseChatError(new Error(text)).code, "timeout");
+  assert.equal(parseChatError({ code: "unknown", message: text }).code, "timeout");
   const fallback = parseChatError("raw provider text SECRET");
   assert.equal(fallback.code, "unknown");
   assert.equal(fallback.message, "Something went wrong.");
