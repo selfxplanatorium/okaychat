@@ -1,6 +1,7 @@
 import type { ModelMessage, UIMessage } from "ai";
 import { decrypt, encrypt } from "./crypto.js";
-import { db } from "./db.js";
+import { db, tx } from "./db.js";
+import { assertStorage } from "./quota.js";
 import { wrapUntrusted } from "./prompt-injection.js";
 
 // The date, recalled memory, the skills index, and retrieved knowledge sit beside the user message they
@@ -85,20 +86,31 @@ export function storedTurnContexts(
 }
 
 export function saveTurnContext(userId: string, threadId: string, messageId: string, context: TurnContext, memoryRevision: number) {
-  db.prepare(`INSERT INTO turn_context (thread_id, message_id, user_id, memory_enc, memory_revision, skills, date, knowledge, knowledge_ids) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(thread_id, message_id) DO UPDATE SET memory_enc = excluded.memory_enc, memory_revision = excluded.memory_revision, skills = excluded.skills, date = excluded.date,
-      knowledge = excluded.knowledge, knowledge_ids = excluded.knowledge_ids`)
-    .run(
-      threadId,
-      messageId,
-      userId,
-      context.memory ? encrypt(context.memory) : null,
-      memoryRevision,
-      context.skills || null,
-      context.date || null,
-      context.knowledge || null,
-      context.knowledgeIds.length ? JSON.stringify(context.knowledgeIds) : null,
-    );
+  return tx(() => {
+    const knowledge = context.knowledge || null;
+    const knowledgeIds = context.knowledgeIds.length ? JSON.stringify(context.knowledgeIds) : null;
+    const bytes = (value: string | null) => (value ? Buffer.byteLength(value) : 0);
+    const previous = db
+      .prepare("SELECT knowledge, knowledge_ids FROM turn_context WHERE thread_id = ? AND message_id = ? AND user_id = ?")
+      .get(threadId, messageId, userId) as { knowledge: string | null; knowledge_ids: string | null } | undefined;
+    // Knowledge text duplicates source passages beside every user message, so it is charged to the owner
+    // like chunks and memories. A rewrite of the same message charges only net growth.
+    assertStorage(userId, bytes(knowledge) + bytes(knowledgeIds) - bytes(previous?.knowledge ?? null) - bytes(previous?.knowledge_ids ?? null));
+    db.prepare(`INSERT INTO turn_context (thread_id, message_id, user_id, memory_enc, memory_revision, skills, date, knowledge, knowledge_ids) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(thread_id, message_id) DO UPDATE SET memory_enc = excluded.memory_enc, memory_revision = excluded.memory_revision, skills = excluded.skills, date = excluded.date,
+        knowledge = excluded.knowledge, knowledge_ids = excluded.knowledge_ids`)
+      .run(
+        threadId,
+        messageId,
+        userId,
+        context.memory ? encrypt(context.memory) : null,
+        memoryRevision,
+        context.skills || null,
+        context.date || null,
+        knowledge,
+        knowledgeIds,
+      );
+  });
 }
 
 /** Ids of the memory facts a stored block already showed. The block is our own `factsContext` JSON. */

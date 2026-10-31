@@ -146,9 +146,23 @@ interface VectorHit {
   score: number;
 }
 
-async function vectorRanking(userId: string, collections: CollectionRow[], query: string, lexicalIds: string[], embedderFor: (row: CollectionRow) => Embedder | null): Promise<VectorHit[]> {
-  const hits: VectorHit[] = [];
+interface VectorOutcome {
+  hits: VectorHit[];
+  /** An embedding setting exists but no query vector could be produced. */
+  degraded: boolean;
+}
+
+async function vectorRanking(
+  userId: string,
+  collections: CollectionRow[],
+  query: string,
+  lexicalIds: string[],
+  sourceIds: string[] | undefined,
+  embedderFor: (row: CollectionRow) => Embedder | null,
+): Promise<VectorOutcome> {
+  const scores = new Map<string, number>();
   const queryVectors = new Map<string, Float32Array | null>();
+  let degraded = false;
   for (const collection of collections) {
     let embedder: Embedder | null;
     try {
@@ -156,21 +170,33 @@ async function vectorRanking(userId: string, collections: CollectionRow[], query
     } catch {
       embedder = null;
     }
-    if (!embedder) continue;
+    if (!embedder) {
+      if (collection.embedding_provider !== "none") degraded = true;
+      continue;
+    }
     const key = embeddingKey({ provider: collection.embedding_provider, providerId: collection.embedding_provider_id ?? undefined, model: collection.embedding_model ?? undefined });
     if (!queryVectors.has(key)) {
       try {
         const [vector] = await embedder.embed([query]);
+        if (!vector) degraded = true;
         queryVectors.set(key, vector ?? null);
       } catch {
         // A provider outage degrades this query to lexical; the label tells the truth.
         queryVectors.set(key, null);
+        degraded = true;
       }
     }
     const queryVector = queryVectors.get(key);
-    if (!queryVector) continue;
+    if (!queryVector) {
+      degraded = true;
+      continue;
+    }
     const candidates = new Map<string, Float32Array>();
-    for (const entry of cachedVectors(userId, collection)) candidates.set(entry.id, entry.vector);
+    for (const entry of cachedVectors(userId, collection)) {
+      // Metadata filters apply before ranking, so a requested source cannot vanish under unrelated hits.
+      if (sourceIds?.length && !sourceIds.includes(entry.sourceId)) continue;
+      candidates.set(entry.id, entry.vector);
+    }
     // FTS found passages outside the bounded cache: their vectors are indexed and cheap to fetch.
     const missing = lexicalIds.filter((id) => !candidates.has(id) && id);
     if (missing.length) {
@@ -183,15 +209,18 @@ async function vectorRanking(userId: string, collections: CollectionRow[], query
         if (vector) candidates.set(row.id, vector);
       }
     }
-    const ranked: VectorHit[] = [];
     for (const [id, vector] of candidates) {
       const score = cosine(queryVector, vector);
-      if (score > 0) ranked.push({ id, score });
+      if (score > 0) scores.set(id, Math.max(score, scores.get(id) ?? 0));
     }
-    ranked.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
-    hits.push(...ranked.slice(0, MAX_VECTOR_CANDIDATES));
   }
-  return hits;
+  // Merge globally by similarity before RRF: per-collection concatenation would make the first attached
+  // collection win ties even when a later one has clearly better passages.
+  const hits = [...scores.entries()]
+    .map(([id, score]) => ({ id, score }))
+    .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+    .slice(0, MAX_VECTOR_CANDIDATES);
+  return { hits, degraded };
 }
 
 interface Fused {
@@ -263,10 +292,10 @@ export async function searchKnowledge(opts: SearchOptions): Promise<RetrievalOut
       return null;
     }
   });
-  const vector = await vectorRanking(opts.userId, collections, opts.query, lexical, embedderFor);
-  const fused = fuseRankings(lexical, vector.map((hit) => hit.id));
+  const vector = await vectorRanking(opts.userId, collections, opts.query, lexical, opts.sourceIds, embedderFor);
+  const fused = fuseRankings(lexical, vector.hits.map((hit) => hit.id));
   const rows = loadRows(opts.userId, fused.map((hit) => hit.id).filter(Boolean));
-  const vectorScores = new Map(vector.map((hit) => [hit.id, hit.score]));
+  const vectorScores = new Map(vector.hits.map((hit) => [hit.id, hit.score]));
 
   const chosen: KnowledgeSearchHit[] = [];
   const accepted: Array<{ sourceId: string; start: number; end: number }> = [];
@@ -296,6 +325,6 @@ export async function searchKnowledge(opts: SearchOptions): Promise<RetrievalOut
       via: hit.lexical && hit.vector ? "both" : hit.vector ? "vector" : "lexical",
     });
   }
-  const mode: KnowledgeRetrievalMode = vector.length ? "hybrid" : "lexical";
-  return { mode, hits: chosen, tokens, collections };
+  const mode: KnowledgeRetrievalMode = vector.hits.length ? "hybrid" : "lexical";
+  return { mode, degraded: vector.degraded, hits: chosen, tokens, collections };
 }

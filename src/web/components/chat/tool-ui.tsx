@@ -225,7 +225,7 @@ export const toolkit = defineToolkit({
                   key={hit.chunkId}
                   type="button"
                   onClick={() => useKnowledgeCitationStore.getState().open(hit.chunkId)}
-                  className="hover:bg-muted/60 flex min-w-0 flex-col gap-0.5 rounded-lg border px-2.5 py-2 text-start"
+                  className="hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-ring flex min-w-0 flex-col gap-0.5 rounded-lg border px-2.5 py-2 text-start pointer-coarse:min-h-11 focus-visible:outline-2 focus-visible:outline-offset-2"
                 >
                   <span className="text-muted-foreground text-xs">{t("knowledge.citationOffset", { start: formatNumber(hit.offset), end: formatNumber(hit.offset + hit.text.length) })}</span>
                   <span className="line-clamp-1 font-medium">{hit.title}</span>
@@ -246,7 +246,7 @@ export const toolkit = defineToolkit({
       return (
         <ToolShell icon={<BookOpenIcon className="size-4" />} running={running} injection={r?.injection} label={t("tools.knowledgeRead")}>
           {r?.chunkId && r.text ? (
-            <button type="button" onClick={() => useKnowledgeCitationStore.getState().open(r.chunkId!)} className="text-primary hover:underline">
+            <button type="button" onClick={() => useKnowledgeCitationStore.getState().open(r.chunkId!)} className="text-primary hover:underline rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring pointer-coarse:min-h-6">
               {t("knowledge.openPassage")}
             </button>
           ) : null}

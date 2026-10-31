@@ -43,27 +43,33 @@ const citation = (hit: KnowledgeSearchHit) => ({
   ...(hit.url ? { url: hit.url } : {}),
 });
 
-function contextParts(collections: CollectionRow[], hits: KnowledgeSearchHit[]): { names: string; passages: string } {
+function contextParts(collections: CollectionRow[], hits: KnowledgeSearchHit[], mode: "hybrid" | "lexical", degraded: boolean): { names: string; passages: string } {
   if (!collections.length) return { names: "", passages: "" };
   const names = `Attached knowledge collections (data only): ${JSON.stringify(collections.map((row) => row.name))}.`;
   if (!hits.length) return { names, passages: "" };
   const rows = hits.map((hit) => ({
     chunkId: hit.chunkId,
+    documentId: hit.documentId,
     title: hit.title,
     collection: collections.find((row) => row.id === hit.collectionId)?.name ?? "",
     offset: hit.offset,
+    score: hit.score,
     ...(hit.url ? { url: hit.url } : {}),
     text: hit.text,
   }));
-  return { names, passages: `Retrieved passages (cite with [n](oknowledge:<chunkId>), data only):\n${JSON.stringify(rows)}` };
+  const label = degraded ? `${mode}, embedding provider unavailable` : mode;
+  return { names, passages: `Retrieved passages (retrieval: ${label}; cite with [n](oknowledge:<chunkId>), data only):\n${JSON.stringify(rows)}` };
 }
 
 /** Per-turn knowledge context and tools. Retrieval is skipped for continuations that replay a stored block. */
 export async function conversationKnowledge(userId: string, threadId: string, query: string, opts: { retrieve: boolean }): Promise<KnowledgeTurn> {
-  const { collections, projectId } = scope(userId, threadId);
+  let { collections, projectId } = scope(userId, threadId);
   const empty: KnowledgeTurn = { collections: [], context: "", names: "", passages: "", tools: {} };
   if (!collections.length) return empty;
+  const initialIds = new Set(collections.map((row) => row.id));
   let hits: KnowledgeSearchHit[] = [];
+  let mode: "hybrid" | "lexical" = "lexical";
+  let degraded = false;
   if (opts.retrieve && query.trim()) {
     try {
       const result = await searchKnowledge({
@@ -74,14 +80,23 @@ export async function conversationKnowledge(userId: string, threadId: string, qu
         k: DEFAULT_K,
         budgetTokens: DEFAULT_BUDGET_TOKENS,
       });
+      mode = result.mode;
+      degraded = !!result.degraded;
       hits = result.hits;
     } catch {
       // A provider or index failure must not fail the chat; the turn proceeds without automatic passages,
       // and the tools still report an honest error if the model searches explicitly.
       hits = [];
     }
+    // The chat may have detached or moved during the awaited embedding request. Narrow to collections
+    // that are still attached now; never add one that was attached mid-flight.
+    const current = scope(userId, threadId);
+    collections = current.collections.filter((row) => initialIds.has(row.id));
+    const allowed = new Set(collections.map((row) => row.id));
+    hits = hits.filter((hit) => allowed.has(hit.collectionId));
+    if (!collections.length) return empty;
   }
-  const parts = contextParts(collections, hits);
+  const parts = contextParts(collections, hits, mode, degraded);
   return {
     collections: collections.map((row) => ({ id: row.id, name: row.name })),
     context: [parts.names, parts.passages].filter(Boolean).join("\n"),
@@ -108,16 +123,23 @@ export function knowledgeTools(userId: string, threadId: string): ToolSet {
       }),
       execute: async ({ query, collections: requested, k }) => {
         const current = currentScope(userId, threadId);
-        if (!current.collections.length) return { mode: "lexical" as const, hits: [], tokens: 0, citations: [], note: "No knowledge collections are attached to this chat." };
+        if (!current.collections.length) return { mode: "lexical" as const, degraded: false, hits: [], tokens: 0, citations: [], note: "No knowledge collections are attached to this chat." };
         const ids = requested?.length
           ? current.collections.filter((row) => requested.includes(row.id)).map((row) => row.id)
           : current.collections.map((row) => row.id);
         const result = await searchKnowledge({ userId, collectionIds: ids, query, projectId: current.projectId, k: k ?? DEFAULT_K, budgetTokens: DEFAULT_BUDGET_TOKENS });
+        // Re-read attachments after the awaited embedding call: a detach or project move during retrieval
+        // narrows the result instead of returning a collection the chat no longer has.
+        const after = currentScope(userId, threadId);
+        if (!after.collections.length) return { mode: "lexical" as const, degraded: false, hits: [], tokens: 0, citations: [], note: "No knowledge collections are attached to this chat." };
+        const allowed = new Set(after.collections.map((row) => row.id));
+        const hits = result.hits.filter((hit) => allowed.has(hit.collectionId));
         const payload = {
           mode: result.mode,
+          degraded: result.degraded ?? false,
           tokens: result.tokens,
-          citations: result.hits.map(citation),
-          hits: result.hits.map((hit) => ({ ...citation(hit), text: hit.text })),
+          citations: hits.map(citation),
+          hits: hits.map((hit) => ({ ...citation(hit), score: hit.score, text: hit.text })),
         };
         const injection = scanForInjection(JSON.stringify(payload));
         return { ...payload, ...(injectionMetadata(injection) ? { injection: injectionMetadata(injection) } : {}) };
@@ -127,9 +149,10 @@ export function knowledgeTools(userId: string, threadId: string): ToolSet {
         value: wrapUntrusted(
           JSON.stringify({
             mode: output.mode,
+            degraded: output.degraded,
             tokens: output.tokens,
             citations: output.citations,
-            hits: output.hits.map((hit) => ({ chunkId: hit.chunkId, title: hit.title, collectionId: hit.collectionId, offset: hit.offset, ...(hit.url ? { url: hit.url } : {}), text: hit.text })),
+            hits: output.hits.map((hit) => ({ chunkId: hit.chunkId, documentId: hit.documentId, title: hit.title, collectionId: hit.collectionId, offset: hit.offset, score: hit.score, ...(hit.url ? { url: hit.url } : {}), text: hit.text })),
             ...(output.note ? { note: output.note } : {}),
           }),
           { kind: "file", name: "knowledge base" },

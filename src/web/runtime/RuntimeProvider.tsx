@@ -24,7 +24,7 @@ import { chatPrivacyFor, isTemporaryChat, useChatPrivacy, useChatPrivacyStore } 
 import { useVoiceAdapters } from "@/speech/adapters";
 import { chatSearchFor, useChatSearch, useChatSearchStore } from "@/state/chat-search";
 import { chatResearchFor, useChatResearchStore } from "@/state/chat-research";
-import { useChatKnowledgeStore } from "@/state/chat-knowledge";
+import { persistKnowledgeAttachments, useChatKnowledgeStore } from "@/state/chat-knowledge";
 import { dropThread, readThread, sameRows, ServerRows, writeThread } from "./threadCache";
 import { setThreadSync, useThreadSyncStore } from "@/state/thread-sync";
 
@@ -121,10 +121,12 @@ const threadListAdapter: RemoteThreadListAdapter = {
     serverRows.created(thread.id);
     useChatSearchStore.getState().bind(localId, thread.id);
     useChatResearchStore.getState().bind(localId, thread.id);
+    const knowledgeIds = useChatKnowledgeStore.getState().byId[localId];
+    // Persist a choice made on the optimistic chat before the first message is sent, and only then mirror
+    // it into the stored chat. A failed PATCH clears the remote entry, so the selector never claims an
+    // attachment the next request does not have; the error reaches the thread-initialisation path.
+    if (knowledgeIds?.length) await persistKnowledgeAttachments(thread.id, knowledgeIds);
     useChatKnowledgeStore.getState().bind(localId, thread.id);
-    const knowledgeIds = useChatKnowledgeStore.getState().byId[thread.id];
-    // Persist a choice made on the optimistic chat before the first message is sent.
-    if (knowledgeIds?.length) await api(`/threads/${thread.id}`, { method: "PATCH", json: { knowledgeIds } }).catch(() => {});
     bindModel(thread.id);
     return { remoteId: thread.id, externalId: undefined };
   },

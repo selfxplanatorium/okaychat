@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
 import { t } from "@/i18n";
+import { formatNumber } from "@/i18n/format";
 import { cn } from "@/lib/utils";
 import { useChatKnowledge } from "@/state/chat-knowledge";
 import { useCommand, useShortcut } from "@/keyboard/registry";
@@ -11,6 +12,10 @@ import { useChatModel } from "@/state/thread-meta";
 
 const triggerClass =
   "hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 shrink-0 pointer-coarse:h-9 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart";
+
+/** The composer control is hidden on phones; the plus menu owns the visible knowledge submenu there. */
+const phoneLayout = () =>
+  typeof window !== "undefined" && (window.matchMedia("(max-width: 639.98px)").matches || window.matchMedia("(pointer: coarse)").matches);
 
 /** The list shared by the desktop popup and the phone plus-menu submenu. */
 export function KnowledgeMenuItems() {
@@ -77,7 +82,11 @@ export function KnowledgeControl() {
   const { ids, temporary } = useChatKnowledge();
   const combo = useShortcut("composer.knowledge");
   const trigger = useRef<HTMLButtonElement>(null);
-  useCommand("composer.knowledge", () => trigger.current?.click(), !!active?.toolCall && !temporary);
+  // On phones the desktop trigger is hidden; return false so the plus menu's handler opens the visible submenu.
+  useCommand("composer.knowledge", () => {
+    if (phoneLayout()) return false;
+    trigger.current?.click();
+  }, !!active?.toolCall && !temporary);
   if (!active?.toolCall || temporary) return null;
   const hint = ids.length ? t("knowledge.selectorAttached", { count: ids.length }) : t("knowledge.selectorHelp");
   return (
@@ -93,7 +102,7 @@ export function KnowledgeControl() {
       >
         <BookOpenIcon className="size-3.5" />
         {t("knowledge.selector")}
-        {ids.length > 0 && <span className="tabular-nums">{ids.length}</span>}
+        {ids.length > 0 && <span className="tabular-nums">{formatNumber(ids.length)}</span>}
       </MenuTrigger>
       <MenuContent side="top" align="start" className="max-h-80 w-72">
         <KnowledgeMenuItems />

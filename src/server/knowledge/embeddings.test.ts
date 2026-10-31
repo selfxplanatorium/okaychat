@@ -9,7 +9,7 @@ process.env.OKAYCHAT_DATA_DIR = dataDir;
 process.env.OKAYCHAT_SECRET = "knowledge-embeddings-test-secret";
 const { db } = await import("../db.js");
 const { saveConnection } = await import("../catalog/providers.js");
-const { EmbeddingError, cosine, createEmbedder, decodeVector, encodeVector, normalizeVector, withRetry } = await import("./embeddings.js");
+const { EmbeddingError, cosine, createEmbedder, decodeVector, encodeVector, normalizeVector, withRetry, MAX_RESPONSE_BYTES, MAX_VECTOR_DIMENSIONS, MAX_RETRY_AFTER_MS } = await import("./embeddings.js");
 
 db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES ('alice', 'alice@example.test', 'Alice', 'x', 'admin', 1)").run();
 saveConnection("alice", "custom-mock", { baseURL: "http://mock.test/v1", apiKey: "test-key" });
@@ -27,6 +27,8 @@ test("vectors are normalized, finite, and round-trip through float32 storage", (
   assert.throws(() => normalizeVector([]), EmbeddingError);
   assert.throws(() => normalizeVector([1, Number.NaN]), EmbeddingError);
   assert.throws(() => normalizeVector([0, 0]), EmbeddingError);
+  assert.throws(() => normalizeVector([Number.MAX_VALUE, Number.MAX_VALUE]), /too large|non-finite/i);
+  assert.throws(() => normalizeVector(new Array(MAX_VECTOR_DIMENSIONS + 1).fill(1)), /dimensions/i);
 });
 
 test("retry honors Retry-After and stops on client errors", async () => {
@@ -39,6 +41,20 @@ test("retry honors Retry-After and stops on client errors", async () => {
   }, { sleep: async (ms) => { delays.push(ms); } });
   assert.equal(result, "ok");
   assert.deepEqual(delays, [7, 7]);
+
+  // A provider's real Retry-After must not be shortened to the exponential backoff cap.
+  const longDelays: number[] = [];
+  await assert.rejects(
+    withRetry(async () => { throw new EmbeddingError("rate limited", 429, 60_000); }, { attempts: 2, sleep: async (ms) => { longDelays.push(ms); } }),
+    /rate limited/,
+  );
+  assert.deepEqual(longDelays, [60_000]);
+  const clamped: number[] = [];
+  await assert.rejects(
+    withRetry(async () => { throw new EmbeddingError("rate limited", 429, 10 * 60_000); }, { attempts: 2, sleep: async (ms) => { clamped.push(ms); } }),
+    /rate limited/,
+  );
+  assert.deepEqual(clamped, [MAX_RETRY_AFTER_MS], "an absurd wait is bounded but still not hammered at 8 s");
 
   const sleep = async (ms: number) => { delays.push(ms); };
   let calls = 0;
@@ -73,6 +89,51 @@ test("the compatible endpoint validates count and dimensions", async () => {
   assert.throws(() => createEmbedder("alice", { provider: "openai" }), /not enabled/);
   assert.equal(createEmbedder("alice", { provider: "none" }), null);
   void embedder;
+});
+
+test("OpenAI-compatible indexes are sorted, validated, or rejected", async () => {
+  const respond = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+  const outOfOrder = createEmbedder("alice", { provider: "compatible", providerId: "custom-mock", model: "embed" }, {
+    fetchImpl: (async () => respond({ data: [{ index: 1, embedding: [0, 4] }, { index: 0, embedding: [3, 0] }] })) as typeof fetch,
+  })!;
+  const [first, second] = await outOfOrder.embed(["one", "two"]);
+  assert.deepEqual([...first!], [1, 0]);
+  assert.deepEqual([...second!], [0, 1]);
+
+  const duplicate = createEmbedder("alice", { provider: "compatible", providerId: "custom-mock", model: "embed" }, {
+    fetchImpl: (async () => respond({ data: [{ index: 0, embedding: [1, 0] }, { index: 0, embedding: [0, 1] }] })) as typeof fetch,
+  })!;
+  await assert.rejects(duplicate.embed(["one", "two"]), /duplicate embedding indexes/);
+
+  const mixed = createEmbedder("alice", { provider: "compatible", providerId: "custom-mock", model: "embed" }, {
+    fetchImpl: (async () => respond({ data: [{ index: 0, embedding: [1, 0] }, { embedding: [0, 1] }] })) as typeof fetch,
+  })!;
+  await assert.rejects(mixed.embed(["one", "two"]), /invalid embedding index/);
+
+  const legacy = createEmbedder("alice", { provider: "compatible", providerId: "custom-mock", model: "embed" }, {
+    fetchImpl: (async () => respond({ data: [{ embedding: [1, 0] }, { embedding: [0, 1] }] })) as typeof fetch,
+  })!;
+  const legacyRows = await legacy.embed(["one", "two"]);
+  assert.deepEqual(legacyRows.map((row) => [...row]), [[1, 0], [0, 1]], "providers without indexes keep response order");
+});
+
+test("embedding requests time out, cancel, and bound the response body", async () => {
+  const hanging = (async (_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+  })) as typeof fetch;
+  const timed = createEmbedder("alice", { provider: "compatible", providerId: "custom-mock", model: "embed" }, { fetchImpl: hanging, timeoutMs: 25 })!;
+  await assert.rejects(timed.embed(["hello"]), (error) => (error as Error).name === "TimeoutError" || (error as Error).name === "AbortError");
+
+  const controller = new AbortController();
+  const cancelled = createEmbedder("alice", { provider: "compatible", providerId: "custom-mock", model: "embed" }, { fetchImpl: hanging, timeoutMs: 5_000 })!;
+  const pending = cancelled.embed(["hello"], controller.signal);
+  setTimeout(() => controller.abort(), 5);
+  await assert.rejects(pending, (error) => (error as Error).name === "AbortError");
+
+  const oversized = createEmbedder("alice", { provider: "compatible", providerId: "custom-mock", model: "embed" }, {
+    fetchImpl: (async () => new Response("x".repeat(MAX_RESPONSE_BYTES + 1), { status: 200, headers: { "Content-Type": "application/json" } })) as typeof fetch,
+  })!;
+  await assert.rejects(oversized.embed(["hello"]), /larger than/);
 });
 
 test("a rate-limited response is retried, then succeeds", async () => {

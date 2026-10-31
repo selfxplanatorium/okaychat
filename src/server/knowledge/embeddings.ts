@@ -2,7 +2,7 @@ import type { KnowledgeEmbeddingOption, KnowledgeEmbeddingProvider, KnowledgeEmb
 import { ollamaEmbed } from "../catalog/ollama.js";
 import { getConnection, listProviders, type Connection } from "../catalog/providers.js";
 import { USER_AGENT } from "../env.js";
-import { publicFetch } from "../public-fetch.js";
+import { publicFetch, readCapped } from "../public-fetch.js";
 
 // Embedding backends for knowledge collections. Every provider is called over plain fetch; Ollama uses
 // the existing native helper. A non-admin's custom endpoint keeps the same publicFetch rule as chat.
@@ -29,6 +29,13 @@ export interface Embedder {
 /** Bounded batch size; providers accept more but a single failure then wastes a large request. */
 export const EMBED_BATCH = 16;
 const MAX_INPUT_CHARS = 8_000;
+/** A provider that returns a huge vector is broken; 16k dimensions covers every current embedding model. */
+export const MAX_VECTOR_DIMENSIONS = 16_384;
+/** Embedding responses are parsed only after a byte check; a broken or hostile endpoint cannot exhaust memory. */
+export const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+export const REQUEST_TIMEOUT_MS = 30_000;
+/** Retry-After stays honest up to this bound; longer server requests are clamped, not silently shortened to 8 s. */
+export const MAX_RETRY_AFTER_MS = 120_000;
 
 const DEFAULT_MODELS: Partial<Record<KnowledgeEmbeddingProvider, string>> = {
   openai: "text-embedding-3-small",
@@ -65,14 +72,17 @@ export function embeddingKey(setting: KnowledgeEmbeddingSetting): string {
   return setting.provider === "none" ? "none" : `${setting.provider}:${setting.providerId ?? ""}:${setting.model ?? ""}`;
 }
 
-/** Normalizes to unit length. Rejects non-finite and zero vectors instead of storing unusable rows. */
+/** Normalizes to unit length. Rejects non-finite, zero, oversized, or overflowing vectors instead of storing unusable rows. */
 export function normalizeVector(values: readonly number[]): Float32Array {
   if (!values.length) throw new EmbeddingError("The embedding provider returned an empty vector.");
+  if (values.length > MAX_VECTOR_DIMENSIONS) throw new EmbeddingError(`The embedding provider returned ${values.length} dimensions; the limit is ${MAX_VECTOR_DIMENSIONS}.`);
   let sum = 0;
   for (const value of values) {
     if (typeof value !== "number" || !Number.isFinite(value)) throw new EmbeddingError("The embedding provider returned a non-finite value.");
     sum += value * value;
   }
+  // MAX_VALUE squared overflows to Infinity; scaling that would write NaNs into the database.
+  if (!Number.isFinite(sum)) throw new EmbeddingError("The embedding provider returned a vector too large to normalize.");
   if (!(sum > 0)) throw new EmbeddingError("The embedding provider returned a zero vector.");
   const scale = 1 / Math.sqrt(sum);
   const out = new Float32Array(values.length);
@@ -139,7 +149,10 @@ export async function withRetry<T>(run: (attempt: number) => Promise<T>, opts: R
     } catch (error) {
       opts.signal?.throwIfAborted();
       if (!(error instanceof EmbeddingError) || attempt >= attempts - 1 || !retryable(error)) throw error;
-      const delay = Math.min(max, error.retryAfterMs ?? base * 2 ** attempt);
+      // A provider's Retry-After is a real instruction; clamp only to an absolute safe maximum.
+      const delay = error.retryAfterMs !== undefined
+        ? Math.min(MAX_RETRY_AFTER_MS, Math.max(0, error.retryAfterMs))
+        : Math.min(max, base * 2 ** attempt);
       opts.onRetry?.(attempt + 1, error, delay);
       await sleep(delay, opts.signal);
     }
@@ -160,7 +173,8 @@ function retryAfter(value: string | null): number | undefined {
 async function errorFrom(res: Response, provider: string): Promise<EmbeddingError> {
   let detail = "";
   try {
-    detail = (await res.text()).slice(0, 300);
+    const bytes = await readCapped(res, 16 * 1024, "response too large");
+    detail = new TextDecoder().decode(bytes).slice(0, 300);
     const parsed = JSON.parse(detail) as { error?: { message?: string } | string };
     if (typeof parsed.error === "string") detail = parsed.error;
     else if (parsed.error?.message) detail = parsed.error.message;
@@ -174,9 +188,45 @@ interface RequestOptions {
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
   sleep?: RetryOptions["sleep"];
+  /** Per-request deadline; tests lower it, production uses REQUEST_TIMEOUT_MS. */
+  timeoutMs?: number;
 }
 
 const request = (conn: Connection, opts: RequestOptions) => opts.fetchImpl ?? (conn.guarded ? publicFetch : fetch);
+
+/** Caller cancellation plus a hard request deadline, so a stalled provider cannot hold a job forever. */
+function requestSignal(signal: AbortSignal | undefined, timeoutMs = REQUEST_TIMEOUT_MS): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
+async function responseJson<T>(res: Response, provider: string): Promise<T> {
+  let bytes: Uint8Array;
+  try {
+    bytes = await readCapped(res, MAX_RESPONSE_BYTES, `${provider} embeddings response is larger than ${MAX_RESPONSE_BYTES} bytes.`);
+  } catch (error) {
+    throw new EmbeddingError(error instanceof EmbeddingError ? error.message : (error as Error).message);
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes)) as T;
+  } catch {
+    throw new EmbeddingError(`${provider} returned an unreadable embeddings response.`);
+  }
+}
+
+/** Validates OpenAI-compatible rows and applies indexes even when a provider returns them out of order. */
+function indexedRows(rows: Array<{ embedding?: unknown; index?: unknown }>, provider: string): number[][] {
+  const indexes = rows.map((row) => row.index);
+  const anyIndexed = indexes.some((index) => index !== undefined && index !== null);
+  if (!anyIndexed) return rows.map((row) => validateRow(row.embedding, provider));
+  if (indexes.some((index) => !Number.isInteger(index) || (index as number) < 0 || (index as number) >= rows.length)) {
+    throw new EmbeddingError(`${provider} returned an invalid embedding index.`);
+  }
+  const sorted = [...rows].sort((a, b) => (a.index as number) - (b.index as number));
+  const unique = new Set(indexes as number[]);
+  if (unique.size !== rows.length) throw new EmbeddingError(`${provider} returned duplicate embedding indexes.`);
+  return sorted.map((row) => validateRow(row.embedding, provider));
+}
 
 async function openaiEmbed(conn: Connection, model: string, texts: string[], opts: RequestOptions): Promise<number[][]> {
   const base = (conn.baseURL || "https://api.openai.com/v1").replace(/\/+$/, "");
@@ -184,7 +234,7 @@ async function openaiEmbed(conn: Connection, model: string, texts: string[], opt
     async () => {
       const response = await request(conn, opts)(`${base}/embeddings`, {
         method: "POST",
-        signal: opts.signal,
+        signal: requestSignal(opts.signal, opts.timeoutMs),
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${conn.apiKey ?? ""}`, "User-Agent": USER_AGENT },
         body: JSON.stringify({ model, input: texts }),
       });
@@ -193,9 +243,9 @@ async function openaiEmbed(conn: Connection, model: string, texts: string[], opt
     },
     { signal: opts.signal, sleep: opts.sleep },
   );
-  const body = (await res.json()) as { data?: Array<{ embedding?: unknown }> };
+  const body = await responseJson<{ data?: Array<{ embedding?: unknown; index?: unknown }> }>(res, "OpenAI");
   if (!Array.isArray(body.data)) throw new EmbeddingError("OpenAI returned no embeddings.");
-  return body.data.map((row) => validateRow(row.embedding, "OpenAI"));
+  return indexedRows(body.data, "OpenAI");
 }
 
 async function googleEmbed(conn: Connection, model: string, texts: string[], opts: RequestOptions): Promise<number[][]> {
@@ -204,7 +254,7 @@ async function googleEmbed(conn: Connection, model: string, texts: string[], opt
     async () => {
       const response = await request(conn, opts)(`${base}/models/${encodeURIComponent(model)}:batchEmbedContents`, {
         method: "POST",
-        signal: opts.signal,
+        signal: requestSignal(opts.signal, opts.timeoutMs),
         headers: { "Content-Type": "application/json", "x-goog-api-key": conn.apiKey ?? "", "User-Agent": USER_AGENT },
         body: JSON.stringify({ requests: texts.map((text) => ({ model: `models/${model}`, content: { parts: [{ text }] } })) }),
       });
@@ -213,7 +263,7 @@ async function googleEmbed(conn: Connection, model: string, texts: string[], opt
     },
     { signal: opts.signal, sleep: opts.sleep },
   );
-  const body = (await res.json()) as { embeddings?: Array<{ values?: unknown }> };
+  const body = await responseJson<{ embeddings?: Array<{ values?: unknown }> }>(res, "Google");
   if (!Array.isArray(body.embeddings)) throw new EmbeddingError("Google returned no embeddings.");
   return body.embeddings.map((row) => validateRow(row.values, "Google"));
 }
@@ -244,7 +294,7 @@ export function createEmbedder(userId: string, setting: KnowledgeEmbeddingSettin
           ? await withRetry(
               async () => {
                 try {
-                  return await ollamaEmbed(conn, model, batch, signal);
+                  return await ollamaEmbed(conn, model, batch, requestSignal(signal, opts.timeoutMs));
                 } catch (error) {
                   if (signal?.aborted) throw error;
                   throw new EmbeddingError((error as Error).message, (error as { status?: number }).status);

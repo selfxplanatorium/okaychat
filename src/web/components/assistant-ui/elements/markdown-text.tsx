@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import { t } from "@/i18n";
 import { useKnowledgeCitationStore } from "@/state/chat-knowledge";
 import { useCurrentThreadId } from "@/state/thread-meta";
+import { isKnowledgeHref, parseKnowledgeCitation } from "@/lib/knowledge-citation";
 import { MarkdownTable } from "./markdown-table";
 
 type MarkdownTextProps = Partial<TextMessagePartProps> & {
@@ -130,15 +131,17 @@ const MarkdownImage: FC<ComponentProps<"img">> = ({ src: rawSrc, ...props }) => 
 const MarkdownLink: FC<ComponentProps<"a">> = ({ className, href, ...props }) => {
   const file = useSandboxUrl(href);
   const openCitation = useKnowledgeCitationStore((s) => s.open);
-  if (href && KNOWLEDGE.test(href)) {
-    const chunkId = decodeURIComponent(href.replace(KNOWLEDGE, "")).trim();
+  if (isKnowledgeHref(href)) {
+    const chunkId = parseKnowledgeCitation(href);
+    // A malformed citation is model text, not a link: render it inert instead of failing the message.
+    if (!chunkId) return <span className={cn("aui-md-a text-muted-foreground", className)}>{props.children}</span>;
     return (
       <button
         type="button"
         title={t("knowledge.openInChat")}
-        onClick={() => chunkId && openCitation(chunkId)}
+        onClick={() => openCitation(chunkId)}
         className={cn(
-          "aui-md-a text-primary hover:text-primary/80 cursor-pointer underline underline-offset-2",
+          "aui-md-a text-primary hover:text-primary/80 cursor-pointer rounded-sm underline underline-offset-2 pointer-coarse:min-h-6 pointer-coarse:px-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
           className,
         )}
       >

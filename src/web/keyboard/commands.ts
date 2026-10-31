@@ -105,7 +105,12 @@ export const COMMANDS: readonly CommandDef[] = [
 
   { id: "ux.dismissHints", labelKey: "keyboard.cmdUxDismissHints", group: "General", keys: [], palette: false },
   { id: "knowledge.newCollection", labelKey: "keyboard.cmdKnowledgeNewCollection", group: "General", keys: [] },
+  { id: "knowledge.retryLoad", labelKey: "keyboard.cmdKnowledgeRetryLoad", group: "General", keys: [] },
+  { id: "knowledge.editCollection", labelKey: "keyboard.cmdKnowledgeEditCollection", group: "General", keys: [] },
   { id: "knowledge.addSource", labelKey: "keyboard.cmdKnowledgeAddSource", group: "General", keys: [] },
+  { id: "knowledge.pasteSource", labelKey: "keyboard.cmdKnowledgePasteSource", group: "General", keys: [] },
+  { id: "knowledge.addUrl", labelKey: "keyboard.cmdKnowledgeAddUrl", group: "General", keys: [] },
+  { id: "knowledge.previewChunks", labelKey: "keyboard.cmdKnowledgePreviewChunks", group: "General", keys: [] },
   { id: "knowledge.search", labelKey: "keyboard.cmdKnowledgeSearch", group: "General", keys: [] },
   { id: "knowledge.reindex", labelKey: "keyboard.cmdKnowledgeReindex", group: "General", keys: [] },
   { id: "settings.ollamaTest", labelKey: "keyboard.cmdSettingsOllamaTest", group: "Settings", keys: [] },

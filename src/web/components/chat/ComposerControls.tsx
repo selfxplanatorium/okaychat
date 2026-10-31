@@ -1,12 +1,13 @@
 import { ComposerPrimitive, useAui } from "@assistant-ui/react";
 import { BrainIcon, BookOpenIcon, CheckIcon, ChevronRightIcon, GlobeIcon, GlobeOffIcon, Loader2Icon, PaperclipIcon, PlusIcon, SettingsIcon, SquareSlashIcon, TelescopeIcon, TriangleAlertIcon, ZapIcon } from "lucide-react";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import type { McpPromptInfo } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { t } from "@/i18n";
+import { formatNumber } from "@/i18n/format";
 import { api } from "@/lib/api";
 import { settingsHref } from "@/lib/settings-link";
 import { cn } from "@/lib/utils";
@@ -254,11 +255,30 @@ export function MobileComposerMenu() {
   const loadPrompts = useData((s) => s.refreshMcpPrompts);
   const { pick, dialog } = usePromptPicker();
   const [, navigate] = useLocation();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
+  const mobileTrigger = useRef<HTMLButtonElement>(null);
+  // The desktop trigger is hidden here. The command opens this menu and its knowledge submenu instead.
+  useCommand("composer.knowledge", () => {
+    const phone = typeof window !== "undefined" && (window.matchMedia("(max-width: 639.98px)").matches || window.matchMedia("(pointer: coarse)").matches);
+    if (!phone) return false;
+    mobileTrigger.current?.focus({ preventScroll: true });
+    setMenuOpen(true);
+    setKnowledgeOpen(true);
+  }, !!active?.toolCall && !knowledge.temporary);
   return (
     <div className="hidden shrink-0 max-sm:block pointer-coarse:block">
       {dialog}
-      <Menu onOpenChange={(open) => open && hasPrompts && void loadPrompts()}>
+      <Menu
+        open={menuOpen}
+        onOpenChange={(open) => {
+          setMenuOpen(open);
+          if (!open) setKnowledgeOpen(false);
+          else if (hasPrompts) void loadPrompts();
+        }}
+      >
         <MenuTrigger
+          ref={mobileTrigger}
           aria-label={t("composer.composerOptions")}
           className="aui-composer-add-attachment text-muted-foreground hover:text-foreground hover:bg-muted-foreground/15 dark:border-muted-foreground/15 dark:hover:bg-muted-foreground/30 size-7 pointer-coarse:size-9 rounded-full flex items-center justify-center transition-[color,background-color,scale] active:scale-[0.96] motion-reduce:transition-none"
         >
@@ -327,11 +347,11 @@ export function MobileComposerMenu() {
             </MenuItem>
           )}
           {active?.toolCall && !knowledge.temporary && (
-            <MenuSubmenuRoot>
+            <MenuSubmenuRoot open={knowledgeOpen} onOpenChange={setKnowledgeOpen}>
               <MenuSubmenuTrigger>
                 <BookOpenIcon />
                 <span className="flex-1">{t("knowledge.selector")}</span>
-                {knowledge.ids.length > 0 && <span className="text-muted-foreground text-xs tabular-nums">{knowledge.ids.length}</span>}
+                {knowledge.ids.length > 0 && <span className="text-muted-foreground text-xs tabular-nums">{formatNumber(knowledge.ids.length)}</span>}
                 <ChevronRightIcon className="text-muted-foreground ml-auto" />
               </MenuSubmenuTrigger>
               <MenuContent side="right" align="start" alignOffset={-5} className="max-h-80 w-72">

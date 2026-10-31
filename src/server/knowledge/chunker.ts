@@ -111,26 +111,44 @@ function splitBlock(text: string, block: Block, bucket: Block[], ceiling: number
     bucket.push(block);
     return;
   }
+  // Boundaries are relative to the block; `body.length` is the final cut.
   const separators = block.kind === "paragraph" ? /(?<=[.!?])\s+|\n{2,}/g : /\n/g;
   const cuts: number[] = [];
-  for (const match of body.matchAll(separators)) cuts.push(match.index + match[0].length);
+  for (const match of body.matchAll(separators)) {
+    const end = match.index + match[0].length;
+    if (end > 0 && end < body.length) cuts.push(end);
+  }
+  cuts.push(body.length);
   let start = block.start;
+  let next = 0;
   const push = (end: number) => {
     if (end <= start) return;
     bucket.push({ ...block, start, end });
     start = end;
   };
-  for (const rel of cuts) {
-    if (rel <= 0) continue;
-    const absolute = block.start + rel;
-    if (absolute - start >= ceiling) push(absolute);
-  }
-  // A single sentence or line longer than the ceiling: fall back to whitespace/character cuts.
   while (block.end - start > ceiling) {
-    let cut = start + ceiling;
-    const space = text.lastIndexOf(" ", cut);
-    if (space > start + ceiling / 2) cut = space + 1;
-    push(cut);
+    const limit = start + ceiling;
+    // Prefer the furthest sentence, line, or blank-line boundary at or before the ceiling.
+    while (next < cuts.length && block.start + cuts[next]! < start) next++;
+    let cut = -1;
+    let scan = next;
+    while (scan < cuts.length && block.start + cuts[scan]! <= limit) {
+      cut = block.start + cuts[scan]!;
+      scan++;
+    }
+    if (cut > start) {
+      push(cut);
+      next = scan;
+      continue;
+    }
+    // No structural boundary fits: cut at whitespace inside the window, else hard at the ceiling.
+    let hard = limit;
+    const space = text.lastIndexOf(" ", Math.min(limit, block.end - 1));
+    if (space > start + ceiling / 2) hard = space + 1 <= limit ? space + 1 : space;
+    // Never split a surrogate pair; a citation or passage must remain valid UTF-16.
+    if (hard > start && hard < block.end && /[\uD800-\uDBFF]/.test(text[hard - 1]!) && /[\uDC00-\uDFFF]/.test(text[hard]!)) hard--;
+    if (hard <= start) hard = Math.min(block.end, start + 1);
+    push(hard);
   }
   push(block.end);
 }
@@ -197,18 +215,17 @@ function overlap(text: string, spans: Span[], ratio: number): Span[] {
  */
 export function chunkDocument(text: string, opts: { sourceId: string; title?: string; targetTokens?: number; overlapRatio?: number } = { sourceId: "" }): RawChunk[] {
   if (!text.trim()) return [];
-  const normalized = text.replace(/\r\n/g, "\n");
   const ceiling = Math.max(200, Math.round((opts.targetTokens ?? TARGET_TOKENS) * CHARS_PER_TOKEN));
   const ratio = Math.min(0.4, Math.max(0, opts.overlapRatio ?? OVERLAP_RATIO));
-  const spans = overlap(normalized, pack(normalized, ceiling), ratio);
+  const spans = overlap(text, pack(text, ceiling), ratio);
   const out: RawChunk[] = [];
   for (const span of spans) {
     let start = span.start;
     let end = span.end;
-    while (start < end && /\s/.test(normalized[start]!)) start++;
-    while (end > start && /\s/.test(normalized[end - 1]!)) end--;
+    while (start < end && /\s/.test(text[start]!)) start++;
+    while (end > start && /\s/.test(text[end - 1]!)) end--;
     if (end <= start) continue;
-    const body = normalized.slice(start, end);
+    const body = text.slice(start, end);
     const title = span.title || opts.title || "Document";
     const hash = createHash("sha256").update(`${opts.sourceId}\n${start}\n${end}\n${body}`).digest("hex").slice(0, 24);
     out.push({ id: `k_${hash}`, ordinal: out.length, title, start, end, text: body, tokens: estimateTokens(body) });
@@ -220,5 +237,8 @@ export function chunkDocument(text: string, opts: { sourceId: string; title?: st
 export function excerpt(text: string, max = 240): string {
   if (text.length <= max) return text;
   const cut = text.slice(0, max);
-  return `${cut.slice(0, cut.length - (cut.codePointAt(cut.length - 1)! > 0xffff ? 1 : 0))}…`;
+  // A cut between a high and low surrogate leaves half a character; drop the dangling high surrogate.
+  const last = cut.charCodeAt(cut.length - 1);
+  const safe = last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+  return `${safe}…`;
 }

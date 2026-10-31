@@ -116,7 +116,7 @@ function turndownService() {
   return converter;
 }
 
-async function htmlToMarkdown(html: string, url: string): Promise<{ title: string; markdown: string }> {
+export async function htmlToMarkdown(html: string, url: string): Promise<{ title: string; markdown: string }> {
   const [{ document }, { Readability }, turndown] = await Promise.all([parseHTML(html), import("@mozilla/readability"), turndownService()]);
   // Readability needs a base URL to resolve relative links.
   const base = document.createElement("base");

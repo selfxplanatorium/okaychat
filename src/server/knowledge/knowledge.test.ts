@@ -19,11 +19,12 @@ const { ensureThread, updateThread } = await import("../threads.js");
 const { knowledgeRoutes } = await import("./routes.js");
 const { attachedCollectionIds, conversationKnowledge, knowledgeTools } = await import("./tools.js");
 const { drainKnowledgeJobs, resumeKnowledgeIngestion, setEmbedderFactoryForTests } = await import("./jobs.js");
-const { chunkRow, createCollection, deleteCollection, requeueSource, sourceRow, replaceChunks } = await import("./store.js");
+const { chunkRow, createCollection, createSource, deleteCollection, requeueSource, sourceRow, replaceChunks } = await import("./store.js");
 const { searchKnowledge, setRetrievalEmbedderFactoryForTests, fuseRankings, VECTOR_CACHE_LIMIT } = await import("./retrieval.js");
 const { saveTurnContext, storedTurnContexts } = await import("../turn-context.js");
 const { normalizeVector } = await import("./embeddings.js");
 const { storeUpload } = await import("../files.js");
+const { MAX_URL_BYTES, setKnowledgeUrlFetchForTests } = await import("./url.js");
 
 const app = new Hono().use(requireUser).onError((error, c) => (error instanceof HTTPException ? c.json({ error: error.message }, error.status) : c.json({ error: "failed" }, 500))).route("/knowledge", knowledgeRoutes);
 for (const [id, role] of [["alice", "user"], ["bob", "user"]] as const) {
@@ -35,6 +36,7 @@ after(() => { db.close(); rmSync(dataDir, { recursive: true, force: true }); });
 beforeEach(() => {
   setEmbedderFactoryForTests(null);
   setRetrievalEmbedderFactoryForTests(null);
+  setKnowledgeUrlFetchForTests(null);
   db.exec(`DELETE FROM knowledge_chunks; DELETE FROM knowledge_sources; DELETE FROM knowledge_collections;
     DELETE FROM turn_context; DELETE FROM messages; DELETE FROM threads; DELETE FROM uploads; DELETE FROM projects;`);
   db.prepare("INSERT INTO projects (id, user_id, name, created_at) VALUES ('p1', 'alice', 'Atlas', 1), ('p2', 'alice', 'Other', 1), ('pb', 'bob', 'Bob', 1)").run();
@@ -66,6 +68,15 @@ const waitFor = async () => {
   await drainKnowledgeJobs();
 };
 
+/** Waits for a job to reach an observable point without depending on a fixed delay. */
+async function waitUntil(check: () => boolean, label: string, ms = 2000) {
+  const end = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > end) throw new Error(`Timed out waiting for ${label}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 const fakeVector = (text: string) => (/quasar|needle/i.test(text) ? normalizeVector([1, 0, 0, 0]) : normalizeVector([0, 1, 0, 0]));
 const fakeEmbedder = {
   provider: "openai" as const,
@@ -78,6 +89,27 @@ function useFakeEmbeddings() {
   setEmbedderFactoryForTests(() => fakeEmbedder);
   setRetrievalEmbedderFactoryForTests((collection) => (collection.embedding_provider === "none" ? null : fakeEmbedder));
 }
+
+let vectorChunkSeq = 0;
+/** Seeds one ready source with explicitly chosen vectors, bypassing ingestion for retrieval ranking tests. */
+function seedVectors(collectionId: string, name: string, rows: Array<{ text: string; vector: number[] }>): string {
+  const text = rows.map((row) => row.text).join("\n");
+  const uploadId = storeUpload("alice", `${name}.txt`, "text/plain", Buffer.from(text));
+  const source = createSource("alice", collectionId, { name: `${name}.txt`, kind: "paste", mime: "text/plain", uploadId, bytes: Buffer.byteLength(text), text });
+  const chunks = rows.map((row, ordinal) => ({
+    chunk: { id: `k_vec_${++vectorChunkSeq}`, ordinal, title: name, start: ordinal * 10, end: ordinal * 10 + row.text.length, text: row.text, tokens: 8 },
+    vector: normalizeVector(row.vector),
+  }));
+  assert.equal(replaceChunks("alice", source.id, sourceRow("alice", source.id)!.generation, collectionId, chunks, 2), true);
+  return source.id;
+}
+
+const queryEmbedder = (vector: number[]) => ({
+  provider: "openai" as const,
+  providerId: "openai",
+  model: "query",
+  embed: async (texts: string[]) => texts.map(() => normalizeVector(vector)),
+});
 
 test("reciprocal rank fusion rewards agreement and keeps a deterministic order", () => {
   const fused = fuseRankings(["a", "b", "c"], ["c", "a"]);
@@ -100,6 +132,19 @@ test("knowledge routes require a session and never leak another account's collec
   assert.equal(post.status, 404);
   const listing = (await (await request("GET", "/collections", undefined, "bob")).json()) as { collections: unknown[] };
   assert.equal(listing.collections.length, 0);
+});
+
+test("the selector list is narrowed by the chat's own project", async () => {
+  const globalId = await create({ provider: "none" }, "alice", { name: "Global" });
+  const atlas = await create({ provider: "none" }, "alice", { name: "Atlas", projectId: "p1" });
+  const other = await create({ provider: "none" }, "alice", { name: "Other", projectId: "p2" });
+  const scoped = (await (await request("GET", "/collections?project=p1")).json()) as { collections: Array<{ id: string }> };
+  assert.deepEqual(new Set(scoped.collections.map((row) => row.id)), new Set([globalId, atlas]));
+  assert.ok(!scoped.collections.some((row) => row.id === other));
+  const globalOnly = (await (await request("GET", "/collections?project=none")).json()) as { collections: Array<{ id: string }> };
+  assert.deepEqual(globalOnly.collections.map((row) => row.id), [globalId]);
+  const all = (await (await request("GET", "/collections")).json()) as { collections: Array<{ id: string }> };
+  assert.equal(all.collections.length, 3, "the management page still lists every owned collection");
 });
 
 test("pasted text is chunked, searchable with citations, and charged to the account", async () => {
@@ -165,6 +210,51 @@ test("hybrid retrieval uses normalized embeddings and reindexes when the model c
   assert.equal(degraded.mode, "lexical");
 });
 
+test("vector candidates merge globally before RRF and are independent of attachment order", async () => {
+  const a = await create({ provider: "none" }, "alice", { name: "Vector A" });
+  const b = await create({ provider: "none" }, "alice", { name: "Vector B" });
+  const aSource = seedVectors(a, "A", [{ text: "alpha passage", vector: [0.5, Math.sqrt(3) / 2] }]);
+  const bSource = seedVectors(b, "B", [{ text: "beta passage", vector: [1, 0] }]);
+  const aChunk = (db.prepare("SELECT id FROM knowledge_chunks WHERE source_id = ?").get(aSource) as { id: string }).id;
+  const bChunk = (db.prepare("SELECT id FROM knowledge_chunks WHERE source_id = ?").get(bSource) as { id: string }).id;
+  const search = (collectionIds: string[]) =>
+    searchKnowledge({ userId: "alice", collectionIds, query: "zebra", projectId: null, k: 2, embedderFor: () => queryEmbedder([1, 0]) });
+
+  const first = await search([a, b]);
+  const reversed = await search([b, a]);
+  assert.deepEqual(first.hits.map((hit) => hit.chunkId), [bChunk, aChunk]);
+  assert.deepEqual(reversed.hits.map((hit) => hit.chunkId), [bChunk, aChunk], "the first attached collection does not win by position");
+});
+
+test("a source filter applies before vector ranking", async () => {
+  const id = await create({ provider: "none" }, "alice", { name: "Filtered" });
+  const high = seedVectors(id, "High", Array.from({ length: 61 }, (_, i) => ({ text: `alpha passage ${i}`, vector: [1, 0] })));
+  const target = seedVectors(id, "Target", [{ text: "beta passage", vector: [0.5, Math.sqrt(3) / 2] }]);
+  const targetChunk = (db.prepare("SELECT id FROM knowledge_chunks WHERE source_id = ?").get(target) as { id: string }).id;
+  const result = await searchKnowledge({ userId: "alice", collectionIds: [id], query: "zebra", projectId: null, k: 8, sourceIds: [target], embedderFor: () => queryEmbedder([1, 0]) });
+  assert.deepEqual(result.hits.map((hit) => hit.chunkId), [targetChunk], "a requested source is not dropped under unrelated top hits");
+  assert.ok(!result.hits.some((hit) => hit.documentId === high));
+});
+
+test("a provider outage degrades honestly to lexical retrieval", async () => {
+  const id = await create({ provider: "openai", model: "down" });
+  const result = await searchKnowledge({
+    userId: "alice",
+    collectionIds: [id],
+    query: "quasar",
+    projectId: null,
+    embedderFor: () => ({
+      provider: "openai",
+      providerId: "openai",
+      model: "down",
+      embed: async () => { throw new Error("provider is down"); },
+    }),
+  });
+  assert.equal(result.mode, "lexical");
+  assert.equal(result.degraded, true);
+  assert.ok(result.hits.every((hit) => hit.via !== "vector"));
+});
+
 test("a failing embedder marks the source failed, and retry recovers", async () => {
   setEmbedderFactoryForTests(() => ({
     provider: "openai",
@@ -211,6 +301,90 @@ test("cancel stops a running source and leaves no chunks behind", async () => {
   assert.equal((db.prepare("SELECT COUNT(*) AS n FROM knowledge_chunks WHERE source_id = ?").get(sourceId) as { n: number }).n, 0);
 });
 
+test("a forged cancel from another account cannot abort a running ingest", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  setEmbedderFactoryForTests(() => ({
+    provider: "openai",
+    providerId: "openai",
+    model: "blocked",
+    embed: async (texts: string[]) => { await gate; return texts.map(fakeVector); },
+  }));
+  const id = await create({ provider: "openai", model: "blocked" });
+  const sourceId = await paste(id, "Quasar text owned by Alice and currently embedding.");
+  await waitUntil(() => sourceRow("alice", sourceId)?.status === "embedding", "Alice's job to reach embedding");
+  try {
+    const forged = await request("POST", `/sources/${sourceId}/cancel`, undefined, "bob");
+    assert.equal(forged.status, 409, "Bob's forged id is not found in his account");
+    assert.equal(sourceRow("alice", sourceId)!.status, "embedding", "the running controller was not aborted");
+  } finally {
+    release();
+  }
+  await waitFor();
+  assert.equal(sourceRow("alice", sourceId)!.status, "ready");
+});
+
+test("retry during an active job aborts it and runs exactly one replacement", async () => {
+  let calls = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  setEmbedderFactoryForTests(() => ({
+    provider: "openai",
+    providerId: "openai",
+    model: "slow",
+    embed: async (texts: string[]) => {
+      calls++;
+      if (calls === 1) await gate;
+      return texts.map(fakeVector);
+    },
+  }));
+  const id = await create({ provider: "openai", model: "slow" });
+  const sourceId = await paste(id, "Quasar content retried while the first job is embedding.");
+  await waitUntil(() => calls === 1, "the first embed call");
+  try {
+    assert.equal((await request("POST", `/sources/${sourceId}/retry`)).status, 200);
+  } finally {
+    release();
+  }
+  await waitFor();
+  const row = sourceRow("alice", sourceId)!;
+  assert.equal(row.status, "ready");
+  assert.ok(row.chunk_count > 0);
+  assert.equal(calls, 2, "the superseded job did not restart and the replacement ran once");
+});
+
+test("changing a collection's embeddings during an active job queues the replacement", async () => {
+  let calls = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  setEmbedderFactoryForTests(() => ({
+    provider: "openai",
+    providerId: "openai",
+    model: "slow",
+    embed: async (texts: string[]) => {
+      calls++;
+      await gate;
+      return texts.map(fakeVector);
+    },
+  }));
+  const id = await create({ provider: "openai", model: "slow" });
+  const sourceId = await paste(id, "Quasar content whose embedding model changes mid-ingest.");
+  await waitUntil(() => calls === 1, "the first embed call");
+  try {
+    const patched = await request("PATCH", `/collections/${id}`, { embedding: { provider: "none" } });
+    assert.equal(patched.status, 200);
+  } finally {
+    release();
+  }
+  await waitFor();
+  const row = sourceRow("alice", sourceId)!;
+  assert.equal(row.status, "ready");
+  assert.ok(row.chunk_count > 0);
+  const rows = db.prepare("SELECT embedding FROM knowledge_chunks WHERE collection_id = ?").all(id) as Array<{ embedding: Uint8Array | null }>;
+  assert.ok(rows.length > 0);
+  assert.ok(rows.every((chunk) => chunk.embedding === null), "the replacement job used the new lexical-only setting");
+});
+
 test("a superseded generation cannot write chunks, and delete frees every owned byte", async () => {
   useFakeEmbeddings();
   const id = await create({ provider: "openai", model: "fake-embed" });
@@ -240,6 +414,26 @@ test("unfinished rows resume after a restart", async () => {
   assert.equal(sourceRow("alice", sourceId)!.status, "ready");
 });
 
+test("startup recovery drains more than one batch of pending rows", async () => {
+  const id = await create({ provider: "none" });
+  const insert = db.prepare(`INSERT INTO knowledge_sources (id, collection_id, user_id, name, kind, mime, bytes, text, text_bytes, status, progress, created_at, updated_at)
+    VALUES (?, ?, 'alice', ?, 'paste', 'text/plain', 0, ?, ?, 'queued', 0, 1, 1)`);
+  db.exec("BEGIN");
+  try {
+    for (let i = 0; i < 501; i++) {
+      const sourceId = `kns_bulk_${String(i).padStart(4, "0")}`;
+      const text = `Quasar recovery note number ${i}.`;
+      insert.run(sourceId, id, `note-${i}.txt`, text, Buffer.byteLength(text));
+    }
+  } finally {
+    db.exec("COMMIT");
+  }
+  assert.equal(resumeKnowledgeIngestion(), 500, "the first keyset batch is bounded");
+  await waitFor();
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM knowledge_sources WHERE collection_id = ? AND status = 'ready'").get(id) as { n: number }).n, 501);
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM knowledge_sources WHERE collection_id = ? AND status != 'ready'").get(id) as { n: number }).n, 0);
+});
+
 test("attached collections scope chat tools and replay only while still attached", async () => {
   useFakeEmbeddings();
   const globalId = await create({ provider: "openai", model: "fake-embed" }, "alice", { name: "Global handbook" });
@@ -259,6 +453,9 @@ test("attached collections scope chat tools and replay only while still attached
   const turn = await conversationKnowledge("alice", "thread-p1", "quasar", { retrieve: true });
   assert.equal(turn.collections.length, 2);
   assert.match(turn.context, /quasar/i);
+  assert.match(turn.context, /retrieval: hybrid/);
+  assert.match(turn.context, /documentId/);
+  assert.match(turn.context, /score/);
   assert.doesNotMatch(turn.context, /other quasar/i);
   assert.doesNotMatch(turn.context, /Bob's/i);
 
@@ -266,6 +463,12 @@ test("attached collections scope chat tools and replay only while still attached
   const run = tools.search_knowledge!.execute as (input: unknown, options: unknown) => Promise<unknown>;
   const narrowed = (await run({ query: "quasar", collections: [otherId, bobId] }, { toolCallId: "t", messages: [] })) as { hits: unknown[] };
   assert.equal(narrowed.hits.length, 0, "the collections argument cannot widen scope");
+  const scored = (await run({ query: "quasar" }, { toolCallId: "t", messages: [] })) as { mode: string; hits: Array<{ score: number; documentId: string; title: string }> };
+  assert.equal(scored.mode, "hybrid");
+  assert.ok(scored.hits.length > 0);
+  assert.equal(typeof scored.hits[0]!.score, "number");
+  assert.ok(scored.hits[0]!.documentId.length > 0);
+  assert.ok(scored.hits[0]!.title.length > 0);
 
   const read = tools.read_knowledge_chunk!.execute as (input: unknown, options: unknown) => Promise<{ error?: string; text?: string }>;
   const firstChunk = db.prepare("SELECT id FROM knowledge_chunks WHERE collection_id IN (?, ?) LIMIT 1").get(globalId, projectId) as { id: string };
@@ -282,6 +485,51 @@ test("attached collections scope chat tools and replay only while still attached
   assert.deepEqual(attachedCollectionIds("alice", "thread-p1"), []);
   const after = (await run({ query: "quasar" }, { toolCallId: "t", messages: [] })) as { hits: unknown[] };
   assert.equal(after.hits.length, 0);
+});
+
+test("a detach during retrieval drops passages and never widens scope", async () => {
+  useFakeEmbeddings();
+  const id = await create({ provider: "openai", model: "fake-embed" }, "alice", { name: "Race" });
+  await paste(id, "The quasar race passage is retrieved while the collection is attached.");
+  await waitFor();
+  updateThread("alice", "thread-p1", { knowledgeIds: [id] });
+
+  let started = false;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  setRetrievalEmbedderFactoryForTests(() => ({
+    provider: "openai",
+    providerId: "openai",
+    model: "blocked",
+    embed: async (texts: string[]) => { started = true; await gate; return texts.map(fakeVector); },
+  }));
+  const pending = conversationKnowledge("alice", "thread-p1", "quasar", { retrieve: true });
+  await waitUntil(() => started, "automatic retrieval to block");
+  updateThread("alice", "thread-p1", { knowledgeIds: [] });
+  release();
+  const turn = await pending;
+  assert.deepEqual(turn.collections, []);
+  assert.equal(turn.context, "", "a detached collection contributes no context");
+
+  // The same race for the explicit tool: the scope is re-read after the awaited embedding call.
+  updateThread("alice", "thread-p1", { knowledgeIds: [id] });
+  let toolStarted = false;
+  let releaseTool!: () => void;
+  const toolGate = new Promise<void>((resolve) => (releaseTool = resolve));
+  setRetrievalEmbedderFactoryForTests(() => ({
+    provider: "openai",
+    providerId: "openai",
+    model: "blocked",
+    embed: async (texts: string[]) => { toolStarted = true; await toolGate; return texts.map(fakeVector); },
+  }));
+  const tools = knowledgeTools("alice", "thread-p1") as ToolSet;
+  const run = tools.search_knowledge!.execute as (input: unknown, options: unknown) => Promise<{ hits: unknown[] }>;
+  const toolPending = run({ query: "quasar" }, { toolCallId: "t", messages: [] });
+  await waitUntil(() => toolStarted, "tool retrieval to block");
+  updateThread("alice", "thread-p1", { knowledgeIds: [] });
+  releaseTool();
+  const result = await toolPending;
+  assert.deepEqual(result.hits, [], "passages from a detached collection are not returned");
 });
 
 test("search stays bounded with 20k chunks and never scans the whole table per query", async () => {
@@ -309,6 +557,70 @@ test("search stays bounded with 20k chunks and never scans the whole table per q
   assert.equal(result.mode, "hybrid");
   assert.ok(elapsed < 5000, `retrieval took ${Math.round(elapsed)}ms`);
   assert.equal(VECTOR_CACHE_LIMIT, 4000, "the vector cache is explicitly bounded");
+});
+
+test("a URL source keeps the original response and extracts readable text separately", async () => {
+  const id = await create();
+  const html = `<html><head><title>Quasar guide</title></head><body><article><h1>Quasar guide</h1><p>${"The quasar calibrates the starboard relay. ".repeat(12)}</p><p>${"A second paragraph explains the checklist. ".repeat(8)}</p></article></body></html>`;
+  const original = new TextEncoder().encode(html);
+  setKnowledgeUrlFetchForTests(async (input) => {
+    assert.equal(String(input), "https://example.com/guide");
+    return new Response(original, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
+  });
+  const uploaded = await request("POST", `/collections/${id}/sources/url`, { url: "https://example.com/guide" });
+  assert.equal(uploaded.status, 201, await uploaded.clone().text());
+  const sourceId = ((await uploaded.json()) as { id: string }).id;
+  await waitFor();
+  const row = sourceRow("alice", sourceId)!;
+  assert.equal(row.status, "ready");
+  assert.equal(row.url, "https://example.com/guide");
+  assert.match(row.text ?? "", /starboard relay/);
+  const stored = db.prepare("SELECT data, mime FROM uploads WHERE id = ? AND user_id = 'alice'").get(row.upload_id) as { data: Uint8Array; mime: string };
+  assert.equal(Buffer.from(stored.data).toString("utf8"), html, "the original bytes are persisted, not the Markdown extraction");
+  assert.equal(stored.mime, "text/html");
+  assert.equal(row.bytes, original.byteLength);
+
+  setKnowledgeUrlFetchForTests(async () => new Response("too big", { headers: { "Content-Type": "text/plain", "Content-Length": String(MAX_URL_BYTES + 1) } }));
+  const oversized = await request("POST", `/collections/${id}/sources/url`, { url: "https://example.com/large" });
+  assert.equal(oversized.status, 422);
+  assert.match(((await oversized.json()) as { error: string }).error, /larger/i);
+
+  setKnowledgeUrlFetchForTests(async () => new Response("missing", { status: 404, headers: { "Content-Type": "text/html" } }));
+  const missing = await request("POST", `/collections/${id}/sources/url`, { url: "https://example.com/missing" });
+  assert.equal(missing.status, 422);
+  assert.match(((await missing.json()) as { error: string }).error, /HTTP 404/);
+
+  const ftp = await request("POST", `/collections/${id}/sources/url`, { url: "ftp://example.com/guide" });
+  assert.ok([400, 422].includes(ftp.status), "non-http schemes are refused before any fetch");
+});
+
+test("retrieved knowledge stored in turn_context is charged to the quota", async () => {
+  const id = await create();
+  await paste(id, "Quasar quota passage.");
+  await waitFor();
+  const before = storageUsed("alice");
+  const knowledge = `Retrieved passages (retrieval: lexical):\n${"quasar passage ".repeat(80)}`;
+  const ids = JSON.stringify([id]);
+  saveTurnContext("alice", "thread-1", "m1", { date: "", memory: "", skills: "", knowledge, knowledgeIds: [id] }, 0);
+  assert.equal(storageUsed("alice"), before + Buffer.byteLength(knowledge) + Buffer.byteLength(ids));
+  const replay = storedTurnContexts("alice", "thread-1", { memoryRevision: null, skills: false, knowledge: new Set([id]) }).get("m1")!;
+  assert.equal(replay.knowledge, knowledge);
+
+  const smaller = "short passage";
+  saveTurnContext("alice", "thread-1", "m1", { date: "", memory: "", skills: "", knowledge: smaller, knowledgeIds: [id] }, 0);
+  assert.equal(storageUsed("alice"), before + Buffer.byteLength(smaller) + Buffer.byteLength(ids), "rewriting charges only net growth");
+
+  const used = storageUsed("alice");
+  db.prepare("UPDATE users SET storage_limit = ? WHERE id = 'alice'").run(used + 10);
+  try {
+    assert.throws(
+      () => saveTurnContext("alice", "thread-1", "m2", { date: "", memory: "", skills: "", knowledge: "z".repeat(200), knowledgeIds: [id] }, 0),
+      /Storage quota exceeded/,
+    );
+    assert.equal((db.prepare("SELECT knowledge FROM turn_context WHERE thread_id = 'thread-1' AND message_id = 'm2'").get() as { knowledge?: string } | undefined)?.knowledge, undefined);
+  } finally {
+    db.prepare("UPDATE users SET storage_limit = NULL WHERE id = 'alice'").run();
+  }
 });
 
 test("PDF text is extracted and a scanned PDF fails with an honest message", async () => {

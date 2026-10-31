@@ -12,7 +12,7 @@ Object.defineProperty(globalThis, "localStorage", {
   configurable: true,
 });
 
-const { useChatKnowledgeStore, useKnowledgeCitationStore } = await import("./chat-knowledge.js");
+const { persistKnowledgeAttachments, useChatKnowledgeStore, useKnowledgeCitationStore } = await import("./chat-knowledge.js");
 
 beforeEach(() => {
   useChatKnowledgeStore.setState({ byId: {}, collections: null, loading: false });
@@ -35,6 +35,21 @@ test("server hydration replaces stale attachments and clearing detaches", () => 
   assert.deepEqual(useChatKnowledgeStore.getState().byId["thr_1"], ["knc_new"]);
   store.hydrate("thr_1", []);
   assert.deepEqual(useChatKnowledgeStore.getState().byId["thr_1"], []);
+});
+
+test("a failed first attachment PATCH clears the stored chat instead of claiming it", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({ error: "nope" }), { status: 500, headers: { "Content-Type": "application/json" } })) as typeof fetch;
+  try {
+    // A remote entry may already exist from a list/detail fetch; the failed PATCH must clear it.
+    useChatKnowledgeStore.getState().hydrate("thr_new", ["knc_a"]);
+    await assert.rejects(persistKnowledgeAttachments("thr_new", ["knc_a"]), /nope/);
+    assert.deepEqual(useChatKnowledgeStore.getState().byId["thr_new"], [], "the stored chat mirrors no attachment");
+    useChatKnowledgeStore.getState().set("local_new", ["knc_a"]);
+    assert.deepEqual(useChatKnowledgeStore.getState().byId["local_new"], ["knc_a"], "the optimistic choice survives for a retry");
+  } finally {
+    globalThis.fetch = original;
+  }
 });
 
 test("the citation store opens exactly one passage and closes cleanly", () => {

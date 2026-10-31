@@ -6,7 +6,6 @@ import type { AppEnv } from "../auth.js";
 import { db } from "../db.js";
 import { MAX_BYTES, storeUpload } from "../files.js";
 import { QuotaError } from "../quota.js";
-import { webFetch } from "../tools/web.js";
 import { excerpt } from "./chunker.js";
 import { embeddingOptions } from "./embeddings.js";
 import {
@@ -17,6 +16,7 @@ import {
   resumeKnowledgeIngestion,
 } from "./jobs.js";
 import { searchKnowledge } from "./retrieval.js";
+import { fetchKnowledgeUrl } from "./url.js";
 import {
   attachableCollections,
   chunkRow,
@@ -185,26 +185,26 @@ export const knowledgeRoutes = new Hono<AppEnv>()
   .post("/collections/:id/sources/url", async (c) => {
     const parsed = z.object({ url: z.string().url().max(2000) }).safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "Enter a valid http or https URL." }, 400);
-    const collection = getCollectionRow(c.get("user").id, c.req.param("id"));
+    const userId = c.get("user").id;
+    const collection = getCollectionRow(userId, c.req.param("id"));
     if (!collection) return c.json({ error: "Collection not found" }, 404);
-    let page: { title: string; content: string };
+    let page: Awaited<ReturnType<typeof fetchKnowledgeUrl>>;
     try {
-      page = await webFetch(parsed.data.url);
+      page = await fetchKnowledgeUrl(parsed.data.url, { signal: c.req.raw.signal });
     } catch (error) {
       return c.json({ error: (error as Error).message }, 422);
     }
-    const text = page.content.trim().slice(0, MAX_TEXT);
-    if (!text) return c.json({ error: "That page had no readable text." }, 422);
     try {
-      const source = addSource(c.get("user").id, collection.id, {
-        name: (page.title || parsed.data.url).slice(0, 200),
+      // The original response body is the upload; `page.text` is only the extraction used for chunking.
+      const source = addSource(userId, collection.id, {
+        name: page.title.slice(0, 200),
         kind: "url",
-        mime: "text/markdown",
-        data: Buffer.from(text),
-        text,
+        mime: page.mime,
+        data: page.bytes,
+        text: page.text,
         url: parsed.data.url,
       });
-      enqueueSource(c.get("user").id, source.id);
+      enqueueSource(userId, source.id);
       return c.json(source, 201);
     } catch (error) {
       failure(error);
@@ -233,7 +233,7 @@ export const knowledgeRoutes = new Hono<AppEnv>()
       query: parsed.data.query,
       k: parsed.data.k,
     });
-    return c.json({ mode: result.mode, tokens: result.tokens, hits: result.hits.map((hit) => ({ ...hit, excerpt: excerpt(hit.text) })) });
+    return c.json({ mode: result.mode, degraded: result.degraded ?? false, tokens: result.tokens, hits: result.hits.map((hit) => ({ ...hit, excerpt: excerpt(hit.text) })) });
   })
   .get("/collections/:id/chunks", (c) => {
     const userId = c.get("user").id;

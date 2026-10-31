@@ -30,6 +30,8 @@ interface Job {
   sourceId: string;
   userId: string;
   collectionId: string;
+  /** The source generation this queued work belongs to; a newer generation supersedes it. */
+  generation: number;
 }
 
 type EmbedderFactory = (userId: string, collection: CollectionRow) => Embedder | null;
@@ -49,10 +51,17 @@ export function setEmbedderFactoryForTests(next: EmbedderFactory | null) {
 
 const queue: Job[] = [];
 const running = new Map<string, AbortController>();
+/** Generation of the job in `running`, so a superseding retry can tell it is stale. */
+const runningGenerations = new Map<string, number>();
 /** One job per collection at a time; different collections of one account may run in parallel. */
 const runningCollections = new Set<string>();
 const perUser = new Map<string, number>();
 const inflight = new Set<Promise<void>>();
+const RESUMED_BATCH = 500;
+/** Keyset cursor for unfinished rows at startup; batches load as the queue drains, with no idle timer. */
+let resumeCursor: { createdAt: number; id: string } | null = null;
+
+const activeStatus = (status: string) => status === "queued" || status === "extracting" || status === "embedding";
 
 const isAbort = (error: unknown) => error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError" || (error as { cause?: { name?: string } }).cause?.name === "AbortError");
 
@@ -64,7 +73,9 @@ function capacity(userId: string): boolean {
 function take(): Job | undefined {
   for (let i = 0; i < queue.length; i++) {
     const job = queue[i]!;
-    if (!sourceRow(job.userId, job.sourceId)) {
+    const row = sourceRow(job.userId, job.sourceId);
+    // Cancelled, failed, ready, or superseded work must leave the queue instead of waiting forever.
+    if (!row || !activeStatus(row.status) || row.generation !== job.generation) {
       queue.splice(i, 1);
       i--;
       continue;
@@ -76,18 +87,49 @@ function take(): Job | undefined {
   return undefined;
 }
 
+/** Loads the next batch of unfinished rows found at startup, moving the keyset forward once per call. */
+function refillResumeQueue(): number {
+  if (!resumeCursor) return 0;
+  const rows = db
+    .prepare(
+      `SELECT id, user_id, collection_id, generation, created_at FROM knowledge_sources
+       WHERE status IN ('queued', 'extracting', 'embedding') AND (created_at > ? OR (created_at = ? AND id > ?))
+       ORDER BY created_at, id LIMIT ${RESUMED_BATCH}`,
+    )
+    .all(resumeCursor.createdAt, resumeCursor.createdAt, resumeCursor.id) as Array<{ id: string; user_id: string; collection_id: string; generation: number; created_at: number }>;
+  if (!rows.length) {
+    resumeCursor = null;
+    return 0;
+  }
+  const last = rows[rows.length - 1]!;
+  resumeCursor = rows.length < RESUMED_BATCH ? null : { createdAt: last.created_at, id: last.id };
+  for (const row of rows) {
+    if (running.has(row.id) || queue.some((job) => job.sourceId === row.id)) continue;
+    queue.push({ sourceId: row.id, userId: row.user_id, collectionId: row.collection_id, generation: row.generation });
+  }
+  return rows.length;
+}
+
 function pump() {
   for (;;) {
     const job = take();
-    if (!job) return;
+    if (!job) {
+      // Startup recovery is paginated, so more than one batch of pending rows still drains.
+      if (refillResumeQueue()) continue;
+      return;
+    }
     perUser.set(job.userId, (perUser.get(job.userId) ?? 0) + 1);
     runningCollections.add(job.collectionId);
     const controller = new AbortController();
     running.set(job.sourceId, controller);
+    runningGenerations.set(job.sourceId, job.generation);
     const task = runJob(job, controller)
       .catch(() => {})
       .finally(() => {
-        running.delete(job.sourceId);
+        if (running.get(job.sourceId) === controller) {
+          running.delete(job.sourceId);
+          runningGenerations.delete(job.sourceId);
+        }
         runningCollections.delete(job.collectionId);
         const left = (perUser.get(job.userId) ?? 1) - 1;
         if (left > 0) perUser.set(job.userId, left);
@@ -100,10 +142,23 @@ function pump() {
 }
 
 export function enqueueSource(userId: string, sourceId: string) {
-  if (running.has(sourceId) || queue.some((job) => job.sourceId === sourceId)) return;
   const source = sourceRow(userId, sourceId);
-  if (!source) return;
-  queue.push({ sourceId, userId, collectionId: source.collection_id });
+  if (!source || !activeStatus(source.status)) return;
+  const runningGeneration = runningGenerations.get(sourceId);
+  if (running.has(sourceId)) {
+    // Same generation: the running job already covers this request. A newer one must abort it and
+    // queue exactly one replacement, which starts only after the old job releases its slot.
+    if (runningGeneration === source.generation) return;
+    running.get(sourceId)?.abort();
+  }
+  // Drop any queued entry for this source, including one for a superseded generation.
+  for (let i = queue.length - 1; i >= 0; i--) {
+    if (queue[i]!.sourceId === sourceId) {
+      if (queue[i]!.generation === source.generation) return;
+      queue.splice(i, 1);
+    }
+  }
+  queue.push({ sourceId, userId, collectionId: source.collection_id, generation: source.generation });
   pump();
 }
 
@@ -113,11 +168,12 @@ export function enqueueSources(userId: string, sourceIds: readonly string[]) {
 
 /** Aborts the job and marks the row cancelled unless it already finished. */
 export function cancelSourceIngestion(userId: string, sourceId: string): boolean {
+  // Ownership first: a forged id from another account must not abort that account's running job.
+  const row = sourceRow(userId, sourceId);
+  if (!row) return false;
   const controller = running.get(sourceId);
   controller?.abort();
   for (let i = queue.length - 1; i >= 0; i--) if (queue[i]!.sourceId === sourceId) queue.splice(i, 1);
-  const row = sourceRow(userId, sourceId);
-  if (!row) return false;
   const result = db
     .prepare("UPDATE knowledge_sources SET status = 'cancelled', progress = 0, generation = generation + 1, updated_at = ? WHERE user_id = ? AND id = ? AND status IN ('queued', 'extracting', 'embedding')")
     .run(Date.now(), userId, sourceId);
@@ -131,15 +187,10 @@ export function cancelCollectionIngestion(userId: string, collectionId: string) 
 
 /** Called at startup. Rows keep their state, so nothing is lost when the process stopped mid-ingest. */
 export function resumeKnowledgeIngestion() {
-  const rows = db
-    .prepare("SELECT id, user_id, collection_id FROM knowledge_sources WHERE status IN ('queued', 'extracting', 'embedding') ORDER BY created_at LIMIT 500")
-    .all() as Array<{ id: string; user_id: string; collection_id: string }>;
-  for (const row of rows) {
-    if (running.has(row.id) || queue.some((job) => job.sourceId === row.id)) continue;
-    queue.push({ sourceId: row.id, userId: row.user_id, collectionId: row.collection_id });
-  }
+  resumeCursor = { createdAt: 0, id: "" };
+  const count = refillResumeQueue();
   pump();
-  return rows.length;
+  return count;
 }
 
 /** Tests wait for the queue to empty without polling a timer. */
@@ -184,8 +235,8 @@ async function runJob(job: Job, controller: AbortController) {
   const { userId, sourceId } = job;
   const signal = controller.signal;
   const row = sourceRow(userId, sourceId);
-  if (!row) return;
-  const generation = row.generation;
+  if (!row || row.generation !== job.generation || !activeStatus(row.status)) return;
+  const generation = job.generation;
   const collection = getCollectionRow(userId, row.collection_id);
   if (!collection) return;
   setSourceProgress(userId, sourceId, generation, "extracting", 0.04);

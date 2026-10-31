@@ -184,7 +184,12 @@ export default {
   cmdNavKnowledge: "Knowledge",
   cmdComposerKnowledge: "Choose knowledge collections for this chat",
   cmdKnowledgeNewCollection: "New knowledge collection",
+  cmdKnowledgeRetryLoad: "Retry loading knowledge collections",
+  cmdKnowledgeEditCollection: "Edit the selected knowledge collection",
   cmdKnowledgeAddSource: "Add a knowledge source",
+  cmdKnowledgePasteSource: "Paste text into the selected knowledge collection",
+  cmdKnowledgeAddUrl: "Add a web page to the selected knowledge collection",
+  cmdKnowledgePreviewChunks: "Preview passages in the selected knowledge collection",
   cmdKnowledgeSearch: "Test knowledge search",
   cmdKnowledgeReindex: "Reindex the selected knowledge collection",
 } as const;

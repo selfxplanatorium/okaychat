@@ -47,6 +47,20 @@ export const useChatKnowledgeStore = create<ChatKnowledgeState>((set, get) => ({
   },
 }));
 
+/**
+ * Persists a new chat's attachment choice after the server created its thread. On failure the stored
+ * thread is cleared, so the selector never claims attachments the next request does not have; the
+ * optimistic local choice remains for a retry and the error reaches the thread-initialisation path.
+ */
+export async function persistKnowledgeAttachments(threadId: string, ids: string[]): Promise<void> {
+  try {
+    await api(`/threads/${threadId}`, { method: "PATCH", json: { knowledgeIds: ids } });
+  } catch (error) {
+    useChatKnowledgeStore.getState().hydrate(threadId, []);
+    throw error;
+  }
+}
+
 export function useChatKnowledge(): {
   ids: string[];
   collections: KnowledgeCollection[] | null;
@@ -57,6 +71,12 @@ export function useChatKnowledge(): {
 } {
   const id = useAuiState((s) => s.threadListItem.id);
   const remoteId = useAuiState((s) => s.threadListItem.remoteId);
+  // A chat opened from the search spotlight can be in another project while the sidebar filter is null;
+  // the thread's own metadata, not the filter, decides which collections it may attach.
+  const threadProject = useAuiState((s) => {
+    const custom = s.threadListItem.custom as { projectId?: string | null } | undefined;
+    return custom && "projectId" in custom ? custom.projectId ?? null : undefined;
+  });
   const stored = useChatKnowledgeStore((s) => s.byId[remoteId ?? ""] ?? s.byId[id]);
   const collections = useChatKnowledgeStore((s) => s.collections);
   const loading = useChatKnowledgeStore((s) => s.loading);
@@ -64,10 +84,11 @@ export function useChatKnowledge(): {
   const set = useChatKnowledgeStore((s) => s.set);
   const ids = stored ?? [];
   const key = remoteId ?? id;
-  // Stable: the selector's load effect runs once per mount, even as attachments change.
+  // Stable per chat and project: the selector's load effect reruns when the open chat or its project changes.
   const refresh = useCallback(async () => {
-    await useChatKnowledgeStore.getState().loadCollections(useData.getState().activeProject);
-  }, []);
+    const projectId = remoteId && threadProject !== undefined ? threadProject : useData.getState().activeProject;
+    await useChatKnowledgeStore.getState().loadCollections(projectId);
+  }, [remoteId, threadProject]);
   return {
     ids,
     collections,

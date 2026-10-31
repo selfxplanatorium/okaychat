@@ -72,3 +72,37 @@ test("empty or whitespace-only text produces no chunks, and excerpts are bounded
   assert.equal(estimateTokens("abcd"), 1);
   assert.equal(excerpt("abcdef", 4), "abcd…");
 });
+
+test("CRLF input keeps exact offsets into the original text", () => {
+  const text = ["# Handbook", "", ...Array.from({ length: 12 }, (_, i) => paragraph(i + 1)).flatMap((p) => [p, ""]), "## Tail", "", paragraph(20)].join("\r\n");
+  const chunks = chunkDocument(text, { sourceId: "src-crlf" });
+  assert.ok(chunks.length >= 2);
+  for (const chunk of chunks) {
+    assert.equal(text.slice(chunk.start, chunk.end), chunk.text, "a citation slice matches the stored source text");
+  }
+  assert.ok(chunks.some((chunk) => chunk.text.includes("\r\n")), "line endings are preserved rather than normalized");
+});
+
+test("a huge sentence or line is cut at or before the ceiling", () => {
+  const giantSentence = `${"x".repeat(9_000)}. ${"y".repeat(9_000)}`;
+  const sentenceChunks = chunkDocument(giantSentence, { sourceId: "src-sentence" });
+  assert.ok(sentenceChunks.length >= 2);
+  for (const chunk of sentenceChunks.slice(0, -1)) assert.ok(chunk.tokens <= TARGET_TOKENS * 1.35, `sentence chunk ${chunk.ordinal} is ${chunk.tokens} tokens`);
+
+  const giantLine = `${"word ".repeat(9_000)}\n${"word ".repeat(9_000)}`;
+  const lineChunks = chunkDocument(giantLine, { sourceId: "src-line" });
+  assert.ok(lineChunks.length >= 2);
+  for (const chunk of lineChunks.slice(0, -1)) assert.ok(chunk.tokens <= TARGET_TOKENS * 1.35, `line chunk ${chunk.ordinal} is ${chunk.tokens} tokens`);
+
+  const punctuationOnly = `${"z".repeat(5_000)}!\n${"z".repeat(5_000)}?`;
+  const punctuationChunks = chunkDocument(punctuationOnly, { sourceId: "src-punctuation" });
+  assert.ok(punctuationChunks.length >= 2);
+  for (const chunk of punctuationChunks.slice(0, -1)) assert.ok(chunk.tokens <= TARGET_TOKENS * 1.35);
+});
+
+test("excerpt never leaves half a surrogate pair", () => {
+  const text = `aaa${"😀"}bcdef`;
+  assert.equal(excerpt(text, 4), "aaa…");
+  assert.equal(excerpt("😀😀😀", 2), "😀…");
+  assert.equal(excerpt("😀😀😀", 3), "😀…");
+});

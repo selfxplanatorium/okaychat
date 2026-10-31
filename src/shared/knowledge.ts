@@ -101,6 +101,11 @@ export interface KnowledgeSearchResult {
   mode: KnowledgeRetrievalMode;
   hits: KnowledgeSearchHit[];
   tokens: number;
+  /**
+   * At least one attached collection has an embedding setting but produced no query vector (missing
+   * connection, provider error, or timeout). The label stays `lexical` when no vectors were available.
+   */
+  degraded?: boolean;
 }
 
 /** One source passage shown in the citation panel. */
