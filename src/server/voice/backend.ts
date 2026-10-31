@@ -246,9 +246,8 @@ export const workerBackends: CallBackends = {
 };
 
 /**
- * What the account can start right now. Reads settings and the worker's configuration only: it never loads or
- * downloads a model, so opening a chat costs nothing. A configured worker that is currently down still answers
- * `worker: true`; starting a call then fails with the worker's own error, which is the actionable one.
+ * What the account can start right now. Probes worker health without loading or downloading a model.
+ * An unreachable configured worker reports a recoverable `worker` reason so the call view can offer Retry.
  */
 export async function voiceAvailability(userId: string): Promise<CallAvailability> {
   const admin = adminSpeech();

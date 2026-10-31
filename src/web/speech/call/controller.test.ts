@@ -558,3 +558,36 @@ test("a call refuses to start while the chat runs, loads cached history, or dict
   assert.equal(useCall.getState().call.failure?.code, "chatBusy");
   dictating.dispose();
 });
+
+
+test("Realtime cleanup after a chat switch disconnects only the owning thread", async () => {
+  resetStore();
+  const h = harness();
+  const { controller, connection } = await startCall(h, "realtime");
+  connection.events.onMessage({ t: "ready", engine: "realtime", voice: "marin", maxSeconds: 1800, maxUtteranceSeconds: 60 });
+  assert.equal(h.threads.get("a")!.voiceConnects, 1);
+  h.mainId = "b";
+  controller.end();
+  assert.equal(h.threads.get("a")!.voiceDisconnects, 1);
+  assert.equal(h.threads.get("b")!.voiceDisconnects, 0);
+  controller.dispose();
+});
+
+
+test("several sentences received before playback opens drain without blocking each other", async () => {
+  resetStore();
+  const player = new FakePlayer(true);
+  const h = harness({ player });
+  const { controller, connection } = await startCall(h);
+  ready(connection);
+  await tick();
+  for (const id of [1, 2, 3]) {
+    connection.events.onMessage({ t: "audio", id, rate: 22050 });
+    connection.events.onAudio(id, pcm([id, id]));
+    connection.events.onMessage({ t: "said", id, ok: true });
+  }
+  player.gate!.resolve();
+  await tick();
+  assert.deepEqual(player.pushed.map((bytes) => [...new Int16Array(bytes.buffer)]), [[1, 1], [2, 2], [3, 3]]);
+  controller.dispose();
+});

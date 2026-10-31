@@ -67,3 +67,25 @@ test("overflow drops the newest audio instead of buffering without bound", () =>
   assert.equal(buffer.bufferedSamples, 200);
   assert.equal(buffer.overflowCount, 1);
 });
+
+
+test("a late completion does not block the next queued sentence", () => {
+  const buffer = new JitterBuffer({ minBufferMs: 100, sampleRate: 1000 });
+  buffer.push(1, chunk(100));
+  assert.equal(buffer.take()?.length, 100);
+  buffer.push(2, chunk(50));
+  buffer.complete(1);
+  buffer.complete(2);
+  assert.equal(buffer.take()?.length, 50);
+  assert.equal(buffer.take(), null);
+});
+
+test("after starting, a sentence drains below the initial cushion", () => {
+  const buffer = new JitterBuffer({ minBufferMs: 100, sampleRate: 1000 });
+  buffer.push(1, chunk(60));
+  buffer.push(1, chunk(60));
+  assert.equal(buffer.ready, true);
+  assert.equal(buffer.take()?.length, 60);
+  assert.equal(buffer.ready, true);
+  assert.equal(buffer.take()?.length, 60);
+});

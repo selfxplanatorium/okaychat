@@ -232,8 +232,8 @@ export class CallController {
     useCall.getState().dispatch({ type: "mute", muted });
     if (this.call.engine === "realtime" && this.realtimeConnected) {
       try {
-        if (muted) this.aui.thread.muteVoice();
-        else this.aui.thread.unmuteVoice();
+        if (muted) this.boundThread?.muteVoice();
+        else this.boundThread?.unmuteVoice();
       } catch {}
       return;
     }
@@ -244,9 +244,9 @@ export class CallController {
     this.unsubscribe?.();
     this.unsubscribe = this.aui.subscribe(() => this.tick());
     this.unsubscribeVolume?.();
-    this.unsubscribeVolume = this.aui.thread.subscribeVoiceVolume(() => {
-      useCall.getState().setLevel(this.aui.thread.getVoiceVolume());
-    });
+    this.unsubscribeVolume = this.boundThread?.subscribeVoiceVolume(() => {
+      useCall.getState().setLevel(this.boundThread?.getVoiceVolume() ?? 0);
+    }) ?? null;
   }
 
   private tick() {
@@ -258,7 +258,7 @@ export class CallController {
     }
     const state = this.call;
     if (state.engine === "realtime" || this.realtimeConnected) {
-      const voice = this.aui.thread.getState().voice;
+      const voice = this.boundThread?.getState().voice;
       if (voice) {
         this.realtimeConnected = true;
         this.realtimeSeen = true;
@@ -364,6 +364,7 @@ export class CallController {
         void microphone.stop();
         return;
       }
+      void microphone.stop();
       this.microphone = null;
       this.vad = null;
       const media = error instanceof CallMediaError ? error : new CallMediaError("media", "The microphone could not start.");
@@ -532,14 +533,15 @@ export class CallController {
     if (this.endRequested || !this.started || rate <= 0) return;
     if (!this.player) {
       const player = this.createPlayer();
+      const playerGeneration = this.generation;
       this.player = player;
       player.onEmpty = () => {
-        if (!this.isCurrent(this.generation)) return;
+        if (!this.isCurrent(playerGeneration) || this.player !== player) return;
         this.drained = true;
         this.maybeListening();
       };
       player.onOverflow = () => {
-        if (!this.isCurrent(this.generation)) return;
+        if (!this.isCurrent(playerGeneration) || this.player !== player) return;
         // The worklet's bounded queue dropped audio. Say so rather than truncating a reply silently.
         useCall.getState().setNotice("limit");
       };
@@ -584,8 +586,17 @@ export class CallController {
    */
   private flushPlayer() {
     if (!this.playerReady || this.endRequested) return;
-    for (const item of this.waitingAudio.splice(0)) {
-      if (item.id > this.cancelledThrough) this.pushAudio(item.id, item.pcm);
+    const waiting = this.waitingAudio.splice(0);
+    for (let index = 0; index < waiting.length; index++) {
+      const item = waiting[index]!;
+      if (item.id <= this.cancelledThrough) continue;
+      this.pushAudio(item.id, item.pcm);
+      // Restore each completion before starting the next sentence, as on the wire. Otherwise
+      // a drained first sentence holds up every later one while the worklet is opening.
+      if (waiting[index + 1]?.id !== item.id && this.saidPending.delete(item.id)) {
+        this.jitter.complete(item.id);
+        this.pumpAudio();
+      }
     }
     for (const id of [...this.saidPending]) {
       this.saidPending.delete(id);
@@ -677,7 +688,7 @@ export class CallController {
       onFailure: (reason) => this.realtimeFailed(reason),
     };
     try {
-      this.aui.thread.connectVoice();
+      this.boundThread?.connectVoice();
     } catch (error) {
       this.realtimeFailed(error instanceof Error ? error.message : "The Realtime session could not start.");
     }
@@ -724,7 +735,7 @@ export class CallController {
     bridge = null;
     this.rejectOffer(new Error("The call switched to the local engine."));
     try {
-      this.aui.thread.disconnectVoice();
+      this.boundThread?.disconnectVoice();
     } catch {}
   }
 
@@ -735,7 +746,7 @@ export class CallController {
     bridge = null;
     this.rejectOffer(new Error(reason));
     try {
-      this.aui.thread.disconnectVoice();
+      this.boundThread?.disconnectVoice();
     } catch {}
     if (!this.connection?.isOpen) {
       this.fail("network", "The call connection was lost before it could fall back.");
@@ -795,7 +806,7 @@ export class CallController {
     void player?.dispose();
     if (this.realtimeConnected) {
       try {
-        this.aui.thread.disconnectVoice();
+        this.boundThread?.disconnectVoice();
       } catch {}
       this.realtimeConnected = false;
     }

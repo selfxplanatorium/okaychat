@@ -58,7 +58,14 @@ export class JitterBuffer {
 
   /** The next chunk to hand to the worklet, or null while the cushion is filling or everything is queued. */
   take(): Int16Array | null {
-    const head = this.order.length ? this.sentences.get(this.order[0]!) : undefined;
+    // A completion can arrive after all chunks were handed to the worklet. Skip that empty
+    // sentence in this call, or the following sentence waits for a network event that may never come.
+    let head = this.order.length ? this.sentences.get(this.order[0]!) : undefined;
+    while (head?.complete && !head.chunks.length) {
+      this.sentences.delete(head.id);
+      this.order.shift();
+      head = this.order.length ? this.sentences.get(this.order[0]!) : undefined;
+    }
     if (!head) return null;
     if (!head.started) {
       // A complete short sentence need not wait, or it would never start.
@@ -85,7 +92,7 @@ export class JitterBuffer {
   /** True when the worklet should start playing the queued audio. */
   get ready(): boolean {
     const head = this.order.length ? this.sentences.get(this.order[0]!) : undefined;
-    return !!head && (head.complete || this.samples >= this.minSamples);
+    return !!head && (head.started || head.complete || this.samples >= this.minSamples);
   }
 
   /** Barge-in: every queued and in-flight sentence is dropped, in order, for good. */
