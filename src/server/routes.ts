@@ -8,7 +8,9 @@ import { z } from "zod";
 import type { McpServerConfig, UserSettings } from "../shared/types.js";
 import { requireUser, type AppEnv } from "./auth.js";
 import { newId } from "./crypto.js";
-import { deleteConnection, listModels, listProviders, mayUsePrivateHosts, saveConnection } from "./catalog/providers.js";
+import { deleteConnection, getOwnConnection, listModels, listProviders, privateUrlError, saveConnection } from "./catalog/providers.js";
+import { OLLAMA, OLLAMA_DEFAULT_URL } from "./catalog/ollama.js";
+import { ollamaManagementRoutes } from "./catalog/ollama-routes.js";
 import { adminRoutes, audienceInput } from "./admin.js";
 import { artifactRoutes } from "./artifacts.js";
 import { chatRoutes } from "./chat.js";
@@ -27,7 +29,6 @@ import { speechRoutes } from "./speech/routes.js";
 import { deleteThreadImages, imageRoutes } from "./tools/image.js";
 import { deleteSandboxWorkspace, sandboxRoutes } from "./tools/sandbox.js";
 import { env } from "./env.js";
-import { assertPublicHost, BlockedAddressError } from "./public-fetch.js";
 import {
   AppCallNeedsConfirmation,
   callbackUrl,
@@ -75,20 +76,6 @@ const mcpInput = z.object({
     approval: z.enum(["destructive", "always", "never"]).optional(),
   }),
 });
-
-/**
- * Non-admins may only point connections at the public internet, or any user could read the server's
- * network through a provider or MCP URL. Requests are checked again at connection time.
- */
-async function privateUrlError(userId: string, url: string | undefined): Promise<string | null> {
-  if (!url || mayUsePrivateHosts(userId)) return null;
-  try {
-    await assertPublicHost(new URL(url));
-    return null;
-  } catch (error) {
-    return error instanceof BlockedAddressError ? "Only admins can use local or private network addresses." : (error as Error).message;
-  }
-}
 
 const modelRef = z.string().min(1).max(300);
 // Thread and message ids are chosen by the client (assistant-ui), so only their shape is checked.
@@ -158,15 +145,21 @@ const api = new Hono<AppEnv>()
   .put("/providers/:id", async (c) => {
     const body = providerInput.safeParse(await c.req.json());
     if (!body.success) return c.json({ error: body.error.issues[0]?.message }, 400);
-    const blocked = await privateUrlError(c.get("user").id, body.data.baseURL);
+    const id = c.req.param("id");
+    const userId = c.get("user").id;
+    // An omitted or empty Ollama address still means loopback, so validate that effective URL.
+    const stored = id === OLLAMA ? getOwnConnection(userId, OLLAMA)?.baseURL : undefined;
+    const effective = id === OLLAMA && !body.data.baseURL ? (stored ?? OLLAMA_DEFAULT_URL) : body.data.baseURL;
+    const blocked = await privateUrlError(userId, effective);
     if (blocked) return c.json({ error: blocked }, 400);
-    saveConnection(c.get("user").id, c.req.param("id"), body.data);
+    saveConnection(userId, id, body.data);
     return c.json({ ok: true });
   })
   .delete("/providers/:id", (c) => {
     deleteConnection(c.get("user").id, c.req.param("id"));
     return c.json({ ok: true });
   })
+  .route("/providers/ollama", ollamaManagementRoutes("user"))
   .get("/models", async (c) => c.json(await listModels(c.get("user").id)))
 
   // Threads and history (assistant-ui ThreadHistoryAdapter rows)

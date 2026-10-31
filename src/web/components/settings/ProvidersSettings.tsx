@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 import { AudienceButton } from "./Audience";
 import { CodexConnect } from "./CodexConnect";
+import { OllamaSettings } from "./OllamaSettings";
 import { SettingsPage, SettingsSection } from "./SettingsUI";
 
 export const OPENCODE_GO_CONSOLE = "https://opencode.ai/console";
@@ -144,7 +145,9 @@ function ProviderRow({ provider, index, expanded, onToggle }: { provider: Provid
       </div>
       {expanded && (
         <div className="settings-collapse mt-3">
-          {chatgpt ? (
+          {provider.id === "ollama" ? (
+            <OllamaSettings provider={provider} base={base} onChanged={refresh} />
+          ) : chatgpt ? (
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-muted-foreground max-w-sm text-xs">
                 {t("providers.chatgptDescription")}

@@ -17,7 +17,7 @@ okaychat is a self-hosted AI chat app meant to replace LibreChat and Open WebUI.
 | --- | --- | --- |
 | Runtime | Node 22+ | `node:sqlite` is built in, so there are no native deps to compile in Docker |
 | Server | Hono + `@hono/node-server` | Small, fast, Web-standard `Request`/`Response` |
-| LLM | AI SDK v7 (`ai`) + `@ai-sdk/openai`, `anthropic`, `google`, `openai-compatible` | Covers all four OpenCode Go wire formats |
+| LLM | AI SDK v7 (`ai`) + `@ai-sdk/openai`, `anthropic`, `google`, `openai-compatible`, plus an in-repo native Ollama adapter | Covers all four OpenCode Go wire formats and Ollama's own `/api/chat` without another dependency. See `docs/implementation/ollama.md` |
 | MCP | `@ai-sdk/mcp` | Streamable HTTP, SSE, stdio clients |
 | DB | SQLite via `node:sqlite` | One file, one volume |
 | Web | Vite + React 19 + Tailwind v4 | No SSR needed |
@@ -66,7 +66,8 @@ src/server/
   speech/             Read aloud and speech to text: engines (cloud + worker client), voice/model lists, routes, admin settings, recording retention
   codex.ts            Codex CLI login (device code), per-run CODEX_HOME with encrypted credentials, token refresh for chat
   llm.ts              Model factory per wire format, cache breakpoints, OpenCode headers
-  catalog/            models.dev catalog + provider connections (encrypted keys)
+  ollama-model.ts     Native Ollama `/api/chat` LanguageModelV4 adapter (stream, tools, thinking, usage, abort)
+  catalog/            models.dev catalog + provider connections (encrypted keys); ollama.ts is native transport/metadata, ollama-routes.ts its management API
   mcp/                MCP connection manager, OAuth provider, storage
   tools/              Built-in tools: web_search, web_fetch (+ Scrapling fallback), generate_image (Codex or image APIs), delegate_task (sub-agents), run_code (sandbox client)
   turn-context.ts     Stores each turn's memory/skills block and replays it so later requests keep the cached prefix
@@ -113,6 +114,7 @@ docs/                 Reusable documentation (see below)
 - `docs/implementation/bundled-fonts.md`: fonts shipped in the picker, their licenses, and the Liberation source.
 - `docs/implementation/codex-images.md`: image generation through the Codex CLI, login, credential handling.
 - `docs/implementation/codex-chat.md`: chatting with the user's ChatGPT plan through the Codex backend: endpoint, headers, body rules, token refresh.
+- `docs/implementation/ollama.md`: native Ollama connection, tags/show/ps metadata, the LanguageModelV4 chat adapter, pull/delete, embeddings data layer, security, and limitations.
 - `docs/implementation/image-generation.md`: image services (Codex, OpenAI, Gemini, xAI, Together, FLUX, fal, Replicate), key reuse, service choice.
 - `docs/implementation/generative-ui.md`: `generative-frame` widgets and spec mode, browser-executed tools.
 - `docs/implementation/documents.md`: PDF/DOCX/XLSX tools, the HTML subset, in-place editing, Chromium lifecycle.
@@ -153,6 +155,7 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 - The composer's Search toggle is an in-memory per-chat override (`state/chat-search.ts`), sent as `config.webSearch` and keyed by thread id, bound to the remote id when a thread is created. It only hides `web_search`; `web_fetch` stays, and the account's `webTools` setting still disables both. On touch devices and below the `sm` breakpoint the reasoning and search controls move into the plus-button menu, which also triggers attachments. "Instant" is the label for `none` reasoning effort.
 - The chat request body comes from `AssistantChatTransport`: thread id is `id`, model and effort are `config.modelName` / `config.reasoningEffort` (registered in `ModelContextBridge`).
 - models.dev lists embedding, rerank, and speech models with text output and most image models with text+image output. The chat model list drops models whose output is anything but text, and ids/families matching `NON_CHAT_ID` in `catalog/models-dev.ts` (live and custom-provider lists too).
+- Ollama is first-class (`format: "ollama"`, provider id `ollama`), not a `custom-*` OpenAI-compatible endpoint. `catalog/ollama.ts` speaks native `/api/version|tags|show|ps|chat|embed|pull|delete`; `ollama-model.ts` is an in-repo `LanguageModelV4` adapter used by `llm.ts` (the installed AI SDK is v7/v4, not V2). `/api/show` is authoritative for context and capabilities; embedding-only models stay out of chat but remain in the management inventory. Refs are `ollama/<name>` and names may contain slashes. The default URL is `http://127.0.0.1:11434`; admins may use private hosts, everyone else's requests go through `publicFetch` for every native endpoint. A shared connection is readable by its audience, but pull/delete require the user's own row; admins manage the shared row from Admin → Providers. No prompt-cache fields are sent (the daemon manages its own cache), and a cancelled pull can keep running in the daemon. See `docs/implementation/ollama.md`.
 - The `chatgpt` provider is the Codex login (`codex_auth`), not a key. `readConnections()` adds it as a virtual connection while the login exists; a `provider_connections` row only stores its on/off switch, and it can never be shared by an admin. `catalog/chatgpt.ts` lists its models from the Codex backend and wraps fetch: bearer token from `codexAccess()` (refreshed in the same per-user queue as CLI runs, because the refresh token rotates), `stream: true`, `store: false`, no `temperature` or `prompt_cache_breakpoint`. See `docs/implementation/codex-chat.md`.
 - Shared provider connections and shared MCP servers have an audience (`groups.ts`). No `share_audiences` row means everyone; a row restricts the resource to the users in `share_users` plus members of the groups in `share_groups`. Readers filter with the `audienceIncludes()` SQL condition (bind the user id twice). Deleting the resource must call `clearAudience()`, because provider ids repeat and a stale restriction would apply to a re-added key. A restricted provider does not reach the admin either unless they are in its audience.
 - OpenCode Go ids missing from models.dev inherit the wire format of a sibling in the same family (`qwen3.6-plus` uses Anthropic like `qwen3.8-max`).
@@ -219,7 +222,7 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 | --- | --- |
 | `npm run dev` | Server (tsx watch, 127.0.0.1:8787) + Vite (127.0.0.1:5173, proxies `/api`) behind Tailscale Serve (HTTPS :5173) + browser worker (127.0.0.1:8791, own process, no firewall) |
 | `npm run typecheck` | Both tsconfigs |
-| `npm test` | Node tests (appearance, account pictures, storage quota, tool limits, library, memory, skills, sandbox, and streamed chat integration) |
+| `npm test` | Node tests (appearance, account pictures, storage quota, tool limits, library, memory, skills, sandbox, Ollama transport/adapter, and streamed chat integration) |
 | `npm run build` / `npm start` | Production build and server |
 | `test/integration/speech.sh` | Speech worker container: auth, Piper, a Piper → Whisper round trip, limits, memory release when idle |
 | `test/integration/run.sh` | Real containers: builds `:it` images, starts the isolated `okaychat-it` compose project, runs the sandbox, worker, and end-to-end suites, cleans up only its own containers and volumes |

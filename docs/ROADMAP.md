@@ -1,6 +1,6 @@
 # Roadmap
 
-Status as of 2026-10-26. Update this file when a feature ships or a plan changes.
+Status as of 2026-10-31. Update this file when a feature ships or a plan changes.
 
 ## Pass 1: core (built)
 
@@ -13,7 +13,7 @@ Status as of 2026-10-26. Update this file when a feature ships or a plan changes
 | Tool limits | Independent agent steps (default 20) and web searches (default 5; 0 disables searches) in Settings → General | Hard query budget shared with delegated tasks, retained over browser-tool continuations; page reads remain available |
 | Server-wide keys | Admins connect providers for every user or for chosen groups and users (Settings → Admin). A user's own key for the same provider wins. Users see a "Server key" badge | `shared_connections`, merged under each user's connections in `catalog/providers.ts`, filtered by audience |
 | User groups | Settings → Admin → Groups: named sets of users. Server-wide providers and shared MCP servers go to everyone or to chosen groups and single users | `groups.ts`: `share_audiences` row = restricted; `share_users`/`share_groups` list who |
-| Providers | OpenCode Go first (onboarding), the user's own ChatGPT plan through the Codex login, OpenCode Zen, and every models.dev provider that speaks OpenAI, OpenAI-compatible, Anthropic, or Google APIs. Custom OpenAI-compatible endpoints (Ollama, LM Studio, vLLM) | Keys AES-256-GCM encrypted. Go model list is live from `/v1/models`, enriched by models.dev. ChatGPT models are live from the Codex backend (`docs/implementation/codex-chat.md`) |
+| Providers | OpenCode Go first (onboarding), the user's own ChatGPT plan through the Codex login, OpenCode Zen, native Ollama, and every models.dev provider that speaks OpenAI, OpenAI-compatible, Anthropic, or Google APIs. Custom OpenAI-compatible endpoints (LM Studio, vLLM, older proxies) remain separate | Keys AES-256-GCM encrypted. Go model list is live from `/v1/models`, enriched by models.dev. ChatGPT models are live from the Codex backend (`docs/implementation/codex-chat.md`). Ollama uses `/api/tags`, `/api/show`, and `/api/ps` for installed models, capabilities, context, and loaded state, with pull progress and delete (`docs/implementation/ollama.md`) |
 | Chat | assistant-ui Thread: streaming, Markdown, reasoning, tool calls, branches, edit, regenerate, copy, export; streams resume after reload | Threads and branching history persisted in SQLite. Selected chat and pending stream stored per tab; replay held in server memory for 15 minutes after the last update |
 | Model picker | Search, favorites, capability icons, context size, price, per-model reasoning effort | |
 | Files | Images (vision, also pasted from the clipboard), PDFs as native file input up to 10 MB, DOCX (server text extraction), 60+ text/code formats | Models without PDF input get the extracted text, swapped in per request on the server (`pdf-parts.ts`), so switching models keeps working. PDFs without a text layer get a clear note |

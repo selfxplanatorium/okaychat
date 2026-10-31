@@ -5,11 +5,13 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { wrapLanguageModel, type JSONValue, type LanguageModel, type ModelMessage } from "ai";
 import type { ModelInfo, ReasoningEffort } from "../shared/types.js";
 import { CHATGPT, chatgptFetch } from "./catalog/chatgpt.js";
+import { OLLAMA_DEFAULT_URL } from "./catalog/ollama.js";
 import type { Connection } from "./catalog/providers.js";
 import { sha256 } from "./crypto.js";
 import { USER_AGENT } from "./env.js";
 import { publicFetch } from "./public-fetch.js";
 import { openaiToolSchemas } from "./openai-schema.js";
+import { createOllamaModel } from "./ollama-model.js";
 
 type ProviderOptions = Record<string, Record<string, JSONValue>>;
 
@@ -92,6 +94,18 @@ export function createModel(info: ModelInfo, conn: Connection, opts: { userId: s
       }
       return { model: provider(info.id), providerOptions: { google }, markCache: passthrough };
     }
+    case "ollama":
+      // Native /api/chat: no OpenAI JSON, no cache fields. The daemon manages its own prompt cache.
+      return {
+        model: createOllamaModel({
+          id: info.id,
+          baseURL: baseURL ?? OLLAMA_DEFAULT_URL,
+          guarded: conn.guarded,
+          thinking: info.reasoning,
+        }),
+        providerOptions: {},
+        markCache: passthrough,
+      };
     case "openai-chat": {
       const name = info.providerId.replace(/[^a-zA-Z0-9]/g, "");
       const provider = createOpenAICompatible({
