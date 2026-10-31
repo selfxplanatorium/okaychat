@@ -13,7 +13,7 @@ Each account has one limit: `OKAYCHAT_STORAGE_LIMIT` bytes (default 1 GiB), over
 - Durable `sandbox_files.data`; scratch workspaces are outside account storage.
 - Uploaded fonts, account avatar, encrypted memory bytes (facts and summaries), and extracted project-file text.
 - Skill names, descriptions, instructions, reference paths and reference contents, counted as UTF-8 bytes across `skills` and `skill_files`.
-- Message JSON (`messages.bytes`), without inline `data:` URLs, which are charged once as uploads. Branching charges the copy. Existing rows are backfilled by a migration.
+- Message JSON (`messages.bytes`), without inline `data:` URLs, which are charged once as uploads, plus the encrypted first original of an edited assistant reply (`messages.original_enc`). The original is retained after Undo. Branching charges the copied message and original. Existing rows are backfilled by a migration.
 
 Settings, provider/MCP credentials, skill-source credentials and other small configuration rows do not
 count. Retained speech recordings (`speech_recordings`, only when an admin sets a retention period) do not

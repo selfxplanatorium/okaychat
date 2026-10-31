@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { McpPromptInfo, McpServerInfo, Me, ModelInfo, Project, ProviderInfo, StorageInfo, UserSettings } from "@shared/types";
 import { api, prefetch } from "@/lib/api";
 import { setLibraryAccount } from "./library-cache";
+import { clearMessageEdits } from "./message-edits";
 import { warmThreadCache } from "@/runtime/threadCache";
 
 interface DataState {
@@ -159,6 +160,8 @@ let preloaded: { userId: string; promise?: Promise<void> } | undefined;
 /** Starts the shell's data requests as soon as the session is known, alongside the shell chunk and appearance. */
 export function preloadData(userId: string) {
   setLibraryAccount(userId);
+  // A new account must not inherit the previous one's edited-reply badges or open editor.
+  if (preloaded?.userId !== userId) clearMessageEdits();
   // Once per signed-in user: a later status check for the same session must not refetch under a mounted shell.
   if (preloaded?.userId === userId) return;
   const promise = useData.getState().load();

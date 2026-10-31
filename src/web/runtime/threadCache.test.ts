@@ -104,6 +104,18 @@ test("sameRows compares content, not only ids", () => {
   assert.equal(sameRows(rows.slice(1), rows), false);
 });
 
+test("acknowledged edits replace a cached row in place and keep edited_at", () => {
+  const server = new ServerRows();
+  server.loaded("t", server.beginLoad("t"), [msg("a", null), msg("b", "a"), msg("c", "b")]);
+  server.beginWrite("t");
+  const edited = { ...msg("b", "a", "rewritten"), edited_at: 1234 };
+  const rows = server.acknowledged("t", edited)!;
+  assert.deepEqual(rows.map((row) => row.id), ["a", "b", "c"], "the branch order does not move");
+  assert.equal((rows[1] as typeof edited).edited_at, 1234);
+  assert.equal(sameRows(rows, [msg("a", null), edited as ReturnType<typeof msg>, msg("c", "b")]), true);
+  assert.equal(sameRows(rows, [msg("a", null), msg("b", "a", "rewritten"), msg("c", "b")]), false, "a missing edit time is a different row");
+});
+
 // Last: sign-out closes the cache for the rest of the page.
 test("after sign-out, a late write cannot recreate the cache", async () => {
   const opened: string[] = [];

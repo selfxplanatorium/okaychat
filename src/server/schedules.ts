@@ -3,7 +3,8 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { Schedule, ScheduleSpec } from "../shared/types.js";
 import type { AppEnv } from "./auth.js";
-import { threadBusy, turnStream } from "./chat.js";
+import { turnStream } from "./chat.js";
+import { markBusy, threadBusy } from "./thread-runs.js";
 import { newId } from "./crypto.js";
 import { db } from "./db.js";
 import { AppError } from "./errors.js";
@@ -91,6 +92,7 @@ export async function runSchedule(row: Row): Promise<void> {
     nextRun(JSON.parse(row.spec_json) as ScheduleSpec, startedAt),
     row.id,
   );
+  let releaseThread: (() => void) | undefined;
   try {
     let threadId = row.thread_mode === "same" ? row.thread_id : null;
     if (threadId && !getThread(row.user_id, threadId)) {
@@ -107,6 +109,8 @@ export async function runSchedule(row: Row): Promise<void> {
       updateThread(row.user_id, threadId, { title: row.thread_mode === "new" ? `${row.title} · ${runLabel(row, startedAt)}` : row.title });
       db.prepare("UPDATE schedules SET thread_id = ? WHERE id = ?").run(threadId, row.id);
     }
+    // Edits to this chat's messages wait until the run has stored its reply.
+    releaseThread = markBusy(threadId);
     const history = row.thread_mode === "new" ? [] : currentBranch(row.user_id, threadId);
     const userMessage: UIMessage = { id: generateId(), role: "user", parts: [{ type: "text", text: row.prompt }], metadata: { custom: { scheduleId: row.id } } };
     appendMessage(row.user_id, threadId, { id: userMessage.id, parent_id: history.at(-1)?.id ?? null, format: "ai-sdk/v6", content: withoutId(userMessage) });
@@ -136,6 +140,7 @@ export async function runSchedule(row: Row): Promise<void> {
     const failure = describeBoundaryError(error, { log: true, kind: "background", model: row.model_ref });
     db.prepare("UPDATE schedules SET last_run_at = ?, last_status = 'error', last_error = ? WHERE id = ?").run(startedAt, failure.message.slice(0, 500), row.id);
   } finally {
+    releaseThread?.();
     running.delete(row.id);
   }
 }

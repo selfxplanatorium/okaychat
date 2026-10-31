@@ -593,6 +593,12 @@ const migrations: Array<string | (() => void)> = [
   ALTER TABLE turn_context ADD COLUMN knowledge TEXT;
   ALTER TABLE turn_context ADD COLUMN knowledge_ids TEXT;
   `,
+  // User edits of assistant replies: when the text was last edited, and the first original text parts,
+  // encrypted, so Undo can restore them. Both stay NULL for messages that were never edited.
+  `
+  ALTER TABLE messages ADD COLUMN edited_at INTEGER;
+  ALTER TABLE messages ADD COLUMN original_enc TEXT;
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

@@ -200,6 +200,8 @@ export interface UserSettings {
   imageServices?: ImageServiceSettings;
   /** Speech to text and read aloud. */
   speech?: SpeechSettings;
+  /** The user may rewrite the text of finished assistant replies. Off by default. */
+  editAssistantMessages?: boolean;
 }
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
@@ -214,6 +216,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   generativeUI: true,
   subagents: true,
   codeExecution: true,
+  editAssistantMessages: false,
 };
 
 export interface TokenUsage {
@@ -596,4 +599,23 @@ export interface StorageInfo {
   limit: number;
   /** The server-wide default limit, for UIs that show what null means. */
   defaultLimit: number;
+}
+
+/** Total characters of text an edited assistant reply may hold. */
+export const MAX_EDITED_TEXT = 200_000;
+
+/** A stored message row as `GET /threads/:id/messages` returns it. `edited_at` appears only on edited replies. */
+export interface StoredMessageRow {
+  id: string;
+  parent_id: string | null;
+  format: string;
+  content: unknown;
+  edited_at?: number;
+}
+
+/** Answer of `PATCH /threads/:id/messages/:messageId` and of undoing an edit. */
+export interface MessageEditResult {
+  message: StoredMessageRow;
+  /** When the text was last edited; null after Undo. */
+  editedAt: number | null;
 }

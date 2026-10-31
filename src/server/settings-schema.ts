@@ -36,4 +36,5 @@ export const settingsPatch = z.object({
   generativeUI: z.boolean().optional(),
   subagents: z.boolean().optional(),
   codeExecution: z.boolean().optional(),
+  editAssistantMessages: z.boolean().optional(),
 });

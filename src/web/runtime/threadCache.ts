@@ -135,15 +135,15 @@ export async function clearThreadCache(): Promise<void> {
   db = undefined;
 }
 
-type MessageRow = Row & { format: string; content: unknown };
+type MessageRow = Row & { format: string; content: unknown; edited_at?: number | null };
 
-/** True when the painted cache rows are exactly the server's rows, content included, so no swap is needed. */
+/** True when the painted cache rows are exactly the server's rows, edit times included, so no swap is needed. */
 export function sameRows(cached: MessageRow[], rows: MessageRow[]): boolean {
   return (
     cached.length === rows.length &&
     rows.every((row, i) => {
       const other = cached[i]!;
-      return row.id === other.id && row.parent_id === other.parent_id && row.format === other.format && JSON.stringify(row.content) === JSON.stringify(other.content);
+      return row.id === other.id && row.parent_id === other.parent_id && row.format === other.format && row.edited_at === other.edited_at && JSON.stringify(row.content) === JSON.stringify(other.content);
     })
   );
 }
