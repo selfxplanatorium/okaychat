@@ -62,6 +62,12 @@ async function execute(tools: ToolSet, name: string, input: unknown = {}): Promi
   return run(input, { toolCallId: `test-${name}`, messages: [] });
 }
 
+/** The JSON-quoted body of the deterministic data envelope. */
+function envelopeBody(text: string): string {
+  const end = text.lastIndexOf("\n</untrusted_data>");
+  return JSON.parse(text.slice(text.lastIndexOf("\n", end - 1) + 1, end)) as string;
+}
+
 // ---------------------------------------------------------------- parsing
 
 test("parseSkillMd reads plain and quoted frontmatter and trims the body", () => {
@@ -223,6 +229,18 @@ test("load_skill and read_skill_file serve enabled skills of the owning user onl
   assert.equal(loaded.name, "alpha");
   assert.equal(loaded.instructions, "Body A");
   assert.deepEqual(loaded.files, ["notes.md"]);
+  const model = await turn.subTools.load_skill!.toModelOutput!({ toolCallId: "t", input: { name: "alpha" }, output: loaded });
+  const payload = JSON.parse(envelopeBody((model as { value: string }).value)) as Record<string, unknown>;
+  assert.deepEqual(payload, {
+    name: "alpha",
+    description: "Alpha",
+    instructions: "Body A",
+    files: ["notes.md"],
+    hint: 'Call read_skill_file with name "alpha" to read one of these files.',
+  }, "file names and the hint stay inside the quoted object, not as separate lines");
+  const file = await execute(turn.subTools, "read_skill_file", { name: "alpha", file: "notes.md" });
+  const fileModel = await turn.subTools.read_skill_file!.toModelOutput!({ toolCallId: "t", input: { name: "alpha", file: "notes.md" }, output: file });
+  assert.deepEqual(JSON.parse(envelopeBody((fileModel as { value: string }).value)), { name: "alpha", file: "notes.md", content: "N" });
   const bobTurn = turnSkills("bob", { temporary: false, canCallTools: true });
   assert.equal((await execute(bobTurn.subTools, "load_skill", { name: "alpha" })).instructions, "B", "same name in another account stays separate");
   assert.equal((await execute(turn.subTools, "read_skill_file", { name: "alpha", file: "notes.md" })).content, "N");

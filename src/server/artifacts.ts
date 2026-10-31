@@ -288,12 +288,16 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
         const a = latestArtifact(threadId, id);
         if (!a) throw new Error(`No artifact with id \`${id}\` in this chat.`);
         if (a.size) throw new Error(`\`${id}\` is a document. Use read_document.`);
-        const injection = scanForInjection(a.content);
+        const injection = scanForInjection(`${a.title ?? ""}\n${a.content}`);
         return { id: a.id, version: a.version, title: a.title, kind: a.kind, language: a.language, content: a.content, ...(injection.flagged ? { injection } : {}) };
       },
+      // Keep every field the model needs for paging and versioned edits inside the data envelope.
       toModelOutput: ({ output }) => ({
         type: "text",
-        value: wrapUntrusted(output.content, { kind: "artifact", name: output.title }).text,
+        value: wrapUntrusted(
+          JSON.stringify({ id: output.id, version: output.version, title: output.title, kind: output.kind, language: output.language, content: output.content }),
+          { kind: "artifact", name: output.title },
+        ).text,
       }),
     }),
 
@@ -361,12 +365,16 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
       execute: async ({ id, range }) => {
         const { artifact, data, kind } = documentOf(threadId, id);
         const text = kind === "docx" ? await readDocxText(data) : kind === "xlsx" ? await readXlsx(data, range) : await readPdf(data);
-        const injection = scanForInjection(text);
+        const injection = scanForInjection(`${artifact.title}\n${text}`);
         return { id, version: artifact.version, kind, text, ...(injection.flagged ? { injection } : {}) };
       },
+      // Keep id/version/kind/paging fields in the envelope; the model needs them for edits and re-reads.
       toModelOutput: ({ output }) => ({
         type: "text",
-        value: wrapUntrusted(output.text, { kind: "artifact", name: `document ${output.id}` }).text,
+        value: wrapUntrusted(
+          JSON.stringify({ id: output.id, version: output.version, kind: output.kind, text: output.text }),
+          { kind: "artifact", name: `document ${output.id}` },
+        ).text,
       }),
     }),
     ...(visual.canViewImages && shots && rendererAvailable()

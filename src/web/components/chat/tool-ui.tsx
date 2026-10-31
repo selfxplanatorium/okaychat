@@ -21,10 +21,9 @@ const host = (url: string) => {
   }
 };
 
-function Favicon({ url }: { url: string }) {
-  const [failed, setFailed] = useState(false);
-  if (failed) return <GlobeIcon className="text-muted-foreground size-3.5 shrink-0" />;
-  return <img src={`https://icons.duckduckgo.com/ip3/${host(url)}.ico`} alt="" className="size-3.5 shrink-0 rounded-sm" onError={() => setFailed(true)} />;
+function Favicon() {
+  // A local icon, not a remote favicon service: a crafted host would otherwise be sent upstream.
+  return <GlobeIcon aria-hidden className="text-muted-foreground size-3.5 shrink-0" />;
 }
 
 /** Quiet advisory badge on the real tool row. Never a modal and never a block. */
@@ -80,7 +79,7 @@ export const toolkit = defineToolkit({
               {results.map((res) => (
                 <a key={res.url} href={res.url} target="_blank" rel="noreferrer" className="hover:bg-muted/60 flex flex-col gap-0.5 rounded-lg border px-2.5 py-2">
                   <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
-                    <Favicon url={res.url} /> {host(res.url)}
+                    <Favicon /> {host(res.url)}
                   </span>
                   <span className="line-clamp-1 font-medium">{res.title}</span>
                   {res.snippet && <span className="text-muted-foreground line-clamp-2 text-xs">{res.snippet}</span>}
@@ -471,7 +470,7 @@ function ResearchCard({ result, running }: { result: unknown; running: boolean }
                 {r.sources.map((source) => (
                   <li key={source.url} className="min-w-0">
                     <a href={source.url} target="_blank" rel="noreferrer" className="hover:bg-muted/60 flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-xs">
-                      <Favicon url={source.url} />
+                      <Favicon />
                       <span className="truncate">{source.title}</span>
                       <span className="text-muted-foreground shrink-0">{host(source.url)}</span>
                     </a>

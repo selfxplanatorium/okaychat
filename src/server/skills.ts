@@ -725,24 +725,24 @@ export function turnSkills(userId: string, opts: { temporary: boolean; canCallTo
         canUse();
         const skill = enabledByName(name);
         if (!skill) invalid(`No enabled skill named \`${name}\`. Check the skill index for the exact names.`, 404);
-        const injection = scanForInjection(skill!.body);
-        return {
+        const output = {
           name: skill!.name,
           description: skill!.description,
           instructions: skill!.body,
           files: skill!.files.map((file) => file.name),
           hint: skill!.files.length ? `Call read_skill_file with name "${skill!.name}" to read one of these files.` : undefined,
-          ...(injection.flagged ? { injection } : {}),
         };
+        const injection = scanForInjection(JSON.stringify(output));
+        return { ...output, ...(injection.flagged ? { injection } : {}) };
       },
-      // A skill is user-installed guidance, but its body is still third-party text. It is spotlighted
-      // and explicitly bounded to the current request instead of being sent as a higher authority.
+      // A skill is user-installed guidance, but its body and file names are still third-party text. The
+      // whole useful object (including the hint) is quoted in one envelope, so names cannot add lines.
       toModelOutput: ({ output }) => ({
         type: "text",
-        value: [
-          wrapUntrusted(output.instructions, { kind: "skill", name: output.name }).text,
-          output.files.length ? `Files in this skill: ${output.files.join(", ")}` : "",
-        ].filter(Boolean).join("\n\n"),
+        value: wrapUntrusted(
+          JSON.stringify({ name: output.name, description: output.description, instructions: output.instructions, files: output.files, hint: output.hint }),
+          { kind: "skill", name: output.name },
+        ).text,
       }),
     }),
     read_skill_file: tool({
@@ -755,12 +755,13 @@ export function turnSkills(userId: string, opts: { temporary: boolean; canCallTo
         const path = validateSkillFileName(file);
         const row = db.prepare("SELECT content FROM skill_files WHERE skill_id = ? AND name = ?").get(skill!.id, path) as { content: string } | undefined;
         if (!row) invalid(`\`${skill!.name}\` has no file \`${path}\`. Available: ${skill!.files.map((f) => `\`${f.name}\``).join(", ") || "none"}.`, 404);
-        const injection = scanForInjection(row.content);
-        return { name: skill!.name, file: path, content: row.content, ...(injection.flagged ? { injection } : {}) };
+        const output = { name: skill!.name, file: path, content: row.content };
+        const injection = scanForInjection(JSON.stringify(output));
+        return { ...output, ...(injection.flagged ? { injection } : {}) };
       },
       toModelOutput: ({ output }) => ({
         type: "text",
-        value: wrapUntrusted(output.content, { kind: "skill", name: `${output.name}/${output.file}` }).text,
+        value: wrapUntrusted(JSON.stringify({ name: output.name, file: output.file, content: output.content }), { kind: "skill", name: `${output.name}/${output.file}` }).text,
       }),
     }),
   };

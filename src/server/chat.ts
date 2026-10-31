@@ -36,7 +36,7 @@ import { conversationMemory, factsContext, memoryPreferences, temporaryMemory } 
 import { contextText, insertTurnContexts, saveTurnContext, shownFactIds, storedTurnContexts } from "./turn-context.js";
 import { adaptPdfParts } from "./pdf-parts.js";
 import { getProject, projectContext } from "./projects.js";
-import { applyUntrustedEnvelopes, approvalRiskReason, messagesHaveUntrustedContent, riskOfTool, wrapUntrusted } from "./prompt-injection.js";
+import { applyUntrustedEnvelopes, approvalRiskReason, messagesHaveUntrustedContent, riskOfTool, toolsHaveExternalMetadata, wrapUntrusted } from "./prompt-injection.js";
 import { turnSkills } from "./skills.js";
 import { getSettings, subagentModelRefs } from "./settings.js";
 import { branchMessages, currentBranch, ensureThread, getThread, isTemporaryThread, setCompaction, updateThread, userText } from "./threads.js";
@@ -221,8 +221,13 @@ export async function turnStream(opts: TurnOptions) {
       const modelMessages = applyUntrustedEnvelopes(await historyMessages(applied, (tail) => adaptPdfParts(tail, model), tools));
       // Per-turn taint: project files and every replayed attachment/tool result are third-party content.
       // The approval gate below also checks each step's messages, so a run_code or MCP result taints the
-      // next step without a persisted account flag.
-      let tainted = messagesHaveUntrustedContent(modelMessages) || (thread.projectId ? (getProject(userId, thread.projectId)?.files.length ?? 0) > 0 : false);
+      // next step without a persisted account flag. System 1/2 and the tool block do not reach the gate's
+      // message list, so MCP server instructions, project files, and a memory summary taint the turn up
+      // front; the gate separately checks a described MCP tool's static metadata.
+      let tainted = messagesHaveUntrustedContent(modelMessages)
+        || (thread.projectId ? (getProject(userId, thread.projectId)?.files.length ?? 0) > 0 : false)
+        || mcp.instructions.length > 0
+        || !!memory.summary;
       // Retrieved facts change with the query, so they sit beside the user message they were retrieved for,
       // never in the system prefix. Stored chats replay each earlier block verbatim to keep the prefix cached.
       let converted = modelMessages;
@@ -300,7 +305,7 @@ export async function turnStream(opts: TurnOptions) {
       const memoryInstructions = [temporary ? promptText("temporary") : "", memory.instructions].filter(Boolean).join("\n\n");
       const messages = handle.markCache([
         systemPrompt(model, personalized ? settings.systemPrompt : "", mcp.instructions, useArtifacts, useGenerativeUI ? opts.clientSystem : undefined, memoryInstructions),
-        chatContext(temporary ? "" : projectContext(userId, thread.projectId), memory.summary),
+        chatContext(temporary ? "" : projectContext(userId, thread.projectId), memory.summary ? wrapUntrusted(memory.summary, { kind: "past_chat", name: "saved memory summary" }).text : undefined),
       ], [
         ...(summary ? summaryMessages(summary) : []),
         ...converted,
@@ -348,7 +353,7 @@ export async function turnStream(opts: TurnOptions) {
             ? await configured(toolCall.input as never, { toolCallId: toolCall.toolCallId, messages: stepMessages, context: undefined as never })
             : configured === true;
           const risk = riskOfTool(tool);
-          const taintedNow = tainted || messagesHaveUntrustedContent(stepMessages);
+          const taintedNow = tainted || toolsHaveExternalMetadata(available) || messagesHaveUntrustedContent(stepMessages);
           if (!needsIt && !(risk && taintedNow)) return undefined;
           const label = `"${toolCall.toolName.replaceAll("_", " ").replace(/\s+/g, " ")}"`;
           if (opts.unattended === true) {

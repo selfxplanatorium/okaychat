@@ -94,6 +94,12 @@ async function run(tool: { execute?: (input: never, options: never) => unknown }
   return last;
 }
 
+/** The JSON-quoted body of the deterministic data envelope. */
+function envelopeBody(text: string): string {
+  const end = text.lastIndexOf("\n</untrusted_data>");
+  return JSON.parse(text.slice(text.lastIndexOf("\n", end - 1) + 1, end)) as string;
+}
+
 const screenshotTool = { name: "screenshot", description: "Takes a screenshot", inputSchema: { type: "object", properties: {} } };
 
 function addServer(name = "browser", shared = false) {
@@ -271,7 +277,10 @@ test("prompts are listed per server and rendered to text", async (t) => {
   const id = addServer("coder");
   const prompts = await listPrompts("alice");
   assert.deepEqual(prompts, [{ serverId: id, server: "coder", name: "review", title: undefined, description: "Review code", arguments: [{ name: "lang", required: true }] }]);
-  assert.equal(await getPromptText("alice", id, "review", { lang: "ts" }), "Review this ts code.\n\nconst a = 1;");
+  const prompt = await getPromptText("alice", id, "review", { lang: "ts" });
+  assert.match(prompt, /kind="mcp_prompt"/);
+  assert.match(prompt, /server="coder"/);
+  assert.equal(envelopeBody(prompt), "Review this ts code.\n\nconst a = 1;", "the author's request stays intact inside the envelope");
   await assert.rejects(getPromptText("bob", id, "review", {}), /not found/, "another user's private server is not reachable");
 });
 
@@ -329,6 +338,35 @@ test("the call's timeout stops counting while the form is open", async (t) => {
   assert.equal(((await iterator.next()).value as { text: string }).text, 'answer: {"action":"decline"}');
 });
 
+test("the baseline approval policy keeps an explicit destructiveHint:false exempt", async (t) => {
+  fakeServer(t, (method) => {
+    if (method === "tools/list") {
+      return {
+        tools: [
+          { name: "wipe", inputSchema: { type: "object", properties: {} }, annotations: { destructiveHint: true } },
+          { name: "write", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: false, destructiveHint: false } },
+          { name: "read", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true } },
+        ],
+      };
+    }
+    return { content: [{ type: "text", text: "ok" }] };
+  });
+  for (const [name, approval, expected] of [
+    ["default", undefined, { wipe: true, write: false, read: false }],
+    ["always", "always", { wipe: true, write: true, read: true }],
+    ["never", "never", { wipe: false, write: false, read: false }],
+  ] as const) {
+    createServer("alice", { name, transport: "http", enabled: true, config: { url: "http://mcp.test/mcp", ...(approval ? { approval } : {}) } });
+    const { tools } = await toolsForUser("alice");
+    for (const tool of ["wipe", "write", "read"] as const) {
+      assert.equal(tools[`${name}__${tool}`]!.needsApproval, expected[tool], `${name}/${tool} keeps the configured baseline`);
+    }
+    // Risk metadata is separate from the baseline policy: a non-read-only tool still gates after
+    // untrusted content even though its explicit destructiveHint:false needs no approval on a clean turn.
+    assert.equal(tools[`${name}__write`]!.metadata?.okaychatRisk, "destructive");
+  }
+});
+
 test("destructive and non-read-only tools stay out of delegate tools even when the policy is never", async (t) => {
   fakeServer(t, (method, params) => {
     if (method === "tools/list") {
@@ -346,6 +384,8 @@ test("destructive and non-read-only tools stay out of delegate tools even when t
   createServer("alice", { name: "ops", transport: "http", enabled: true, shared: false, config: { url: "http://mcp.test/mcp", approval: "never" } });
   const { tools, subTools } = await toolsForUser("alice", { interactive: true });
   assert.ok(tools.ops__wipe, "the main chat keeps the tool under its explicit never policy");
+  assert.equal(tools.ops__wipe!.needsApproval, false);
+  assert.equal(tools.ops__write!.needsApproval, false, "the baseline policy is unchanged by the stricter risk check");
   assert.equal(subTools.ops__wipe, undefined, "a delegate cannot inherit a destructive tool through approval=never");
   assert.equal(subTools.ops__write, undefined, "a non-read-only tool is a write even when it says non-destructive");
   assert.ok(subTools.ops__read, "read-only tools remain available to delegates");
@@ -353,6 +393,36 @@ test("destructive and non-read-only tools stay out of delegate tools even when t
   assert.equal(tools.ops__write!.metadata?.okaychatRisk, "destructive");
   const output = await run(tools.ops__wipe, {});
   assert.equal((output as { injection?: { flagged: boolean } }).injection?.flagged, true);
+});
+
+test("an MCP App cannot run a destructive or non-read-only tool under an explicit never policy without confirmation", async (t) => {
+  fakeServer(t, (method, params) => {
+    if (method === "tools/list") {
+      return {
+        tools: [
+          { ...screenshotTool, name: "refresh", annotations: { readOnlyHint: true } },
+          { ...screenshotTool, name: "write", annotations: { readOnlyHint: false, destructiveHint: false } },
+          { ...screenshotTool, name: "wipe", annotations: { destructiveHint: true } },
+        ],
+      };
+    }
+    if (method === "tools/call") return { content: [{ type: "text", text: `ran ${String(params.name)}` }] };
+    throw new Error(`unexpected ${method}`);
+  });
+  const id = createServer("alice", { name: "charts", transport: "http", enabled: true, config: { url: "http://mcp.test/mcp", approval: "never" } });
+  assert.ok(await callToolFromApp("alice", id, "refresh", {}, false), "read-only app calls still run without a prompt");
+  for (const name of ["write", "wipe"]) {
+    const error = await callToolFromApp("alice", id, name, {}, false).then(
+      () => assert.fail(`${name} must wait for the user`),
+      (e: Error) => e,
+    );
+    assert.ok(error instanceof AppCallNeedsConfirmation);
+    assert.match(error.message, /untrusted content in an MCP App/, "the prompt names the untrusted app, not a user click");
+    assert.match(error.message, new RegExp(name));
+    assert.match(error.message, /change or delete data/);
+    assert.match(error.message, /private data/);
+    assert.ok(await callToolFromApp("alice", id, name, {}, true), "the user's Allow is the single confirmation path");
+  }
 });
 
 test("MCP App tools carry their UI, and app-only tools stay out of the model's tool list", async (t) => {

@@ -18,7 +18,7 @@ import { openElicitation } from "./elicitation.js";
 import { mayUsePrivateHosts } from "../catalog/providers.js";
 import { env } from "../env.js";
 import { publicFetch } from "../public-fetch.js";
-import { injectionMetadata, riskMetadata, scanForInjection, wrapUntrusted, type UntrustedSource } from "../prompt-injection.js";
+import { approvalRiskReason, externalMetadataFlag, injectionMetadata, riskMetadata, scanForInjection, wrapUntrusted, type UntrustedSource } from "../prompt-injection.js";
 import { storeImage, type StoredImage } from "../tools/image.js";
 import { MAX_TOOL_IMAGES_PER_TURN, type ToolImage } from "../tools/screenshots.js";
 import { StoredOAuthProvider } from "./oauth.js";
@@ -62,7 +62,10 @@ function uiMeta(tool: RawTool): { resourceUri?: string; visibility: Array<"model
 function needsApproval(server: McpServerRecord, tool: RawTool): boolean {
   const policy = server.config.approval ?? "destructive";
   if (policy !== "destructive") return policy === "always";
-  return isDestructive(tool);
+  const a = tool.annotations;
+  // The baseline policy is the server's own explicit answer: an explicit `destructiveHint: false`
+  // keeps the old no-prompt behaviour even when the tool is not read-only.
+  return a?.destructiveHint === true || (a?.readOnlyHint === false && a.destructiveHint !== false);
 }
 
 /**
@@ -673,7 +676,7 @@ export async function getPromptText(userId: string, serverId: string, name: stri
   const server = getVisibleServer(userId, serverId);
   if (!server?.enabled) throw new Error("MCP server not found");
   const result = await withClient(server, (client, timeout) => client.experimental_getPrompt({ name, arguments: args, options: { timeout } }));
-  return result.messages
+  const text = result.messages
     .map((m) => {
       const c = m.content as ContentPart;
       if (c.type === "text") return c.text ?? "";
@@ -681,6 +684,10 @@ export async function getPromptText(userId: string, serverId: string, name: stri
     })
     .filter(Boolean)
     .join("\n\n");
+  // This lands in the composer, visible and editable, but the author is the MCP server, not the user.
+  // Emitting the same deterministic envelope from the start means sending it stays data-only and the
+  // turn is tainted; the user can still inspect and edit the quoted request.
+  return wrapUntrusted(text, { kind: "mcp_prompt", name: `${server.name} · ${name}`, server: server.name }).text;
 }
 
 /** Thrown when an app calls a tool the user must confirm first. */
@@ -708,6 +715,15 @@ export async function callToolFromApp(userId: string, serverId: string, name: st
   const entry = await ensure(server);
   const raw = entry.tools.find((t) => t.name === name);
   if (!raw || server.disabledTools.includes(name) || !uiMeta(raw).visibility.includes("app")) throw new Error(`Tool "${name}" is not available to this app`);
+  // An MCP App is third-party code running in an iframe, not a user click. Even an explicit `never`
+  // policy does not let its JavaScript run a destructive or non-read-only tool on its own; the server
+  // route turns the thrown confirmation into the existing 409 card, and a user Allow retries with
+  // `confirmed: true`. Read-only tools still run automatically.
+  if (isDestructive(raw) && !confirmed) {
+    throw new AppCallNeedsConfirmation(
+      approvalRiskReason("destructive", `The MCP App on "${server.name}" asked to run "${name}"`, "the call came from untrusted content in an MCP App, not from a user click"),
+    );
+  }
   if (needsApproval(server, raw) && !confirmed) throw new AppCallNeedsConfirmation(`Allow ${server.name} to run "${name}"?`);
   return callTool(server, name, args);
 }
@@ -732,13 +748,20 @@ export async function toolsForUser(userId: string, opts: McpTurnOptions = {}): P
   const tools: ToolSet = {};
   const subTools: ToolSet = {};
   const instructions: string[] = [];
-  const build = (server: McpServerRecord, raw: RawTool, interactive: boolean) =>
-    dynamicTool({
-      // Tool metadata is third-party text too. State the source; never let a description read as a
-      // higher-priority instruction.
-      description: `Third-party MCP tool from "${server.name}". ${raw.description ?? raw.name}`,
+  const build = (server: McpServerRecord, raw: RawTool, interactive: boolean) => {
+    const thirdPartyDescription = raw.description?.trim();
+    return dynamicTool({
+      // Tool metadata is third-party text too. The description is enveloped and the tool is marked as
+      // carrying external metadata, so even a first destructive call on an otherwise clean turn is gated.
+      // Input-schema descriptions stay raw: the provider API constrains them to strings inside the JSON
+      // schema, and wrapping them would change the schema every server sees. That is a documented limit.
+      description: thirdPartyDescription
+        ? wrapUntrusted(thirdPartyDescription, { kind: "mcp_tool", name: `${server.name} · ${raw.name}`, server: server.name }).text
+        : `Third-party MCP tool from "${server.name}". ${raw.name}`,
       inputSchema: jsonSchema(raw.inputSchema ?? { type: "object", properties: {} }),
-      ...(isDestructive(raw) ? { metadata: riskMetadata("destructive") } : {}),
+      ...((isDestructive(raw) || thirdPartyDescription)
+        ? { metadata: { ...(isDestructive(raw) ? riskMetadata("destructive") : {}), ...(thirdPartyDescription ? externalMetadataFlag() : {}) } }
+        : {}),
       needsApproval: needsApproval(server, raw),
       execute: (args, { abortSignal, toolCallId }) =>
         runWithElicitation(server, abortSignal, interactive, async (elicit) =>
@@ -755,6 +778,7 @@ export async function toolsForUser(userId: string, opts: McpTurnOptions = {}): P
       toModelOutput: ({ output }) =>
         mcpModelText(output, { kind: "mcp_tool", name: `${server.name} · ${raw.name}`, server: server.name }),
     });
+  };
   for (const { server, entry } of ready) {
     if (entry.status !== "connected") continue;
     if (entry.instructions) instructions.push(`## ${server.name}\n${entry.instructions}`);

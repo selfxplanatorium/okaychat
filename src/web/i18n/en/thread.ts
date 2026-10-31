@@ -29,7 +29,7 @@ export default {
   imageUnavailable: "Image unavailable",
   loadImage: "Load image",
   remoteImageBlocked: "Image blocked",
-  remoteImageBody: "Loading it would tell {host} that this chat is open.",
+  remoteImageBody: "Loading it would tell {host} that this chat is open, send your IP address, and send any data embedded in its address.",
   remoteImageTitle: "Remote image not loaded",
   remoteImageUnavailable: "Image not loaded",
   kindDocument: "Document",

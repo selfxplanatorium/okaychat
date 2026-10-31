@@ -230,7 +230,7 @@ export function webTools(opts: { searchBudget?: SearchBudget; search?: boolean }
         const { title, content, via } = await webFetch(url, abortSignal);
         const pages = Math.max(1, Math.ceil(content.length / PAGE_CHARS));
         const slice = content.slice((page - 1) * PAGE_CHARS, page * PAGE_CHARS);
-        const injection = scanForInjection(slice);
+        const injection = scanForInjection(`${title}\n${url}\n${slice}`);
         return { title, url, page, pages, via, content: slice, ...(injectionMetadata(injection) ? { injection: injectionMetadata(injection) } : {}) };
       },
       // The UI still pages the raw content; the model gets provenance and a quoted body.

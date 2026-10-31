@@ -37,3 +37,22 @@ export function remoteImageHost(url: string): string | undefined {
     return undefined;
   }
 }
+
+/**
+ * Consent is per exact URL, not per mount. A streaming Markdown tree reuses this component while the
+ * `src` changes, so a boolean would let an approved innocuous image authorize the next attacker URL.
+ * The failure flag is keyed the same way, so URL A failing does not hide URL B.
+ */
+export interface ImageConsentState {
+  approvedUrl?: string | null;
+  failedUrl?: string | null;
+}
+
+export type ImageReveal = "blocked" | "consent" | "image" | "failed";
+
+export function imageReveal(source: MarkdownImageSource, consent: ImageConsentState): ImageReveal {
+  if (source.kind === "blocked" || !source.url) return "blocked";
+  if (consent.failedUrl === source.url) return "failed";
+  if (source.kind === "remote" && consent.approvedUrl !== source.url) return "consent";
+  return "image";
+}

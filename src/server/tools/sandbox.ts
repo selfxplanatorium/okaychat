@@ -269,24 +269,32 @@ export function sandboxTools(userId: string, threadId: string, signal?: AbortSig
       }),
       execute: async ({ language, code, timeout_seconds, input_files }) => {
         const output = await runCode({ userId, threadId, language, code, timeoutS: timeout_seconds, inputFiles: input_files, signal, turn });
-        const injection = scanForInjection([output.stdout, output.stderr].join("\n"));
+        // File paths and copied input names come from attachments or earlier program output, so scan the
+        // whole object, not only stdout/stderr.
+        const injection = scanForInjection(
+          [output.stdout, output.stderr, ...output.files.map((f) => f.path), ...output.deleted, ...output.inputs].join("\n"),
+        );
         return injection.flagged ? { ...output, injection } : output;
       },
       // The model needs paths, not download URLs. Program output is third-party data as well: a run can
-      // print an attached document, so it is spotlighted before the chat model reads it.
+      // print an attached document. The whole useful object sits in one quoted envelope, so a controlled
+      // path or input name cannot add lines outside it.
       toModelOutput: ({ output }) => ({
-        type: "json",
-        value: {
-          exitCode: output.exitCode,
-          ...(output.stopped ? { stopped: output.stopped } : {}),
-          stdout: output.stdout ? wrapUntrusted(output.stdout, { kind: "code_output", name: "stdout" }).text : "",
-          stderr: output.stderr ? wrapUntrusted(output.stderr, { kind: "code_output", name: "stderr" }).text : "",
-          files: output.files.map((f) => ({ path: f.path, size: f.size, ...(f.fileId ? { fileId: f.fileId } : {}) })),
-          ...(output.deleted.length ? { deleted: output.deleted } : {}),
-          ...(output.inputs.length ? { inputs: output.inputs } : {}),
-          ...(output.tooLarge?.length ? { tooLarge: output.tooLarge } : {}),
-          ...(output.storageWarning ? { storageWarning: output.storageWarning } : {}),
-        },
+        type: "text",
+        value: wrapUntrusted(
+          JSON.stringify({
+            exitCode: output.exitCode,
+            ...(output.stopped ? { stopped: output.stopped } : {}),
+            stdout: output.stdout,
+            stderr: output.stderr,
+            files: output.files.map((f) => ({ path: f.path, size: f.size, ...(f.fileId ? { fileId: f.fileId } : {}) })),
+            ...(output.deleted.length ? { deleted: output.deleted } : {}),
+            ...(output.inputs.length ? { inputs: output.inputs } : {}),
+            ...(output.tooLarge?.length ? { tooLarge: output.tooLarge } : {}),
+            ...(output.storageWarning ? { storageWarning: output.storageWarning } : {}),
+          }),
+          { kind: "code_output", name: `${output.language ?? "code"} run` },
+        ).text,
       }),
     }),
   };

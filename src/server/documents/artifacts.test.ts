@@ -28,6 +28,12 @@ const run = async (name: string, input: unknown) => {
   return tool.execute(input as never, { toolCallId: "t", messages: [] } as never) as Promise<Record<string, unknown>>;
 };
 
+/** The JSON-quoted body of the deterministic data envelope. */
+const envelopeBody = (text: string): string => {
+  const end = text.lastIndexOf("\n</untrusted_data>");
+  return JSON.parse(text.slice(text.lastIndexOf("\n", end - 1) + 1, end)) as string;
+};
+
 test("create_document builds an xlsx artifact, edits rebuild it, and read_document sees values", async () => {
   const created = await run("create_document", {
     id: "Budget",
@@ -56,6 +62,30 @@ test("create_document builds an xlsx artifact, edits rebuild it, and read_docume
   const binary = await run("edit_document", { id: "budget", xlsx_ops: [{ op: "set_cells", start: "C1", values: [["Note"]] }] });
   assert.equal(binary.version, 3);
   assert.equal(artifactVersions(THREAD, "budget").at(-1)!.content, "");
+});
+
+test("read_artifact and read_document keep paging/edit metadata inside the data envelope", async () => {
+  db.prepare("INSERT INTO artifacts (thread_id, id, version, title, kind, language, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .run(THREAD, "snippet", 1, "Snippet", "code", "ts", "const a = 1;", Date.now());
+  const tools = artifactTools(THREAD, USER);
+  const toModel = (name: string, output: unknown) =>
+    (tools[name] as unknown as { toModelOutput: (options: { toolCallId: string; input: unknown; output: unknown }) => Promise<{ type: string; value: string }> })
+      .toModelOutput({ toolCallId: "t", input: { id: "snippet" }, output });
+
+  const artifact = await run("read_artifact", { id: "snippet" });
+  const artifactView = await toModel("read_artifact", artifact);
+  assert.match(artifactView.value, /kind="artifact"/);
+  assert.deepEqual(JSON.parse(envelopeBody(artifactView.value)), { id: "snippet", version: 1, title: "Snippet", kind: "code", language: "ts", content: "const a = 1;" });
+  assert.doesNotMatch(artifactView.value, /injection/, "advisory bookkeeping is not part of the model contract");
+
+  const created = await run("create_document", { id: "docview", title: "View", kind: "docx", content: "<p>Hello</p>" });
+  const read = await run("read_document", { id: "docview" });
+  const documentView = await toModel("read_document", read);
+  const parsed = JSON.parse(envelopeBody(documentView.value)) as { id: string; version: number; kind: string; text: string };
+  assert.equal(parsed.id, "docview");
+  assert.equal(parsed.version, created.version);
+  assert.equal(parsed.kind, "docx");
+  assert.match(parsed.text, /Hello/);
 });
 
 test("create_document builds a docx artifact that reads and edits by paragraph", async () => {

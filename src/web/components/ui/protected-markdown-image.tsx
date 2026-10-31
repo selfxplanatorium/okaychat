@@ -5,20 +5,32 @@ import { useState, type ComponentProps } from "react";
 import { safeHref } from "@/components/assistant-ui/utils/href";
 import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
-import { markdownImageSource, remoteImageHost } from "@/lib/markdown-image-policy";
+import { imageReveal, markdownImageSource, remoteImageHost } from "@/lib/markdown-image-policy";
 
 /**
  * Markdown images from a model or external page. App-owned image routes load normally. Any remote URL
  * is shown as a placeholder until the reader chooses Load image, so an injected `![](https://…?data)`
- * cannot make the browser contact the attacker on its own. The choice is in-memory only: a reload asks
- * again.
+ * cannot make the browser contact the attacker on its own. Consent is stored for the exact normalized
+ * URL, so a streaming tree that reuses this component cannot let an approved innocuous URL authorize a
+ * later attacker URL. The choice is in-memory only: a reload asks again.
  */
-export function ProtectedMarkdownImage({ className, src: rawSrc, alt, onError, ...props }: ComponentProps<"img">) {
+export function ProtectedMarkdownImage({
+  className,
+  src: rawSrc,
+  alt,
+  onError,
+  // Markdown can carry srcSet/sizes; those would start a request to another URL even when `src` waits.
+  srcSet: _srcSet,
+  sizes: _sizes,
+  ...props
+}: ComponentProps<"img">) {
   const source = markdownImageSource(typeof rawSrc === "string" ? rawSrc : undefined);
-  const [consented, setConsented] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const url = source.kind === "blocked" ? undefined : source.url;
+  const [approvedUrl, setApprovedUrl] = useState<string | null>(null);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const reveal = imageReveal(source, { approvedUrl, failedUrl });
 
-  if ((source.kind === "remote" && !consented) || source.kind === "blocked") {
+  if (reveal === "consent" || reveal === "blocked") {
     const host = source.kind === "remote" ? remoteImageHost(source.url) : undefined;
     return (
       <span
@@ -41,8 +53,8 @@ export function ProtectedMarkdownImage({ className, src: rawSrc, alt, onError, .
               type="button"
               data-command="chat.loadImage"
               onClick={() => {
-                setFailed(false);
-                setConsented(true);
+                setFailedUrl(null);
+                setApprovedUrl(source.url);
               }}
               className="border-border bg-background text-foreground hover:bg-muted focus-visible:ring-ring inline-flex min-h-10 items-center rounded-md border px-3 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart focus-visible:ring-2 focus-visible:outline-none"
             >
@@ -66,9 +78,9 @@ export function ProtectedMarkdownImage({ className, src: rawSrc, alt, onError, .
     );
   }
 
-  if (failed) {
+  if (reveal === "failed") {
     const label = alt?.trim() || t("thread.imageUnavailable");
-    const href = safeHref(source.url);
+    const href = url ? safeHref(url) : undefined;
     return (
       <span
         data-slot="markdown-image-fallback"
@@ -85,14 +97,17 @@ export function ProtectedMarkdownImage({ className, src: rawSrc, alt, onError, .
     );
   }
 
+  if (!url) return null;
+
   return (
     <img
       {...props}
-      src={source.url}
+      src={url}
       alt={alt}
+      referrerPolicy="no-referrer"
       className={cn(className)}
       onError={(event) => {
-        setFailed(true);
+        setFailedUrl(url);
         onError?.(event);
       }}
     />

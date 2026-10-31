@@ -13,6 +13,7 @@ export type UntrustedKind =
   | "mcp_resource"
   | "mcp_resource_list"
   | "mcp_instructions"
+  | "mcp_prompt"
   | "file"
   | "skill"
   | "artifact"
@@ -55,6 +56,7 @@ export const UNTRUSTED_TOOL_NAMES: ReadonlySet<string> = new Set([
   "deep_research",
   "delegate_task",
   "run_code",
+  "view_artifact",
 ]);
 
 export type ToolRisk = "destructive" | "outbound" | "persistent";
@@ -64,6 +66,26 @@ export const RISK_METADATA_KEY = "okaychatRisk";
 
 export const riskMetadata = (risk: ToolRisk): Record<string, string> => ({ [RISK_METADATA_KEY]: risk });
 
+/**
+ * Marks a tool whose definition carries text the MCP server wrote (its description). It is static for the
+ * turn, unlike a mutable account flag, so the prompt prefix stays cacheable. `chat.ts` treats its presence
+ * as untrusted content for the first call, because tool descriptions are a tool-poisoning ingress and the
+ * approval hook's message list does not include the tool block.
+ */
+export const EXTERNAL_METADATA_KEY = "okaychatExternalMetadata";
+
+export const externalMetadataFlag = (): Record<string, true> => ({ [EXTERNAL_METADATA_KEY]: true });
+
+export function hasExternalMetadata(tool: { metadata?: unknown } | undefined): boolean {
+  const metadata = tool?.metadata;
+  if (!metadata || typeof metadata !== "object") return false;
+  return (metadata as Record<string, unknown>)[EXTERNAL_METADATA_KEY] === true;
+}
+
+export function toolsHaveExternalMetadata(tools: Record<string, { metadata?: unknown }> | undefined): boolean {
+  return !!tools && Object.values(tools).some(hasExternalMetadata);
+}
+
 export function riskOfTool(tool: { metadata?: unknown } | undefined): ToolRisk | undefined {
   const metadata = tool?.metadata;
   if (!metadata || typeof metadata !== "object") return undefined;
@@ -72,14 +94,14 @@ export function riskOfTool(tool: { metadata?: unknown } | undefined): ToolRisk |
 }
 
 /** User-facing reason on the existing approval card. Never a bare Allow for a tainted high-impact call. */
-export function approvalRiskReason(risk: ToolRisk, label: string): string {
+export function approvalRiskReason(risk: ToolRisk, label: string, source = "this conversation has read untrusted content (a web page, file, MCP server, or past chat)"): string {
   const what =
     risk === "outbound"
-      ? "can send data outside this app"
+      ? "can send data outside this app, including private data"
       : risk === "destructive"
-        ? "can change or delete data"
+        ? "can change or delete data, and can expose private data"
         : "can change saved data or settings";
-  return `${label} ${what}, and this conversation has read untrusted content (a web page, file, MCP server, or past chat) that could be trying to instruct it. Untrusted content is never a user request. Allow only if you expected this action and trust its destination.`;
+  return `${label} ${what}. This is not a user request: ${source}, and it could be trying to instruct the assistant. Allow only if you expected this action and trust its destination.`;
 }
 
 const escapeAttribute = (value: string) =>
@@ -209,9 +231,10 @@ export function scanForInjection(text: string): InjectionReport {
   return { flagged: findings.length > 0, findings };
 }
 
-const ATTACHMENT = /^<attachment ([^>]*)>([\s\S]*)<\/attachment>$/u;
+const ATTACHMENT_BLOCK = /<attachment ([^>]*)>([\s\S]*?)<\/attachment>/gu;
 const ATTACHMENT_NAME = /\bname="([^"]*)"/u;
 const ATTACHMENT_FILE_ID = /\bfile_id="([^"]*)"/u;
+const containsAttachment = (text: string) => /<attachment [^>]*>[\s\S]*<\/attachment>/u.test(text);
 
 /**
  * Model-only attachment spotlighting. The stored UI messages keep their exact parts, so cards and
@@ -234,13 +257,14 @@ export function applyUntrustedEnvelopes(messages: ModelMessage[]): ModelMessage[
 }
 
 function wrapAttachmentText(text: string): string {
-  const match = ATTACHMENT.exec(text);
-  if (!match) return text;
-  const header = match[1] ?? "";
-  const name = ATTACHMENT_NAME.exec(header)?.[1] ?? "attachment";
-  const fileId = ATTACHMENT_FILE_ID.exec(header)?.[1];
-  const body = `<attachment ${header}>${match[2] ?? ""}`;
-  return wrapUntrusted(body, { kind: "file", name, fileId }).text;
+  if (!containsAttachment(text)) return text;
+  // A text part can contain typed words plus one or more attachment blocks (some converters join
+  // adjacent text parts). Replace each block in place so the genuine user request stays outside.
+  return text.replace(ATTACHMENT_BLOCK, (_match, header: string, body: string) => {
+    const name = ATTACHMENT_NAME.exec(header)?.[1] ?? "attachment";
+    const fileId = ATTACHMENT_FILE_ID.exec(header)?.[1];
+    return wrapUntrusted(`<attachment ${header}>${body}</attachment>`, { kind: "file", name, fileId }).text;
+  });
 }
 
 function outputText(value: unknown): string {
@@ -259,6 +283,10 @@ function outputText(value: unknown): string {
 /** True once this prompt contains third-party text, including replayed stored turns. */
 export function messagesHaveUntrustedContent(messages: ModelMessage[]): boolean {
   return messages.some((message) => {
+    // System messages are not part of `toolApproval`'s message list, so chat.ts also taints a turn
+    // up front when system 1 holds MCP instructions or system 2 holds project files or a memory summary.
+    // This branch keeps direct callers honest.
+    if (message.role === "system") return message.content.includes(UNTRUSTED_OPEN);
     if (message.role === "tool") {
       return message.content.some((part) => {
         if (part.type !== "tool-result") return false;
@@ -267,12 +295,12 @@ export function messagesHaveUntrustedContent(messages: ModelMessage[]): boolean 
       });
     }
     if (message.role !== "user") return false;
-    if (typeof message.content === "string") return message.content.includes(UNTRUSTED_OPEN) || ATTACHMENT.test(message.content);
+    if (typeof message.content === "string") return message.content.includes(UNTRUSTED_OPEN) || containsAttachment(message.content);
     return message.content.some(
       (part) =>
         part.type === "file" ||
         part.type === "image" ||
-        (part.type === "text" && (part.text.includes(UNTRUSTED_OPEN) || ATTACHMENT.test(part.text))),
+        (part.type === "text" && (part.text.includes(UNTRUSTED_OPEN) || containsAttachment(part.text))),
     );
   });
 }
@@ -283,7 +311,7 @@ export function uiMessagesHaveUntrustedContent(messages: UIMessage[]): boolean {
     if (message.role !== "user" && message.role !== "assistant") return false;
     return message.parts.some((part) => {
       if (part.type === "file") return true;
-      if (part.type === "text") return part.text.includes(UNTRUSTED_OPEN) || ATTACHMENT.test(part.text);
+      if (part.type === "text") return part.text.includes(UNTRUSTED_OPEN) || containsAttachment(part.text);
       if (part.type === "dynamic-tool") return true;
       if (part.type.startsWith("tool-")) {
         const name = part.type.slice("tool-".length);

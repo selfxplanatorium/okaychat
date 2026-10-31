@@ -1,6 +1,7 @@
 import type { ModelMessage, UIMessage } from "ai";
 import { decrypt, encrypt } from "./crypto.js";
 import { db } from "./db.js";
+import { wrapUntrusted } from "./prompt-injection.js";
 
 // The date, recalled memory, and the skills index sit beside the user message they were computed for. Providers cache
 // by exact prefix, so dropping that block in the next turn would invalidate everything after it: the
@@ -16,7 +17,17 @@ export interface TurnContext {
 
 interface Row { message_id: string; memory_enc: string | null; memory_revision: number; skills: string | null; date: string | null }
 
-export const contextText = (context: TurnContext) => [context.date, context.memory, context.skills].filter(Boolean).join("\n\n");
+/**
+ * The model-facing form of a stored block. The stored JSON stays raw so `shownFactIds` and the memory
+ * revision check keep working; the fact text is spotlighted at delivery only. That is deterministic,
+ * so the replayed block is byte-identical on every turn.
+ */
+export const contextText = (context: TurnContext) =>
+  [
+    context.date,
+    context.memory ? wrapUntrusted(context.memory, { kind: "past_chat", name: "saved memory" }).text : "",
+    context.skills,
+  ].filter(Boolean).join("\n\n");
 
 /**
  * The stored context per user message id. Memory text is returned only while memory is active for the
