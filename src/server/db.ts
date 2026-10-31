@@ -458,6 +458,28 @@ const migrations: Array<string | (() => void)> = [
   CREATE INDEX speech_recordings_created ON speech_recordings(created_at);
   CREATE INDEX speech_recordings_user ON speech_recordings(user_id);
   `,
+  // Per-audience model access on a shared provider connection. A missing policy row means every model,
+  // which keeps every legacy audience and connection on the old behaviour. Targets are the same audience
+  // entries as share_users/share_groups, plus "everyone" when the connection has no share_audiences row.
+  // Deleting the connection clears its policies through the foreign key and clearAudience().
+  `
+  CREATE TABLE provider_model_policies (
+    provider_id TEXT NOT NULL REFERENCES shared_connections(provider_id) ON DELETE CASCADE,
+    target_kind TEXT NOT NULL CHECK (target_kind IN ('everyone', 'user', 'group')),
+    target_id TEXT NOT NULL DEFAULT '',
+    mode TEXT NOT NULL CHECK (mode IN ('all', 'selected')),
+    PRIMARY KEY (provider_id, target_kind, target_id)
+  );
+  CREATE TABLE provider_model_grants (
+    provider_id TEXT NOT NULL,
+    target_kind TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    model_id TEXT NOT NULL,
+    PRIMARY KEY (provider_id, target_kind, target_id, model_id),
+    FOREIGN KEY (provider_id, target_kind, target_id)
+      REFERENCES provider_model_policies(provider_id, target_kind, target_id) ON DELETE CASCADE
+  );
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

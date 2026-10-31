@@ -15,14 +15,14 @@ import { useChatModel, useCurrentThreadId } from "@/state/thread-meta";
 
 const OPENCODE_GO = "opencode-go";
 
-function price(m: ModelInfo) {
+export function modelPrice(m: ModelInfo) {
   if (m.free) return t("composer.free");
   if (!m.cost) return null;
   const fmt = (n: number) => formatNumber(n, { minimumFractionDigits: 0, maximumFractionDigits: n < 1 ? 2 : n % 1 ? 1 : 0 });
   return t("composer.modelPrice", { input: fmt(m.cost.input), output: fmt(m.cost.output) });
 }
 
-function Capabilities({ model }: { model: ModelInfo }) {
+export function Capabilities({ model }: { model: ModelInfo }) {
   return (
     <span className="text-muted-foreground flex items-center gap-1 [&_svg]:size-3">
       {model.reasoning && <BrainIcon aria-label={t("composer.capReasoning")} />}
@@ -190,7 +190,7 @@ export function ModelList({
                   {!compact && (
                     <div className="text-muted-foreground flex gap-2 text-[11px] tabular-nums">
                       <span>{t("composer.contextWindow", { tokens: formatTokens(m.context) })}</span>
-                      {price(m) && <span>{price(m)}</span>}
+                      {modelPrice(m) && <span>{modelPrice(m)}</span>}
                     </div>
                   )}
                 </div>

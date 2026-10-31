@@ -7,6 +7,7 @@ import audience from "./audience";
 import auth from "./auth";
 import common from "./common";
 import composer from "./composer";
+import entitlements from "./entitlements";
 import format from "./format";
 import general from "./general";
 import genui from "./genui";
@@ -39,6 +40,7 @@ export const en = {
   auth,
   common,
   composer,
+  entitlements,
   format,
   general,
   genui,

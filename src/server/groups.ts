@@ -2,6 +2,12 @@ import { HTTPException } from "hono/http-exception";
 import type { ShareAudience, UserGroup } from "../shared/types.js";
 import { newId } from "./crypto.js";
 import { db, tx } from "./db.js";
+import {
+  clearModelAccessPolicies,
+  clearModelAccessPoliciesForGroup,
+  isModelAccessKind,
+  pruneModelAccessPolicies,
+} from "./entitlements.js";
 
 // Admin-defined user groups, and the audience of each shared resource: everyone, or only listed users and
 // members of listed groups. Shared provider connections and shared MCP servers both use it.
@@ -38,7 +44,10 @@ export function updateGroup(id: string, patch: { name?: string; userIds?: string
 }
 
 export function deleteGroup(id: string) {
-  db.prepare("DELETE FROM user_groups WHERE id = ?").run(id);
+  tx(() => {
+    clearModelAccessPoliciesForGroup(id);
+    db.prepare("DELETE FROM user_groups WHERE id = ?").run(id);
+  });
 }
 
 /** Unknown user ids are dropped rather than rejected: a user may have been deleted while the form was open. */
@@ -57,19 +66,24 @@ export function getAudience(kind: ShareKind, resourceId: string): ShareAudience 
 
 export function setAudience(kind: ShareKind, resourceId: string, audience: ShareAudience) {
   tx(() => {
-    clearAudience(kind, resourceId);
-    if (audience.mode === "all") return;
-    db.prepare("INSERT INTO share_audiences (kind, resource_id) VALUES (?, ?)").run(kind, resourceId);
-    const addUser = db.prepare("INSERT OR IGNORE INTO share_users (kind, resource_id, user_id) SELECT ?, ?, id FROM users WHERE id = ?");
-    const addGroup = db.prepare("INSERT OR IGNORE INTO share_groups (kind, resource_id, group_id) SELECT ?, ?, id FROM user_groups WHERE id = ?");
-    for (const userId of new Set(audience.userIds)) addUser.run(kind, resourceId, userId);
-    for (const groupId of new Set(audience.groupIds)) addGroup.run(kind, resourceId, groupId);
+    // Delete the audience rows directly instead of clearAudience(): that function also drops model policies,
+    // while an audience edit must preserve the policies of the targets it keeps.
+    db.prepare("DELETE FROM share_audiences WHERE kind = ? AND resource_id = ?").run(kind, resourceId);
+    if (audience.mode === "selected") {
+      db.prepare("INSERT INTO share_audiences (kind, resource_id) VALUES (?, ?)").run(kind, resourceId);
+      const addUser = db.prepare("INSERT OR IGNORE INTO share_users (kind, resource_id, user_id) SELECT ?, ?, id FROM users WHERE id = ?");
+      const addGroup = db.prepare("INSERT OR IGNORE INTO share_groups (kind, resource_id, group_id) SELECT ?, ?, id FROM user_groups WHERE id = ?");
+      for (const userId of new Set(audience.userIds)) addUser.run(kind, resourceId, userId);
+      for (const groupId of new Set(audience.groupIds)) addGroup.run(kind, resourceId, groupId);
+    }
+    if (isModelAccessKind(kind)) pruneModelAccessPolicies(resourceId);
   });
 }
 
 /** Called when the resource is deleted, so a new one with the same id (provider ids repeat) starts shared with everyone. */
 export function clearAudience(kind: ShareKind, resourceId: string) {
   db.prepare("DELETE FROM share_audiences WHERE kind = ? AND resource_id = ?").run(kind, resourceId);
+  if (isModelAccessKind(kind)) clearModelAccessPolicies(resourceId);
 }
 
 /**

@@ -66,6 +66,29 @@ export interface ShareAudience {
   groupIds: string[];
 }
 
+/** One entry of a shared provider's audience, used as the key of a model-access policy. */
+export interface ModelAccessTarget {
+  kind: "everyone" | "user" | "group";
+  /** Empty for `everyone`, otherwise a user or group id. */
+  id: string;
+}
+
+/** All models, or an explicit allowlist, for one audience target of a shared provider connection. */
+export interface ModelAccessPolicy {
+  target: ModelAccessTarget;
+  mode: "all" | "selected";
+  /** Stored catalog ids. May be empty for `selected` (grants nothing) and always empty for `all`. */
+  modelIds: string[];
+}
+
+/** Admin response for one shared provider: its catalog models and every current audience policy. */
+export interface ProviderModelAccess {
+  providerId: string;
+  audience: ShareAudience;
+  policies: ModelAccessPolicy[];
+  models: ModelInfo[];
+}
+
 export interface UserGroup {
   id: string;
   name: string;

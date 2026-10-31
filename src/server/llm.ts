@@ -2,6 +2,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import { HTTPException } from "hono/http-exception";
 import { wrapLanguageModel, type JSONValue, type LanguageModel, type ModelMessage } from "ai";
 import type { ModelInfo, ReasoningEffort } from "../shared/types.js";
 import { CHATGPT, chatgptFetch } from "./catalog/chatgpt.js";
@@ -9,6 +10,7 @@ import { OLLAMA_DEFAULT_URL } from "./catalog/ollama.js";
 import type { Connection } from "./catalog/providers.js";
 import { sha256 } from "./crypto.js";
 import { USER_AGENT } from "./env.js";
+import { modelAccessMessage, sharedModelAccess } from "./entitlements.js";
 import { publicFetch } from "./public-fetch.js";
 import { openaiToolSchemas } from "./openai-schema.js";
 import { createOllamaModel } from "./ollama-model.js";
@@ -46,6 +48,16 @@ function affinityHeaders(providerId: string, affinity: string): Record<string, s
 export const cacheAffinity = (userId: string) => `okc-${sha256(`cache:${userId}`).slice(0, 32)}`;
 
 export function createModel(info: ModelInfo, conn: Connection, opts: { userId: string; effort?: ReasoningEffort }): ModelHandle {
+  // Recheck the live policy here, not only where the model was listed: a turn can run after an admin
+  // revoked access, and a caller can hand over an earlier model/connection pair. Nothing reaches the
+  // provider before this passes.
+  if (info.providerId !== conn.providerId) throw new HTTPException(400, { message: "The model and connection do not match." });
+  if (conn.shared) {
+    const access = sharedModelAccess(opts.userId, info.providerId);
+    if (!access.visible || (!access.all && !access.ids.has(info.id))) {
+      throw new HTTPException(403, { message: modelAccessMessage(info.ref) });
+    }
+  }
   const affinity = cacheAffinity(opts.userId);
   const headers = affinityHeaders(info.providerId, affinity);
   const apiKey = conn.apiKey ?? "not-needed";
