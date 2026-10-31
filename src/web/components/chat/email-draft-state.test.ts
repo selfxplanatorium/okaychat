@@ -214,7 +214,7 @@ test("a network failure is offline, keeps the text, and retries at the same revi
   controller.dispose();
 });
 
-test("hydration uses the latest server record and restores only same-revision local text", () => {
+test("hydration uses the latest server record and keeps conflicting local text for explicit resolution", () => {
   const storage = new Map<string, string>();
   const store: DraftOutboxStorage = {
     getItem: (key) => storage.get(key) ?? null,
@@ -234,9 +234,15 @@ test("hydration uses the latest server record and restores only same-revision lo
   assert.equal(controller.snapshot().status, "pending");
   assert.notEqual(readOutbox(store, key), null, "unsaved text stays in the outbox");
   controller.applyServer(draftOf(4, { body: "Server wins" }));
-  assert.equal(controller.snapshot().fields.body, "Server wins", "a newer revision wins over stale local text");
+  assert.equal(controller.snapshot().fields.body, "Unsaved", "a newer server revision must not erase unsaved local text");
+  assert.equal(controller.snapshot().status, "conflict");
   assert.equal(controller.snapshot().revision, 4);
-  assert.equal(readOutbox(store, key), null);
+  assert.notEqual(readOutbox(store, key), null);
+  assert.equal(readOutbox(store, key)?.fields.body, "Unsaved");
+  controller.adoptLatest(draftOf(4, { body: "Server wins" }));
+  assert.equal(controller.snapshot().fields.body, "Server wins");
+  assert.equal(controller.snapshot().status, "saved");
+  assert.equal(readOutbox(store, key), null, "only explicit reload discards the conflicting outbox");
   controller.dispose();
 });
 

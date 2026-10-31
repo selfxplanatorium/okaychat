@@ -178,8 +178,8 @@ export class DraftAutosave {
   });
 
   /**
-   * Applies the server record. Local unsaved text wins only when it was written against this
-   * revision; `preserveLocal` is for a model write that lands while the user is typing, where the
+   * Applies the server record. A reload keeps unsaved text and flags a conflict if its base
+   * revision differs; `preserveLocal` is for a model write that lands while the user is typing, where the
    * newer revision must not destroy the local text (the card settles it as a pending save).
    */
   applyServer(draft: EmailDraft, options: { preserveLocal?: boolean } = {}): void {
@@ -210,11 +210,12 @@ export class DraftAutosave {
     this.draft = draft;
     this.revision = draft.revision;
     this.error = null;
-    if (outbox && outbox.revision === draft.revision && JSON.stringify(outbox.fields) !== JSON.stringify(fieldsOf(draft))) {
+    if (outbox && JSON.stringify(outbox.fields) !== JSON.stringify(fieldsOf(draft))) {
       this.fields = outbox.fields;
       this.dirty = true;
-      this.status = "pending";
-      this.schedule();
+      this.status = outbox.revision === draft.revision ? "pending" : "conflict";
+      if (this.status === "pending") this.schedule();
+      else this.clearPendingTimer();
     } else {
       this.fields = fieldsOf(draft);
       this.dirty = false;

@@ -396,6 +396,19 @@ export function EmailDraftCard(props: ToolCallMessagePartProps) {
     };
   }, []);
 
+  // Reloading during SMTP must eventually leave the sending state when that request finishes.
+  useEffect(() => {
+    if (!base || draft?.status !== "sending") return;
+    const abort = new AbortController();
+    const refresh = () => {
+      void api<EmailDraft>(base, { signal: abort.signal }).then((server) => {
+        if (!abort.signal.aborted) controllerRef.current?.applyServer(server);
+      }).catch(() => {});
+    };
+    const timer = setInterval(refresh, 2000);
+    return () => { abort.abort(); clearInterval(timer); };
+  }, [base, draft?.status]);
+
   const viewFields = fields ?? previewFields(args);
   const wordCount = draftWordCount(viewFields.body);
   const edited = !!draft && (draft.updatedBy === "user" || autosave !== "saved");
@@ -559,8 +572,15 @@ export function EmailDraftCard(props: ToolCallMessagePartProps) {
     }
   };
 
-  const rewrite = () => {
+  const rewrite = async () => {
     if (!draft || temporary) return;
+    const controller = controllerRef.current;
+    if (!controller) return;
+    await controller.flush();
+    if (controller.snapshot().dirty || controller.snapshot().status !== "saved") {
+      setActionError(t("email.draftSendFirst"));
+      return;
+    }
     const subject = draft.subject || t("email.noSubject");
     aui.thread.append({
       role: "user",
@@ -783,7 +803,7 @@ export function EmailDraftCard(props: ToolCallMessagePartProps) {
               <ExternalLinkIcon aria-hidden />
               {t("email.draftMailto")}
             </a>
-            <Button type="button" variant="ghost" size="sm" className="pointer-coarse:min-h-11" data-command="email.draftRewrite" disabled={busy || temporary || !draft} onClick={rewrite}>
+            <Button type="button" variant="ghost" size="sm" className="pointer-coarse:min-h-11" data-command="email.draftRewrite" disabled={busy || temporary || !draft} onClick={() => void rewrite()}>
               <SparklesIcon aria-hidden />
               {t("email.draftRewrite")}
             </Button>

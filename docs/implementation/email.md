@@ -131,9 +131,10 @@ was in flight; that newer text is queued against the acknowledged revision. A 40
 text, shows a conflict, and offers "Keep my version" (fetch the latest revision, then save the local
 text) or "Reload latest" (adopt the server text). A network failure is `offline`; the text is kept
 and retried on reconnect, window focus, or the manual Retry. Unacknowledged text is mirrored to a
-localStorage outbox keyed by user, chat, and draft, so a reload restores it only when its revision
-still matches; a newer server revision wins and clears the outbox. Saves that arrive after a newer
-model write do not move the card backwards.
+localStorage outbox keyed by user, chat, and draft, so a reload restores its unsaved text. If the
+server revision has advanced, the card keeps both versions and asks for explicit conflict resolution
+instead of clearing the outbox. Saves that arrive after a newer model write do not move the card
+backwards.
 
 A model update that lands while the card is open is fetched and shown with a quiet "Updated"; unsaved
 local text is preserved as the next pending save rather than being silently discarded. User edits
@@ -149,15 +150,16 @@ then goes through `send.ts`, the same approved path as `email_send`/`email_reply
 switch, sender, signature, reply participants, host check, TLS, and Bcc-as-envelope-only rules all
 apply. A changed draft or account invalidates the token. Content writes clear it. A review lasts 10
 minutes and is single-use. A successful send stores `sent_at`, increments `send_count`, makes the
-fields read-only, and shows "Sent"; resending is a new review and another approval. A failed send
+fields read-only, and shows "Sent"; a card reloaded during sending refreshes the record until
+the send settles; resending is a new review and another approval. A failed send
 returns the draft to editable with the mapped error in `last_error`. The server never appends a
 signature after approval; the card offers an explicit "Add signature" before review when the account
 requires one.
 
 The toolbar also copies a readable message (with the HTTPS clipboard fallback), downloads a Unicode
 `.eml` built by `buildMime`, opens `mailto:` with encoded subject/body/recipients, discards after a
-confirmation dialog, and asks for a rewrite by appending a user turn that names the draft id. All
-other actions keep working with no account. When no connected account can send, Send is disabled and
+confirmation dialog, and asks for a rewrite after saving local changes by appending a user turn
+that names the draft id. All other actions keep working with no account. When no connected account can send, Send is disabled and
 a Settings → Email link explains why. At 360px the header, fields, and toolbar wrap with `min-w-0`;
 the body auto-grows without a fixed-height jump. Fields have labels; status is announced through a
 polite live region, copy feedback included; Ctrl/⌘+Enter opens the review, Escape only blurs a field;
