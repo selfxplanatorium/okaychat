@@ -1,0 +1,24 @@
+# Optional NVIDIA GPU acceleration for Whisper in the speech worker.
+# CPU deployments use docker-compose.yml alone and stay unchanged.
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+# See docs/implementation/speech.md ("GPU acceleration").
+services:
+  speech:
+    build:
+      context: ./speech
+      args:
+        INSTALL_CUDA: "1"
+    environment:
+      # auto picks CUDA when a device is visible, then falls back to CPU with a reason.
+      SPEECH_DEVICE: ${SPEECH_DEVICE:-auto}
+      # Empty means float16 on CUDA / int8 on CPU; the worker retries safely.
+      SPEECH_COMPUTE_TYPE: ${SPEECH_COMPUTE_TYPE:-}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # CUDA libraries and a transcription need headroom over the CPU-only 2 GB limit.
+    mem_limit: 4g

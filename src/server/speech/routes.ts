@@ -32,6 +32,9 @@ import { speechWorkerConfigured, workerHealth, workerModels, workerPreload } fro
 const MAX_CONCURRENT = 6;
 const inFlight = new Map<string, number>();
 
+/** Worker diagnostics are shown to admins, so keep them short and never unbounded. */
+const bounded = (value: unknown, max: number): string | null => (typeof value === "string" && value ? value.slice(0, max) : null);
+
 async function limited<T>(userId: string, fn: () => Promise<T>): Promise<T> {
   const n = inFlight.get(userId) ?? 0;
   if (n >= MAX_CONCURRENT) throw new HTTPException(429, { message: "Too many speech requests at once. Wait a moment." });
@@ -218,7 +221,23 @@ export const speechRoutes = new Hono<AppEnv>()
     }
     return c.json({
       settings: adminSpeech(),
-      worker: { configured: speechWorkerConfigured(), reachable: !!health, sttRunning: !!health?.stt, ttsRunning: !!health?.tts, downloaded: models?.downloaded ?? [] },
+      worker: {
+        configured: speechWorkerConfigured(),
+        reachable: !!health,
+        sttRunning: !!health?.stt,
+        ttsRunning: !!health?.tts,
+        // Older workers omit these; the settings page handles nulls and undefined.
+        requestedDevice: health?.requestedDevice === "cpu" || health?.requestedDevice === "cuda" || health?.requestedDevice === "auto" ? health!.requestedDevice : null,
+        device: health?.device === "cpu" || health?.device === "cuda" ? health!.device : null,
+        computeType: bounded(health?.computeType, 40),
+        gpuName: bounded(health?.gpuName, 120),
+        cudaVersion: bounded(health?.cudaVersion, 40),
+        cudaAvailable: typeof health?.cudaAvailable === "boolean" ? health.cudaAvailable : null,
+        degraded: health?.degraded === true,
+        reason: bounded(health?.reason, 300),
+        model: bounded(health?.model, 100),
+        downloaded: models?.downloaded ?? [],
+      },
       whisperModels: WHISPER_MODELS,
       recordings: recordingStats(),
       keys,

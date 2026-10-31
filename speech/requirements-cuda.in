@@ -1,0 +1,4 @@
+# GPU images only (INSTALL_CUDA=1). ctranslate2 4.x for CUDA 12 loads these at runtime;
+# see docs/implementation/speech.md. Keep the CPU image free of them.
+nvidia-cublas-cu12==12.9.1.4
+nvidia-cudnn-cu12==9.20.0.48

@@ -1,0 +1,6 @@
+# Generated for GPU images (INSTALL_CUDA=1) from requirements-cuda.in. x86-64 wheels only.
+# nvidia-cudnn-cu12 depends on nvidia-cublas-cu12, which is pinned below.
+nvidia-cublas-cu12==12.9.1.4 \
+    --hash=sha256:453611eb21a7c1f2c2156ed9f3a45b691deda0440ec550860290dc901af5b4c2
+nvidia-cudnn-cu12==9.20.0.48 \
+    --hash=sha256:7d7479e1321c7a039b33827f0247791ee1be091759032c1f66a287c4a643396a

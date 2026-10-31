@@ -6,7 +6,8 @@ See docs/implementation/speech.md. Rules:
   the only files are downloaded models under SPEECH_MODELS.
 - The HTTP server imports only the standard library. Each engine runs in its own child process, started on
   the first request and stopped after SPEECH_IDLE_MINUTES without one, so an idle worker holds no model or
-  library memory at all. Python does not reliably return freed memory to the system; exiting does.
+  library memory at all. Python does not reliably return freed memory to the system; exiting does. On a GPU
+  the child also owns the CUDA context, so exiting returns its VRAM.
 - One transcription and one synthesis run at a time each; later requests wait for a slot or time out.
 - Every request needs the app's bearer token. The worker holds no app secrets or data.
 """
@@ -19,8 +20,11 @@ import re
 import threading
 import time
 import urllib.request
+from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
+
+from device import CPU_COMPUTE, DEFAULT_CUDA_COMPUTE, FALLBACK_CUDA_COMPUTE, DevicePlan, resolve_device
 
 TOKEN_FILE = os.environ.get("SPEECH_TOKEN_FILE", "")
 TOKEN = os.environ.pop("SPEECH_TOKEN", "")
@@ -64,18 +68,126 @@ def duration(seconds: float) -> str:
 
 
 class SttEngine:
-    def __init__(self):
-        self.key = None
-        self.model = None
+    """faster-whisper in the child process, with a CUDA attempt and a safe CPU fallback.
 
-    def load(self, name: str, compute: str):
+    The model cache key is (name, device, compute_type): a CPU model is never reused for
+    CUDA, and switching models replaces the single cached model so an idle child exits
+    with nothing pinned. Health reports the actual load result, not the startup probe.
+    """
+
+    def __init__(self, plan: DevicePlan | None = None, loader=None, log=None):
+        plan = plan or DevicePlan(requested="cpu", device="cpu", compute_type=CPU_COMPUTE, cuda_available=False)
+        self.plan = plan
+        self.device = plan.device
+        self.compute = plan.compute_type
+        self.degraded = bool(plan.degraded)
+        self.reason = plan.reason
+        self.model = None
+        self.model_name = None
+        self.key = None
+        self.loader = loader or self.load_whisper
+        self.log = log or (lambda message: print(message, flush=True))
+        self.fallback_logged = False
+
+    @staticmethod
+    def load_whisper(name: str, device: str, compute: str):
         from faster_whisper import WhisperModel
 
-        if self.key != (name, compute):
-            self.model = None
-            self.model = WhisperModel(name, device="cpu", compute_type=compute, cpu_threads=THREADS, download_root=os.path.join(MODELS, "whisper"))
-            self.key = (name, compute)
-        return self.model
+        return WhisperModel(name, device=device, compute_type=compute, cpu_threads=THREADS, download_root=os.path.join(MODELS, "whisper"))
+
+    def candidates(self) -> list[tuple[str, str]]:
+        if self.device == "cuda":
+            primary = self.compute or DEFAULT_CUDA_COMPUTE
+            tries = [("cuda", primary)]
+            # Some GPUs or CUDA builds lack float16; int8_float16 is the next CUDA step.
+            if primary == DEFAULT_CUDA_COMPUTE:
+                tries.append(("cuda", FALLBACK_CUDA_COMPUTE))
+            tries.append(("cpu", CPU_COMPUTE))
+            return tries
+        primary = self.compute or CPU_COMPUTE
+        return [("cpu", primary)] + ([("cpu", CPU_COMPUTE)] if primary != CPU_COMPUTE else [])
+
+    def mark_fallback(self, error: Exception):
+        self.degraded = True
+        detail = f"{type(error).__name__}: {error}".strip()
+        self.reason = f"CUDA could not run Whisper, so it is using the CPU: {detail}"[:280]
+        if not self.fallback_logged:
+            self.log(f"stt CUDA unavailable; using CPU: {detail}")
+            self.fallback_logged = True
+
+    def load(self, name: str):
+        if self.model is not None and self.key == (name, self.device, self.compute):
+            return self.model
+        # Only one model stays loaded, so a switch releases the old one before the new
+        # one can allocate (important on a GPU) and a failed load cannot report it.
+        self.model, self.model_name, self.key = None, None, None
+        cuda_error = None
+        last = None
+        for device, compute in self.candidates():
+            try:
+                model = self.loader(name, device, compute)
+            except Exception as error:
+                last = error
+                if device == "cuda":
+                    cuda_error = error
+                    continue
+                if compute != CPU_COMPUTE:
+                    continue
+                if cuda_error is not None:
+                    self.mark_fallback(cuda_error)
+                    self.device, self.compute = "cpu", compute
+                raise
+            self.model = model
+            self.model_name = name
+            self.key = (name, device, compute)
+            self.device, self.compute = device, compute
+            if device == "cuda":
+                self.degraded = False
+                self.reason = None
+            elif cuda_error is not None:
+                self.mark_fallback(cuda_error)
+            return model
+        if cuda_error is not None:
+            self.mark_fallback(cuda_error)
+            self.device, self.compute = "cpu", CPU_COMPUTE
+        if last is not None:
+            raise last
+        raise RuntimeError("No compute device could load Whisper.")
+
+    def status(self) -> dict:
+        return {
+            "device": self.device,
+            "computeType": self.compute,
+            "model": self.model_name if self.model is not None else None,
+            "degraded": self.degraded,
+            "reason": self.reason,
+        }
+
+    def infer(self, samples, name: str, language: str | None, q: dict) -> dict:
+        segments, info = self.load(name).transcribe(
+            samples,
+            language=language,
+            vad_filter=q.get("vad", "1") == "1",
+            beam_size=max(1, min(int(q.get("beam", "1")), 5)),
+            condition_on_previous_text=False,
+        )
+        # faster-whisper returns a lazy generator: computation errors can surface here,
+        # after the model loaded successfully, so the CPU retry wraps this whole call.
+        text = " ".join(s.text.strip() for s in segments).strip()
+        return {"text": text, "language": info.language}
+
+    def run_with_fallback(self, samples, name: str, language: str | None, q: dict) -> dict:
+        try:
+            return self.infer(samples, name, language, q)
+        except Failure:
+            raise
+        except Exception as error:
+            if self.device != "cuda":
+                raise
+            self.mark_fallback(error)
+            self.device, self.compute = "cpu", CPU_COMPUTE
+            self.model, self.model_name, self.key = None, None, None
+            return self.infer(samples, name, language, q)
 
     def transcribe(self, audio: bytes, q: dict) -> dict:
         import io
@@ -85,9 +197,6 @@ class SttEngine:
         name = q.get("model", "base")
         if name not in WHISPER_MODELS:
             raise Failure(400, f"Unknown Whisper model {name}.")
-        compute = q.get("compute", "int8")
-        if compute not in ("int8", "int8_float32", "float32"):
-            raise Failure(400, "compute must be int8, int8_float32, or float32.")
         language = q.get("language") or None
         if language and not LANG_RE.match(language):
             raise Failure(400, "language must be an ISO 639-1 code.")
@@ -99,15 +208,10 @@ class SttEngine:
         seconds = len(samples) / 16000
         if seconds > max_seconds:
             raise Failure(413, f"The recording is {duration(seconds)} long; the limit is {duration(max_seconds)}.")
-        segments, info = self.load(name, compute).transcribe(
-            samples,
-            language=language,
-            vad_filter=q.get("vad", "1") == "1",
-            beam_size=max(1, min(int(q.get("beam", "1")), 5)),
-            condition_on_previous_text=False,
-        )
-        text = " ".join(s.text.strip() for s in segments).strip()
-        return {"text": text, "language": info.language, "duration": round(seconds, 2)}
+        result = self.run_with_fallback(samples, name, language, q)
+        result["duration"] = round(seconds, 2)
+        result["_status"] = self.status()
+        return result
 
     def preload(self, name: str):
         from faster_whisper.utils import download_model
@@ -165,9 +269,12 @@ class TtsEngine:
         self.download(voice)
 
 
-def engine_main(kind: str, conn):
+def engine_main(kind: str, conn, plan: dict | None = None):
     """Child process: answers (op, args) messages with ("ok", value) or ("err", status, message)."""
-    engine = SttEngine() if kind == "stt" else TtsEngine()
+    if kind == "stt":
+        engine = SttEngine(DevicePlan(**plan)) if plan else SttEngine()
+    else:
+        engine = TtsEngine()
     while True:
         try:
             op, args = conn.recv()
@@ -194,6 +301,9 @@ class Engine:
         self.conn = None
         self.used = 0.0
         self.label = "speech recognition" if kind == "stt" else "speech"
+        # The last status a child reported. It survives an idle exit so health can
+        # explain a fallback, but model/running are always read from the live child.
+        self.report = None
 
     def call(self, op: str, *args, wait: float = SLOT_WAIT):
         if not self.lock.acquire(timeout=wait):
@@ -201,7 +311,9 @@ class Engine:
         try:
             if self.proc is None or not self.proc.is_alive():
                 parent, child = mp.Pipe()
-                self.proc = mp.get_context("spawn").Process(target=engine_main, args=(self.kind, child), daemon=True)
+                plan = asdict(resolve_device()) if self.kind == "stt" else None
+                self.report = None
+                self.proc = mp.get_context("spawn").Process(target=engine_main, args=(self.kind, child, plan), daemon=True)
                 self.proc.start()
                 child.close()
                 self.conn = parent
@@ -218,7 +330,12 @@ class Engine:
             self.lock.release()
         if reply[0] == "err":
             raise Failure(reply[1], reply[2])
-        return reply[1]
+        value = reply[1]
+        if self.kind == "stt" and isinstance(value, dict):
+            status = value.pop("_status", None)
+            if isinstance(status, dict):
+                self.report = status
+        return value
 
     def stop(self):
         if self.proc is not None:
@@ -242,6 +359,37 @@ class Engine:
 stt = Engine("stt")
 tts = Engine("tts")
 voices_cache: dict | None = None
+
+
+def speech_health() -> dict:
+    """Cheap health with the device a child actually used, not the startup probe alone."""
+    plan = resolve_device()
+    running = stt.running()
+    report = stt.report
+    device, compute_type = plan.device, plan.compute_type
+    degraded, reason = plan.degraded, plan.reason
+    model = None
+    if report:
+        device = report.get("device") or device
+        compute_type = report.get("computeType") or compute_type
+        degraded = bool(report.get("degraded"))
+        reason = report.get("reason") or (plan.reason if not degraded else None)
+        # A model exists only while its child does; the idle exit releases its VRAM.
+        model = report.get("model") if running else None
+    return {
+        "ok": True,
+        "stt": running,
+        "tts": tts.running(),
+        "requestedDevice": plan.requested,
+        "device": device,
+        "computeType": compute_type,
+        "gpuName": plan.gpu_name,
+        "cudaVersion": plan.cuda_version,
+        "cudaAvailable": plan.cuda_available,
+        "degraded": degraded,
+        "reason": reason,
+        "model": model,
+    }
 
 
 def piper_voices() -> list[dict]:
@@ -312,7 +460,7 @@ class Handler(BaseHTTPRequestHandler):
         url = urlsplit(self.path)
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
         if url.path == "/health":
-            return self.json(200, {"ok": True, "stt": stt.running(), "tts": tts.running()})
+            return self.json(200, speech_health())
         if not self.authorized():
             return self.json(401, {"error": "Unauthorized"})
         if method == "POST" and url.path == "/transcribe":
@@ -372,6 +520,11 @@ if __name__ == "__main__":
     if len(TOKEN) < 32 and not TOKEN_FILE:
         raise SystemExit("Set SPEECH_TOKEN (32+ characters) or SPEECH_TOKEN_FILE")
     os.makedirs(MODELS, exist_ok=True)
+    plan = resolve_device()
     threading.Thread(target=reaper, daemon=True).start()
-    print(f"speech worker on :{PORT}, {THREADS} threads, engines stop after {IDLE_MINUTES:g} idle minutes", flush=True)
+    print(
+        f"speech worker on :{PORT}, {THREADS} threads, whisper on {plan.device}/{plan.compute_type}, "
+        f"engines stop after {IDLE_MINUTES:g} idle minutes",
+        flush=True,
+    )
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

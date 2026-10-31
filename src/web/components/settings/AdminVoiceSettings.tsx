@@ -13,7 +13,23 @@ import { SpeechKeyForm } from "./VoiceSettings";
 
 interface AdminSpeech {
   settings: AdminSpeechSettings;
-  worker: { configured: boolean; reachable: boolean; sttRunning: boolean; ttsRunning: boolean; downloaded: string[] };
+  /** Device fields are absent in payloads from older workers. */
+  worker: {
+    configured: boolean;
+    reachable: boolean;
+    sttRunning: boolean;
+    ttsRunning: boolean;
+    requestedDevice?: "auto" | "cpu" | "cuda" | null;
+    device?: "cpu" | "cuda" | null;
+    computeType?: string | null;
+    gpuName?: string | null;
+    cudaVersion?: string | null;
+    cudaAvailable?: boolean | null;
+    degraded?: boolean;
+    reason?: string | null;
+    model?: string | null;
+    downloaded: string[];
+  };
   whisperModels: string[];
   recordings: { count: number; bytes: number };
   keys: Record<SpeechKeyService, { connected: boolean; region?: string; baseURL?: string }>;
@@ -56,10 +72,34 @@ export function AdminVoiceSettings() {
       : w.sttRunning || w.ttsRunning
         ? t("admin.workerInUse", { engines: formatList([w.sttRunning && "Whisper", w.ttsRunning && "Piper"].filter((x): x is string => !!x)) })
         : t("admin.workerIdle");
+  // The configured model is the honest answer while the child is idle and holds none.
+  const whisperModel = w.model ?? s.local.whisperModel;
+  const deviceLabel = w.device === "cuda" ? t("admin.workerDeviceGpu") : w.device === "cpu" ? t("admin.workerDeviceCpu") : null;
+  const runtime = w.device && deviceLabel
+    ? w.computeType
+      ? t("admin.workerRuntime", { model: whisperModel, device: deviceLabel, computeType: w.computeType })
+      : t("admin.workerRuntimePlain", { model: whisperModel, device: deviceLabel })
+    : null;
+  const gpuDetail = w.gpuName
+    ? w.cudaVersion
+      ? t("admin.workerGpuCuda", { gpu: w.gpuName, version: w.cudaVersion })
+      : t("admin.workerGpuName", { gpu: w.gpuName })
+    : null;
+  const fallbackNote = !w.degraded ? null : w.cudaAvailable === false ? t("admin.workerNoGpu") : t("admin.workerCudaFallback");
+  const diagnostic = w.degraded && w.cudaAvailable !== false && w.reason ? w.reason : null;
+  const workerDescription = (
+    <div className="space-y-1 break-words">
+      <p>{workerState}</p>
+      {w.reachable && runtime && <p>{runtime}</p>}
+      {w.reachable && gpuDetail && <p>{gpuDetail}</p>}
+      {w.reachable && fallbackNote && <p className="text-warning-foreground">{fallbackNote}</p>}
+      {w.reachable && diagnostic && <p>{diagnostic}</p>}
+    </div>
+  );
 
   return (
     <SettingsSection title={t("admin.voice")} description={t("admin.voiceDescription")}>
-      <SettingsRow label={t("admin.speechWorker")} description={workerState} control={null} />
+      <SettingsRow label={t("admin.speechWorker")} description={workerDescription} control={null} />
       <SettingsRow
         label={t("admin.piperReadAloud")}
         description={t("admin.piperDescription")}

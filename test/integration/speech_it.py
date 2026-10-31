@@ -43,7 +43,22 @@ for _ in range(50):
     time.sleep(0.2)
 
 status, _, body = call("GET", "/health", token=None)
-check("health without token", status == 200 and json.loads(body) == {"ok": True, "stt": False, "tts": False}, body.decode())
+health = json.loads(body) if status == 200 else {}
+check(
+    "health without token",
+    status == 200 and health.get("ok") is True and health.get("stt") is False and health.get("tts") is False,
+    body.decode(),
+)
+print(f"  health device: {health.get('device')} / {health.get('computeType')} (requested {health.get('requestedDevice')})", flush=True)
+check(
+    "forced cpu mode is reported",
+    health.get("requestedDevice") == "cpu"
+    and health.get("device") == "cpu"
+    and health.get("computeType") == "int8"
+    and health.get("degraded") is False
+    and health.get("model") is None,
+    body.decode(),
+)
 check("speak needs the token", call("POST", "/speak", b"hi", token="x" * 40)[0] == 401)
 check("transcribe needs the token", call("POST", "/transcribe", b"hi", token=None)[0] == 401)
 idle = rss_kb()
@@ -78,13 +93,21 @@ except urllib.error.URLError:
 check("oversized body rejected", oversized and call("GET", "/health", token=None)[0] == 200)
 
 status, _, body = call("GET", "/health", token=None)
-check("engines running after use", json.loads(body) == {"ok": True, "stt": True, "tts": True}, body.decode())
+health = json.loads(body) if status == 200 else {}
+check("engines running after use", health.get("stt") is True and health.get("tts") is True, body.decode())
+check(
+    "cpu device and model stay visible while running",
+    health.get("device") == "cpu" and health.get("computeType") == "int8" and health.get("degraded") is False and health.get("model") == "base",
+    body.decode(),
+)
 busy = rss_kb()
 print(f"  memory in use: {busy} kB", flush=True)
 time.sleep(40)
 status, _, body = call("GET", "/health", token=None)
+health = json.loads(body) if status == 200 else {}
 after = rss_kb()
-check("engines exit when idle", json.loads(body) == {"ok": True, "stt": False, "tts": False}, body.decode())
+check("engines exit when idle", health.get("stt") is False and health.get("tts") is False, body.decode())
+check("idle health releases the model", health.get("device") == "cpu" and health.get("model") is None, body.decode())
 check("memory returns to baseline", after < 80_000, f"{busy} kB -> {after} kB")
 
 status, _, body = call("GET", "/voices")

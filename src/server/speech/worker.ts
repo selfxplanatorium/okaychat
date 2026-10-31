@@ -4,8 +4,8 @@ import path from "node:path";
 import { HTTPException } from "hono/http-exception";
 import { USER_AGENT } from "../env.js";
 
-// Client for the speech worker (speech/, its own container in compose): faster-whisper and Piper on the CPU.
-// Audio and text only pass through it in memory. See docs/implementation/speech.md.
+// Client for the speech worker (speech/, its own container in compose): faster-whisper and Piper, on the CPU
+// or an optional NVIDIA GPU. Audio and text only pass through it in memory. See docs/implementation/speech.md.
 
 // Read when used, not at import, so tests can start a fake worker after importing this module.
 const workerUrl = () => (process.env.OKAYCHAT_SPEECH_URL ?? "").replace(/\/+$/, "");
@@ -92,11 +92,27 @@ export async function workerPreload(kind: "stt" | "tts", name: string): Promise<
   await call(`/preload?${new URLSearchParams({ kind, name })}`, { method: "POST", timeoutMs: 10_000 });
 }
 
-export async function workerHealth(): Promise<{ ok: boolean; stt: string | null; tts: string | null; downloading: string[] } | null> {
+/** The worker's health. Device fields are optional so an older worker payload still reads. */
+export interface WorkerHealth {
+  ok: boolean;
+  stt: boolean;
+  tts: boolean;
+  requestedDevice?: "auto" | "cpu" | "cuda";
+  device?: "cpu" | "cuda";
+  computeType?: string | null;
+  gpuName?: string | null;
+  cudaVersion?: string | null;
+  cudaAvailable?: boolean | null;
+  degraded?: boolean;
+  reason?: string | null;
+  model?: string | null;
+}
+
+export async function workerHealth(): Promise<WorkerHealth | null> {
   if (!speechWorkerConfigured()) return null;
   try {
     const res = await fetch(`${workerUrl()}/health`, { signal: AbortSignal.timeout(3000) });
-    return res.ok ? ((await res.json()) as { ok: boolean; stt: string | null; tts: string | null; downloading: string[] }) : null;
+    return res.ok ? ((await res.json()) as WorkerHealth) : null;
   } catch {
     return null;
   }
