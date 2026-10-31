@@ -77,20 +77,6 @@ const mcpInput = z.object({
   }),
 });
 
-/**
- * Non-admins may only point connections at the public internet, or any user could read the server's
- * network through a provider or MCP URL. Requests are checked again at connection time.
- */
-async function privateUrlError(userId: string, url: string | undefined): Promise<string | null> {
-  if (!url || mayUsePrivateHosts(userId)) return null;
-  try {
-    await assertPublicHost(new URL(url));
-    return null;
-  } catch (error) {
-    return error instanceof BlockedAddressError ? "Only admins can use local or private network addresses." : (error as Error).message;
-  }
-}
-
 // Thread and message ids are chosen by the client (assistant-ui), so only their shape is checked.
 const clientId = z.string().min(1).max(200);
 
