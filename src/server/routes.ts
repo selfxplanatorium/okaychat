@@ -14,6 +14,7 @@ import { ollamaManagementRoutes } from "./catalog/ollama-routes.js";
 import { adminRoutes, audienceInput } from "./admin.js";
 import { artifactRoutes } from "./artifacts.js";
 import { chatRoutes } from "./chat.js";
+import { emailRoutes } from "./email/routes.js";
 import { exportRoutes } from "./export.js";
 import { fileRoutes } from "./files.js";
 import { fontRoutes } from "./fonts.js";
@@ -364,6 +365,7 @@ const api = new Hono<AppEnv>()
   .route("/", scheduleRoutes)
   .route("/", projectRoutes)
   .route("/skills", skillRoutes)
+  .route("/email", emailRoutes)
   .route("/", searchRoutes)
   .route("/", shareRoutes)
   .route("/", adminRoutes)

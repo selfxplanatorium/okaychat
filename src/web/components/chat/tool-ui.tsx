@@ -10,6 +10,7 @@ import { formatBytes, formatCost, formatList, formatNumber } from "@/i18n/format
 import { Trans } from "@/i18n/react";
 import { useData } from "@/state/data";
 import { RunFiles, type RunFile } from "./reply-files";
+import { EmailFoldersCard, EmailListCard, EmailReadCard, EmailReplyCard, EmailSearchCard, EmailSendCard } from "./email-tools";
 import { cn } from "@/lib/utils";
 
 type SearchResult = { title: string; url: string; snippet: string };
@@ -42,15 +43,16 @@ export function InjectionBadge({ report, className }: { report?: InjectionReport
   );
 }
 
-function ToolShell({ icon, label, running, error, failure, injection, children }: { icon: ReactNode; label: ReactNode; running: boolean; error?: string; failure?: string; injection?: InjectionReport; children?: ReactNode }) {
+export function ToolShell({ icon, label, running, error, failure, injection, children, defaultOpen = false }: { icon: ReactNode; label: ReactNode; running: boolean; error?: string; failure?: string; injection?: InjectionReport; children?: ReactNode; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(false);
+  const expanded = defaultOpen || open;
   // A tool error is wire JSON. A historical raw string or object still gets the translated generic
   // failure instead of being printed, because no regex can tell a secret from a sentence. `failure`
   // is a message this app authored for the card (e.g. "Search failed"), so it is safe to print.
   const shown = toolErrorPresentation(error);
   return (
     <div className="my-2 text-sm">
-      <button type="button" onClick={() => setOpen(!open)} className="text-muted-foreground hover:text-foreground flex max-w-full items-center gap-2 transition-colors duration-(--motion-fast) ease-out-quart" disabled={!children}>
+      <button type="button" aria-expanded={expanded} onClick={() => setOpen(!open)} className="text-muted-foreground hover:text-foreground flex max-w-full items-center gap-2 transition-colors duration-(--motion-fast) ease-out-quart" disabled={!children}>
         {/* The spinner and the result icon share a slot so completion crossfades. */}
         <span className="relative size-4 shrink-0">
           <Loader2Icon className={cn("absolute inset-0 size-4 transition-[opacity,scale] duration-(--motion-fast) ease-out-quart motion-reduce:animate-none", running ? "scale-100 animate-spin opacity-100" : "scale-50 opacity-0")} />
@@ -59,7 +61,7 @@ function ToolShell({ icon, label, running, error, failure, injection, children }
           </span>
         </span>
         <span className={cn("truncate", running && "shimmer")}>{label}</span>
-        {children && <ChevronDownIcon className={cn("size-3.5 shrink-0 transition-transform duration-(--motion-base) ease-out-expo", open && "rotate-180")} />}
+        {children && <ChevronDownIcon className={cn("size-3.5 shrink-0 transition-transform duration-(--motion-base) ease-out-expo", expanded && "rotate-180")} />}
       </button>
       {injection?.flagged ? <InjectionBadge report={injection} className="mt-1 ml-6" /> : null}
       {shown ? (
@@ -70,7 +72,7 @@ function ToolShell({ icon, label, running, error, failure, injection, children }
       ) : failure ? (
         <p className="text-muted-foreground animate-rise-in mt-1 ml-6 text-xs break-words">{failure}</p>
       ) : null}
-      {open && children && <div className="animate-rise-in mt-2 ml-6">{children}</div>}
+      {expanded && children && <div className="animate-rise-in mt-2 ml-6">{children}</div>}
     </div>
   );
 }
@@ -214,6 +216,12 @@ export const toolkit = defineToolkit({
     type: "backend",
     render: ({ args, result, status }) => <RunCodeCard args={args} result={result} running={status?.type === "running"} />,
   },
+  email_folders: { type: "backend", render: (props) => <EmailFoldersCard {...props} /> },
+  email_list: { type: "backend", render: (props) => <EmailListCard {...props} /> },
+  email_search: { type: "backend", render: (props) => <EmailSearchCard {...props} /> },
+  email_read: { type: "backend", render: (props) => <EmailReadCard {...props} /> },
+  email_send: { type: "backend", render: (props) => <EmailSendCard {...props} /> },
+  email_reply: { type: "backend", render: (props) => <EmailReplyCard {...props} /> },
 });
 
 // generative-frame renders its helper tools as nothing, which leaves an empty row in the reasoning group.

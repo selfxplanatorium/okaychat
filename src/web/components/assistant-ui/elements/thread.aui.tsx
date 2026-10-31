@@ -17,6 +17,7 @@ import {
   ReasoningTrigger,
 } from "@/components/assistant-ui/elements/reasoning.aui";
 import { ToolFallback } from "@/components/assistant-ui/elements/tool-fallback.aui";
+import { emailResultKey } from "@/components/assistant-ui/elements/fold-key";
 import {
   ToolGroupContent,
   ToolGroupRoot,
@@ -157,6 +158,9 @@ const messageGroupBy = groupPartByType({
   "tool-call:delegate_task": [],
   "tool-call:deep_research": [],
   "tool-call:run_code": [],
+  "tool-call:email_read": [],
+  "tool-call:email_send": [],
+  "tool-call:email_reply": [],
 });
 
 type ThreadGroupKey =
@@ -216,6 +220,10 @@ const resultKey = (part: GroupablePart): string | undefined => {
     // The research card stays above its report: it holds the questions and the pages read.
     case "deep_research":
       return `research:${part.toolCallId}`;
+    case "email_read":
+    case "email_send":
+    case "email_reply":
+      return emailResultKey(part.toolName, part.toolCallId, part.args);
     default:
       // Each MCP App call is its own result, like a generated image.
       return mcpAppOf(part.result) ? `app:${part.toolCallId}` : undefined;
@@ -1388,7 +1396,16 @@ const AssistantMessage: FC = () => {
                   />
                 );
               case "tool-call":
-                return part.toolUI ?? <ToolFallbackComponent {...part} />;
+                // Email cards show the reviewed payload; the existing fallback supplies their
+                // Allow/Deny controls. Other custom tools retain their own approval UI.
+                return part.toolUI ? (
+                  <>
+                    {part.toolUI}
+                    {part.approval && (part.toolName === "email_send" || part.toolName === "email_reply") ? <ToolFallback.Approval {...part} /> : null}
+                  </>
+                ) : (
+                  <ToolFallbackComponent {...part} />
+                );
               case "data":
                 return part.dataRendererUI;
               case "file":
