@@ -580,10 +580,14 @@ test("a URL source keeps the original response and extracts readable text separa
   assert.equal(stored.mime, "text/html");
   assert.equal(row.bytes, original.byteLength);
 
-  setKnowledgeUrlFetchForTests(async () => new Response("too big", { headers: { "Content-Type": "text/plain", "Content-Length": String(MAX_URL_BYTES + 1) } }));
+  let cancelled = false;
+  setKnowledgeUrlFetchForTests(async () => new Response(new ReadableStream({
+    cancel() { cancelled = true; },
+  }), { headers: { "Content-Type": "text/plain", "Content-Length": String(MAX_URL_BYTES + 1) } }));
   const oversized = await request("POST", `/collections/${id}/sources/url`, { url: "https://example.com/large" });
   assert.equal(oversized.status, 422);
   assert.match(((await oversized.json()) as { error: string }).error, /larger/i);
+  assert.equal(cancelled, true, "rejecting Content-Length closes the unread response");
 
   setKnowledgeUrlFetchForTests(async () => new Response("missing", { status: 404, headers: { "Content-Type": "text/html" } }));
   const missing = await request("POST", `/collections/${id}/sources/url`, { url: "https://example.com/missing" });
@@ -592,6 +596,29 @@ test("a URL source keeps the original response and extracts readable text separa
 
   const ftp = await request("POST", `/collections/${id}/sources/url`, { url: "ftp://example.com/guide" });
   assert.ok([400, 422].includes(ftp.status), "non-http schemes are refused before any fetch");
+});
+
+test("PDF URLs extract text and reject scans without storing extraction warnings", async () => {
+  const id = await create();
+  const readable = await PDFDocument.create();
+  readable.addPage().drawText("The quasar is in the URL document.");
+  const readableBytes = await readable.save();
+  setKnowledgeUrlFetchForTests(async () => new Response(readableBytes, { headers: { "Content-Type": "application/pdf" } }));
+  const added = await request("POST", `/collections/${id}/sources/url`, { url: "https://example.com/text.pdf" });
+  assert.equal(added.status, 201, await added.clone().text());
+  const sourceId = ((await added.json()) as { id: string }).id;
+  await waitFor();
+  assert.equal(sourceRow("alice", sourceId)!.status, "ready");
+  assert.match(sourceRow("alice", sourceId)!.text!, /quasar/);
+  const pdf = await PDFDocument.create();
+  pdf.addPage();
+  const bytes = await pdf.save();
+  setKnowledgeUrlFetchForTests(async () => new Response(bytes, { headers: { "Content-Type": "application/pdf" } }));
+  const response = await request("POST", `/collections/${id}/sources/url`, { url: "https://example.com/scan.pdf" });
+  assert.equal(response.status, 422);
+  assert.match(((await response.json()) as { error: string }).error, /no text layer|OCR/);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM knowledge_sources").get()!["n"], 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM uploads").get()!["n"], 1);
 });
 
 test("retrieved knowledge stored in turn_context is charged to the quota", async () => {

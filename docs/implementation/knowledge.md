@@ -70,8 +70,10 @@ reindex):
 Non-admin custom endpoints go through `publicFetch`, exactly like chat. Keys are read server-side from
 the encrypted connection store, never returned to the browser and never logged. Requests are batched in
 groups of 16, each input capped at 8,000 characters. Every backend request (including Ollama's native
-helper) combines the caller's abort signal with a 30 s deadline, and successful or error bodies are read
-through a byte cap before parsing, so a stalled or hostile provider cannot hold a job or exhaust memory.
+helper) combines the caller's abort signal with a 30 s deadline. The knowledge-owned OpenAI/Google
+transports cap successful and error bodies before parsing.
+Ollama retains the existing native helper's response parsing; its request has the same deadline but no
+additional knowledge-specific response byte cap.
 Vectors must be finite, non-zero, at most 16,384 dimensions, the same dimension across a batch, and not
 overflow when squared (a `[Number.MAX_VALUE, …]` row is rejected rather than normalized to NaN); they are
 normalized to unit length and stored little-endian float32. OpenAI-compatible responses may carry `index`
@@ -165,7 +167,8 @@ ids. Nothing per-chat or per-turn enters system message 1; the stable prefix the
 Continuations and retries reuse the stored block. A detached collection's block is not replayed, and if
 no attached collection remains the tools are not offered. After retrieval awaits an embedding request,
 the chat's attachments are read again: hits from a collection detached or moved during the wait are
-dropped, and a collection attached mid-flight is not added to that turn's scope.
+dropped, earlier replay blocks are gated again after retrieval, and a collection attached mid-flight
+is not added to that turn's scope.
 
 `search_knowledge(query, collections?, k?)` and `read_knowledge_chunk(chunkId)` are read-only and need no
 approval. The `collections` argument can only narrow the thread's attachments. Both tools re-read the
@@ -238,6 +241,8 @@ and touch/focus-visible sizing.
 - The Library can delete an upload that a knowledge source still references (the foreign key sets
   `upload_id` to NULL). Existing extracted text and chunks stay searchable and reindex from that text; a
   source whose job failed before extraction reports that the original is gone and must be added again.
+- URL PDFs without a text layer are rejected before storing the source, just like uploaded scanned PDFs;
+  oversized declared URL bodies are cancelled before returning an error.
 - Knowledge text is stored unencrypted in SQLite (the original files are in `uploads` too). A copied
   database exposes it just like chat history; `OKAYCHAT_SECRET` covers provider keys and memory, not
   knowledge.

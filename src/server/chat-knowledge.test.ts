@@ -140,3 +140,29 @@ test("a chat without attachments keeps the original tool and system blocks; temp
   assert.ok(!userText(requests[2]!).includes(COLLECTION_NAME));
   assert.deepEqual(requests[0]!.messages[0], requests[1]!.messages[0], "the shared system part is identical across chats");
 });
+
+
+test("detaching during new retrieval also revokes earlier replay blocks", async (t) => {
+  const collectionId = seedCollection();
+  ensureThread("alice", "race-chat");
+  updateThread("alice", "race-chat", { knowledgeIds: [collectionId] });
+  const requests = provider(t);
+  const first = turn();
+  await run("race-chat", [first]);
+  assert.ok(userText(requests[0]!).includes(PASSAGE));
+  const { setRetrievalEmbedderFactoryForTests } = await import("./knowledge/retrieval.js");
+  setRetrievalEmbedderFactoryForTests(() => ({
+    provider: "openai", providerId: "openai", model: "fake",
+    embed: async () => {
+      updateThread("alice", "race-chat", { knowledgeIds: [] });
+      return [new Float32Array([1, 0])];
+    },
+  }));
+  try {
+    await run("race-chat", [first, { id: "a1", role: "assistant", parts: [{ type: "text", text: "Found." }] } as UIMessage, turn("u2", "Another question")]);
+    assert.ok(!userText(requests[1]!).includes(PASSAGE), "old blocks are gated after the awaited retrieval");
+    assert.ok(!userText(requests[1]!).includes(COLLECTION_NAME));
+  } finally {
+    setRetrievalEmbedderFactoryForTests(null);
+  }
+});

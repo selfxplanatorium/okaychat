@@ -75,7 +75,10 @@ export async function fetchKnowledgeUrl(raw: string, opts: { signal?: AbortSigna
     throw new Error(`The page answered HTTP ${res.status}.`);
   }
   const declared = Number(res.headers.get("content-length") ?? 0);
-  if (Number.isFinite(declared) && declared > MAX_URL_BYTES) throw new Error(`That page is larger than ${MAX_URL_BYTES / 1024 / 1024} MB.`);
+  if (Number.isFinite(declared) && declared > MAX_URL_BYTES) {
+    await res.body?.cancel().catch(() => {});
+    throw new Error(`That page is larger than ${MAX_URL_BYTES / 1024 / 1024} MB.`);
+  }
   let bytes: Uint8Array;
   try {
     bytes = await readCapped(res, MAX_URL_BYTES, `That page is larger than ${MAX_URL_BYTES / 1024 / 1024} MB.`);
@@ -89,8 +92,10 @@ export async function fetchKnowledgeUrl(raw: string, opts: { signal?: AbortSigna
   const name = fileName(parsed);
 
   if (type === "application/pdf" || isPdf(bytes)) {
-    const { text } = await extract(name.endsWith(".pdf") ? name : `${name}.pdf`, "application/pdf", bytes);
-    if (!text.trim()) throw new Error("That PDF has no readable text.");
+    const { text } = await extract(name.endsWith(".pdf") ? name : `${name}.pdf`, "application/pdf", new Uint8Array(bytes));
+    if (!text.trim() || text.startsWith("[This PDF has no text layer")) {
+      throw new Error("That PDF has no text layer. No OCR is available; add a text version instead.");
+    }
     return { title: name, mime: "application/pdf", bytes, text: text.slice(0, MAX_URL_TEXT) };
   }
 

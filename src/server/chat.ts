@@ -193,6 +193,14 @@ export async function turnStream(opts: TurnOptions) {
       const knowledge: KnowledgeTurn = temporary || !knowledgeScope.length
         ? { collections: [], context: "", names: "", passages: "", tools: {} }
         : await conversationKnowledge(user.id, threadId, query, { retrieve: !!lastUser && !stored.has(lastUser.id) });
+      // Retrieval can await a provider while attachments change. Revoke earlier replay blocks too,
+      // not just the freshly retrieved passages checked by conversationKnowledge.
+      const currentKnowledgeScope = new Set(temporary ? [] : attachedCollectionIds(userId, threadId));
+      for (const [id, block] of stored) {
+        if (block.knowledgeIds.some((collectionId: string) => !currentKnowledgeScope.has(collectionId))) {
+          stored.set(id, { ...block, knowledge: "", knowledgeIds: [] });
+        }
+      }
       // Built-in tools first, then MCP tools in sorted order, so the tool block is identical across turns.
       const readOnlyTools = {
         ...builtInWeb,
