@@ -100,8 +100,8 @@ function ProviderRow({ provider, index, expanded, onToggle, onModels }: { provid
   const chatgpt = provider.id === CHATGPT;
   return (
     <div className="stagger animate-rise-in px-4 py-3" style={{ "--i": index } as CSSProperties}>
-      <div className="flex items-center gap-3">
-        <button type="button" onClick={onToggle} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="button" onClick={onToggle} className="flex min-w-24 flex-1 items-center gap-2 text-left">
           <span className="truncate text-sm font-medium">{provider.name}</span>
           {provider.id === "opencode-go" && <span className="bg-primary/10 text-primary rounded px-1.5 py-0.5 text-[10px] font-medium">{t("providers.recommended")}</span>}
           {provider.connected && <CheckCircle2Icon className="text-success animate-pop-in size-3.5 shrink-0" aria-label={t("providers.connected")} />}
@@ -272,7 +272,7 @@ export function ProviderLists() {
 
   return (
     <div className="flex flex-col gap-8">
-      <ModelEntitlementsDialog provider={modelsFor} onClose={() => setModelsFor(null)} onSaved={refresh} />
+      {modelsFor && <ModelEntitlementsDialog provider={modelsFor} onClose={() => setModelsFor(null)} onSaved={refresh} />}
       {connected.length > 0 && <SettingsSection title={t("providers.connected")}>{rows(connected)}</SettingsSection>}
       <SettingsSection
         title={t("providers.addAProvider")}

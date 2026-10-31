@@ -54,6 +54,7 @@ All access checks are server-side.
 | `catalog/providers.ts` `listModels()` | Filters a shared connection's models to the union of its matching policies. The same list feeds the composer, settings default/utility model pickers, sub-agents, schedules, and compaction/title fallbacks. |
 | `catalog/providers.ts` `listProviders()` | A restricted shared connection whose effective selection has no *current* chat model is not listed at all, exactly like one outside the audience. `modelCount` shows the entitled count. Empty grants and allowlists made only of stale ids both disappear. |
 | `catalog/providers.ts` `resolveModel()` | Rejects an unentitled model with a 403 naming the administrator before any upstream request. This is what a saved chat hits on its next turn after a revoke; the history itself is untouched. |
+| `catalog/ollama-routes.ts` user inventory | Filters a shared daemon's inventory and its counts to the viewer's granted ids; admin management and own connections retain the full inventory. |
 | `llm.ts` `createModel()` | Rechecks synchronously before building any provider: the model and connection must have the same provider, and a `shared` connection needs a visible policy that allows the id. A stale model/connection pair, a fabricated shared connection, or a schedule/title/compaction call cannot bypass listing. |
 
 Deliberate limits:
@@ -90,8 +91,9 @@ Only the supplied targets are updated, so one request cannot widen another audie
 - when `mode` is `selected`, ids must be in the current catalog or already stored for that same target;
   otherwise the whole request fails (`400`). Mode `all` clears the allowlist.
 
-Both routes sit behind `requireAdmin`. The dialog in `ModelEntitlements.tsx` sends every audience's own
-draft, so switching audiences never copies a selection, and a failed save leaves the drafts untouched.
+Both routes sit behind `requireAdmin`. The dialog in `ModelEntitlements.tsx` sends only changed audiences'
+drafts, so saving one audience cannot overwrite an untouched audience from an older dialog snapshot.
+Switching audiences never copies a selection, and a failed save leaves the drafts untouched.
 
 ## UI
 

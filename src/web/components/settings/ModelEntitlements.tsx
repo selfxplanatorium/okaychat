@@ -105,7 +105,11 @@ export function ModelEntitlementsDialog({
     setBusy(true);
     setSaveError(null);
     try {
-      const next = data.policies.map((policy) => {
+      const next = data.policies.filter((policy) => {
+        const value = drafts[keyOf(policy.target)];
+        return value && (value.mode !== policy.mode || (value.mode === "selected" &&
+          (value.ids.size !== policy.modelIds.length || policy.modelIds.some((id) => !value.ids.has(id)))));
+      }).map((policy) => {
         const value = drafts[keyOf(policy.target)] ?? draftOf(policy);
         return { target: policy.target, mode: value.mode, modelIds: value.mode === "selected" ? [...value.ids] : [] };
       });

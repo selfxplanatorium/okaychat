@@ -167,6 +167,9 @@ test("a group restriction filters model lists and hides an empty policy; a new t
   setModelAccessPolicies("openai", [{ target: { kind: "group", id: team.id }, mode: "selected", modelIds: ["gpt-gone"] }]);
   assert.equal((await listModels("alice")).some((m) => m.providerId === "openai"), false, "stale ids grant nothing at runtime");
   await assert.rejects(resolveModel("alice", "openai/gpt-a"), /administrator/);
+  await assert.rejects(resolveModel("alice", "openai/gpt-gone"), /administrator/);
+  setAudience("provider", "openai", { mode: "selected", userIds: [], groupIds: [] });
+  await assert.rejects(resolveModel("alice", "openai/gpt-a"), /administrator/);
 });
 
 test("a user's own connection overrides shared policies for the same provider", async () => {
@@ -175,6 +178,9 @@ test("a user's own connection overrides shared policies for the same provider", 
   setModelAccessPolicies("openai", [{ target: { kind: "user", id: "alice" }, mode: "selected", modelIds: ["gpt-a"] }]);
   assert.deepEqual((await listModels("alice")).map((m) => m.id), ["gpt-a"]);
 
+  saveConnection("alice", "openai", { apiKey: "sk-own", enabled: true });
+  assert.equal(getConnection("alice", "openai")?.shared ?? false, false);
+  assert.deepEqual((await listModels("alice")).map((m) => m.id).sort(), ["gpt-a", "gpt-b", "gpt-c"]);
   saveConnection("bob", "openai", { apiKey: "sk-own", enabled: true });
   assert.equal(getConnection("bob", "openai")?.shared ?? false, false);
   assert.deepEqual((await listModels("bob")).map((m) => m.id).sort(), ["gpt-a", "gpt-b", "gpt-c"]);
@@ -230,6 +236,8 @@ test("the model factory rejects revoked and fabricated shared connections before
   const own = getConnection("bob", "openai")!;
   assert.equal(own.shared, undefined);
   createModel(model("gpt-c"), own, { userId: "bob" });
+  setModelAccessPolicies("openai", [{ target: { kind: "user", id: "alice" }, mode: "selected", modelIds: [] }]);
+  assert.throws(() => createModel(model("gpt-a"), connection, { userId: "alice" }), /administrator/, "an earlier connection cannot bypass a live revoke");
 });
 
 test("admin policy routes enforce permission, audience targets, and catalog ids", async () => {
@@ -274,4 +282,20 @@ test("admin policy routes enforce permission, audience targets, and catalog ids"
   assert.equal((await put([{ target: { kind: "user", id: "alice" }, mode: "all", modelIds: [] }])).status, 200);
   assert.equal(getModelAccessPolicy("openai", { kind: "user", id: "alice" }).mode, "all");
   assert.equal((db.prepare("SELECT COUNT(*) AS n FROM provider_model_grants").get() as { n: number }).n, 0);
+});
+
+
+test("a partial policy update leaves another audience's restriction intact", async () => {
+  shared();
+  setAudience("provider", "openai", { mode: "selected", userIds: ["alice", "bob"], groupIds: [] });
+  setModelAccessPolicies("openai", [
+    { target: { kind: "user", id: "alice" }, mode: "selected", modelIds: ["gpt-a"] },
+    { target: { kind: "user", id: "bob" }, mode: "selected", modelIds: ["gpt-b"] },
+  ]);
+  const response = await request("PUT", "/admin/providers/openai/entitlements", TOKENS.admin, { policies: [
+    { target: { kind: "user", id: "alice" }, mode: "all", modelIds: [] },
+  ] });
+  assert.equal(response.status, 200);
+  assert.deepEqual((await listModels("bob")).map((m) => m.id), ["gpt-b"]);
+  assert.equal((await request("PUT", "/admin/providers/openai/entitlements", TOKENS.bob, { policies: [] })).status, 403);
 });

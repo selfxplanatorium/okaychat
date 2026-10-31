@@ -399,7 +399,6 @@ export async function listSharedModels(providerId: string): Promise<ModelInfo[]>
 }
 
 export async function listModels(userId: string): Promise<ModelInfo[]> {
-  const catalog = await getCatalog();
   // Ollama needs no key and may use its default URL, so it is connected without either field.
   const connections = [...readConnections(userId).values()].filter(
     (c) => c.enabled && (c.providerId === OLLAMA || c.apiKey || c.baseURL),
@@ -425,14 +424,15 @@ export async function resolveModel(userId: string, ref: string): Promise<{ model
   const access = sharedModelAccess(userId, providerId);
   const denied = !access.all && (access.ids.size === 0 || !access.ids.has(modelId));
   if (!conn || !conn.enabled) {
-    // A shared connection can be hidden by an empty model policy. Say so instead of "not connected".
-    if (access.visible && denied) throw new HTTPException(403, { message: modelAccessMessage(ref) });
+    // Audience revocation must also explain why a saved chat can no longer use its server key.
+    if (!conn && getSharedConnection(providerId)?.enabled) throw new HTTPException(403, { message: modelAccessMessage(ref) });
     throw new HTTPException(400, { message: `Provider ${providerId} is not connected` });
   }
   if (conn.shared && denied) throw new HTTPException(403, { message: modelAccessMessage(ref) });
   const models = await listModels(userId);
   const model = models.find((m) => m.ref === ref);
   if (!model) {
+    if (conn.shared && !access.all) throw new HTTPException(403, { message: modelAccessMessage(ref) });
     if (providerId === OLLAMA) {
       // listModels keeps the last good list when the daemon is down. For a model that was not found,
       // ask once more so a stopped daemon or a broken address produces an actionable error.
