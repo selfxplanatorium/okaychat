@@ -69,6 +69,7 @@ export function GeneralSettings() {
 
       <SettingsSection title={t("general.contextTitle")}>
         <SettingsRow
+          id="setting-compaction"
           label={t("general.autoCompact")}
           description={t("general.autoCompactDescription")}
           reset={settings.autoCompactAt !== DEFAULT_USER_SETTINGS.autoCompactAt ? () => update({ autoCompactAt: DEFAULT_USER_SETTINGS.autoCompactAt }) : null}
@@ -96,6 +97,7 @@ export function GeneralSettings() {
           control={<SettingsSlider label={t("general.maxAgentSteps")} value={settings.maxSteps} min={1} max={50} step={1} onChange={(v) => update({ maxSteps: v })} />}
         />
         <SettingsRow
+          id="setting-web-search-limit"
           label={t("general.maxWebSearches")}
           description={t("general.maxWebSearchesDescription")}
           reset={settings.maxSearches !== DEFAULT_USER_SETTINGS.maxSearches ? () => update({ maxSearches: DEFAULT_USER_SETTINGS.maxSearches }) : null}
@@ -105,6 +107,7 @@ export function GeneralSettings() {
 
       <SettingsSection title={t("general.toolsTitle")}>
         <SettingsRow
+          id="setting-web-tools"
           label={t("general.webTools")}
           description={t("general.webToolsDescription")}
           control={<Switch checked={settings.webTools} onCheckedChange={(webTools) => update({ webTools })} aria-label={t("general.webToolsLabel")} />}

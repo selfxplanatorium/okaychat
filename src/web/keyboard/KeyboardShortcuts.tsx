@@ -3,6 +3,7 @@ import { CommandIcon, SearchIcon } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { settingsHref } from "@/lib/settings-link";
 import { signOut } from "@/lib/sign-out";
 import { cn } from "@/lib/utils";
 import { useAppearance } from "@/state/appearance";
@@ -89,11 +90,14 @@ export function KeyboardShortcuts() {
     useCommand(`nav.${page}`, () => navigate(`/${page}`));
   }
   useCommand("nav.settings", () => navigate("/settings"));
+  useCommand("nav.createProject", () => navigate("/projects?new=1"));
+  useCommand("nav.createSchedule", () => navigate("/scheduled?new=1"));
   for (const command of COMMANDS.filter((c) => c.group === "Settings")) {
     const section = command.id.slice("settings.".length);
     useCommand(command.id, () => {
       if (section === "admin" && useData.getState().me?.role !== "admin") return false;
-      navigate(`/settings/${section}`);
+      const anchored = section === "compaction" || section === "webTools" || section === "webSearchLimit";
+      navigate(anchored ? settingsHref(section) : `/settings/${section}`);
     });
   }
 
@@ -143,7 +147,7 @@ export function KeyboardShortcuts() {
   useCommand("message.previous", () => step(-1));
   useCommand("message.first", () => focusMessage(messages()[0]));
   useCommand("message.last", () => focusMessage(messages().at(-1)));
-  for (const action of ["copy", "edit", "retry", "branch", "more"] as const) {
+  for (const action of ["copy", "edit", "retry", "retryWithModel", "branch", "more"] as const) {
     useCommand(`message.${action}`, () => {
       const message = focusedMessage();
       if (!message) return false;

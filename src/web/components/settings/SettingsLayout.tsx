@@ -1,7 +1,8 @@
 import { ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
-import type { ComponentType } from "react";
-import { Link } from "wouter";
+import { useEffect, type ComponentType } from "react";
+import { Link, useSearch } from "wouter";
 import { t } from "@/i18n";
+import { focusSettingAnchor, SETTINGS_FOCUS_PARAM } from "@/lib/settings-link";
 import { cn } from "@/lib/utils";
 import { AdminSettings } from "./AdminSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
@@ -64,6 +65,14 @@ export function SettingsLayout({ section }: { section?: string }) {
   // No section means /settings. Desktop shows General there; phones show the index instead.
   const current = sections.find((s) => s.id === section) ?? sections[0]!;
   const Page = PAGES[current.id]!;
+  // A deep link's `?focus=` is applied after this section's lazy page has committed, because the row
+  // does not exist before that. The query is left in place so a reload lands on the same row.
+  const anchor = new URLSearchParams(useSearch()).get(SETTINGS_FOCUS_PARAM);
+  useEffect(() => {
+    if (!anchor) return;
+    const frame = requestAnimationFrame(() => focusSettingAnchor(anchor));
+    return () => cancelAnimationFrame(frame);
+  }, [anchor, current.id]);
 
   return (
     <div className="flex h-full min-h-0 flex-1 max-md:flex-col">

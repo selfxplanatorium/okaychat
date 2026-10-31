@@ -12,6 +12,7 @@ import { GhostIcon } from "@/components/chat/GhostIcon";
 import { ShareButton } from "@/components/share/ShareButton";
 import { t, type PlainMessageKey } from "@/i18n";
 import { api } from "@/lib/api";
+import { settingsHref } from "@/lib/settings-link";
 import { cn } from "@/lib/utils";
 import { useAppearance } from "@/state/appearance";
 import { getActiveModel, useData } from "@/state/data";
@@ -219,7 +220,7 @@ export function ChatPrivacyMenu() {
                 finally { setBusy(false); }
               }} />
             </div>
-            <Link href="/settings/memory" onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground mb-4 block text-xs underline underline-offset-4">{t("composer.memorySettings")}</Link>
+            <Link href={settingsHref("memory")} onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground mb-4 block text-xs underline underline-offset-4">{t("composer.memorySettings")}</Link>
             {skillsEnabled && (
               <button
                 type="button"

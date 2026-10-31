@@ -10,6 +10,7 @@ import { compareText, formatNumber, formatTokens } from "@/i18n/format";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useData } from "@/state/data";
+import { settingsHref } from "@/lib/settings-link";
 import { useChatModel, useCurrentThreadId } from "@/state/thread-meta";
 
 const OPENCODE_GO = "opencode-go";
@@ -228,7 +229,7 @@ export function ModelPicker() {
 
   if (models.length === 0) {
     return (
-      <button type="button" onClick={() => navigate("/settings/providers")} className="text-muted-foreground hover:text-foreground rounded-lg px-2 py-1 text-xs">
+      <button type="button" data-command="settings.providers" onClick={() => navigate(settingsHref("providers"))} className="text-muted-foreground hover:text-foreground rounded-lg px-2 py-1 text-xs">
         {t("composer.connectProvider")}
       </button>
     );
@@ -239,6 +240,7 @@ export function ModelPicker() {
       <PopoverTrigger
         className="group hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 pointer-coarse:h-9 max-w-56 min-w-0 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart"
         aria-label={t("composer.chooseModel")}
+        aria-live="polite"
         data-command="composer.model"
       >
         <TextSwap value={active?.name ?? t("composer.chooseModel")} className="truncate" />

@@ -276,7 +276,12 @@ function ModelContextBridge() {
   useEffect(
     () =>
       aui.modelContext.register({
-        getModelContext: () => ({ config: { modelName: getActiveModel(aui.threadListItem.getState().remoteId)?.ref, reasoningEffort: effort, webSearch: chatSearchFor(aui.threadListItem.getState()), deepResearch: chatResearchFor(aui.threadListItem.getState()), temporaryPersonalization: chatPrivacyFor(aui.threadListItem.getState()).personalized } }),
+        getModelContext: () => {
+          // Retry can select a model and start its run before React installs the next registration.
+          const item = aui.threadListItem.getState();
+          const ref = getActiveModel(item.remoteId)?.ref;
+          return { config: { modelName: ref, reasoningEffort: ref ? useData.getState().settings?.reasoningEffort[ref] : undefined, webSearch: chatSearchFor(item), deepResearch: chatResearchFor(item), temporaryPersonalization: chatPrivacyFor(item).personalized } };
+        },
       }),
     [aui, model?.ref, effort, webSearch, privacy.personalized, privacy.temporary],
   );

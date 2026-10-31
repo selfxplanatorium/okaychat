@@ -1,6 +1,6 @@
 # Roadmap
 
-Status as of 2026-10-26. Update this file when a feature ships or a plan changes.
+Status as of 2026-10-31. Update this file when a feature ships or a plan changes.
 
 ## Pass 1: core (built)
 
@@ -51,7 +51,18 @@ Status as of 2026-10-26. Update this file when a feature ships or a plan changes
 - Startup path: the session check starts the shell chunk, appearance, account data, chat list, and restored chat messages in parallel. Preloaded routes avoid a Suspense hold. The startup loader appears only after 700 ms. Production assets are precompressed and cached; model catalogs warm at boot and refresh without blocking requests. See `docs/implementation/web-bundle.md`.
 - Current implementation guides live in `docs/implementation/`. Obsolete research snapshots and copied vendor components have been removed; generated build output and design working files are excluded from version control.
 
-No planned core items remain. New work can be tracked as a subsequent pass.
+## Pass 3: UX flows (built)
+
+An audit of the main interaction flows and six improvements that keep frequent actions where the user already is. See `docs/implementation/ux-audit.md` for the evidence and the deliberate deferrals.
+
+- **Retry with another model, in place**: the assistant action bar opens the favorite-aware model list and re-answers the same user message in the current chat, never a branch. Announced and shown in the composer; blocked while history is cached.
+- **Complete context popover**: explains that the ring counts the last reply's final step (input + output), links to the auto-compaction row, and adds open/compact/trim commands.
+- **Settings deep links**: one typed helper (`lib/settings-link.ts`) with real focus targets; used by the context popover, model picker, memory, research web-tools state, and shortcut hints. No new pages.
+- **Commands in Ctrl/⌘+K**: the chat spotlight gains a Commands group from the existing registry, with one keyboard order across commands and chats and focus kept on the command's destination.
+- **Sidebar quick create**: Projects and Scheduled get a one-click `+` and real empty-state actions; both forms open immediately from `?new=1`.
+- **First-run shortcut hints**: a quiet, account-dismissed row in an empty chat teaches the configured search, model, and command bindings, with a retryable save failure.
+
+Deferred: a per-chat tools sheet (needs consolidated per-chat capability state), and hover-only message metadata (kept by design).
 
 ## Known gaps
 

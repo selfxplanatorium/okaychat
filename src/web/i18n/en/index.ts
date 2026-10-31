@@ -27,6 +27,7 @@ import thread from "./thread";
 import tools from "./tools";
 import ui from "./ui";
 import usage from "./usage";
+import ux from "./ux";
 import voice from "./voice";
 
 export const en = {
@@ -58,5 +59,6 @@ export const en = {
   tools,
   ui,
   usage,
+  ux,
   voice,
 };

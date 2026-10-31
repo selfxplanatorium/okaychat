@@ -208,11 +208,22 @@ export function ScheduleSettings() {
   const [schedules, setSchedules] = useState<Schedule[] | null>(null);
   const models = useData((s) => s.models);
   const aui = useAui();
-  const [, navigate] = useLocation();
+  const [path, navigate] = useLocation();
   // "Schedule a prompt" in a chat's options opens the form with that chat picked.
-  const fromThread = new URLSearchParams(useSearch()).get("thread") ?? undefined;
-  const [editing, setEditing] = useState<string | "new" | null>(fromThread ? "new" : null);
+  const params = new URLSearchParams(useSearch());
+  const fromThread = params.get("thread") ?? undefined;
+  // The sidebar's + and the command palette arrive with ?new=1, so the form is waiting.
+  const requested = params.get("new") === "1";
+  const [editing, setEditing] = useState<string | "new" | null>(fromThread || requested ? "new" : null);
+  useEffect(() => {
+    if (fromThread || requested) setEditing("new");
+  }, [fromThread, requested]);
   const refresh = useCallback(() => api<Schedule[]>("/schedules").then(setSchedules), []);
+  const done = () => {
+    setEditing(null);
+    // Clear the query, or navigating back to this page would reopen a form the user closed.
+    if (fromThread || requested) navigate(path, { replace: true });
+  };
 
   useEffect(() => {
     void refresh();
@@ -253,20 +264,26 @@ export function ScheduleSettings() {
           <ScheduleForm
             initialThreadId={fromThread}
             onDone={() => {
-              setEditing(null);
-              if (fromThread) navigate(location.pathname, { replace: true });
+              done();
               void refresh();
             }}
           />
         )}
-        {schedules?.length === 0 && editing !== "new" && <p className="text-muted-foreground animate-fade-in px-4 py-6 text-sm">{t("schedules.empty")}</p>}
+        {schedules?.length === 0 && editing !== "new" && (
+          <div className="flex flex-col items-center gap-3 px-4 py-6 text-center">
+            <p className="text-muted-foreground animate-fade-in text-sm">{t("schedules.empty")}</p>
+            <Button size="sm" variant="outline" onClick={() => setEditing("new")}>
+              <PlusIcon /> {t("schedules.newSchedule")}
+            </Button>
+          </div>
+        )}
         {schedules?.map((s, index) =>
           editing === s.id ? (
             <ScheduleForm
               key={s.id}
               initial={s}
               onDone={() => {
-                setEditing(null);
+                done();
                 void refresh();
               }}
             />

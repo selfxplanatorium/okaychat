@@ -5,7 +5,7 @@ import { useCommand, useKeyboardDialog, useShortcutProps } from "@/keyboard/regi
 import { SIDEBAR_ITEMS } from "@shared/types";
 import { useChatPrivacyStore } from "@/state/chat-privacy";
 import { ChatSearch } from "./ChatSearch";
-import { CalendarClockIcon, FolderIcon, LibraryIcon, LogOutIcon, PanelLeftIcon, PuzzleIcon, SearchIcon, SettingsIcon, SquarePenIcon, UserRoundIcon } from "lucide-react";
+import { CalendarClockIcon, FolderIcon, LibraryIcon, LogOutIcon, PanelLeftIcon, PlusIcon, PuzzleIcon, SearchIcon, SettingsIcon, SquarePenIcon, UserRoundIcon } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { ThreadList, ThreadSelectionBar } from "@/components/assistant-ui/elements/thread-list.aui";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
@@ -89,22 +89,36 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
                 showChat(navigate);
               }}><SquarePenIcon className="size-4 shrink-0" /> {t("common.newChat")}</button>}
               {([
-                { id: "scheduled", label: "sidebar.scheduled", href: "/scheduled", icon: CalendarClockIcon },
+                { id: "scheduled", label: "sidebar.scheduled", href: "/scheduled", icon: CalendarClockIcon, create: { command: "nav.createSchedule", label: "ux.newScheduleQuick", href: "/scheduled?new=1" } },
                 { id: "library", label: "sidebar.library", href: "/library", icon: LibraryIcon },
                 { id: "plugins", label: "sidebar.plugins", href: "/plugins", icon: PuzzleIcon },
-                { id: "projects", label: "sidebar.projects", href: "/projects", icon: FolderIcon },
+                { id: "projects", label: "sidebar.projects", href: "/projects", icon: FolderIcon, create: { command: "nav.createProject", label: "ux.newProjectQuick", href: "/projects?new=1" } },
               ] as const).filter((item) => visibleItems.includes(item.id)).map((item) => (
-                <Link
-                  key={item.id}
-                  data-glide
-                  href={item.href}
-                  aria-current={location === item.href ? "page" : undefined}
-                  className={cn(rowClass, location === item.href && "bg-sidebar-row-hover")}
-                  // Start the Library's first page while the pointer heads for the click, so it opens with data.
-                  {...(item.id === "library" ? { onPointerEnter: prefetchLibrary, onFocus: prefetchLibrary, onPointerDown: prefetchLibrary } : {})}
-                >
-                  <item.icon className="size-4 shrink-0" /> {t(item.label)}
-                </Link>
+                <div key={item.id} className="flex items-center gap-0.5">
+                  <Link
+                    data-glide
+                    href={item.href}
+                    aria-current={location === item.href ? "page" : undefined}
+                    className={cn(rowClass, "min-w-0 flex-1", location === item.href && "bg-sidebar-row-hover")}
+                    // Start the Library's first page while the pointer heads for the click, so it opens with data.
+                    {...(item.id === "library" ? { onPointerEnter: prefetchLibrary, onFocus: prefetchLibrary, onPointerDown: prefetchLibrary } : {})}
+                  >
+                    <item.icon className="size-4 shrink-0" /> {t(item.label)}
+                  </Link>
+                  {"create" in item && (
+                    // Sibling, never inside the Link: the row keeps opening its page while this opens the form.
+                    <button
+                      type="button"
+                      data-command={item.create.command}
+                      onClick={() => navigate(item.create.href)}
+                      aria-label={t(item.create.label)}
+                      title={t(item.create.label)}
+                      className="text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:outline-ring inline-flex size-8 pointer-coarse:size-11 shrink-0 items-center justify-center rounded-lg transition-colors duration-(--motion-fast) ease-out-quart"
+                    >
+                      <PlusIcon className="size-4" />
+                    </button>
+                  )}
+                </div>
               ))}
             </nav>
             <ProjectSwitcher />
