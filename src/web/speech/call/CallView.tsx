@@ -9,7 +9,9 @@ import { t, type PlainMessageKey } from "@/i18n";
 import { formatDuration } from "@/i18n/format";
 import { cn } from "@/lib/utils";
 import { useCommand } from "@/keyboard/registry";
+import { useThreadSync } from "@/state/thread-sync";
 import { CallController } from "./controller";
+import { callBlock } from "./guard";
 import { FAILURE_TEXT, noticeText } from "./messages";
 import { isActive, type CallPhase } from "./state";
 import { useCall } from "./store";
@@ -81,6 +83,12 @@ export function CallView() {
   const [now, setNow] = useState(() => Date.now());
   const [startIndex, setStartIndex] = useState(0);
   const messages = useAuiState((s) => s.thread.messages);
+  // These selectors only subscribe the view; `callBlock` reads the same live state at action time.
+  useThreadSync();
+  useAuiState((s) => s.thread.isRunning);
+  useAuiState((s) => s.thread.isLoading);
+  useAuiState((s) => s.composer.dictation != null);
+  const blocked = callBlock(aui);
   const controller = useRef<CallController | null>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const wasOpen = useRef(false);
@@ -88,8 +96,9 @@ export function CallView() {
   if (!controller.current) controller.current = new CallController(aui);
 
   useEffect(() => {
-    if (useCall.getState().availability === null) void useCall.getState().loadAvailability();
-  }, []);
+    if (open) void useCall.getState().loadAvailability();
+    else if (useCall.getState().availability === null) void useCall.getState().loadAvailability();
+  }, [open]);
 
   // Opening the dialog shows an empty call, not the chat's previous messages as if they were spoken now.
   useEffect(() => {
@@ -122,6 +131,9 @@ export function CallView() {
   }, [active]);
 
   const start = (engine: CallEngine) => {
+    if (callBlock(aui)) return;
+    const current = useCall.getState().availability;
+    if (!current || (engine === "local" ? !current.local : !current.realtime)) return;
     setStartIndex(aui.thread.getState().messages.length);
     void controller.current?.start(engine);
   };
@@ -131,7 +143,17 @@ export function CallView() {
   const localAvailable = availability?.local ?? false;
   const realtimeAvailable = availability?.realtime ?? false;
   const localReason = !localAvailable ? availability?.localReason : undefined;
-  const chosen: CallEngine = preferred === "local" ? (localAvailable ? "local" : "realtime") : realtimeAvailable ? "realtime" : "local";
+  const preferredAvailable = preferred === "local" ? localAvailable : realtimeAvailable;
+  // Local is the private default. If it is down the call does not silently move to the cloud; the user has
+  // to pick the other engine explicitly.
+  const chosen: CallEngine | null = preferredAvailable ? preferred : null;
+  const otherAvailable = preferred === "local" ? realtimeAvailable : localAvailable;
+  const preferredReason = preferred === "local" ? availability?.localReason : availability?.realtimeReason;
+  const canStart = !!chosen && !blocked;
+  // If the remembered engine is unavailable its radio is disabled, so the other one must take the tab stop.
+  const focusEngine: CallEngine = preferredAvailable ? preferred : localAvailable ? "local" : realtimeAvailable ? "realtime" : preferred;
+  // Opening from the command list must re-probe too: a worker that was down can come back.
+  const refreshAvailability = () => void useCall.getState().loadAvailability();
 
   useCommand("chat.voiceCall", () => {
     if (useCall.getState().open) return true;
@@ -143,6 +165,7 @@ export function CallView() {
     () => {
       const phase = useCall.getState().call.phase;
       if (!useCall.getState().open || isActive(phase) || phase === "preparing" || phase === "starting") return false;
+      if (!chosen || blocked) return false;
       start(chosen);
       return true;
     },
@@ -170,10 +193,20 @@ export function CallView() {
     "call.retry",
     () => {
       if (useCall.getState().call.phase !== "error") return false;
-      start(chosen);
+      if (canStart && chosen) start(chosen);
+      else refreshAvailability();
       return true;
     },
     open && call.phase === "error",
+  );
+  useCommand(
+    "call.refresh",
+    () => {
+      if (!useCall.getState().open) return false;
+      refreshAvailability();
+      return true;
+    },
+    open,
   );
 
   const lines = messages
@@ -198,14 +231,29 @@ export function CallView() {
     close();
   };
 
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== " ") return;
+  const onKeyDownCapture = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== " " || event.nativeEvent.isComposing) return;
     const target = event.target as HTMLElement;
-    // Space on a focused button belongs to that button; only the call surface itself mutes.
-    if (target.closest("button, a, input, textarea, select, [contenteditable='true']")) return;
+    if (target.closest("input, textarea, select, [contenteditable='true']")) return;
     if (!active) return;
+    // Space is the advertised mute shortcut even when focus is on a button (the dialog traps focus there).
+    // Preventing the default stops that button from activating as well, so Enter remains its activation key.
     event.preventDefault();
+    event.stopPropagation();
     mute();
+  };
+
+  const onEngineKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"].includes(event.key)) return;
+    const options = (["local", "realtime"] as const).filter((engine) => (engine === "local" ? localAvailable : realtimeAvailable));
+    if (!options.length) return;
+    event.preventDefault();
+    const direction = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : -1;
+    const current = options.indexOf(preferred);
+    const next = options[(current + direction + options.length) % options.length]!;
+    useCall.getState().prefer(next);
+    const group = event.currentTarget;
+    requestAnimationFrame(() => group.querySelector<HTMLElement>(`[data-engine="${next}"]`)?.focus());
   };
 
   const elapsed = call.startedAt ? formatDuration((now - call.startedAt) / 1000) : formatDuration(0);
@@ -216,7 +264,7 @@ export function CallView() {
       <DialogContent
         showCloseButton={false}
         data-no-drawer-swipe
-        onKeyDown={onKeyDown}
+        onKeyDownCapture={onKeyDownCapture}
         className="call-surface depth-float top-0 left-0 h-dvh w-full max-w-none translate-x-0 translate-y-0 grid-rows-[auto_1fr_auto] gap-0 rounded-none p-0 data-[starting-style]:translate-y-2 data-[ending-style]:translate-y-2 sm:top-1/2 sm:left-1/2 sm:h-auto sm:max-h-[min(90dvh,780px)] sm:w-[min(92vw,760px)] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:border"
       >
         <header className="flex items-start justify-between gap-3 border-b px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-4">
@@ -270,9 +318,11 @@ export function CallView() {
           </div>
 
           {call.fallback && (
-            <p role="status" className="border-warning/40 bg-warning/10 rounded-lg border px-3 py-2 text-xs">
-              {t("voice.callFallback", { requested: t(ENGINE_LABEL.realtime), used: t(ENGINE_LABEL[call.engine]) })}
-            </p>
+            <div role="status" className="border-warning/40 bg-warning/10 rounded-lg border px-3 py-2 text-xs">
+              <p>{t("voice.callFallback", { requested: t(ENGINE_LABEL.realtime), used: t(ENGINE_LABEL[call.engine]) })}</p>
+              <p className="text-muted-foreground mt-0.5">{t(FAILURE_TEXT[call.fallback.code].title)}</p>
+              <p className="text-muted-foreground mt-0.5">{t(FAILURE_TEXT[call.fallback.code].fix)}</p>
+            </div>
           )}
           {notice && (
             <p role="status" className="border-warning/40 bg-warning/10 rounded-lg border px-3 py-2 text-xs">
@@ -289,14 +339,23 @@ export function CallView() {
 
           {!inCall && (
             <div className="flex flex-col gap-3">
-              <div role="group" aria-label={t("voice.callEngine")} className="bg-muted/60 grid grid-cols-1 gap-2 rounded-xl p-1 sm:grid-cols-2">
+              <div
+                role="radiogroup"
+                aria-label={t("voice.callEngine")}
+                onKeyDown={onEngineKeyDown}
+                className="bg-muted/60 grid grid-cols-1 gap-2 rounded-xl p-1 sm:grid-cols-2"
+              >
                 {(["local", "realtime"] as const).map((engine) => {
                   const available = engine === "local" ? localAvailable : realtimeAvailable;
                   return (
                     <button
                       key={engine}
                       type="button"
-                      aria-pressed={preferred === engine}
+                      role="radio"
+                      aria-checked={preferred === engine}
+                      aria-label={t(ENGINE_LABEL[engine])}
+                      tabIndex={focusEngine === engine ? 0 : -1}
+                      data-engine={engine}
                       disabled={!available}
                       onClick={() => useCall.getState().prefer(engine)}
                       className={cn(
@@ -311,22 +370,38 @@ export function CallView() {
                   );
                 })}
               </div>
+              {blocked && (
+                <div role="status" className="border-warning/40 bg-warning/10 rounded-lg border px-3 py-2 text-xs">
+                  <p className="font-medium">{t(FAILURE_TEXT[blocked].title)}</p>
+                  <p className="text-muted-foreground mt-0.5">{t(FAILURE_TEXT[blocked].fix)}</p>
+                </div>
+              )}
               {!availability && !availabilityError && <p className="text-muted-foreground text-xs">{t("voice.callStarting")}</p>}
-              {(availabilityError || (!localAvailable && !realtimeAvailable)) && (
+              {(availabilityError || (!localAvailable && !realtimeAvailable) || (!preferredAvailable && otherAvailable)) && (
                 <div role="alert" className="border-error/40 bg-error/10 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-xs">
                   <div className="min-w-0 flex-1">
                     <p className="text-error font-medium">
-                      {availabilityError ? t("voice.callErrNetwork") : localReason ? t(FAILURE_TEXT[localReason.code].title) : t("voice.callNoEngines")}
+                      {availabilityError
+                        ? t("voice.callErrNetwork")
+                        : preferredReason
+                          ? t(FAILURE_TEXT[preferredReason.code].title)
+                          : localReason
+                            ? t(FAILURE_TEXT[localReason.code].title)
+                            : t("voice.callNoEngines")}
                     </p>
                     <p className="text-muted-foreground mt-0.5">
-                      {availabilityError ? t("voice.callFixNetwork") : localReason ? t(FAILURE_TEXT[localReason.code].fix) : t("voice.callNoEnginesFix")}
+                      {availabilityError
+                        ? t("voice.callFixNetwork")
+                        : preferredReason
+                          ? t(FAILURE_TEXT[preferredReason.code].fix)
+                          : localReason
+                            ? t(FAILURE_TEXT[localReason.code].fix)
+                            : t("voice.callNoEnginesFix")}
                     </p>
                   </div>
-                  {availabilityError && (
-                    <Button size="sm" variant="outline" onClick={() => void useCall.getState().loadAvailability()} className="min-h-9">
-                      {t("voice.callRetry")}
-                    </Button>
-                  )}
+                  <Button data-command="call.refresh" size="sm" variant="outline" onClick={refreshAvailability} className="min-h-9">
+                    {t("voice.callRetry")}
+                  </Button>
                 </div>
               )}
             </div>
@@ -362,7 +437,7 @@ export function CallView() {
 
         <footer className="flex items-center justify-center gap-3 border-t px-5 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
           {(call.phase === "idle" || call.phase === "ended") && (
-            <Button data-command="call.start" onClick={() => start(chosen)} disabled={!localAvailable && !realtimeAvailable} className="min-h-11 min-w-40">
+            <Button data-command="call.start" onClick={() => chosen && start(chosen)} disabled={!canStart} className="min-h-11 min-w-40">
               <PhoneIcon className="size-4" aria-hidden />
               {call.phase === "ended" ? t("voice.callStartAgain") : t("voice.callStart")}
             </Button>
@@ -388,7 +463,12 @@ export function CallView() {
             </>
           )}
           {call.phase === "error" && (
-            <Button data-command="call.retry" variant="outline" onClick={() => start(chosen)} className="min-h-11 min-w-32">
+            <Button
+              data-command="call.retry"
+              variant="outline"
+              onClick={() => (canStart && chosen ? start(chosen) : refreshAvailability())}
+              className="min-h-11 min-w-32"
+            >
               <RotateCcwIcon className="size-4" aria-hidden />
               {t("voice.callRetry")}
             </Button>

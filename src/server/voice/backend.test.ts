@@ -38,7 +38,7 @@ after(() => {
 
 const cookie = (user: string) => ({ cookie: `okaychat_session=${user}` });
 
-test("origin checks refuse foreign pages and a missing Origin", () => {
+test("origin checks refuse foreign pages, missing Origins, and crafted spellings", () => {
   assert.equal(voiceOriginAllowed("https://app.test", "https://app.test"), true);
   assert.equal(voiceOriginAllowed("https://public.test", "http://127.0.0.1:8787", "https://public.test"), true);
   // Dev TLS proxy: same host, different scheme, no forwarded-proto header.
@@ -46,6 +46,26 @@ test("origin checks refuse foreign pages and a missing Origin", () => {
   assert.equal(voiceOriginAllowed("https://evil.test", "https://app.test"), false);
   assert.equal(voiceOriginAllowed(undefined, "https://app.test"), false);
   assert.equal(voiceOriginAllowed("https://app.test", "https://app.test", undefined, "cross-site"), false);
+  // A same-host downgrade is only the https page → http proxy case, never the other way round.
+  assert.equal(voiceOriginAllowed("http://app.test", "https://app.test"), false);
+  assert.equal(voiceOriginAllowed("https://app.test", "https://app.test:8443"), false);
+  // Only a canonical serialized http(s) origin is an Origin.
+  for (const crafted of [
+    "ftp://app.test",
+    "file://app.test",
+    "https://user@app.test",
+    "https://user:pass@app.test",
+    "https://app.test/",
+    "https://app.test/path",
+    "https://app.test?x=1",
+    "https://app.test#x",
+    "//app.test",
+    "app.test",
+    "null",
+    "https://app.test:443",
+  ]) {
+    assert.equal(voiceOriginAllowed(crafted, "https://app.test"), false, crafted);
+  }
 });
 
 test("availability reports an absent worker without loading a model", async () => {

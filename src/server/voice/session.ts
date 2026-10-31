@@ -73,6 +73,8 @@ const PARTIAL_STEP = INPUT_BYTES_PER_SECOND;
 const PARTIAL_UNTIL = 20 * INPUT_BYTES_PER_SECOND;
 /** Shorter than this is a cough or a click, not speech. */
 const MIN_UTTERANCE = 0.25 * INPUT_BYTES_PER_SECOND;
+/** One partial transcription at a time per call, even across replaced utterances. */
+const MAX_PARTIAL_JOBS = 1;
 /** Audio frames to the browser: about 0.2 s each at 22 kHz. */
 const AUDIO_CHUNK = 8192;
 /** Over this much unsent data the client is too slow; audio is dropped rather than buffered without bound. */
@@ -101,6 +103,10 @@ export class CallSession {
   /** Cancels every request this call has in flight when it ends. */
   private readonly lifetime = new AbortController();
   private readonly timers: NodeJS.Timeout[] = [];
+  private readonly createdAt: number;
+  /** A final transcription is running; a new utterance start is refused until it answers. */
+  private finalInFlight = false;
+  private partialJobs = 0;
   private startedAt = 0;
   private lastActivity = 0;
   private lastMessage = 0;
@@ -112,8 +118,17 @@ export class CallSession {
 
   constructor(private readonly userId: string, private readonly socket: CallSocket, private readonly deps: CallDeps) {
     this.now = deps.now ?? Date.now;
-    this.lastMessage = this.now();
-    this.timers.push(setTimeout(() => this.phase === "waiting" && this.fail("protocol", "No start message.", true), deps.limits.startSeconds * 1000));
+    this.createdAt = this.now();
+    this.lastMessage = this.createdAt;
+    // The watchdog runs from the upgrade, not only after `ready`. An abandoned connection that keeps a model
+    // warming, or one whose session was revoked while preparing, would otherwise hold the one-call slot for
+    // as long as the warm takes.
+    const startTimer = setTimeout(() => this.phase === "waiting" && this.fail("protocol", "No start message.", true), deps.limits.startSeconds * 1000);
+    startTimer.unref?.();
+    this.timers.push(startTimer);
+    const watch = setInterval(() => this.checkLimits(), 5000);
+    watch.unref?.();
+    this.timers.push(watch);
   }
 
   get ended() {
@@ -170,6 +185,30 @@ export class CallSession {
     this.cleanup();
   }
 
+  /**
+   * The server-side health check, independent of any client message. It covers every phase, so a session that
+   * was revoked while the worker was preparing still ends, and a socket that stops pinging cannot keep streaming.
+   * Exposed for tests with an injected clock.
+   */
+  checkLimits() {
+    if (this.phase === "ended") return;
+    const now = this.now();
+    if (!this.deps.stillSignedIn()) return this.end("unauthorized");
+    if (this.phase === "waiting") {
+      if (now - this.createdAt > this.deps.limits.startSeconds * 1000) this.fail("protocol", "No start message.", true);
+      return;
+    }
+    if (now - this.lastMessage > this.deps.limits.silentSocketSeconds * 1000) return this.end("failed");
+    if (this.phase === "preparing") {
+      if (now - this.createdAt > this.deps.limits.prepareSeconds * 1000) this.fail("worker", "Preparing speech took too long.", true);
+      return;
+    }
+    if (this.phase !== "active") return;
+    if (this.startedAt && now - this.startedAt > this.deps.limits.maxSeconds * 1000) return this.end("duration");
+    // Realtime audio never passes through this server, so an idle timer here would end a working call.
+    if (this.engine === "local" && now - this.lastActivity > this.deps.limits.idleSeconds * 1000) this.end("idle");
+  }
+
   /** Ends the call with a reason the client can show, then closes the socket. */
   end(reason: CallErrorCode | "user") {
     if (this.phase === "ended") return;
@@ -186,6 +225,8 @@ export class CallSession {
     this.speaking = null;
     this.queue.length = 0;
     this.utterance = null;
+    this.finalInFlight = false;
+    this.partialJobs = 0;
     for (const timer of this.timers) clearTimeout(timer);
     if (this.registered && this.deps.registry.delete(this.userId, this)) this.deps.backends.released();
     this.registered = false;
@@ -256,14 +297,9 @@ export class CallSession {
     if (first) {
       this.startedAt = this.now();
       this.lastActivity = this.startedAt;
-      this.timers.push(setTimeout(() => this.end("duration"), limits.maxSeconds * 1000));
-      const watch = setInterval(() => {
-        const now = this.now();
-        if (now - this.lastMessage > limits.silentSocketSeconds * 1000) this.end("failed");
-        // Realtime audio never passes through this server, so an idle timer here would end a working call.
-        else if (this.engine === "local" && now - this.lastActivity > limits.idleSeconds * 1000) this.end("idle");
-      }, 5000);
-      this.timers.push(watch);
+      const duration = setTimeout(() => this.end("duration"), limits.maxSeconds * 1000);
+      duration.unref?.();
+      this.timers.push(duration);
     }
     this.send({
       t: "ready",
@@ -315,6 +351,21 @@ export class CallSession {
 
   private openUtterance(uttId: number) {
     if (!this.localActive()) return;
+    if (this.finalInFlight) {
+      // One final transcription per call. Acknowledge this start instead of leaving the client waiting for a
+      // final that this server will never produce.
+      this.fail("protocol", "Wait for the previous transcript before speaking again.", false);
+      this.send({ t: "final", id: uttId, text: "" });
+      return;
+    }
+    if (this.utterance) {
+      // Repeated starts must not accumulate buffers. Close the previous one without transcribing it and let
+      // its client ack clear the pending utterance there too.
+      const previous = this.utterance;
+      this.utterance = null;
+      this.send({ t: "final", id: previous.id, text: "" });
+      this.fail("protocol", "A new utterance replaced the previous one.", false);
+    }
     this.utterance = { id: uttId, chunks: [], bytes: 0, partialAt: 0, partialRunning: false };
     this.lastActivity = this.now();
   }
@@ -322,6 +373,11 @@ export class CallSession {
   private audio(data: Uint8Array) {
     const utterance = this.utterance;
     if (!utterance || !this.localActive()) return;
+    // PCM16 is two bytes per sample; an odd frame is malformed and must not reach the buffer.
+    if (data.byteLength === 0 || data.byteLength % 2 !== 0) {
+      this.fail("protocol", "Audio frames must be PCM16.", false);
+      return;
+    }
     this.inputBytes += data.byteLength;
     if (this.inputBytes > this.deps.limits.maxInputBytes) return this.fail("limit", "This call sent more audio than one call may.", true);
     utterance.chunks.push(Buffer.from(data));
@@ -336,6 +392,8 @@ export class CallSession {
   }
 
   private async partial(utterance: Utterance) {
+    if (this.partialJobs >= MAX_PARTIAL_JOBS) return;
+    this.partialJobs++;
     utterance.partialRunning = true;
     utterance.partialAt = utterance.bytes;
     const pcm = Buffer.concat(utterance.chunks);
@@ -345,6 +403,7 @@ export class CallSession {
     } catch {
       // A missed partial only means the live transcript lags; the final transcript is what counts.
     } finally {
+      this.partialJobs--;
       utterance.partialRunning = false;
     }
   }
@@ -352,9 +411,16 @@ export class CallSession {
   private async finishUtterance(uttId: number) {
     const utterance = this.utterance;
     if (!utterance || utterance.id !== uttId || !this.localActive()) return;
+    if (this.finalInFlight) {
+      // The start that created this utterance should have been refused; never begin a second job.
+      this.send({ t: "final", id: uttId, text: "" });
+      this.utterance = null;
+      return;
+    }
     this.utterance = null;
     this.lastActivity = this.now();
     if (utterance.bytes < MIN_UTTERANCE) return this.send({ t: "final", id: uttId, text: "" });
+    this.finalInFlight = true;
     const pcm = Buffer.concat(utterance.chunks);
     utterance.chunks = [];
     this.sttSeconds += pcm.byteLength / INPUT_BYTES_PER_SECOND;
@@ -365,6 +431,8 @@ export class CallSession {
       if (this.lifetime.signal.aborted) return;
       this.send({ t: "final", id: uttId, text: "" });
       this.fail(error instanceof CallFailure ? error.code : "worker", error instanceof Error ? error.message : "Speech recognition failed.", false);
+    } finally {
+      this.finalInFlight = false;
     }
   }
 

@@ -131,11 +131,13 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "email.removeAccount", labelKey: "keyboard.cmdEmailRemoveAccount", group: "Settings", keys: [] },
   { id: "email.setDefault", labelKey: "keyboard.cmdEmailSetDefault", group: "Settings", keys: [] },
   { id: "email.confirmRemove", labelKey: "keyboard.cmdEmailConfirmRemove", group: "Settings", keys: [] },
-  // Voice calls: reachable by name; Space/Escape act inside the call view.
-  { id: "call.start", labelKey: "keyboard.cmdCallStart", group: "Chat", keys: [] },
-  { id: "call.mute", labelKey: "keyboard.cmdCallMute", group: "Chat", keys: [] },
-  { id: "call.end", labelKey: "keyboard.cmdCallEnd", group: "Chat", keys: [] },
-  { id: "call.retry", labelKey: "keyboard.cmdCallRetry", group: "Chat", keys: [] },
+  // Voice calls: reachable by name; Space/Escape act inside the call view. They are global so they also run
+  // from the command list while the call's modal is open.
+  { id: "call.start", labelKey: "keyboard.cmdCallStart", group: "Chat", keys: [], scope: "global" },
+  { id: "call.mute", labelKey: "keyboard.cmdCallMute", group: "Chat", keys: [], scope: "global" },
+  { id: "call.end", labelKey: "keyboard.cmdCallEnd", group: "Chat", keys: [], scope: "global" },
+  { id: "call.retry", labelKey: "keyboard.cmdCallRetry", group: "Chat", keys: [], scope: "global" },
+  { id: "call.refresh", labelKey: "keyboard.cmdCallRefresh", group: "Chat", keys: [], scope: "global" },
 ];
 
 export const COMMAND_GROUPS: readonly CommandGroup[] = ["General", "Navigation", "Chat", "Composer", "Messages", "Settings"];

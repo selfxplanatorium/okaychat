@@ -209,4 +209,5 @@ export default {
   cmdCallMute: "Mute or unmute the microphone",
   cmdCallEnd: "End the voice call",
   cmdCallRetry: "Retry the voice call",
+  cmdCallRefresh: "Refresh voice availability",
 } as const;

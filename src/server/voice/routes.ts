@@ -29,9 +29,28 @@ const publicOrigin = () => {
 };
 
 /**
- * A browser always sends Origin on a WebSocket handshake. Same-origin browsing (including through a reverse
- * proxy that sets the request URL) is allowed, as is the configured public origin. A cross-site page, a
- * missing Origin, or `Sec-Fetch-Site: cross-site` is refused. Exported for tests.
+ * A browser always sends a canonical serialized Origin. Accept only `http(s)://host[:port]` with no
+ * credentials, path, query, or fragment; a malformed or crafted value (for example `ftp://…` or
+ * `https://user@host`) is a foreign origin, not an alternate spelling of this one. Exported for tests.
+ */
+export function canonicalOrigin(value: string | undefined): URL | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) return null;
+    // `URL.origin` drops a default port and lowercases the host; a non-canonical spelling never came from a browser.
+    return url.origin === value ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Same-origin browsing (including through a reverse proxy that sets the request URL) is allowed, as is the
+ * configured public origin. The only scheme mismatch allowed is the dev TLS proxy: an `https` page whose
+ * upgrade request is `http` on exactly the same host. A cross-site page, a missing Origin, a malformed
+ * Origin, or `Sec-Fetch-Site: cross-site` is refused. Exported for tests.
  */
 export function voiceOriginAllowed(
   origin: string | undefined,
@@ -41,15 +60,15 @@ export function voiceOriginAllowed(
 ): boolean {
   if (!origin) return false;
   if (secFetchSite === "cross-site") return false;
+  const given = canonicalOrigin(origin);
+  const request = canonicalOrigin(requestOrigin);
+  if (!given || !request) return false;
   if (origin === requestOrigin) return true;
   if (allowedPublicOrigin && origin === allowedPublicOrigin) return true;
-  // Behind a TLS-terminating dev proxy the upgrade request is http while the page is https. The host still
-  // has to match exactly, so a foreign page cannot pass by changing only the scheme.
-  try {
-    return new URL(origin).host === new URL(requestOrigin).host;
-  } catch {
-    return false;
-  }
+  // Behind a TLS-terminating dev proxy the page is https while the upgrade request is http. The host still
+  // has to match exactly and the downgrade is one-way, so a foreign page cannot pass by changing only the
+  // scheme.
+  return given.protocol === "https:" && request.protocol === "http:" && given.host === request.host;
 }
 
 /** The call registry and start limiter are per process; tests build their own `CallSession`s. */

@@ -6,7 +6,8 @@ import type { CallEngine, CallErrorCode } from "@shared/voice";
 export type CallPhase = "idle" | "starting" | "preparing" | "listening" | "thinking" | "speaking" | "interrupted" | "ended" | "error";
 
 export interface CallFailure {
-  code: CallErrorCode | "mic" | "insecure" | "network";
+  /** `chatBusy` and `chatLoading` are web-only: the chat cannot take a spoken turn right now. */
+  code: CallErrorCode | "mic" | "insecure" | "network" | "chatBusy" | "chatLoading";
   /** English diagnostic from the server or the browser; the UI never shows it raw. */
   detail: string;
   fix?: string;

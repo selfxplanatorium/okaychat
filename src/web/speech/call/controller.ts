@@ -1,16 +1,20 @@
 import { useAui } from "@assistant-ui/react";
+import type { ThreadRuntime } from "@assistant-ui/core";
 import { CALL_INPUT_RATE, type CallEngine, type CallErrorCode, type ServerMessage } from "@shared/voice";
 import { useData } from "@/state/data";
-import { VoiceConnection } from "./connection";
+import { VoiceConnection, type VoiceConnectionEvents } from "./connection";
 import { SentenceChunker } from "./chunker";
+import { callBlock, callBlockDetail } from "./guard";
 import { JitterBuffer } from "./jitter";
-import { CallMediaError, Microphone, Player } from "./media";
+import { CallMediaError, Microphone, Player, type CallMicrophone, type CallPlayer } from "./media";
 import { createRealtimeAdapter } from "./realtime";
-import { isBusy, type CallState } from "./state";
+import { isBusy, type CallFailure, type CallState } from "./state";
 import { useCall } from "./store";
 import { VoiceActivity } from "./vad";
 
 type Aui = ReturnType<typeof useAui>;
+type Thread = ThreadRuntime;
+type FailureCode = CallFailure["code"];
 
 /** The call socket's SDP exchange for the Realtime adapter, switched on only while a Realtime call is active. */
 interface RealtimeBridge {
@@ -27,6 +31,23 @@ export const realtimeVoiceAdapter = createRealtimeAdapter({
   },
   onFailure: (reason) => bridge?.onFailure(reason),
 });
+
+/** What the controller needs from the network; `VoiceConnection` in the app, a fake in tests. */
+export interface VoiceLink {
+  open(): Promise<void>;
+  readonly isOpen: boolean;
+  send(message: Parameters<VoiceConnection["send"]>[0]): void;
+  sendAudio(pcm: Int16Array): void;
+  close(): void;
+  abort(): void;
+}
+
+/** Media factories are injectable so the call lifecycle can be tested without a browser. */
+export interface CallControllerDeps {
+  createConnection?: (threadId: string, engine: CallEngine, events: VoiceConnectionEvents) => VoiceLink;
+  createPlayer?: () => CallPlayer;
+  createMicrophone?: () => CallMicrophone;
+}
 
 const textOf = (message: { content: readonly { type: string; text?: string }[] }): string =>
   message.content.flatMap((part) => (part.type === "text" ? [part.text ?? ""] : [])).join("");
@@ -47,11 +68,15 @@ const callFailure = (state: CallState): string => state.failure?.detail ?? "";
  * appends only final transcripts as normal user messages (so the normal chat turn runs with RAG, tools, memory,
  * approvals, compaction, cancellation and usage), speaks the reply sentence by sentence, and cancels both on
  * barge-in. The Realtime engine connects assistant-ui's voice adapter; transcripts land in the same chat.
+ *
+ * Every start owns a generation. Async work from an ended or retried call checks its generation before touching
+ * shared state and cleans up the resources it captured itself, so a late permission prompt, socket, player, or
+ * model warm can never close or mutate the call that replaced it.
  */
 export class CallController {
-  private connection: VoiceConnection | null = null;
-  private microphone: Microphone | null = null;
-  private player: Player | null = null;
+  private connection: VoiceLink | null = null;
+  private microphone: CallMicrophone | null = null;
+  private player: CallPlayer | null = null;
   private vad: VoiceActivity | null = null;
   private unsubscribe: (() => void) | null = null;
   private unsubscribeVolume: (() => void) | null = null;
@@ -67,9 +92,13 @@ export class CallController {
   private readonly chunker = new SentenceChunker();
   private readonly jitter = new JitterBuffer();
   private playerRate = 0;
+  /** True only after the worklet actually exists; an `ensure` in flight is not ready to receive audio. */
+  private playerReady = false;
+  private playerOpening: Promise<void> | null = null;
   private maxUtteranceSeconds = 60;
-  private playerReady: Promise<void> | null = null;
   private readonly waitingAudio: Array<{ id: number; pcm: Uint8Array }> = [];
+  /** `said` arrived while the player was still opening; applied after its audio is queued, in wire order. */
+  private readonly saidPending = new Set<number>();
   private reply = { active: false, messageId: null as string | null, seen: 0, complete: false, after: 0 };
   private drained = true;
   private realtimeConnected = false;
@@ -77,55 +106,110 @@ export class CallController {
   private fallingBack = false;
   private endRequested = false;
   private started = false;
-  private opening = false;
+  private generation = 0;
+  /** The chat this call started in, captured once. Switching chats ends the call and never retargets it. */
+  private boundThread: Thread | null = null;
   private boundThreadKey: string | null = null;
   private offerWaiter: { resolve: (sdp: string) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null;
 
-  constructor(private readonly aui: Aui) {}
+  constructor(private readonly aui: Aui, private readonly deps: CallControllerDeps = {}) {}
 
   get call() {
     return useCall.getState().call;
   }
 
+  private isCurrent(generation: number) {
+    return this.generation === generation && this.started && !this.endRequested;
+  }
+
+  private createPlayer(): CallPlayer {
+    return this.deps.createPlayer?.() ?? new Player();
+  }
+
+  private createMicrophone(): CallMicrophone {
+    return this.deps.createMicrophone?.() ?? new Microphone();
+  }
+
+  private createConnection(threadId: string, engine: CallEngine, events: VoiceConnectionEvents): VoiceLink {
+    return this.deps.createConnection?.(threadId, engine, events) ?? new VoiceConnection(threadId, engine, events);
+  }
+
   /** Opens the socket and asks the server for the chosen engine. */
   async start(engine: CallEngine): Promise<void> {
-    if (this.opening) return;
-    this.opening = true;
+    const phase = this.call.phase;
+    if (this.started && !this.endRequested && phase !== "ended" && phase !== "error" && phase !== "idle") return;
+    const generation = ++this.generation;
     if (this.started) this.cleanup();
     this.endRequested = false;
     this.fallingBack = false;
     this.realtimeConnected = false;
     this.realtimeSeen = false;
-    this.boundThreadKey = this.aui.threadListItem.getState().id;
     this.started = true;
     useCall.getState().dispatch({ type: "open", engine });
     useCall.getState().prefer(engine);
+    const blocked = callBlock(this.aui);
+    if (blocked) {
+      this.fail(blocked, callBlockDetail[blocked]);
+      return;
+    }
+    const item = this.aui.threadListItem;
+    const key = item.getState().id;
+    this.boundThreadKey = key;
+    const runtime = this.aui.threads.__internal_getAssistantRuntime?.();
+    if (!runtime) {
+      this.fail("failed", "This chat could not be bound to the call.");
+      return;
+    }
+    // Capture the runtime for this thread, not the live main-thread proxy: switching chats must never make
+    // the call append into, or cancel a run in, whatever chat happens to be open later.
+    try {
+      this.boundThread = runtime.threads.getById(key);
+    } catch {
+      this.fail("thread", "This chat no longer exists.");
+      return;
+    }
+    // Read-aloud and the call's own TTS must never play together.
+    try {
+      this.boundThread.stopSpeaking();
+    } catch {}
     this.subscribe();
     try {
-      const remoteId = this.aui.threadListItem.getState().remoteId ?? (await this.aui.threadListItem.initialize()).remoteId;
-      if (!this.started || this.endRequested) return;
-      const connection = new VoiceConnection(remoteId, engine, {
-        onMessage: (message) => this.onServerMessage(message),
-        onAudio: (id, pcm) => this.onAudio(id, pcm),
-        onDropped: () => this.fail("network", "The voice connection dropped."),
+      const remoteId = item.getState().remoteId ?? (await item.initialize()).remoteId;
+      if (!this.isCurrent(generation) || item.getState().id !== key) return;
+      const connection = this.createConnection(remoteId, engine, {
+        onMessage: (message) => {
+          if (this.isCurrent(generation)) this.onServerMessage(message);
+        },
+        onAudio: (id, pcm) => {
+          if (this.isCurrent(generation)) this.onAudio(id, pcm);
+        },
+        onDropped: () => {
+          if (this.isCurrent(generation)) this.fail("network", "The voice connection dropped.");
+        },
       });
       this.connection = connection;
       await connection.open();
-      if (!this.started) connection.abort();
+      if (!this.isCurrent(generation) || this.connection !== connection) {
+        connection.abort();
+        return;
+      }
     } catch (error) {
-      if (!this.started) return;
+      if (!this.isCurrent(generation)) return;
       this.fail("network", error instanceof Error ? error.message : "The voice call could not connect.");
-    } finally {
-      this.opening = false;
     }
   }
 
   /** Ends the call, releases every device and network resource, and keeps the summary on screen. */
   end(): void {
-    if (this.endRequested || !this.started) {
+    if (!this.started) {
       useCall.getState().dispatch({ type: "end" });
       return;
     }
+    if (this.endRequested) {
+      useCall.getState().dispatch({ type: "end" });
+      return;
+    }
+    this.generation++;
     this.endRequested = true;
     this.connection?.close();
     this.release();
@@ -134,10 +218,9 @@ export class CallController {
 
   /** Component unmount or tab close: no UI update, no orphaned tracks, socket, WebRTC, or turn. */
   dispose(): void {
-    if (this.started) {
-      this.endRequested = true;
-      this.connection?.close();
-    }
+    this.generation++;
+    if (this.started) this.endRequested = true;
+    this.connection?.close();
     this.cleanup();
     this.started = false;
     // The view is going away (route change, unmount, bfcache): it must not reopen later as a dead call.
@@ -225,7 +308,6 @@ export class CallController {
         this.onFinal(message.id, message.text);
         return;
       case "audio":
-        this.playerRate = message.rate;
         this.preparePlayer(message.rate);
         return;
       case "said":
@@ -249,6 +331,8 @@ export class CallController {
   private onEnded(reason: CallErrorCode | "user") {
     // The server sends fatal reasons (duration, idle, replaced) as `ended` without a separate error.
     if (reason === "user") {
+      this.generation++;
+      this.endRequested = true;
       this.release();
       useCall.getState().dispatch({ type: "end" });
       return;
@@ -259,24 +343,39 @@ export class CallController {
   // ---- local media ----
 
   private async startLocal() {
-    if (!this.started || this.endRequested) return;
-    this.microphone = new Microphone();
-    this.vad = new VoiceActivity(Math.round(CALL_INPUT_RATE * 0.04), {
+    const generation = this.generation;
+    if (!this.isCurrent(generation)) return;
+    if (this.microphone) return;
+    const microphone = this.createMicrophone();
+    const vad = new VoiceActivity(Math.round(CALL_INPUT_RATE * 0.04), {
       sampleRate: CALL_INPUT_RATE,
       maxUtteranceMs: this.maxUtteranceSeconds * 1000,
     });
+    this.microphone = microphone;
+    this.vad = vad;
     try {
-      await this.microphone.start((pcm) => this.onFrame(pcm));
+      await microphone.start((pcm) => {
+        if (this.isCurrent(generation) && this.microphone === microphone) this.onFrame(pcm);
+      });
     } catch (error) {
+      // The call ended or was retried while the permission prompt was open: stop only the microphone this
+      // start owns, and never touch the one the new call may have replaced it with.
+      if (!this.isCurrent(generation) || this.microphone !== microphone) {
+        void microphone.stop();
+        return;
+      }
+      this.microphone = null;
+      this.vad = null;
       const media = error instanceof CallMediaError ? error : new CallMediaError("media", "The microphone could not start.");
       this.fail(media.code === "media" ? "mic" : media.code, media.message);
       return;
     }
-    if (!this.started || this.endRequested) {
-      void this.microphone.stop();
-      this.microphone = null;
+    if (!this.isCurrent(generation) || this.microphone !== microphone) {
+      void microphone.stop();
       return;
     }
+    // A mute chosen while the prompt was open applies as soon as tracks exist.
+    microphone.mute(this.call.muted);
     useCall.getState().dispatch({ type: "listening" });
   }
 
@@ -330,9 +429,7 @@ export class CallController {
     if (!isBusy(this.call.phase)) return;
     this.cancelSpeech();
     this.connection?.send({ t: "say.cancel" });
-    try {
-      this.aui.thread.cancelRun();
-    } catch {}
+    this.cancelOwnedRun();
     this.reply.active = false;
     this.chunker.reset();
     useCall.getState().dispatch({ type: "interrupted" });
@@ -343,6 +440,8 @@ export class CallController {
     // its own message, in the order the server finished them.
     if (!this.awaitingFinal.delete(id)) return;
     const spoken = text.trim();
+    const thread = this.boundThread;
+    if (!thread) return;
     if (!spoken) {
       if (id === this.utterance && this.call.phase === "thinking") useCall.getState().dispatch({ type: "listening" });
       this.flushDeferred();
@@ -351,14 +450,14 @@ export class CallController {
     useCall.getState().dispatch({ type: "turn" });
     // Only assistant messages that appear after this user message belong to this turn; the previous reply is
     // still in the list for a moment and must never be spoken again.
-    this.reply = { active: true, messageId: null, seen: 0, complete: false, after: this.aui.thread.getState().messages.length };
+    this.reply = { active: true, messageId: null, seen: 0, complete: false, after: thread.getState().messages.length };
     this.chunker.reset();
     try {
-      this.aui.thread.append({
+      thread.append({
         role: "user",
         content: [{ type: "text", text: spoken }],
         metadata: { modality: "voice", custom: { voiceCall: "local" } },
-      });
+      } as Parameters<Thread["append"]>[0]);
     } catch {
       this.fail("failed", "The transcript could not be added to this chat.");
       return;
@@ -378,7 +477,9 @@ export class CallController {
 
   private readReply() {
     if (!this.reply.active) return;
-    const state = this.aui.thread.getState();
+    const thread = this.boundThread;
+    if (!thread) return;
+    const state = thread.getState();
     const messages = state.messages;
     let assistant: (typeof messages)[number] | undefined;
     for (let i = messages.length - 1; i >= this.reply.after; i--) {
@@ -428,36 +529,70 @@ export class CallController {
   // ---- playback ----
 
   private preparePlayer(rate: number) {
+    if (this.endRequested || !this.started || rate <= 0) return;
     if (!this.player) {
-      this.player = new Player();
-      this.player.onEmpty = () => {
+      const player = this.createPlayer();
+      this.player = player;
+      player.onEmpty = () => {
+        if (!this.isCurrent(this.generation)) return;
         this.drained = true;
         this.maybeListening();
       };
+      player.onOverflow = () => {
+        if (!this.isCurrent(this.generation)) return;
+        // The worklet's bounded queue dropped audio. Say so rather than truncating a reply silently.
+        useCall.getState().setNotice("limit");
+      };
     }
+    const player = this.player;
     if (this.playerReady && this.playerRate === rate) return;
+    if (this.playerOpening && this.playerRate === rate) return;
     this.playerRate = rate;
-    this.playerReady = this.player
+    this.playerReady = false;
+    const generation = this.generation;
+    let opening!: Promise<void>;
+    opening = player
       .ensure(rate)
       .then(() => {
-        if (!this.started || this.endRequested) return;
-        const waiting = this.waitingAudio.splice(0);
-        for (const item of waiting) this.pushAudio(item.id, item.pcm);
+        if (!this.isCurrent(generation) || this.player !== player || this.playerRate !== rate) return;
+        this.playerReady = true;
+        this.flushPlayer();
       })
-      .catch(() => {
-        // No AudioWorklet (a hardened browser): say so instead of a call that silently never speaks.
-        this.fail("failed", "This browser could not start audio playback.");
+      .catch((error: unknown) => {
+        if (!this.isCurrent(generation) || this.player !== player) return;
+        // No AudioWorklet (a hardened browser) or a suspended context: say so instead of a silent call.
+        this.fail("failed", error instanceof Error ? error.message : "This browser could not start audio playback.");
+      })
+      .finally(() => {
+        if (this.playerOpening === opening) this.playerOpening = null;
       });
+    this.playerOpening = opening;
   }
 
   private onAudio(id: number, pcm: Uint8Array) {
-    if (id <= this.cancelledThrough) return;
-    if (!this.player) return;
-    if (!this.playerReady) {
-      this.waitingAudio.push({ id, pcm });
-      return;
+    if (id <= this.cancelledThrough || this.endRequested) return;
+    // Audio JSON always precedes its binary frames; without a rate there is no player to open.
+    if (this.playerRate <= 0) return;
+    this.waitingAudio.push({ id, pcm });
+    if (this.playerReady) this.flushPlayer();
+  }
+
+  /**
+   * Moves queued audio and `said` acknowledgements into the worklet in the order they arrived. Until the
+   * worklet exists, both are held here (the old code dropped the first sentence because readiness was a
+   * promise but the check was a boolean).
+   */
+  private flushPlayer() {
+    if (!this.playerReady || this.endRequested) return;
+    for (const item of this.waitingAudio.splice(0)) {
+      if (item.id > this.cancelledThrough) this.pushAudio(item.id, item.pcm);
     }
-    this.pushAudio(id, pcm);
+    for (const id of [...this.saidPending]) {
+      this.saidPending.delete(id);
+      if (id > this.cancelledThrough) this.jitter.complete(id);
+    }
+    this.pumpAudio();
+    if (this.pendingAnswers.size === 0 && this.drained) this.maybeListening();
   }
 
   private pushAudio(id: number, pcm: Uint8Array) {
@@ -481,16 +616,23 @@ export class CallController {
 
   private onSaid(id: number, ok: boolean) {
     this.pendingAnswers.delete(id);
-    this.jitter.complete(id);
     if (!ok) useCall.getState().setNotice("voice");
-    this.pumpAudio();
-    if (this.pendingAnswers.size === 0 && this.drained) this.maybeListening();
+    if (this.player && !this.playerReady) {
+      // The audio for this sentence is still waiting for the worklet; completing it now would make the
+      // jitter buffer think the sentence ended before any of it was queued.
+      this.saidPending.add(id);
+    } else if (id > this.cancelledThrough) {
+      this.jitter.complete(id);
+      this.pumpAudio();
+    }
+    if (this.pendingAnswers.size === 0 && this.drained && !this.waitingAudio.length && !this.saidPending.size) this.maybeListening();
   }
 
   private cancelSpeech() {
     this.cancelledThrough = this.sayId;
     this.pendingAnswers.clear();
     this.waitingAudio.length = 0;
+    this.saidPending.clear();
     this.jitter.cancel();
     this.player?.cancel();
     this.drained = true;
@@ -607,8 +749,9 @@ export class CallController {
 
   // ---- failure and cleanup ----
 
-  private fail(code: CallErrorCode | "mic" | "insecure" | "network", detail: string) {
+  private fail(code: FailureCode, detail: string) {
     if (this.endRequested && code !== "thread") return;
+    this.generation++;
     this.endRequested = true;
     this.release();
     // A failed local start leaves the server's call open; close it so it does not hold the one-call slot.
@@ -617,29 +760,50 @@ export class CallController {
     useCall.getState().dispatch({ type: "fail", failure: { code, detail } });
   }
 
+  /** Cancels the run this call started, and only that one. */
+  private cancelOwnedRun() {
+    const thread = this.boundThread;
+    if (!thread || !this.reply.active || this.reply.complete) return;
+    try {
+      if (thread.getState().isRunning) thread.cancelRun();
+    } catch {}
+  }
+
   private release() {
     this.endRequested = true;
     bridge = null;
     this.rejectOffer(new Error("The call ended."));
-    void this.microphone?.stop();
+    const microphone = this.microphone;
     this.microphone = null;
+    void microphone?.stop();
     this.vad = null;
     this.sending = null;
     this.awaitingFinal.clear();
     this.deferredFrames = [];
-    this.cancelSpeech();
-    void this.player?.dispose();
+    // Barge-in state belongs to this call; the player is discarded below.
+    this.cancelledThrough = this.sayId;
+    this.pendingAnswers.clear();
+    this.waitingAudio.length = 0;
+    this.saidPending.clear();
+    this.jitter.cancel();
+    this.drained = true;
+    const player = this.player;
     this.player = null;
-    this.playerReady = null;
+    this.playerReady = false;
+    this.playerOpening = null;
+    this.playerRate = 0;
+    void player?.dispose();
     if (this.realtimeConnected) {
       try {
         this.aui.thread.disconnectVoice();
       } catch {}
       this.realtimeConnected = false;
     }
-    try {
-      if (this.aui.thread.getState().isRunning) this.aui.thread.cancelRun();
-    } catch {}
+    this.cancelOwnedRun();
+    this.reply = { active: false, messageId: null, seen: 0, complete: false, after: 0 };
+    this.chunker.reset();
+    this.boundThread = null;
+    this.boundThreadKey = null;
     useCall.getState().setLevel(0);
   }
 
@@ -651,8 +815,6 @@ export class CallController {
     this.unsubscribe = null;
     this.unsubscribeVolume?.();
     this.unsubscribeVolume = null;
-    this.reply = { active: false, messageId: null, seen: 0, complete: false, after: 0 };
-    this.chunker.reset();
     this.started = false;
   }
 }

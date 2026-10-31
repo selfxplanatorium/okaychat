@@ -42,3 +42,9 @@ test("speech and response events drive listening and speaking modes", () => {
 test("an empty done event does not emit a blank assistant message", () => {
   assert.equal(readRealtimeEvent({ type: "response.audio_transcript.done", transcript: "" }, assistant()), null);
 });
+
+test("a data-channel error becomes a generic failure, never the provider's raw message", () => {
+  const read = readRealtimeEvent({ type: "error", error: { message: "sk-secret account detail" } }, assistant());
+  assert.deepEqual(read, { failure: "The Realtime session reported an error." });
+  assert.equal(JSON.stringify(read).includes("sk-secret"), false);
+});

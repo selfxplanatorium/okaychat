@@ -24,6 +24,8 @@ export interface CallLimits {
   maxQueue: number;
   /** Seconds the client has to send `start` after the upgrade. */
   startSeconds: number;
+  /** Longest time from upgrade to `ready` while the worker warms or downloads models. */
+  prepareSeconds: number;
   /** Call starts per account in `startWindowSeconds`. */
   maxStarts: number;
   startWindowSeconds: number;
@@ -41,6 +43,7 @@ export const callLimits = (): CallLimits => ({
   maxTtsChars: 200_000,
   maxQueue: 64,
   startSeconds: 10,
+  prepareSeconds: 10 * 60,
   maxStarts: 10,
   startWindowSeconds: 600,
   maxMessageBytes: 256 * 1024,

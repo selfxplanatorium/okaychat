@@ -36,7 +36,9 @@ export const useCall = create<CallStore>((set, get) => ({
   loadAvailability: () =>
     (loading ??= (takePrefetched<CallAvailability>("/voice") ?? api<CallAvailability>("/voice"))
       .then((availability) => {
-        set({ availability, availabilityError: false, preferred: availability.local ? get().preferred : "realtime" });
+        // Never move the choice to the cloud just because local is down: local is the private default, and
+        // the view asks the user to pick another engine explicitly.
+        set({ availability, availabilityError: false });
         return availability;
       })
       .catch(() => {

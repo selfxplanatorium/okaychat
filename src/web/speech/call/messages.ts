@@ -25,6 +25,8 @@ export const FAILURE_TEXT: Record<CallFailureCode, { title: PlainMessageKey; fix
   protocol: { title: "voice.callErrProtocol", fix: "voice.callFixProtocol" },
   unauthorized: { title: "voice.callErrUnauthorized", fix: "voice.callFixUnauthorized" },
   failed: { title: "voice.callErrFailed", fix: "voice.callFixFailed" },
+  chatBusy: { title: "voice.callErrChatBusy", fix: "voice.callFixChatBusy" },
+  chatLoading: { title: "voice.callErrChatLoading", fix: "voice.callFixChatLoading" },
 };
 
 /** A non-fatal server notice; these never stop the call. */

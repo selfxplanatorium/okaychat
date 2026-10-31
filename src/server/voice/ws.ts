@@ -10,10 +10,17 @@ import type { WebSocketLike, WebSocketServerLike } from "@hono/node-server";
 
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const utf8 = new TextDecoder("utf-8", { fatal: true });
+const closeUtf8 = new TextDecoder("utf-8", { fatal: true });
+const MAX_FRAGMENTS = 1024;
+
+/** RFC 6455 §7.4: 1004–1006 and 1015 are reserved for the protocol, and 1016–2999 are unassigned. */
+const validCloseCode = (code: number) => (code >= 1000 && code <= 1003) || (code >= 1007 && code <= 1014) || (code >= 3000 && code <= 4999);
 
 export interface MiniSocketOptions {
   /** Largest message, after reassembling fragments. Larger ones close the socket with 1009. */
   maxPayload: number;
+  /** Most fragments one message may use; an endless run of empty continuations would otherwise grow the array. */
+  maxFragments?: number;
 }
 
 type ReadyState = 0 | 1 | 2 | 3;
@@ -27,9 +34,11 @@ export class MiniWebSocket extends EventEmitter implements WebSocketLike {
   private fragmentBinary = false;
   private closeSent = false;
   private closed = false;
+  private readonly maxFragments: number;
 
   constructor(private readonly socket: Duplex, head: Buffer, private readonly options: MiniSocketOptions) {
     super();
+    this.maxFragments = Math.max(1, options.maxFragments ?? MAX_FRAGMENTS);
     socket.on("data", (data: Buffer) => this.receive(data));
     socket.on("close", () => this.finish(1006, ""));
     socket.on("error", (error) => {
@@ -115,10 +124,14 @@ export class MiniWebSocket extends EventEmitter implements WebSocketLike {
       if (length === 126) {
         if (this.buffer.length < 4) return;
         length = this.buffer.readUInt16BE(2);
+        // The 16-bit form is only legal for lengths of 126 or more.
+        if (length < 126) return this.terminate(1002);
         offset = 4;
       } else if (length === 127) {
         if (this.buffer.length < 10) return;
         const big = this.buffer.readBigUInt64BE(2);
+        // The high bit must be zero (RFC 6455 §5.2), and the 64-bit form is only legal above 65535.
+        if ((big >> 63n) === 1n || big < 65536n) return this.terminate(1002);
         if (big > BigInt(this.options.maxPayload)) return this.terminate(1009);
         length = Number(big);
         offset = 10;
@@ -139,6 +152,7 @@ export class MiniWebSocket extends EventEmitter implements WebSocketLike {
     switch (opcode) {
       case 0x0: // continuation
         if (!this.fragments.length) return this.terminate(1002);
+        if (this.fragments.length >= this.maxFragments) return this.terminate(1009);
         this.fragments.push(payload);
         this.fragmentBytes += payload.length;
         if (fin) this.deliver(Buffer.concat(this.fragments), this.fragmentBinary);
@@ -147,13 +161,26 @@ export class MiniWebSocket extends EventEmitter implements WebSocketLike {
       case 0x2:
         if (this.fragments.length) return this.terminate(1002);
         if (fin) return this.deliver(payload, opcode === 0x2);
+        if (this.maxFragments < 1) return this.terminate(1009);
         this.fragments = [payload];
         this.fragmentBytes = payload.length;
         this.fragmentBinary = opcode === 0x2;
         return;
       case 0x8: {
-        const code = payload.length >= 2 ? payload.readUInt16BE(0) : 1005;
-        const reason = payload.length > 2 ? payload.subarray(2).toString("utf8") : "";
+        if (payload.length === 1) return this.terminate(1002);
+        let code = 1005;
+        let reason = "";
+        if (payload.length >= 2) {
+          code = payload.readUInt16BE(0);
+          if (!validCloseCode(code)) return this.terminate(1002);
+          if (payload.length > 2) {
+            try {
+              reason = closeUtf8.decode(payload.subarray(2));
+            } catch {
+              return this.terminate(1007);
+            }
+          }
+        }
         if (this.readyState === 1) {
           this.readyState = 2;
           this.sendClose(code === 1005 ? 1000 : code, "");
@@ -176,11 +203,15 @@ export class MiniWebSocket extends EventEmitter implements WebSocketLike {
     this.fragments = [];
     this.fragmentBytes = 0;
     if (!binary) {
+      let text: string;
       try {
-        this.emit("message", utf8.decode(data), false);
+        text = utf8.decode(data);
       } catch {
         this.terminate(1007);
+        return;
       }
+      // A handler that throws is a server bug, not bad client UTF-8; let it surface instead of reporting 1007.
+      this.emit("message", text, false);
       return;
     }
     this.emit("message", data, true);

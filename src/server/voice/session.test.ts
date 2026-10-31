@@ -51,7 +51,7 @@ class Socket {
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-function make(overrides: { speech?: LocalSpeech | null; limits?: Partial<CallLimits>; threadOwned?: boolean } = {}) {
+function make(overrides: { speech?: LocalSpeech | null; limits?: Partial<CallLimits>; threadOwned?: boolean; now?: () => number; signedIn?: () => boolean } = {}) {
   const socket = new Socket();
   const b = backends(overrides.speech);
   const registry = new CallRegistry();
@@ -62,9 +62,10 @@ function make(overrides: { speech?: LocalSpeech | null; limits?: Partial<CallLim
     registry,
     starts: new StartLimiter(10, 60_000),
     threadOwned: () => overrides.threadOwned ?? true,
-    stillSignedIn: () => true,
+    stillSignedIn: overrides.signedIn ?? (() => true),
     maxRecordingSeconds: () => 600,
     onUsage: (entry) => usage.push(entry),
+    ...(overrides.now ? { now: overrides.now } : {}),
   };
   const session = new CallSession("alice", socket, deps);
   return { session, socket, deps, registry, usage, released: b.released };
@@ -306,4 +307,169 @@ test("start is required first and cannot be repeated", async () => {
   other.session.onMessage(JSON.stringify({ t: "start", threadId: "thr_1", engine: "local" }));
   assert.equal(other.socket.of("error").at(-1)?.code, "protocol");
   other.session.onClose();
+});
+
+test("only one final transcription runs per call and refused starts are acknowledged", async () => {
+  let finals = 0;
+  let release: ((text: string) => void) | null = null;
+  const transcribe: LocalSpeech["transcribe"] = (_pcm, partial) => {
+    if (partial) return Promise.resolve(null);
+    finals++;
+    return new Promise((resolve) => {
+      release = resolve;
+    });
+  };
+  const { session, socket } = make({ speech: fakeSpeech({ transcribe }) });
+  session.onMessage(JSON.stringify({ t: "start", threadId: "thr_1", engine: "local" }));
+  await tick();
+  await tick();
+
+  session.onMessage(JSON.stringify({ t: "utt.start", id: 1 }));
+  session.onMessage(new Uint8Array(10_000));
+  session.onMessage(JSON.stringify({ t: "utt.end", id: 1 }));
+  await tick();
+  assert.equal(finals, 1);
+
+  // The client cannot start another utterance until the transcript answers; it must not hang waiting.
+  for (const id of [2, 3]) {
+    session.onMessage(JSON.stringify({ t: "utt.start", id }));
+    session.onMessage(new Uint8Array(10_000));
+    session.onMessage(JSON.stringify({ t: "utt.end", id }));
+  }
+  await tick();
+  assert.equal(finals, 1);
+  assert.deepEqual(socket.of("final").map((final) => [final.id, final.text]), [
+    [2, ""],
+    [3, ""],
+  ]);
+  assert.equal(socket.of("error").filter((error) => error.code === "protocol" && !error.fatal).length, 2);
+
+  release?.("first answer");
+  await tick();
+  assert.deepEqual(socket.of("final").at(-1), { t: "final", id: 1, text: "first answer" });
+  session.onClose();
+});
+
+test("replacing an utterance does not start a second partial job or keep the old buffer", async () => {
+  let partialCalls = 0;
+  const transcribe: LocalSpeech["transcribe"] = (_pcm, partial) => {
+    if (!partial) return Promise.resolve("");
+    partialCalls++;
+    // A worker that never answers must not allow a second partial to pile up.
+    return new Promise(() => {});
+  };
+  const { session, socket } = make({ speech: fakeSpeech({ transcribe }) });
+  session.onMessage(JSON.stringify({ t: "start", threadId: "thr_1", engine: "local" }));
+  await tick();
+  await tick();
+
+  session.onMessage(JSON.stringify({ t: "utt.start", id: 1 }));
+  session.onMessage(new Uint8Array(32_000));
+  await tick();
+  assert.equal(partialCalls, 1);
+
+  session.onMessage(JSON.stringify({ t: "utt.start", id: 2 }));
+  assert.deepEqual(socket.of("final").at(-1), { t: "final", id: 1, text: "" });
+  session.onMessage(new Uint8Array(32_000));
+  await tick();
+  assert.equal(partialCalls, 1);
+  assert.equal(socket.of("error").at(-1)?.code, "protocol");
+  assert.equal(session.ended, false);
+  session.onClose();
+});
+
+test("odd-sized audio frames are refused before buffering", async () => {
+  const { session, socket } = make();
+  session.onMessage(JSON.stringify({ t: "start", threadId: "thr_1", engine: "local" }));
+  await tick();
+  await tick();
+  session.onMessage(JSON.stringify({ t: "utt.start", id: 4 }));
+  session.onMessage(new Uint8Array(3));
+  assert.equal(socket.of("error").at(-1)?.code, "protocol");
+  assert.equal(socket.of("error").at(-1)?.fatal, false);
+  session.onMessage(JSON.stringify({ t: "utt.end", id: 4 }));
+  await tick();
+  assert.deepEqual(socket.of("final").at(-1), { t: "final", id: 4, text: "" });
+  session.onClose();
+});
+
+test("the watchdog ends a revoked session without any client ping", async () => {
+  let now = 1_000_000;
+  let signedIn = true;
+  const { session, socket } = make({ now: () => now, signedIn: () => signedIn });
+  session.onMessage(JSON.stringify({ t: "start", threadId: "thr_1", engine: "local" }));
+  await tick();
+  await tick();
+  assert.equal(socket.of("ready").length, 1);
+  signedIn = false;
+  now += 20_000;
+  session.checkLimits();
+  assert.equal(session.ended, true);
+  assert.equal(socket.of("ended").at(-1)?.reason, "unauthorized");
+});
+
+test("the watchdog also covers preparing, revocation, and the preparation ceiling", async () => {
+  const never = new Promise<void>(() => {});
+  let now = 5_000_000;
+  let signedIn = true;
+  const stuck = make({ speech: fakeSpeech({ warm: () => never }), now: () => now, signedIn: () => signedIn });
+  stuck.session.onMessage(JSON.stringify({ t: "start", threadId: "thr_1", engine: "local" }));
+  await tick();
+  assert.equal(stuck.socket.of("preparing").length, 1);
+  // No ping and no message for the silent window: an abandoned warm must not hold the call.
+  now += 46_000;
+  stuck.session.checkLimits();
+  assert.equal(stuck.session.ended, true);
+  assert.equal(stuck.socket.of("ended").at(-1)?.reason, "failed");
+
+  now = 6_000_000;
+  signedIn = true;
+  const revoked = make({ speech: fakeSpeech({ warm: () => never }), now: () => now, signedIn: () => signedIn });
+  revoked.session.onMessage(JSON.stringify({ t: "start", threadId: "thr_1", engine: "local" }));
+  await tick();
+  signedIn = false;
+  revoked.session.checkLimits();
+  assert.equal(revoked.session.ended, true);
+  assert.equal(revoked.socket.of("ended").at(-1)?.reason, "unauthorized");
+
+  now = 7_000_000;
+  const tooLong = make({ speech: fakeSpeech({ warm: () => never }), now: () => now, limits: { prepareSeconds: 10 } });
+  tooLong.session.onMessage(JSON.stringify({ t: "start", threadId: "thr_1", engine: "local" }));
+  await tick();
+  now += 11_000;
+  tooLong.session.checkLimits();
+  assert.equal(tooLong.session.ended, true);
+  assert.equal(tooLong.socket.of("error").at(-1)?.code, "worker");
+});
+
+test("a final that answers after the call ended is never sent", async () => {
+  let release: ((text: string) => void) | null = null;
+  const transcribe: LocalSpeech["transcribe"] = () =>
+    new Promise((resolve) => {
+      release = resolve;
+    });
+  const { session, socket } = make({ speech: fakeSpeech({ transcribe }) });
+  session.onMessage(JSON.stringify({ t: "start", threadId: "thr_1", engine: "local" }));
+  await tick();
+  await tick();
+  session.onMessage(JSON.stringify({ t: "utt.start", id: 7 }));
+  session.onMessage(new Uint8Array(10_000));
+  session.onMessage(JSON.stringify({ t: "utt.end", id: 7 }));
+  await tick();
+  session.onClose();
+  release?.("late answer");
+  await tick();
+  assert.equal(socket.of("final").length, 0);
+});
+
+test("the duration cap still applies with the constructor watchdog", async () => {
+  let now = 9_000_000;
+  const { session, socket } = make({ now: () => now, limits: { maxSeconds: 30 } });
+  session.onMessage(JSON.stringify({ t: "start", threadId: "thr_1", engine: "local" }));
+  await tick();
+  await tick();
+  now += 31_000;
+  session.checkLimits();
+  assert.equal(session.ended, true);
+  assert.equal(socket.of("ended").at(-1)?.reason, "duration");
 });

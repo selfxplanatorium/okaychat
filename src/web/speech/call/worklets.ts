@@ -35,24 +35,44 @@ registerProcessor("call-capture", CallCaptureProcessor);
 /**
  * Gapless playback: a FIFO of sentence chunks in arrival order. A sentence is pushed as Float32; chunks play
  * back to back with no overlap because only one queue is consumed. "cancel" clears it immediately for barge-in.
+ *
+ * The FIFO is bounded by duration, not just by count: the server can synthesize a whole reply faster than it
+ * can be spoken, so without a cap the queue would grow without limit. A chunk that would exceed the cap is
+ * dropped and reported ("overflow"), so the caller can tell the user audio was lost instead of truncating
+ * silently. `offset` belongs to the chunk being played and is only reset when advancing or cancelling; an
+ * arriving chunk must never rewind it, or the current samples would play twice.
  */
 export const PLAYBACK_WORKLET = `
 class CallPlaybackProcessor extends AudioWorkletProcessor {
-  constructor() {
+  constructor(options) {
     super();
+    const settings = (options && options.processorOptions) || {};
+    const maxMs = typeof settings.maxQueueMs === "number" && settings.maxQueueMs > 0 ? settings.maxQueueMs : 30000;
+    this.maxQueued = Math.max(1, Math.round(sampleRate * maxMs / 1000));
     this.queue = [];
+    // Includes the unplayed tail of this.current.
+    this.queued = 0;
     this.current = null;
     this.offset = 0;
     this.empty = true;
     this.port.onmessage = (event) => {
       const data = event.data;
+      if (!data) return;
       if (data.type === "chunk") {
-        this.queue.push(data.samples);
-        this.offset = 0;
+        const samples = data.samples;
+        // An empty chunk has nothing to play and must not accumulate in the queue.
+        if (!samples || !samples.length) return;
+        if (this.queued + samples.length > this.maxQueued) {
+          this.port.postMessage({ type: "overflow", dropped: samples.length, queued: this.queued });
+          return;
+        }
+        this.queue.push(samples);
+        this.queued += samples.length;
       } else if (data.type === "cancel") {
         this.queue.length = 0;
         this.current = null;
         this.offset = 0;
+        this.queued = 0;
         this.empty = true;
       }
     };
@@ -72,6 +92,7 @@ class CallPlaybackProcessor extends AudioWorkletProcessor {
       for (let i = 0; i < take; i++) output[written + i] = this.current[this.offset + i];
       written += take;
       this.offset += take;
+      this.queued -= take;
       if (this.offset >= this.current.length) this.current = null;
     }
     if (written === 0 && !this.empty) {

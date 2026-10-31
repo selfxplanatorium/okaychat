@@ -5,10 +5,32 @@ import { loadCallWorklets } from "./worklets";
 // server at 16 kHz even when the browser ignores the AudioContext rate (Safari), and keeps Piper audio at the
 // right pitch when a context cannot open at the WAV's rate.
 
+/** A microphone permission prompt that never answers must not leave the call screen on "Listening". */
+export const MIC_SETUP_TIMEOUT_MS = 20_000;
+/** How much synthesized audio the playback worklet may hold; longer replies are dropped with a notice. */
+export const PLAYER_QUEUE_MS = 30_000;
+
 export class CallMediaError extends Error {
   constructor(readonly code: "mic" | "insecure" | "media", message: string) {
     super(message);
   }
+}
+
+/** The playback half the controller drives; `Player` is the real one, tests use a fake. */
+export interface CallPlayer {
+  onEmpty: (() => void) | null;
+  onOverflow: (() => void) | null;
+  ensure(rate: number): Promise<void>;
+  push(pcm: Uint8Array): void;
+  cancel(): void;
+  dispose(): Promise<void>;
+}
+
+/** The microphone half the controller drives; `Microphone` is the real one, tests use a fake. */
+export interface CallMicrophone {
+  start(onFrame: (pcm: Int16Array) => void): Promise<void>;
+  mute(muted: boolean): void;
+  stop(): Promise<void>;
 }
 
 /** Linear resampling of Int16 PCM. Returns the input unchanged when the rates match. */
@@ -36,7 +58,18 @@ function audioContext(options: AudioContextOptions): AudioContext {
   }
 }
 
-export class Microphone {
+async function running(context: AudioContext, what: string): Promise<void> {
+  try {
+    await context.resume();
+  } catch {
+    throw new CallMediaError("media", `${what} could not start.`);
+  }
+  // A context that stays suspended after the call's own click would play nothing at all; failing loudly beats
+  // a call that looks connected and stays silent.
+  if (context.state !== "running") throw new CallMediaError("media", `${what} is suspended.`);
+}
+
+export class Microphone implements CallMicrophone {
   private context: AudioContext | null = null;
   private stream: MediaStream | null = null;
   private node: AudioWorkletNode | null = null;
@@ -52,14 +85,24 @@ export class Microphone {
     this.context = audioContext({ sampleRate: CALL_INPUT_RATE, latencyHint: "interactive" });
     await loadCallWorklets(this.context);
     if (this.stopped) return this.stop();
+    const pending = navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new CallMediaError("mic", "The microphone did not answer in time.")), MIC_SETUP_TIMEOUT_MS);
+    });
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
+      this.stream = await Promise.race([pending, timeout]);
     } catch (error) {
       await this.stop();
+      // A permission prompt that answers after the deadline must not leave a live track behind.
+      pending.then((stream) => stream.getTracks().forEach((track) => track.stop())).catch(() => {});
+      if (error instanceof CallMediaError) throw error;
       const name = (error as Error).name;
       throw new CallMediaError("mic", name === "NotAllowedError" ? "Microphone access was denied." : "No microphone is available.");
+    } finally {
+      if (timer) clearTimeout(timer);
     }
     if (this.stopped) return this.stop();
     const context = this.context;
@@ -75,7 +118,12 @@ export class Microphone {
       const frame = new Int16Array(event.data);
       onFrame(resampleInt16(frame, context.sampleRate, CALL_INPUT_RATE));
     };
-    await context.resume().catch(() => {});
+    try {
+      await running(context, "Microphone capture");
+    } catch (error) {
+      await this.stop();
+      throw error;
+    }
   }
 
   mute(muted: boolean) {
@@ -95,44 +143,67 @@ export class Microphone {
   }
 }
 
-export class Player {
+export class Player implements CallPlayer {
   private context: AudioContext | null = null;
   private node: AudioWorkletNode | null = null;
   private rate = 0;
-  private opening: Promise<void> | null = null;
+  private chain: Promise<void> = Promise.resolve();
   private disposed = false;
   /** Fires when the worklet ran dry; the controller uses it to return to listening. */
   onEmpty: (() => void) | null = null;
+  /** Fires when the worklet's bounded FIFO had to drop audio. */
+  onOverflow: (() => void) | null = null;
 
   get sampleRate() {
     return this.context?.sampleRate ?? this.rate;
   }
 
-  async ensure(rate: number): Promise<void> {
+  ensure(rate: number): Promise<void> {
+    if (this.disposed) return Promise.resolve();
+    // Serialize rate changes: two callers must not build two contexts, and the later rate wins.
+    const task = this.chain.then(() => this.openContext(rate));
+    this.chain = task.catch(() => {});
+    return task;
+  }
+
+  private async openContext(rate: number): Promise<void> {
     if (this.disposed) return;
-    if (this.rate === rate && this.context) return;
-    if (this.opening) return this.opening;
+    if (this.context && this.rate === rate) return;
     this.rate = rate;
-    this.opening = (async () => {
-      await this.disposeContext();
-      const context = audioContext({ sampleRate: rate });
+    await this.disposeContext();
+    const context = audioContext({ sampleRate: rate });
+    let node: AudioWorkletNode | null = null;
+    try {
       await loadCallWorklets(context);
       if (this.disposed) {
         await context.close().catch(() => {});
         return;
       }
-      const node = new AudioWorkletNode(context, "call-playback", { numberOfOutputs: 1, outputChannelCount: [1] });
+      node = new AudioWorkletNode(context, "call-playback", {
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+        processorOptions: { maxQueueMs: PLAYER_QUEUE_MS },
+      });
       node.port.onmessage = (event: MessageEvent<{ type?: string }>) => {
-        if (event.data?.type === "empty" && !this.disposed) this.onEmpty?.();
+        if (this.disposed) return;
+        if (event.data?.type === "empty") this.onEmpty?.();
+        else if (event.data?.type === "overflow") this.onOverflow?.();
       };
       node.connect(context.destination);
       this.context = context;
       this.node = node;
-      await context.resume().catch(() => {});
-    })().finally(() => {
-      this.opening = null;
-    });
-    return this.opening;
+      await running(context, "Audio playback");
+    } catch (error) {
+      // No worklet or a suspended context: release the context here, not on the next call.
+      node?.port.close();
+      node?.disconnect();
+      if (this.context === context) {
+        this.context = null;
+        this.node = null;
+      }
+      await context.close().catch(() => {});
+      throw error;
+    }
   }
 
   push(pcm: Uint8Array): void {
