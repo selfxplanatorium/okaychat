@@ -37,12 +37,11 @@ promotes the oldest remaining one. The default cannot be cleared to nothing.
 ## Tools
 
 `email_folders` doubles as the account inventory: with no `accountId` it returns every owned
-account's id, label, address, default marker, read/send switches, and signature, plus the default
-account's folders when that account can be read. If the default's read switch is off it still returns
-the inventory (and no folders), so the model can pick any other account instead of failing. Every
-write and send tool requires an explicit `accountId`; only the read tools fall back to the default.
-The inventory is scanned and enveloped like mail content because a signature and labels are
-user-supplied text.
+account's id, label, address, default marker, read/send switches, and signature. Pass an explicit
+account id to fetch folders; inventory itself opens no mail connection, so an unreachable or
+read-disabled default cannot hide the other accounts. Send/reply require an explicit `accountId`;
+list/search/read can fall back to the default. The inventory is scanned and enveloped like mail
+content because signatures and labels are user-supplied text.
 
 `email_search` maps the model-facing `query` field to IMAP `TEXT`, and keeps `from`, `subject`,
 `since`, `unseen`, and `limit`. `email_read` returns the opaque mailbox+UIDVALIDITY+UID handle as
@@ -172,7 +171,7 @@ yet.
 - `accounts.test.ts`: encryption round-trip, ownership, blank-password edit, host-change refusal,
   defaults, validation, account cap, host guard.
 - `discover.test.ts`: preset order and Proton, namespaced autoconfig with substitutions, autodiscover
-  XML/JSON, SRV ordering, heuristic order, host refusal.
+  XML/JSON, complete HTTP-to-SRV fallback ordering, SRV ordering, heuristic order, host refusal.
 - `mime.test.ts`: header-injection rejection, unicode round-trip, quoted-printable/base64, multipart
   parsing, filename/MIME sanitation, HTML-to-text.
 - `protocol.test.ts`: in-process `node:net`/`node:tls` mock IMAP and SMTP servers for connect, real

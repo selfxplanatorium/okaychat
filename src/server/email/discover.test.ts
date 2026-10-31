@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import dns from "node:dns/promises";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -173,4 +174,36 @@ test("discovery documents refuse an HTTPS downgrade and stop after bounded redir
   t.mock.method(globalThis, "fetch", async () => new Response("<clientConfig/>", { status: 200, headers: { "content-type": "application/xml" } }));
   const bytes = await fetchBounded("admin", "https://autoconfig.example.test/final.xml", {}, 1024);
   assert.match(new TextDecoder().decode(bytes), /clientConfig/);
+});
+
+test("discovery falls through all HTTP endpoints in order before SRV, preserving the first side found", async (t) => {
+  const requests: Array<{ url: string; method: string }> = [];
+  t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    requests.push({ url, method: init?.method ?? "GET" });
+    // The last Thunderbird source finds only IMAP; later sources must not overwrite it.
+    if (url.includes("thunderbird.net")) {
+      return new Response(XML.replace(/<outgoingServer[\s\S]*?<\/outgoingServer>/, ""));
+    }
+    if (url.endsWith("autodiscover.xml")) return new Response("bad XML");
+    return new Response(null, { status: 404 });
+  });
+  const lookups: string[] = [];
+  t.mock.method(dns, "resolveSrv", async (name: string) => {
+    lookups.push(name);
+    return [{ name: name.startsWith("_imaps") ? "other-imap.example.test" : "smtp.example.test", port: name.startsWith("_imaps") ? 993 : 465, priority: 0, weight: 1 }];
+  });
+  const result = await discoverEmail({ userId: "admin", email: "alice@example.test" });
+  assert.deepEqual(requests, [
+    { url: "https://autoconfig.example.test/mail/config-v1.1.xml?emailaddress=alice%40example.test", method: "GET" },
+    { url: "https://example.test/.well-known/autoconfig/mail/config-v1.1.xml?emailaddress=alice%40example.test", method: "GET" },
+    { url: "https://autoconfig.thunderbird.net/v1.1/example.test", method: "GET" },
+    { url: "https://autodiscover.example.test/autodiscover/autodiscover.xml", method: "POST" },
+    { url: "https://autodiscover.example.test/autodiscover/autodiscover.json?Email=alice%40example.test&Protocol=IMAP", method: "GET" },
+  ]);
+  assert.deepEqual(lookups, ["_imaps._tcp.example.test", "_imap._tcp.example.test", "_submissions._tcp.example.test", "_submission._tcp.example.test"]);
+  assert.equal(result.imap?.host, "imap.example.test", "the first usable IMAP source wins");
+  assert.equal(result.smtp?.host, "smtp.example.test");
+  assert.equal(result.confidence, "medium");
+  assert.equal(result.attempts.some((attempt) => attempt.stage === "heuristic"), false, "no guesses after both sides were found");
 });

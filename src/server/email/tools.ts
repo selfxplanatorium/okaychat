@@ -133,9 +133,8 @@ export function emailTools(opts: { userId: string; temporary?: boolean; signal?:
           };
           return { ...output, ...scan(output) };
         }
-        const account = fallback;
-        const folders = await listFolders(accountSecrets(userId, account.id), opts.tls);
-        const output = { accounts, account: publicAccount(account), folders };
+        // Inventory must remain available even when the default server is unreachable.
+        const output = { accounts, account: publicAccount(fallback), folders: [] as Awaited<ReturnType<typeof listFolders>> };
         return { ...output, ...scan(output) };
       }
       const account = readAccount(id);

@@ -50,15 +50,16 @@ function clientFor(secrets: EmailSecrets, target: { host: string; servername?: s
 
 async function withClient<T>(secrets: EmailSecrets, run: (client: ImapFlow) => Promise<T>, tls?: ConnectionOptions): Promise<T> {
   const id = secrets.account.id;
-  const count = active.get(id) ?? 0;
-  if (count >= MAX_PER_ACCOUNT) {
-    throw new EmailError("connections", "This email account already has two open connections. Wait for the current request to finish and try again.");
-  }
   // Re-check the live admin role and resolve/pin the host immediately before every connection,
   // including verify, reply, and attachment downloads.
   const target = await emailConnectTarget(secrets.userId, secrets.imap.host).catch((error: unknown) => {
     throw mapEmailError(error, "IMAP server");
   });
+  // DNS can yield to another call; reserve against the current count after it finishes.
+  const count = active.get(id) ?? 0;
+  if (count >= MAX_PER_ACCOUNT) {
+    throw new EmailError("connections", "This email account already has two open connections. Wait for the current request to finish and try again.");
+  }
   active.set(id, count + 1);
   const client = clientFor(secrets, target, tls);
   try {
@@ -187,6 +188,7 @@ export async function listMessages(secrets: EmailSecrets, opts: { mailbox?: stri
       const box = client.mailbox;
       if (!box) throw new EmailError("not_found", `Folder "${mailbox}" is not available.`);
       const uidValidity = String(box.uidValidity);
+      if (!box.exists) return { mailbox, messages: [] };
       const messages: EmailMessageSummary[] = [];
       const query = summaryQuery;
       if (opts.unreadOnly) {

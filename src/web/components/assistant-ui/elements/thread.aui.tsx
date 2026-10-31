@@ -1402,12 +1402,12 @@ const AssistantMessage: FC = () => {
                   />
                 );
               case "tool-call":
-                // A custom card replaces the fallback, but the fallback also owns the approval
-                // controls (Allow/Deny, reason, receipt). Without this a custom UI would hide them.
+                // Email cards show the reviewed payload; the existing fallback supplies their
+                // Allow/Deny controls. Other custom tools retain their own approval UI.
                 return part.toolUI ? (
                   <>
                     {part.toolUI}
-                    {part.approval ? <ToolFallback.Approval {...part} /> : null}
+                    {part.approval && (part.toolName === "email_send" || part.toolName === "email_reply") ? <ToolFallback.Approval {...part} /> : null}
                   </>
                 ) : (
                   <ToolFallbackComponent {...part} />

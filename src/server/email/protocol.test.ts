@@ -325,3 +325,19 @@ test("error mapping names certificate, unreachable, auth, and rate limit without
   assert.equal(mapEmailError(new Error("421 too many requests, try again later")).code, "rate_limited");
   assert.doesNotMatch(mapEmailError({ authenticationFailed: true, message: "LOGIN failed for secret-user" }).message, /secret-user/);
 });
+
+test("simultaneous IMAP calls reserve at most two slots after DNS yields", async () => {
+  const server = await startImapServer();
+  try {
+    const config = secrets("concurrent", server.port, 1);
+    const results = await Promise.allSettled(Array.from({ length: 3 }, () => listFolders(config, tls)));
+    assert.equal(results.filter((result) => result.status === "fulfilled").length, 2);
+    const refused = results.find((result) => result.status === "rejected");
+    assert.ok(refused?.status === "rejected" && refused.reason instanceof EmailError && refused.reason.code === "connections");
+    assert.equal(server.connections, 2);
+    await listFolders(config, tls);
+    assert.equal(server.connections, 3, "completed calls release their slots");
+  } finally {
+    await server.close();
+  }
+});

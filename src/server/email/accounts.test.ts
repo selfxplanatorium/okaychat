@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import dns from "node:dns/promises";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -9,7 +10,7 @@ process.env.OKAYCHAT_DATA_DIR = dataDir;
 process.env.OKAYCHAT_SECRET = "email-accounts-test-secret-only-not-for-production";
 const { db } = await import("../db.js");
 const { decrypt, sha256 } = await import("../crypto.js");
-const { assertEmailHost, accountSecrets, createAccount, deleteAccount, getAccount, listAccounts, setDefaultAccount, updateAccount } = await import("./accounts.js");
+const { emailConnectTarget, assertEmailHost, accountSecrets, createAccount, deleteAccount, getAccount, listAccounts, setDefaultAccount, updateAccount } = await import("./accounts.js");
 
 for (const [id, role] of [["alice", "admin"], ["bob", "user"]] as const) {
   db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, `${id}@example.test`, id, "unused", role, Date.now());
@@ -100,4 +101,19 @@ test("host guard allows an admin a LAN server but refuses a non-admin", async ()
   await assert.rejects(assertEmailHost("bob", "127.0.0.1"), /Only admins/i);
   await assert.rejects(assertEmailHost("bob", "10.0.0.5"), /Only admins/i);
   assert.ok(sha256("x").length === 64);
+});
+
+test("non-admin connections pin a public DNS answer and keep the TLS name, rejecting mixed answers", async (t) => {
+  const lookup = t.mock.method(dns, "lookup", async () => [{ address: "93.184.216.34", family: 4 }]);
+  assert.deepEqual(await emailConnectTarget("bob", "mail.example.test"), { host: "93.184.216.34", servername: "mail.example.test" });
+  assert.equal(lookup.mock.callCount(), 1);
+  lookup.mock.mockImplementation(async () => [{ address: "93.184.216.34", family: 4 }, { address: "100.100.1.2", family: 4 }]);
+  await assert.rejects(emailConnectTarget("bob", "mail.example.test"), /Only admins/i);
+  assert.deepEqual(await emailConnectTarget("alice", "mail.example.test"), { host: "mail.example.test", servername: "mail.example.test" });
+  db.prepare("UPDATE users SET role = 'user' WHERE id = 'alice'").run();
+  try {
+    await assert.rejects(emailConnectTarget("alice", "127.0.0.1"), /Only admins/i);
+  } finally {
+    db.prepare("UPDATE users SET role = 'admin' WHERE id = 'alice'").run();
+  }
 });

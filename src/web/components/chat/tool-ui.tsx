@@ -43,10 +43,11 @@ export function InjectionBadge({ report, className }: { report?: InjectionReport
 }
 
 export function ToolShell({ icon, label, running, error, injection, children, defaultOpen = false }: { icon: ReactNode; label: ReactNode; running: boolean; error?: string; injection?: InjectionReport; children?: ReactNode; defaultOpen?: boolean }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [open, setOpen] = useState(false);
+  const expanded = defaultOpen || open;
   return (
     <div className="my-2 text-sm">
-      <button type="button" onClick={() => setOpen(!open)} className="text-muted-foreground hover:text-foreground flex max-w-full items-center gap-2 transition-colors duration-(--motion-fast) ease-out-quart" disabled={!children}>
+      <button type="button" aria-expanded={expanded} onClick={() => setOpen(!open)} className="text-muted-foreground hover:text-foreground flex max-w-full items-center gap-2 transition-colors duration-(--motion-fast) ease-out-quart" disabled={!children}>
         {/* The spinner and the result icon share a slot so completion crossfades. */}
         <span className="relative size-4 shrink-0">
           <Loader2Icon className={cn("absolute inset-0 size-4 transition-[opacity,scale] duration-(--motion-fast) ease-out-quart motion-reduce:animate-none", running ? "scale-100 animate-spin opacity-100" : "scale-50 opacity-0")} />
@@ -55,11 +56,11 @@ export function ToolShell({ icon, label, running, error, injection, children, de
           </span>
         </span>
         <span className={cn("truncate", running && "shimmer")}>{label}</span>
-        {children && <ChevronDownIcon className={cn("size-3.5 shrink-0 transition-transform duration-(--motion-base) ease-out-expo", open && "rotate-180")} />}
+        {children && <ChevronDownIcon className={cn("size-3.5 shrink-0 transition-transform duration-(--motion-base) ease-out-expo", expanded && "rotate-180")} />}
       </button>
       {injection?.flagged ? <InjectionBadge report={injection} className="mt-1 ml-6" /> : null}
       {error && <p className="text-muted-foreground animate-rise-in mt-1 ml-6 text-xs">{error}</p>}
-      {open && children && <div className="animate-rise-in mt-2 ml-6">{children}</div>}
+      {expanded && children && <div className="animate-rise-in mt-2 ml-6">{children}</div>}
     </div>
   );
 }

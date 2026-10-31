@@ -7,8 +7,9 @@ import { emailResultKey } from "./fold-key.js";
 test("an email read keeps one card per opaque message id", () => {
   const first = emailResultKey("email_read", "call-1", { messageId: "opaque-one" });
   const second = emailResultKey("email_read", "call-2", { messageId: "opaque-two" });
-  assert.equal(first, "email-read:opaque-one");
+  assert.equal(first, "email-read:default:opaque-one");
   assert.notEqual(first, second);
+  assert.notEqual(emailResultKey("email_read", "call-1", { accountId: "work", messageId: "same" }), emailResultKey("email_read", "call-2", { accountId: "personal", messageId: "same" }));
   assert.equal(emailResultKey("email_read", "call-3", {}), undefined);
 });
 

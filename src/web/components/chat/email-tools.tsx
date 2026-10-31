@@ -49,7 +49,7 @@ export function EmailFoldersCard({ args, result, status }: { args: Unknown; resu
     <ToolShell
       icon={<FolderIcon className="size-4" />}
       running={running}
-      error={typeof result === "string" ? result : undefined}
+      error={typeof result === "string" ? result : status?.type === "incomplete" ? t("email.toolFailed") : undefined}
       injection={r?.injection as InjectionReport | undefined}
       label={running ? t("email.toolFoldersRunning", { address }) : t("email.toolFoldersDone", { count: folders.length, address })}
     >
@@ -75,7 +75,7 @@ export function EmailListCard({ args, result, status }: { args: Unknown; result?
     <ToolShell
       icon={<MailIcon className="size-4" />}
       running={running}
-      error={typeof result === "string" ? result : undefined}
+      error={typeof result === "string" ? result : status?.type === "incomplete" ? t("email.toolFailed") : undefined}
       injection={r?.injection as InjectionReport | undefined}
       label={running ? t("email.toolListRunning", { mailbox }) : t("email.toolListDone", { count: messages.length, mailbox })}
     >
@@ -94,7 +94,7 @@ export function EmailSearchCard({ args, result, status }: { args: Unknown; resul
     <ToolShell
       icon={<SearchIcon className="size-4" />}
       running={running}
-      error={typeof result === "string" ? result : undefined}
+      error={typeof result === "string" ? result : status?.type === "incomplete" ? t("email.toolFailed") : undefined}
       injection={r?.injection as InjectionReport | undefined}
       label={running ? t("email.toolSearchRunning", { query }) : t("email.toolSearchDone", { count: messages.length })}
     >
@@ -144,7 +144,7 @@ export function EmailReadCard({ args, result, status }: { args: Unknown; result?
     <ToolShell
       icon={<MailOpenIcon className="size-4" />}
       running={running}
-      error={typeof result === "string" ? result : undefined}
+      error={typeof result === "string" ? result : status?.type === "incomplete" ? t("email.toolFailed") : undefined}
       injection={r?.injection as InjectionReport | undefined}
       label={running ? t("email.toolReadRunning", { subject }) : t("email.toolReadDone", { subject })}
     >
@@ -167,11 +167,11 @@ export function EmailReadCard({ args, result, status }: { args: Unknown; result?
 
 type OutgoingArgs = { from?: string; to?: Array<{ address: string; name?: string }>; cc?: Array<{ address: string; name?: string }>; subject?: string; body?: string };
 
-function OutgoingPreview({ args, result, running, reply, approval }: { args: Unknown; result: unknown; running: boolean; reply: boolean; approval?: { approved?: boolean } }) {
+function OutgoingPreview({ args, result, running, reply, approval, incomplete }: { args: Unknown; result: unknown; running: boolean; reply: boolean; approval?: { approved?: boolean }; incomplete: boolean }) {
   const a = (args ?? {}) as OutgoingArgs;
   const recipients = formatList([...(a.to ?? []), ...(a.cc ?? [])].map((entry) => entry.address));
   const r = typeof result === "object" && result ? (result as { accepted?: string[]; rejected?: string[] }) : undefined;
-  const failed = typeof result === "string";
+  const failed = incomplete || approval?.approved === false || typeof result === "string";
   const sent = !!r && !failed;
   const pending = !running && !failed && !r;
   const label = running
@@ -185,7 +185,7 @@ function OutgoingPreview({ args, result, running, reply, approval }: { args: Unk
     <ToolShell
       icon={sent ? <CheckCircle2Icon className="size-4" /> : failed ? <AlertCircleIcon className="size-4" /> : <SendIcon className="size-4" />}
       running={running}
-      error={typeof result === "string" ? result : undefined}
+      error={typeof result === "string" ? result : failed ? t("email.toolFailed") : undefined}
       label={label}
       // While an outbound call waits for approval, the exact reviewed payload is open, not hidden
       // behind a collapsed row. The approval controls render directly below this card.
@@ -206,9 +206,9 @@ function OutgoingPreview({ args, result, running, reply, approval }: { args: Unk
 }
 
 export function EmailSendCard({ args, result, status, approval }: { args: Unknown; result?: unknown; status: { type: string } | undefined; approval?: { approved?: boolean } }) {
-  return <OutgoingPreview args={args} result={result} running={status?.type === "running"} reply={false} approval={approval} />;
+  return <OutgoingPreview args={args} result={result} running={status?.type === "running"} reply={false} approval={approval} incomplete={status?.type === "incomplete"} />;
 }
 
 export function EmailReplyCard({ args, result, status, approval }: { args: Unknown; result?: unknown; status: { type: string } | undefined; approval?: { approved?: boolean } }) {
-  return <OutgoingPreview args={args} result={result} running={status?.type === "running"} reply approval={approval} />;
+  return <OutgoingPreview args={args} result={result} running={status?.type === "running"} reply approval={approval} incomplete={status?.type === "incomplete"} />;
 }

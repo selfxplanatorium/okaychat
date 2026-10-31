@@ -80,6 +80,9 @@ test("list results are enveloped for the model while the card keeps raw data", a
       smtp: { host: "127.0.0.1", port: 465, security: "tls", username: "bob@example.test" },
     });
     const { tools } = emailTools({ userId: "alice", tls: { ca: TEST_CERT } });
+    const inventory = await execute(tools, "email_folders");
+    assert.equal(inventory.accounts.length, 1);
+    assert.equal(server.connections, 0, "inventory never needs the default server");
     const output = await execute(tools, "email_list", { limit: 5 });
     assert.equal(output.messages.length, 2);
     assert.equal(output.messages[0].subject, "Report attached");

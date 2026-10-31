@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { t, type PlainMessageKey } from "@/i18n";
@@ -364,20 +365,22 @@ function Wizard({ account, onClose, onSaved }: { account?: EmailAccount; onClose
     <section className="bg-muted/40 flex flex-col gap-1 rounded-lg border p-3" aria-label={t("email.progressTitle")} role="log" aria-live="polite">
       <h3 className="text-xs font-medium">{t("email.progressTitle")}</h3>
       {attempts.length === 0 && discovering ? <p className="text-muted-foreground text-xs">{t("email.progressEmpty")}</p> : null}
-      <ul className="flex flex-col gap-1">
-        {attempts.map((attempt, index) => (
-          <li key={`${attempt.stage}-${index}`} className="flex min-w-0 items-start gap-2 text-xs">
-            <span className="text-muted-foreground w-28 shrink-0">{t(STAGE_KEYS[attempt.stage])}</span>
-            <span className="min-w-0 flex-1">
-              <span className="break-words">{attempt.label}</span>
-              {attempt.detail ? <span className="text-muted-foreground block break-words">{attempt.detail}</span> : null}
-            </span>
-            <span className={cn("shrink-0", attempt.status === "failed" && "text-warning")}>
-              {attempt.status === "running" ? <Loader2Icon aria-label={t("email.attemptRunning")} className="size-3.5 animate-spin motion-reduce:animate-none" /> : attempt.status === "ok" ? <CheckCircle2Icon aria-label={t("email.attemptOk")} className="text-success size-3.5" /> : <AlertCircleIcon aria-label={t("email.attemptFailed")} className="text-muted-foreground size-3.5" />}
-            </span>
-          </li>
-        ))}
-      </ul>
+      <ScrollArea className="max-h-48">
+        <ul className="flex flex-col gap-1">
+          {attempts.map((attempt, index) => (
+            <li key={`${attempt.stage}-${index}`} className="flex min-w-0 items-start gap-2 text-xs">
+              <span className="text-muted-foreground w-28 shrink-0">{t(STAGE_KEYS[attempt.stage])}</span>
+              <span className="min-w-0 flex-1">
+                <span className="break-words">{attempt.label}</span>
+                {attempt.detail ? <span className="text-muted-foreground block break-words">{attempt.detail}</span> : null}
+              </span>
+              <span className={cn("shrink-0", attempt.status === "failed" && "text-warning")}>
+                {attempt.status === "running" ? <Loader2Icon aria-label={t("email.attemptRunning")} className="size-3.5 animate-spin motion-reduce:animate-none" /> : attempt.status === "ok" ? <CheckCircle2Icon aria-label={t("email.attemptOk")} className="text-success size-3.5" /> : <AlertCircleIcon aria-label={t("email.attemptFailed")} className="text-muted-foreground size-3.5" />}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </ScrollArea>
     </section>
   ) : null;
 
@@ -409,7 +412,7 @@ function Wizard({ account, onClose, onSaved }: { account?: EmailAccount; onClose
           <p className="text-muted-foreground text-xs">{t("email.oauthNote")}</p>
           {discoveryError && <p role="alert" className="text-destructive text-xs">{discoveryError}</p>}
           {progressBlock}
-          <Button type="button" variant="link" className="min-h-10 self-start px-0" onClick={enterManually}>
+          <Button type="button" variant="link" className="min-h-10 self-start px-0" onClick={enterManually} disabled={discovering}>
             {t("email.enterManually")}
           </Button>
         </div>

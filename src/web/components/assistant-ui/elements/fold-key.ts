@@ -6,7 +6,8 @@
 export function emailResultKey(toolName: string, toolCallId: string, args: unknown): string | undefined {
   if (toolName === "email_read") {
     const messageId = (args as { messageId?: unknown } | null | undefined)?.messageId;
-    return typeof messageId === "string" && messageId ? `email-read:${messageId}` : undefined;
+    const accountId = (args as { accountId?: unknown } | null | undefined)?.accountId;
+    return typeof messageId === "string" && messageId ? `email-read:${String(accountId ?? "default")}:${messageId}` : undefined;
   }
   if (toolName === "email_send" || toolName === "email_reply") return `${toolName}:${toolCallId}`;
   return undefined;

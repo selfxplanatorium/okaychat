@@ -255,3 +255,5 @@ The server reads `.env` only at start. Restart `npm run dev` after editing it.
 Dev login: `dev-login.md` (gitignored) holds the account for signing in to the dev server. Use it to test UI changes in the browser instead of asking.
 
 **Before the repo goes public:** when the user says to make the repo public, delete `dev-login.md` from disk (not only ignored), remove its `.gitignore` line, and remove this "Dev login" paragraph and this instruction from AGENTS.md.
+
+- Email account inventory (`email_folders` without `accountId`) never connects to a mail server; explicit ids fetch folders. Email send/reply review stays expanded throughout approval, and only those new custom cards attach fallback approval controls. IMAP connection slots are reserved after DNS resolves, against the live count.
