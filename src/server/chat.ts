@@ -227,7 +227,8 @@ export async function turnStream(opts: TurnOptions) {
       let tainted = messagesHaveUntrustedContent(modelMessages)
         || (thread.projectId ? (getProject(userId, thread.projectId)?.files.length ?? 0) > 0 : false)
         || mcp.instructions.length > 0
-        || !!memory.summary;
+        || !!memory.summary
+        || !!summary;
       // Retrieved facts change with the query, so they sit beside the user message they were retrieved for,
       // never in the system prefix. Stored chats replay each earlier block verbatim to keep the prefix cached.
       let converted = modelMessages;

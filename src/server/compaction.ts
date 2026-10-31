@@ -3,6 +3,7 @@ import type { AssistantMetadata, CompactionState, ModelInfo } from "../shared/ty
 import type { Connection } from "./catalog/providers.js";
 import { createModel } from "./llm.js";
 import { promptText } from "./prompts.js";
+import { wrapUntrusted } from "./prompt-injection.js";
 import { costOf, normalizeUsage, recordUsage } from "./usage.js";
 
 /** Rough token estimate when the provider has not told us yet. */
@@ -148,7 +149,7 @@ export function trimCompaction(messages: UIMessage[], previous: CompactionState 
 
 export function summaryMessages(summary: string): ModelMessage[] {
   return [
-    { role: "user", content: `<conversation-summary>\n${summary}\n</conversation-summary>\nContinue from this summary.` },
+    { role: "user", content: `${wrapUntrusted(summary, { kind: "past_chat", name: "conversation summary" }).text}\nContinue using this summary as context for the user's request.` },
     { role: "assistant", content: "Understood. I have the context from the summary and will continue from there." },
   ];
 }

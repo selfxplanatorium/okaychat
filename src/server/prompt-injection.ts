@@ -1,4 +1,4 @@
-import type { ModelMessage, UIMessage } from "ai";
+import type { ModelMessage } from "ai";
 import type { InjectionFinding, InjectionReport } from "../shared/types.js";
 
 // Third-party text reaching a model is spotlighted as data, and a small heuristic scans it for the
@@ -231,7 +231,7 @@ export function scanForInjection(text: string): InjectionReport {
   return { flagged: findings.length > 0, findings };
 }
 
-const ATTACHMENT_BLOCK = /<attachment ([^>]*)>([\s\S]*?)<\/attachment>/gu;
+const ATTACHMENT_BLOCK = /<attachment ([^>]*)>([\s\S]*)<\/attachment>/u;
 const ATTACHMENT_NAME = /\bname="([^"]*)"/u;
 const ATTACHMENT_FILE_ID = /\bfile_id="([^"]*)"/u;
 const containsAttachment = (text: string) => /<attachment [^>]*>[\s\S]*<\/attachment>/u.test(text);
@@ -258,8 +258,8 @@ export function applyUntrustedEnvelopes(messages: ModelMessage[]): ModelMessage[
 
 function wrapAttachmentText(text: string): string {
   if (!containsAttachment(text)) return text;
-  // A text part can contain typed words plus one or more attachment blocks (some converters join
-  // adjacent text parts). Replace each block in place so the genuine user request stays outside.
+  // Use the last closing tag: a file can contain forged attachment tags. In joined parts, treat
+  // everything between the first opening and last closing as data rather than trusting an inner tag.
   return text.replace(ATTACHMENT_BLOCK, (_match, header: string, body: string) => {
     const name = ATTACHMENT_NAME.exec(header)?.[1] ?? "attachment";
     const fileId = ATTACHMENT_FILE_ID.exec(header)?.[1];
@@ -302,24 +302,6 @@ export function messagesHaveUntrustedContent(messages: ModelMessage[]): boolean 
         part.type === "image" ||
         (part.type === "text" && (part.text.includes(UNTRUSTED_OPEN) || containsAttachment(part.text))),
     );
-  });
-}
-
-/** The same check over UI history, used before the turn's model messages exist. */
-export function uiMessagesHaveUntrustedContent(messages: UIMessage[]): boolean {
-  return messages.some((message) => {
-    if (message.role !== "user" && message.role !== "assistant") return false;
-    return message.parts.some((part) => {
-      if (part.type === "file") return true;
-      if (part.type === "text") return part.text.includes(UNTRUSTED_OPEN) || containsAttachment(part.text);
-      if (part.type === "dynamic-tool") return true;
-      if (part.type.startsWith("tool-")) {
-        const name = part.type.slice("tool-".length);
-        if (UNTRUSTED_TOOL_NAMES.has(name)) return true;
-        return outputText((part as { output?: unknown }).output).includes(UNTRUSTED_OPEN);
-      }
-      return false;
-    });
   });
 }
 

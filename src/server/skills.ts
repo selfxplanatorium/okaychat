@@ -799,7 +799,13 @@ export function turnSkills(userId: string, opts: { temporary: boolean; canCallTo
       execute: async ({ source, skill }) => {
         canUse();
         const { skill: installed, skipped } = await installSkillFromSource(userId, source, skill, undefined, canUse);
-        return { id: installed.id, name: installed.name, description: installed.description, files: installed.files.map((file) => file.name), skipped };
+        const output = { id: installed.id, name: installed.name, description: installed.description, files: installed.files.map((file) => file.name), skipped };
+        const injection = scanForInjection(JSON.stringify(output));
+        return { ...output, ...(injection.flagged ? { injection } : {}) };
+      },
+      toModelOutput: ({ output }) => {
+        const { injection: _injection, ...installed } = output;
+        return { type: "text", value: wrapUntrusted(JSON.stringify(installed), { kind: "skill", name: output.name }).text };
       },
     }),
     create_skill: tool({

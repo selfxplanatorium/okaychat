@@ -38,7 +38,7 @@ The common lesson is the lethal trifecta. A prompt-injected model is most danger
 | Project instructions | User-authored instructions in system message 2 | Left as user instructions (not third-party data); they are authored by the account owner |
 | Skills index | Names and descriptions in turn context | Envelope; the section says they are data, not a higher authority |
 | `load_skill` / `read_skill_file` | Skill body and reference files | Envelope labelled as user-installed guidance; scanner badge |
-| Skill source listings | Remote names/descriptions | Envelope, scanner badge |
+| Skill source listings and installation receipts | Remote names/descriptions/files | Envelope, scanner badge |
 | `read_artifact` / `read_document` | Artifact or document text | Envelope, scanner, card badge |
 | `conversation_search` / `conversation_read` | Past chat text | Envelope, scanner badge; taints the turn |
 | Memory | Saved facts, summaries, and `memory_search` results | Facts and summaries are enveloped at model delivery (stored JSON stays raw for ids/revocation); search results are enveloped; memory writes after outside content already require approval |
@@ -46,6 +46,7 @@ The common lesson is the lethal trifecta. A prompt-injected model is most danger
 | `view_artifact` | Screenshot image | Vision input; no text envelope, but the tool name and the injected image both taint later steps (see residual risks) |
 | Deep research | Web-only worker findings | Envelope, scanner badge, taints the reply |
 | `delegate_task` | Sub-agent report | Envelope, scanner badge, taints the reply; delegates get no destructive or approval-needing tools |
+| Compaction summaries | Model-written recap of earlier content | Data envelope and conservative taint even when original tool results were compacted away |
 | Shared pages | Public read-only rendering | Same Markdown image consent policy as the app |
 | Email / knowledge tools | Not present | No model-callable email or knowledge-base ingestion exists. If one is added, it is an untrusted source and an outbound channel; wrap its output and mark its writes with a risk. |
 
@@ -73,7 +74,7 @@ The common lesson is the lethal trifecta. A prompt-injected model is most danger
 - a JSON-quoted body with `<`, `>`, U+2028, and U+2029 escaped, so content cannot close the envelope or forge a tag/attribute;
 - no timestamps, random ids, or content rewriting, so a stored reply converts to the same bytes on replay.
 
-Tools keep their `execute` output (text, paging fields, images, UI shapes) and wrap in `toModelOutput`. `applyUntrustedEnvelopes()` wraps attachment text and inserts a notice before native files at model-conversion time; the stored UI message is unchanged. `projects.ts` envelopes pinned project files.
+Tools keep their `execute` output (text, paging fields, images, UI shapes) and wrap in `toModelOutput`. `applyUntrustedEnvelopes()` wraps attachment text and inserts a notice before native files at model-conversion time; the stored UI message is unchanged. `projects.ts` envelopes pinned project files. Attachment wrapping consumes through the final closing tag, so forged tags inside a file cannot promote its remainder to user instructions. When converters join several files, the span between the first opening and last closing is conservatively data. Compaction summaries are enveloped and taint later actions; compression cannot turn external instructions into trusted policy.
 
 ### Heuristic scanner and badge
 
@@ -130,7 +131,8 @@ A model emits all tool calls of a step before any result exists, so a read in th
 - **An MCP App is not a user click.** Its iframe JavaScript can call tools on load. Destructive and non-read-only calls are gated by the existing confirmation even under `never`, but the app's own declared network and any read-only call still run without a prompt.
 - **Unknown tool annotations are trusted as given.** A server that omits `destructiveHint` and `readOnlyHint`, or lies about them, is not marked destructive. Only its description/instructions presence taints the turn; the annotation itself is not verified. Keep untrusted MCP servers on `approval: always`.
 - **Input-schema descriptions are raw.** The provider API constrains them to strings inside the JSON schema, but they are still server text. Wrapping them per property would change the schema and the tool block; treat a server's schema text as metadata you did not envelope.
-- **Memory can be poisoned.** Memory writes after outside content already require approval, and memory facts and summaries are enveloped as data. A user who approves a poisoned fact stores it; summaries derived from it are removed only when the fact is changed. The stored text stays raw so ids and revocation keep working.
+- **Memory can be poisoned.** Memory writes after outside content already require approval, and memory facts and summaries are enveloped as data. A user can approve a poisoned fact. The opt-in background memory reviewer can also learn a poisoned assistant paraphrase without an interactive approval; the tool gate does not cover that separate worker. Summaries derived from a fact are withdrawn when the fact is changed. The stored text stays raw so ids and revocation keep working.
+- **Read tools are outbound channels too.** Web search queries, fetched URLs, and read-only MCP arguments can carry private data. They remain available without per-read approval to preserve normal research; this feature gates annotated high-impact actions, not every network request. A model that obeys an injection can still leak through these channels.
 - **Links and downloads still work.** A user click on an attacker link, or a download the user opens, can leak data outside the app's control. The app shows the destination host in Markdown images and approval prompts, not a full link inspector.
 - **Admin overrides can weaken policy.** The `dataSafety` prompt is admin-overridable like every other server prompt. An admin controls the server and can remove it.
 - **No email or knowledge-base tools exist today.** When added, they are both an untrusted source and an outbound channel. Use the same envelope, scanner, taint gate, and risk metadata; do not add a second approval flow.
