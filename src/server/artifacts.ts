@@ -10,6 +10,7 @@ import { createDocx, createXlsx, editDocx, editPdf, editXlsx, previewXlsx, readD
 import { htmlToPdf, pageFurniture, printDocument, rendererAvailable } from "./documents/render.js";
 import { screenshotArtifact, type VisualShot } from "./documents/visual.js";
 import { docxOp, pdfOp, workbookSpec, xlsxOp } from "./documents/schemas.js";
+import { scanForInjection, wrapUntrusted } from "./prompt-injection.js";
 import { assertStorage } from "./quota.js";
 import { convertToPdf } from "./tools/sandbox.js";
 import { MAX_SHOTS_PER_TURN } from "./tools/screenshots.js";
@@ -287,8 +288,13 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
         const a = latestArtifact(threadId, id);
         if (!a) throw new Error(`No artifact with id \`${id}\` in this chat.`);
         if (a.size) throw new Error(`\`${id}\` is a document. Use read_document.`);
-        return { id: a.id, version: a.version, title: a.title, kind: a.kind, language: a.language, content: a.content };
+        const injection = scanForInjection(a.content);
+        return { id: a.id, version: a.version, title: a.title, kind: a.kind, language: a.language, content: a.content, ...(injection.flagged ? { injection } : {}) };
       },
+      toModelOutput: ({ output }) => ({
+        type: "text",
+        value: wrapUntrusted(output.content, { kind: "artifact", name: output.title }).text,
+      }),
     }),
 
     create_document: tool({
@@ -355,8 +361,13 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
       execute: async ({ id, range }) => {
         const { artifact, data, kind } = documentOf(threadId, id);
         const text = kind === "docx" ? await readDocxText(data) : kind === "xlsx" ? await readXlsx(data, range) : await readPdf(data);
-        return { id, version: artifact.version, kind, text };
+        const injection = scanForInjection(text);
+        return { id, version: artifact.version, kind, text, ...(injection.flagged ? { injection } : {}) };
       },
+      toModelOutput: ({ output }) => ({
+        type: "text",
+        value: wrapUntrusted(output.text, { kind: "artifact", name: `document ${output.id}` }).text,
+      }),
     }),
     ...(visual.canViewImages && shots && rendererAvailable()
       ? {

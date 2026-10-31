@@ -20,4 +20,4 @@ PDFs are extracted with `unpdf`. HTML is parsed with `linkedom`, reduced with Re
 
 Blocked responses and JavaScript shells fall back to Scrapling in the separate browser worker. A short successful plain-fetch result is retained if Scrapling cannot improve it. Scrapling's own transport and egress rules are documented in `scrapling.md` and `browser-worker.md`.
 
-The model receives text in 40,000-character pages, including the title, source URL, current page, total pages, and fetch method. The composer Search switch hides `web_search` only; `web_fetch` remains available. The account's web-tools preference disables both.
+The model receives text in 40,000-character pages, including the title, source URL, current page, total pages, and fetch method. The model text is spotlighted by `wrapUntrusted()` in `toModelOutput`; snippets are scanned for instruction-like phrases and show the advisory badge on the card. The composer Search switch hides `web_search` only; `web_fetch` remains available. The account's web-tools preference disables both. See `prompt-injection.md`.

@@ -1,9 +1,10 @@
 import { stepCountIs, streamText, tool, type ToolSet } from "ai";
 import { z } from "zod";
-import type { ModelInfo, TokenUsage } from "../../shared/types.js";
+import type { InjectionReport, ModelInfo, TokenUsage } from "../../shared/types.js";
 import { resolveModel } from "../catalog/providers.js";
 import { createModel } from "../llm.js";
 import { promptText } from "../prompts.js";
+import { scanForInjection, wrapUntrusted } from "../prompt-injection.js";
 import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "../usage.js";
 import type { SearchBudget } from "./search-budget.js";
 
@@ -21,6 +22,8 @@ export interface SubagentProgress {
   tools: string[];
   usage?: TokenUsage;
   cost?: number;
+  /** Advisory scan of the report, shown as a quiet badge on the sub-agent card. */
+  injection?: InjectionReport;
 }
 
 /**
@@ -78,10 +81,17 @@ export function subagentTools(opts: { userId: string; threadId: string; allowed:
         }
         const finalText = (await result.text).trim();
         recordUsage({ userId: opts.userId, threadId: opts.threadId, providerId: model.providerId, modelId: model.id, kind: "subagent", usage, cost });
-        yield { ...progress, status: "done", text: finalText || progress.text.trim(), usage, cost };
+        const report = finalText || progress.text.trim();
+        const injection = scanForInjection(report);
+        yield { ...progress, status: "done", text: report, usage, cost, ...(injection.flagged ? { injection } : {}) };
       },
-      // The main model needs the report, not the bookkeeping.
-      toModelOutput: ({ output }) => ({ type: "text", value: output.text || "The sub-agent returned no text." }),
+      // The main model needs the report as data, not the bookkeeping.
+      toModelOutput: ({ output }) => ({
+        type: "text",
+        value: output.text
+          ? wrapUntrusted(output.text, { kind: "delegate", name: "sub-agent report" }).text
+          : "The sub-agent returned no text.",
+      }),
     }),
   };
 }

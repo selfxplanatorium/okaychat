@@ -2,6 +2,7 @@ import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 import { db } from "../db.js";
 import { extract, MAX_CHARS } from "../files.js";
+import { scanForInjection, wrapUntrusted } from "../prompt-injection.js";
 import { MAX_TOOL_IMAGES_PER_TURN, type ToolImage } from "./screenshots.js";
 
 /**
@@ -21,16 +22,20 @@ export function attachmentTools(userId: string, images?: Map<string, ToolImage[]
         if (!row) throw new Error("That file is no longer available. Ask the user to attach it again.");
         const header = `<attachment name="${row.name.replaceAll('"', "'")}" file_id="${file_id}">`;
         if (row.mime.startsWith("image/")) {
-          if (!images) return `${header}This model cannot view images.</attachment>`;
+          if (!images) return { text: `${header}This model cannot view images.</attachment>`, images: [], name: row.name };
           const shown = [...images.values()].reduce((sum, list) => sum + list.length, 0);
-          if (shown >= MAX_TOOL_IMAGES_PER_TURN) return `${header}Not shown: this reply reached its image limit.</attachment>`;
+          if (shown >= MAX_TOOL_IMAGES_PER_TURN) return { text: `${header}Not shown: this reply reached its image limit.</attachment>`, images: [], name: row.name };
           images.set(toolCallId, [{ data: new Uint8Array(row.data), mediaType: row.mime }]);
-          return `${header}The image is shown below.</attachment>`;
+          return { text: `${header}The image is shown below.</attachment>`, images: [], name: row.name };
         }
         const { text } = await extract(row.name, row.mime, new Uint8Array(row.data));
         const body = text.length > MAX_CHARS ? `${text.slice(0, MAX_CHARS)}\n\n[truncated: ${text.length - MAX_CHARS} more characters]` : text;
-        return `${header}\n${body}\n</attachment>`;
+        const content = `${header}\n${body}\n</attachment>`;
+        const injection = scanForInjection(content);
+        return { text: content, images: [], name: row.name, ...(injection.flagged ? { injection } : {}) };
       },
+      // The UI shows the extracted text; the model gets it spotlighted as third-party data.
+      toModelOutput: ({ output }) => ({ type: "text", value: wrapUntrusted(output.text, { kind: "file", name: output.name }).text }),
     }),
   };
 }

@@ -68,6 +68,7 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "chat.archive", labelKey: "keyboard.cmdChatArchive", group: "Chat", keys: [] },
   { id: "chat.delete", labelKey: "keyboard.cmdChatDelete", group: "Chat", keys: ["Alt+Shift+Backspace"] },
   { id: "chat.scrollBottom", labelKey: "keyboard.cmdChatScrollBottom", group: "Chat", keys: [] },
+  { id: "chat.loadImage", labelKey: "keyboard.cmdChatLoadImage", group: "Chat", keys: [] },
 
   { id: "composer.model", labelKey: "keyboard.cmdComposerModel", group: "Composer", keys: ["Alt+Shift+M"] },
   { id: "composer.effort", labelKey: "keyboard.cmdComposerEffort", group: "Composer", keys: ["Alt+Shift+T"] },

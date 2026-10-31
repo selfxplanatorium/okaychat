@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSmoothHeight } from "@/components/ui/smooth-height";
 import { cn } from "@/lib/utils";
+import { toolInjection } from "@/lib/tool-injection";
 import { useData } from "@/state/data";
 import { currentLocale, t } from "@/i18n";
 import { formatDuration, formatList } from "@/i18n/format";
@@ -1189,6 +1190,13 @@ const StreamingIndicator: FC<{ waiting: boolean }> = ({ waiting }) => {
   );
 };
 
+/** A folded work-log row still shows the advisory when any result in it was flagged. */
+const groupHasInjection = (parts: readonly GroupablePart[], indices: readonly number[]) =>
+  indices.some((index) => {
+    const part = parts[index];
+    return part?.type === "tool-call" && toolInjection(part.result) !== undefined;
+  });
+
 /** "Searched twice, read 3 pages, and used 2 tools · 41s", like a work log summary. */
 const workLabel = (
   parts: readonly GroupablePart[],
@@ -1307,6 +1315,7 @@ const AssistantMessage: FC = () => {
                   <ToolGroupRoot variant="ghost">
                     <ToolGroupTrigger
                       count={part.indices.length}
+                      warning={groupHasInjection(parts, part.indices)}
                       label={workLabel(parts, part.indices, part.timing)}
                     />
                     <ToolGroupContent>{children}</ToolGroupContent>
@@ -1327,6 +1336,7 @@ const AssistantMessage: FC = () => {
                     <ToolGroupTrigger
                       count={part.indices.length}
                       active={running}
+                      warning={groupHasInjection(parts, part.indices)}
                       label={workLabel(parts, part.indices, part.timing)}
                     />
                     <ToolGroupContent>{children}</ToolGroupContent>
@@ -1347,6 +1357,7 @@ const AssistantMessage: FC = () => {
                     <ToolGroupTrigger
                       count={part.indices.length}
                       active={part.status.type === "running"}
+                      warning={groupHasInjection(parts, part.indices)}
                     />
                     <ToolGroupContent>{children}</ToolGroupContent>
                   </ToolGroupRoot>

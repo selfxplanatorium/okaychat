@@ -9,6 +9,7 @@ import type { Skill, SkillDetail, SkillFile, SkillOrigin, SkillPreferences, Skil
 import type { AppEnv } from "./auth.js";
 import { decrypt, encrypt, newId } from "./crypto.js";
 import { db, tx } from "./db.js";
+import { riskMetadata, scanForInjection, wrapUntrusted } from "./prompt-injection.js";
 import { assertStorage } from "./quota.js";
 import { fetchSkillSource, skillSourceUrl } from "./skill-fetch.js";
 
@@ -258,7 +259,7 @@ export function skillIndexSection(userId: string, revision: number): string {
     Array<{ name: string; description: string }>;
   if (!rows.length) return "";
   const list = rows.map((row) => `- \`${row.name}\`: ${row.description}`).join("\n");
-  return `# Skills\nInstalled skills are reusable instruction packages for this account. When the user's task matches one, call load_skill for it before starting and follow its instructions. Install a new one from a linked source or create one from this chat only when the user asks.\n${list}`;
+  return `# Skills\nInstalled skills are reusable instruction packages for this account. When the user's task matches one, call load_skill for it before starting and follow its instructions. Install a new one from a linked source or create one from this chat only when the user asks.\n${wrapUntrusted(list, { kind: "skill", name: "skill index" }).text}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -724,14 +725,25 @@ export function turnSkills(userId: string, opts: { temporary: boolean; canCallTo
         canUse();
         const skill = enabledByName(name);
         if (!skill) invalid(`No enabled skill named \`${name}\`. Check the skill index for the exact names.`, 404);
+        const injection = scanForInjection(skill!.body);
         return {
           name: skill!.name,
           description: skill!.description,
           instructions: skill!.body,
           files: skill!.files.map((file) => file.name),
           hint: skill!.files.length ? `Call read_skill_file with name "${skill!.name}" to read one of these files.` : undefined,
+          ...(injection.flagged ? { injection } : {}),
         };
       },
+      // A skill is user-installed guidance, but its body is still third-party text. It is spotlighted
+      // and explicitly bounded to the current request instead of being sent as a higher authority.
+      toModelOutput: ({ output }) => ({
+        type: "text",
+        value: [
+          wrapUntrusted(output.instructions, { kind: "skill", name: output.name }).text,
+          output.files.length ? `Files in this skill: ${output.files.join(", ")}` : "",
+        ].filter(Boolean).join("\n\n"),
+      }),
     }),
     read_skill_file: tool({
       description: "Read one extra file inside an installed skill (a path returned by load_skill).",
@@ -743,8 +755,13 @@ export function turnSkills(userId: string, opts: { temporary: boolean; canCallTo
         const path = validateSkillFileName(file);
         const row = db.prepare("SELECT content FROM skill_files WHERE skill_id = ? AND name = ?").get(skill!.id, path) as { content: string } | undefined;
         if (!row) invalid(`\`${skill!.name}\` has no file \`${path}\`. Available: ${skill!.files.map((f) => `\`${f.name}\``).join(", ") || "none"}.`, 404);
-        return { name: skill!.name, file: path, content: row.content };
+        const injection = scanForInjection(row.content);
+        return { name: skill!.name, file: path, content: row.content, ...(injection.flagged ? { injection } : {}) };
       },
+      toModelOutput: ({ output }) => ({
+        type: "text",
+        value: wrapUntrusted(output.content, { kind: "skill", name: `${output.name}/${output.file}` }).text,
+      }),
     }),
   };
 
@@ -756,13 +773,19 @@ export function turnSkills(userId: string, opts: { temporary: boolean; canCallTo
         canUse();
         const sources = listSources(userId);
         const listings = await Promise.allSettled(sources.map((source) => listSkillsInSource(userId, source)));
-        return {
-          sources: listings.map((result, i) => {
-            if (result.status === "rejected") return { source: sources[i]!.name, sourceId: sources[i]!.id, error: String((result.reason as Error).message) };
-            return result.value;
+        const result = {
+          sources: listings.map((entry, i) => {
+            if (entry.status === "rejected") return { source: sources[i]!.name, sourceId: sources[i]!.id, error: String((entry.reason as Error).message) };
+            return entry.value;
           }),
         };
+        const injection = scanForInjection(JSON.stringify(result));
+        return { ...result, ...(injection.flagged ? { injection } : {}) };
       },
+      toModelOutput: ({ output }) => ({
+        type: "text",
+        value: wrapUntrusted(JSON.stringify(output.sources), { kind: "skill", name: "installable skill sources" }).text,
+      }),
     }),
     install_skill: tool({
       description: "Install one skill from a linked skill source after search_skill_sources listed it. Copies that SKILL.md and its extra files from the source; replacing an installed skill of the same name.",
@@ -770,6 +793,7 @@ export function turnSkills(userId: string, opts: { temporary: boolean; canCallTo
         source: z.string().min(1).max(80).describe("Source name or id, as search_skill_sources reported"),
         skill: z.string().min(1).max(120).describe("The entry `name` to install"),
       }),
+      metadata: riskMetadata("persistent"),
       needsApproval: true,
       execute: async ({ source, skill }) => {
         canUse();
@@ -785,6 +809,7 @@ export function turnSkills(userId: string, opts: { temporary: boolean; canCallTo
         instructions: z.string().trim().min(1).max(MAX_BODY_CHARS).describe("Full instructions in Markdown — steps, conventions, context a future conversation needs. No YAML frontmatter; the fields above are it."),
         files: z.array(z.object({ name: z.string().min(1).max(160), content: z.string().min(1).max(MAX_FILE_CHARS) })).max(MAX_FILES).optional().describe("Optional reference files or templates the skill reuses"),
       }),
+      metadata: riskMetadata("persistent"),
       needsApproval: true,
       execute: async (input) => {
         canUse();

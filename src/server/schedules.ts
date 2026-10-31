@@ -115,6 +115,8 @@ export async function runSchedule(row: Row): Promise<void> {
       modelRef: row.model_ref,
       keepThreadModel: !!row.thread_attached,
       uiMessages: [...history, userMessage],
+      // Nobody can answer an approval in a scheduled run, so a gated call is denied instead of waiting.
+      unattended: true,
       signal: AbortSignal.timeout(RUN_TIMEOUT_MS),
     });
     let assistant: UIMessage | undefined;

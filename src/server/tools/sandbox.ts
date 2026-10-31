@@ -2,11 +2,13 @@ import path from "node:path";
 import { tool, type ToolSet } from "ai";
 import { Hono } from "hono";
 import { z } from "zod";
+import type { InjectionReport } from "../../shared/types.js";
 import type { AppEnv } from "../auth.js";
 import { newId, sha256 } from "../crypto.js";
 import { db } from "../db.js";
 import { env } from "../env.js";
 import { assertStorage, QuotaError } from "../quota.js";
+import { scanForInjection, wrapUntrusted } from "../prompt-injection.js";
 import { getThread } from "../threads.js";
 import { resultPaths } from "../sandbox-paths.js";
 
@@ -63,6 +65,8 @@ export interface RunCodeResult extends Omit<RunnerResult, "files"> {
   tooLarge?: Array<{ path: string; size: number }>;
   /** Set when produced files could not all be saved to the user's storage. */
   storageWarning?: string;
+  /** Advisory scan of stdout/stderr; a program that prints an attachment can carry injection. */
+  injection?: InjectionReport;
 }
 
 async function call(route: string, init: RequestInit = {}, timeoutMs = 30_000, signal?: AbortSignal): Promise<Response> {
@@ -263,16 +267,20 @@ export function sandboxTools(userId: string, threadId: string, signal?: AbortSig
         timeout_seconds: z.number().int().min(1).max(MAX_TIMEOUT_S).optional().describe("Wall-clock limit. Default 60"),
         input_files: z.array(z.string()).max(20).optional().describe("file_id values of attachments or fileId values of earlier saved outputs to copy into the working directory first (using safe basenames), even after scratch space expires"),
       }),
-      execute: ({ language, code, timeout_seconds, input_files }) =>
-        runCode({ userId, threadId, language, code, timeoutS: timeout_seconds, inputFiles: input_files, signal, turn }),
-      // The model needs paths, not download URLs.
+      execute: async ({ language, code, timeout_seconds, input_files }) => {
+        const output = await runCode({ userId, threadId, language, code, timeoutS: timeout_seconds, inputFiles: input_files, signal, turn });
+        const injection = scanForInjection([output.stdout, output.stderr].join("\n"));
+        return injection.flagged ? { ...output, injection } : output;
+      },
+      // The model needs paths, not download URLs. Program output is third-party data as well: a run can
+      // print an attached document, so it is spotlighted before the chat model reads it.
       toModelOutput: ({ output }) => ({
         type: "json",
         value: {
           exitCode: output.exitCode,
           ...(output.stopped ? { stopped: output.stopped } : {}),
-          stdout: output.stdout,
-          stderr: output.stderr,
+          stdout: output.stdout ? wrapUntrusted(output.stdout, { kind: "code_output", name: "stdout" }).text : "",
+          stderr: output.stderr ? wrapUntrusted(output.stderr, { kind: "code_output", name: "stderr" }).text : "",
           files: output.files.map((f) => ({ path: f.path, size: f.size, ...(f.fileId ? { fileId: f.fileId } : {}) })),
           ...(output.deleted.length ? { deleted: output.deleted } : {}),
           ...(output.inputs.length ? { inputs: output.inputs } : {}),

@@ -18,6 +18,7 @@ import { openElicitation } from "./elicitation.js";
 import { mayUsePrivateHosts } from "../catalog/providers.js";
 import { env } from "../env.js";
 import { publicFetch } from "../public-fetch.js";
+import { injectionMetadata, riskMetadata, scanForInjection, wrapUntrusted, type UntrustedSource } from "../prompt-injection.js";
 import { storeImage, type StoredImage } from "../tools/image.js";
 import { MAX_TOOL_IMAGES_PER_TURN, type ToolImage } from "../tools/screenshots.js";
 import { StoredOAuthProvider } from "./oauth.js";
@@ -61,8 +62,17 @@ function uiMeta(tool: RawTool): { resourceUri?: string; visibility: Array<"model
 function needsApproval(server: McpServerRecord, tool: RawTool): boolean {
   const policy = server.config.approval ?? "destructive";
   if (policy !== "destructive") return policy === "always";
+  return isDestructive(tool);
+}
+
+/**
+ * Writes or deletes by the server's own annotations, independent of the account's approval policy.
+ * `destructiveHint: false` still means a non-read-only tool, which is enough to gate it after untrusted
+ * content and to keep it away from unattended delegates.
+ */
+function isDestructive(tool: RawTool): boolean {
   const a = tool.annotations;
-  return a?.destructiveHint === true || (a?.readOnlyHint === false && a.destructiveHint !== false);
+  return a?.destructiveHint === true || a?.readOnlyHint === false;
 }
 
 interface Entry {
@@ -436,6 +446,8 @@ function toModelText(result: ToolOutput): string {
 export interface McpToolResult {
   text: string;
   images: StoredImage[];
+  /** Advisory scan of the text, shown as a quiet badge on the tool card. */
+  injection?: ReturnType<typeof scanForInjection>;
   /** The tool has an MCP App: the card renders `resourceUri` and hands it `result`. */
   app?: { serverId: string; resourceUri: string };
   /** The call result for the app, without images. Kept with the message, so it is size-capped. */
@@ -466,12 +478,14 @@ async function presentResult(
   toolCallId: string,
   opts: McpTurnOptions,
   appUri?: string,
-): Promise<string | McpToolResult> {
+): Promise<McpToolResult> {
   const text = toModelText(result);
   if (result.isError) throw new Error(text || "MCP tool returned an error");
   const parts = (result.content ?? []).filter((p) => p.type === "image" && typeof p.data === "string");
   const app = appUri ? { app: { serverId: server.id, resourceUri: appUri }, result: appResult(result) } : {};
-  if (!parts.length) return appUri ? { text, images: [], ...app } : text;
+  const injection = scanForInjection(text);
+  const scanned = injectionMetadata(injection) ? { injection } : {};
+  if (!parts.length) return { text, images: [], ...scanned, ...app };
   // Images get their own summary and notes below, so the text leaves out their placeholders.
   const prose = toModelText({ ...result, content: (result.content ?? []).filter((p) => p.type !== "image") });
   const images: StoredImage[] = [];
@@ -502,7 +516,9 @@ async function presentResult(
   }
   if (forModel.length) opts.images?.set(toolCallId, forModel);
   const summary = images.length ? `[${images.length} image${images.length === 1 ? "" : "s"} shown to the user]` : "";
-  return { text: [prose, summary, ...notes].filter(Boolean).join("\n"), images, ...app };
+  const finalText = [prose, summary, ...notes].filter(Boolean).join("\n");
+  const finalScan = scanForInjection(finalText);
+  return { text: finalText, images, ...(injectionMetadata(finalScan) ? { injection: finalScan } : {}), ...app };
 }
 
 /**
@@ -553,9 +569,12 @@ async function* runWithElicitation<T>(
   yield finished.value;
 }
 
-// The model sees text only. Images reach vision models through `McpTurnOptions.images`.
-const textOutput = ({ output }: { output: unknown }) =>
-  ({ type: "text", value: typeof output === "string" ? output : ((output as Partial<McpToolResult>).text ?? "") }) as const;
+// The model sees text only, spotlighted as third-party data. Images reach vision models through
+// `McpTurnOptions.images`; the card still receives the raw object with its saved image URLs.
+const mcpModelText = (output: unknown, source: UntrustedSource) => {
+  const text = typeof output === "string" ? output : ((output as Partial<McpToolResult>).text ?? "");
+  return { type: "text", value: wrapUntrusted(text, source).text } as const;
+};
 
 /** A resource read can be a whole file. The model gets this much text from one read. */
 const MAX_RESOURCE_CHARS = 100_000;
@@ -574,7 +593,13 @@ function resourceTools(servers: McpServerRecord[], opts: McpTurnOptions): ToolSe
     mcp_list_resources: tool({
       description: `List the resources (files, records, documents) an MCP server offers, and URI templates for resources it can produce. Servers with resources: ${names.join(", ")}. Read one with mcp_read_resource.`,
       inputSchema: z.object({ server: serverParam, cursor: z.string().optional().describe("nextCursor from a previous call") }),
-      execute: async ({ server, cursor }, { abortSignal }) => listResourcesText(byName(server), cursor, abortSignal),
+      execute: async ({ server, cursor }, { abortSignal }) => {
+        const text = await listResourcesText(byName(server), cursor, abortSignal);
+        const injection = scanForInjection(text);
+        return { text, ...(injectionMetadata(injection) ? { injection } : {}) };
+      },
+      toModelOutput: ({ input, output }) =>
+        mcpModelText(output.text, { kind: "mcp_resource_list", name: `resources on ${input.server}`, server: input.server }),
     }),
     mcp_read_resource: tool({
       description: "Read one MCP resource by URI, from mcp_list_resources or a filled-in URI template.",
@@ -590,7 +615,8 @@ function resourceTools(servers: McpServerRecord[], opts: McpTurnOptions): ToolSe
         });
         return presentResult(record, `resource ${uri}`, { content }, toolCallId, opts);
       },
-      toModelOutput: textOutput,
+      toModelOutput: ({ input, output }) =>
+        mcpModelText(output, { kind: "mcp_resource", name: `resource ${input.uri}`, url: input.uri, server: input.server }),
     }),
   };
 }
@@ -708,8 +734,11 @@ export async function toolsForUser(userId: string, opts: McpTurnOptions = {}): P
   const instructions: string[] = [];
   const build = (server: McpServerRecord, raw: RawTool, interactive: boolean) =>
     dynamicTool({
-      description: raw.description ?? `${raw.name} (${server.name})`,
+      // Tool metadata is third-party text too. State the source; never let a description read as a
+      // higher-priority instruction.
+      description: `Third-party MCP tool from "${server.name}". ${raw.description ?? raw.name}`,
       inputSchema: jsonSchema(raw.inputSchema ?? { type: "object", properties: {} }),
+      ...(isDestructive(raw) ? { metadata: riskMetadata("destructive") } : {}),
       needsApproval: needsApproval(server, raw),
       execute: (args, { abortSignal, toolCallId }) =>
         runWithElicitation(server, abortSignal, interactive, async (elicit) =>
@@ -723,7 +752,8 @@ export async function toolsForUser(userId: string, opts: McpTurnOptions = {}): P
             interactive ? uiMeta(raw).resourceUri : undefined,
           ),
         ),
-      toModelOutput: textOutput,
+      toModelOutput: ({ output }) =>
+        mcpModelText(output, { kind: "mcp_tool", name: `${server.name} · ${raw.name}`, server: server.name }),
     });
   for (const { server, entry } of ready) {
     if (entry.status !== "connected") continue;
@@ -733,8 +763,9 @@ export async function toolsForUser(userId: string, opts: McpTurnOptions = {}): P
       if (server.disabledTools.includes(raw.name) || !uiMeta(raw).visibility.includes("model")) continue;
       const name = exposedToolName(server.name, raw.name);
       tools[name] = build(server, raw, opts.interactive === true);
-      // Sub-agents run unattended, so they get no tool that waits for approval.
-      if (!needsApproval(server, raw)) subTools[name] = build(server, raw, false);
+      // Sub-agents run unattended: no tool that waits for approval, and no destructive tool even when
+      // the account's policy is "never" (the output of a web or MCP read must not reach one).
+      if (!needsApproval(server, raw) && !isDestructive(raw)) subTools[name] = build(server, raw, false);
     }
   }
   const resources = resourceTools(ready.filter(({ entry }) => entry.status === "connected" && entry.capabilities.resources).map(({ server }) => server), opts);

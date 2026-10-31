@@ -43,7 +43,9 @@ import { collapsePanel } from "./surfaces";
 import { Button } from "@/components/ui/button";
 import { elicitationOf, McpElicitationCard } from "@/components/chat/McpElicitation";
 import { McpAppCard, mcpAppOf } from "@/components/chat/McpApp";
+import { InjectionBadge } from "@/components/chat/tool-ui";
 import { Textarea } from "@/components/ui/textarea";
+import { toolInjection } from "@/lib/tool-injection";
 
 const ANIMATION_DURATION = 200;
 
@@ -314,6 +316,10 @@ function ToolFallbackResult({
   if (result === undefined) return null;
   // MCP tools that return images send `{ text, images }`; the images are saved copies on our origin.
   const withImages = toolResultImages(result);
+  // Text tools with an injection report use `{ text, injection }`; show the text, never the envelope.
+  const textResult = toolInjection(result) && typeof (result as { text?: unknown }).text === "string"
+    ? (result as { text: string }).text
+    : undefined;
 
   return (
     <div
@@ -325,7 +331,7 @@ function ToolFallbackResult({
         {t("tools.result")}
       </p>
       <pre className="aui-tool-fallback-result-content bg-muted/50 text-foreground/90 mt-1 rounded-md p-2.5 text-xs break-words whitespace-pre-wrap">
-        {withImages ? withImages.text : formatUnknownValue(result, 2)}
+        {withImages ? withImages.text : textResult ?? formatUnknownValue(result, 2)}
       </pre>
       {withImages && withImages.images.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-2">
@@ -1325,9 +1331,15 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
   }, [approval, isRequiresAction, status?.type]);
 
   // MCP App results render the server's own UI instead of the collapsed call.
+  const injection = toolInjection(result);
   const mcpApp = status?.type === "complete" ? mcpAppOf(result) : null;
   if (mcpApp) {
-    return <McpAppCard app={mcpApp.app} toolName={toolName} input={args} result={mcpApp.result} />;
+    return (
+      <>
+        <McpAppCard app={mcpApp.app} toolName={toolName} input={args} result={mcpApp.result} />
+        <InjectionBadge report={injection} className="ps-1" />
+      </>
+    );
   }
 
   return (
@@ -1337,6 +1349,7 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
         status={status}
         responseDeliveryStatus={responseDeliveryStatus}
       />
+      <InjectionBadge report={injection} className="ps-6" />
       <ToolFallbackContent>
         <ToolFallbackError status={status} />
         <ToolFallbackArgs

@@ -32,6 +32,7 @@ export default {
   cmdChatArchive: "Archive chat",
   cmdChatDelete: "Delete chat",
   cmdChatScrollBottom: "Scroll to the bottom",
+  cmdChatLoadImage: "Load a remote image in the chat",
   cmdComposerModel: "Choose model",
   cmdComposerEffort: "Reasoning effort",
   cmdComposerSearch: "Turn web search on or off",

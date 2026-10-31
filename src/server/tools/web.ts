@@ -4,6 +4,7 @@ import { extractText, getDocumentProxy } from "unpdf";
 import { z } from "zod";
 import { DEFAULT_USER_SETTINGS } from "../../shared/types.js";
 import { assertPublicHost, BlockedAddressError, publicFetch, readCapped } from "../public-fetch.js";
+import { injectionMetadata, scanForInjection, wrapUntrusted } from "../prompt-injection.js";
 import { scraplingFetch } from "./scrapling.js";
 import { SearchBudget } from "./search-budget.js";
 
@@ -203,8 +204,18 @@ export function webTools(opts: { searchBudget?: SearchBudget; search?: boolean }
       if (!searchBudget.reserve()) {
         throw new Error(`The web search limit (${searchBudget.limit} queries per reply) has been reached. Answer using the evidence already collected; you may still read known URLs with web_fetch.`);
       }
-      return webSearch(query, limit ?? 8, abortSignal);
+      const found = await webSearch(query, limit ?? 8, abortSignal);
+      const injection = scanForInjection([query, ...found.results.flatMap((r) => [r.title, r.url, r.snippet])].join("\n"));
+      return { ...found, ...(injectionMetadata(injection) ? { injection: injectionMetadata(injection) } : {}) };
     },
+    // UI keeps titles/URLs/snippets; the model sees the same content spotlighted as data.
+    toModelOutput: ({ input, output }) => ({
+      type: "text",
+      value: wrapUntrusted(
+        JSON.stringify({ results: output.results.map((r) => ({ title: r.title, url: r.url, snippet: r.snippet })) }),
+        { kind: "web_search", name: input.query },
+      ).text,
+    }),
   });
   return {
     ...(opts.search === false ? {} : { web_search }),
@@ -219,8 +230,14 @@ export function webTools(opts: { searchBudget?: SearchBudget; search?: boolean }
         const { title, content, via } = await webFetch(url, abortSignal);
         const pages = Math.max(1, Math.ceil(content.length / PAGE_CHARS));
         const slice = content.slice((page - 1) * PAGE_CHARS, page * PAGE_CHARS);
-        return { title, url, page, pages, via, content: slice };
+        const injection = scanForInjection(slice);
+        return { title, url, page, pages, via, content: slice, ...(injectionMetadata(injection) ? { injection: injectionMetadata(injection) } : {}) };
       },
+      // The UI still pages the raw content; the model gets provenance and a quoted body.
+      toModelOutput: ({ output }) => ({
+        type: "text",
+        value: wrapUntrusted(output.content, { kind: "web_page", name: output.title, url: output.url, page: output.page, pages: output.pages, via: output.via }).text,
+      }),
     }),
   };
 }

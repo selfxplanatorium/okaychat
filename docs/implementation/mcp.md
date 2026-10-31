@@ -16,6 +16,8 @@ Per-server policy in `config.approval` (Settings → MCP servers → edit): `des
 - The server sets AI SDK `needsApproval` on the `dynamicTool`. `streamText` stops with a `tool-approval-request`. The client shows Allow / Deny (assistant-ui `ToolFallback`), then `sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses` resends, and `streamText` runs or skips the call. Denied calls persist as `output-denied`.
 - The work-log group opens itself while a call waits for approval (`thread.aui.tsx`), or the prompt would be hidden.
 - MCP tools are `dynamic-tool` parts in UI messages, not `tool-<name>`.
+- After untrusted content entered the turn, a destructive or non-read-only tool is gated by the chat's `toolApproval` even when the server policy is `never`. The existing card names the risk. Sub-agents never receive destructive or non-read-only tools; scheduled runs auto-deny instead of waiting. See `prompt-injection.md`.
+- Text results go to the model inside a provenance envelope in `toModelOutput`; the card keeps `{ text, images }`. Descriptions are prefixed with their server as third-party metadata.
 
 ## Resources, prompts, and app rendering
 
