@@ -66,6 +66,8 @@ export interface OllamaModelOptions {
   context?: number;
   /** Default effort from the chat composer; a per-call `reasoning` option wins. */
   reasoning?: ReasoningEffort;
+  /** Transport for `/api/chat` only. The factory injects the retrying provider fetch. */
+  fetch?: typeof fetch;
 }
 
 /** One NDJSON line of chat output. Tool arguments can be large, so the cap is generous. */
@@ -398,7 +400,7 @@ class OllamaLanguageModel implements LanguageModelV4 {
   }
 
   private connection(): OllamaConnection {
-    return { baseURL: this.options.baseURL, guarded: this.options.guarded };
+    return { baseURL: this.options.baseURL, guarded: this.options.guarded, fetch: this.options.fetch };
   }
 
   async doGenerate(options: LanguageModelV4CallOptions): Promise<LanguageModelV4GenerateResult> {

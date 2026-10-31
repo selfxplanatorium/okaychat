@@ -38,7 +38,6 @@ import {
   type AssistantState,
   BranchPickerPrimitive,
   ComposerPrimitive,
-  ErrorPrimitive,
   groupPartByType,
   MessagePrimitive,
   SuggestionPrimitive,
@@ -92,6 +91,8 @@ import { parseAttachmentText, splitUserMessage, typedText } from "@/runtime/mess
 import { mcpAppOf } from "@/components/chat/McpApp";
 import { ReplyFiles } from "@/components/chat/reply-files";
 import { RetryWithModel } from "@/components/chat/retry-model";
+import { ChatErrorMessage } from "@/components/chat/message-error";
+import { RetryStatus } from "@/components/chat/retry-status";
 import { ShortcutHints } from "@/components/chat/ShortcutHints";
 import { DictationSend, ReadAloudAutoPlay, useDictateLabel, useSendDictation, VoiceNotice } from "@/speech/ChatVoice";
 import { useSpeech } from "@/speech/store";
@@ -494,6 +495,7 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
             )}
           >
             <ThreadScrollToBottom />
+            <RetryStatus />
             <ThreadFollowupSuggestions />
             <Composer autoFocus={autoFocus} />
             <AuiIf condition={(s) => isNewChatView(s) && s.composer.isEmpty}>
@@ -1142,15 +1144,7 @@ const ComposerAction: FC<{ blocked: boolean }> = ({ blocked }) => {
   );
 };
 
-const MessageError: FC = () => {
-  return (
-    <MessagePrimitive.Error>
-      <ErrorPrimitive.Root className="aui-message-error-root border-destructive bg-destructive/10 text-destructive animate-rise-in dark:bg-destructive/5 mt-2 rounded-md border p-3 text-sm transition-colors dark:text-red-200">
-        <ErrorPrimitive.Message className="aui-message-error-message line-clamp-2" />
-      </ErrorPrimitive.Root>
-    </MessagePrimitive.Error>
-  );
-};
+const MessageError: FC = () => <ChatErrorMessage />;
 
 /**
  * Waiting for the first token, and any gap after a tool call: the dots fade in

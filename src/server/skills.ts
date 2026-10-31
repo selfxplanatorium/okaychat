@@ -10,6 +10,7 @@ import type { AppEnv } from "./auth.js";
 import { decrypt, encrypt, newId } from "./crypto.js";
 import { db, tx } from "./db.js";
 import { riskMetadata, scanForInjection, wrapUntrusted } from "./prompt-injection.js";
+import { handleAppError } from "./errors.js";
 import { assertStorage } from "./quota.js";
 import { fetchSkillSource, skillSourceUrl } from "./skill-fetch.js";
 
@@ -901,4 +902,5 @@ export const skillRoutes = new Hono<AppEnv>()
   .delete("/:id", (c) => {
     deleteSkill(c.get("user").id, c.req.param("id"));
     return c.json({ ok: true });
-  });
+  })
+  .onError(handleAppError);

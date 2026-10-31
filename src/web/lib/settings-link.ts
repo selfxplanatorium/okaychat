@@ -33,6 +33,7 @@ export const SETTINGS_DESTINATIONS = {
   webTools: { section: "general", anchor: "web-tools" },
   webSearchLimit: { section: "general", anchor: "web-search-limit" },
   providers: { section: "providers" },
+  account: { section: "account" },
   memory: { section: "memory" },
   keyboard: { section: "keyboard" },
 } as const satisfies Record<string, SettingsDestination>;

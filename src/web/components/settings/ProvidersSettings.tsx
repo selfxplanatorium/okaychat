@@ -8,6 +8,7 @@ import { t } from "@/i18n";
 import { formatNumber } from "@/i18n/format";
 import { useCommand } from "@/keyboard/registry";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/error-text";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 import { AudienceButton } from "./Audience";
@@ -60,7 +61,7 @@ export function ProviderForm({ provider, onSaved, autoFocus }: { provider: Provi
       setApiKey("");
       onSaved?.();
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorText(e, "common.somethingWentWrong"));
     } finally {
       setBusy(false);
     }
@@ -200,7 +201,7 @@ function CustomProviderForm({ onDone }: { onDone: () => void }) {
           await refresh();
           onDone();
         } catch (err) {
-          setError((err as Error).message);
+          setError(errorText(err, "common.somethingWentWrong"));
         }
       }}
     >

@@ -1,5 +1,6 @@
 import { defineToolkit, type ToolCallMessagePartComponent } from "@assistant-ui/react";
 import type { InjectionReport } from "@shared/types";
+import { toolErrorPresentation } from "@/lib/error-presentation";
 import { BookOpenIcon, BotIcon, CheckIcon, ChevronDownIcon, CircleDashedIcon, CircleMinusIcon, DownloadIcon, EyeIcon, FileTextIcon, GlobeIcon, ImageIcon, Loader2Icon, SearchIcon, SquareTerminalIcon, TelescopeIcon, TriangleAlertIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { ArtifactCard } from "@/components/artifacts/ArtifactCard";
@@ -41,8 +42,12 @@ export function InjectionBadge({ report, className }: { report?: InjectionReport
   );
 }
 
-function ToolShell({ icon, label, running, error, injection, children }: { icon: ReactNode; label: ReactNode; running: boolean; error?: string; injection?: InjectionReport; children?: ReactNode }) {
+function ToolShell({ icon, label, running, error, failure, injection, children }: { icon: ReactNode; label: ReactNode; running: boolean; error?: string; failure?: string; injection?: InjectionReport; children?: ReactNode }) {
   const [open, setOpen] = useState(false);
+  // A tool error is wire JSON. A historical raw string or object still gets the translated generic
+  // failure instead of being printed, because no regex can tell a secret from a sentence. `failure`
+  // is a message this app authored for the card (e.g. "Search failed"), so it is safe to print.
+  const shown = toolErrorPresentation(error);
   return (
     <div className="my-2 text-sm">
       <button type="button" onClick={() => setOpen(!open)} className="text-muted-foreground hover:text-foreground flex max-w-full items-center gap-2 transition-colors duration-(--motion-fast) ease-out-quart" disabled={!children}>
@@ -57,7 +62,14 @@ function ToolShell({ icon, label, running, error, injection, children }: { icon:
         {children && <ChevronDownIcon className={cn("size-3.5 shrink-0 transition-transform duration-(--motion-base) ease-out-expo", open && "rotate-180")} />}
       </button>
       {injection?.flagged ? <InjectionBadge report={injection} className="mt-1 ml-6" /> : null}
-      {error && <p className="text-muted-foreground animate-rise-in mt-1 ml-6 text-xs">{error}</p>}
+      {shown ? (
+        <div className="animate-rise-in mt-1 ml-6 text-xs">
+          <p className="text-foreground">{t(shown.messageKey)}</p>
+          <p className="text-muted-foreground">{t(shown.hintKey)}</p>
+        </div>
+      ) : failure ? (
+        <p className="text-muted-foreground animate-rise-in mt-1 ml-6 text-xs break-words">{failure}</p>
+      ) : null}
       {open && children && <div className="animate-rise-in mt-2 ml-6">{children}</div>}
     </div>
   );
@@ -70,10 +82,10 @@ export const toolkit = defineToolkit({
       const r = result as { engine?: string; results?: SearchResult[]; injection?: InjectionReport } | undefined;
       const results = r?.results ?? [];
       const running = status?.type === "running";
-      const error = status?.type === "incomplete" ? t("tools.searchFailed") : undefined;
+      const failure = status?.type === "incomplete" ? t("tools.searchFailed") : undefined;
       const query = (args as { query?: string })?.query ?? "";
       return (
-        <ToolShell icon={<SearchIcon className="size-4" />} running={running} error={error} injection={r?.injection} label={running ? t("tools.searching", { query }) : t("tools.searched", { query, count: results.length })}>
+        <ToolShell icon={<SearchIcon className="size-4" />} running={running} failure={failure} injection={r?.injection} label={running ? t("tools.searching", { query }) : t("tools.searched", { query, count: results.length })}>
           {results.length > 0 && (
             <div className="grid gap-1.5 sm:grid-cols-2">
               {results.map((res) => (
@@ -97,12 +109,12 @@ export const toolkit = defineToolkit({
       const url = (args as { url?: string })?.url ?? "";
       const r = result as { title?: string; via?: string; pages?: number; content?: string; injection?: InjectionReport } | undefined;
       const running = status?.type === "running";
-      const error = status?.type === "incomplete" ? t("tools.pageReadFailed") : undefined;
+      const failure = status?.type === "incomplete" ? t("tools.pageReadFailed") : undefined;
       return (
         <ToolShell
           icon={<FileTextIcon className="size-4" />}
           running={running}
-          error={error}
+          failure={failure}
           injection={r?.injection}
           label={
             <>
@@ -276,7 +288,7 @@ function GeneratedImage({ args, result, running }: { args: unknown; result: unkn
     );
   }
   if (typeof image === "string" || !image.url) {
-    return <ToolShell icon={<ImageIcon className="size-4" />} running={false} error={typeof image === "string" ? image : t("tools.noImage")} label={t("tools.imageFailed")} />;
+    return <ToolShell icon={<ImageIcon className="size-4" />} running={false} error={typeof image === "string" ? image : undefined} failure={typeof image === "string" ? undefined : t("tools.noImage")} label={t("tools.imageFailed")} />;
   }
   return (
     <figure className="group/img animate-blur-in relative my-2 w-fit max-w-full">

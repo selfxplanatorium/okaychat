@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import "@fontsource-variable/onest";
 import "@fontsource-variable/golos-text";
 import "@fontsource/dejavu-sans";
@@ -25,7 +26,9 @@ if (import.meta.env.PROD && "serviceWorker" in navigator) {
 void loadLocale(localeLoaders).then(() =>
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <App />
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
     </StrictMode>,
   ),
 );

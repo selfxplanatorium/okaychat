@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,10 +7,10 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { csrf } from "hono/csrf";
 import { logger } from "hono/logger";
-import { HTTPException } from "hono/http-exception";
 import { authRoutes } from "./auth.js";
 import { warmCatalog } from "./catalog/providers.js";
 import { probeRenderer } from "./documents/render.js";
+import { handleAppError } from "./errors.js";
 import { env } from "./env.js";
 import { startMemoryWorker } from "./memory-learn.js";
 import { api, mcpOAuthCallback } from "./routes.js";
@@ -28,13 +27,7 @@ const publicOrigin = process.env.OKAYCHAT_PUBLIC_URL ? new URL(process.env.OKAYC
 // base64-encoded); upload routes set tighter limits of their own.
 app.use("/api/*", bodyLimit({ maxSize: 100 * 1024 * 1024, onError: (c) => c.json({ error: "Request is too large." }, 413) }));
 app.use("/api/*", csrf({ origin: (origin, c) => origin === new URL(c.req.url).origin || origin === publicOrigin }));
-app.onError((error, c) => {
-  if (error instanceof HTTPException) return c.json({ error: error.message }, error.status);
-  // Raw messages can carry SQL, file paths, or upstream responses. Only the log gets them.
-  const ref = randomBytes(4).toString("hex");
-  console.error(`[${c.req.method} ${c.req.path}] ref=${ref}`, error);
-  return c.json({ error: `Something went wrong (ref ${ref}). The server log has details.` }, 500);
-});
+app.onError(handleAppError);
 // Applied to every response that did not set its own. A script CSP is not possible here: artifact frames
 // use srcdoc, which inherits the parent's policy, and they load libraries from public CDNs.
 app.use("*", async (c, next) => {

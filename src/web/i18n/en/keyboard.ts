@@ -4,6 +4,8 @@ export default {
   cmdAppToggleSidebar: "Show or hide the sidebar",
   cmdAppColorScheme: "Switch color scheme (light, system, dark)",
   cmdAppLogout: "Log out",
+  cmdAppReload: "Reload the app",
+  cmdErrorCopyDetails: "Copy error details",
   cmdNavNewChat: "New chat",
   cmdNavTemporaryChat: "Start or end a temporary chat",
   cmdNavPreviousChat: "Previous chat in the sidebar",

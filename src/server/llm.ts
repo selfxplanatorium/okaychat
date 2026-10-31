@@ -4,6 +4,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { HTTPException } from "hono/http-exception";
 import { wrapLanguageModel, type JSONValue, type LanguageModel, type ModelMessage } from "ai";
+import type { RetryNotice } from "../shared/errors.js";
 import type { ModelInfo, ReasoningEffort } from "../shared/types.js";
 import { CHATGPT, chatgptFetch } from "./catalog/chatgpt.js";
 import { OLLAMA_DEFAULT_URL } from "./catalog/ollama.js";
@@ -12,6 +13,7 @@ import { sha256 } from "./crypto.js";
 import { USER_AGENT } from "./env.js";
 import { modelAccessMessage, sharedModelAccess } from "./entitlements.js";
 import { publicFetch } from "./public-fetch.js";
+import { createRetryingFetch, type RetryingFetchOptions } from "./retry.js";
 import { openaiToolSchemas } from "./openai-schema.js";
 import { createOllamaModel } from "./ollama-model.js";
 
@@ -47,7 +49,16 @@ function affinityHeaders(providerId: string, affinity: string): Record<string, s
 /** Stable per-account routing and cache key. Hashed so the account id never leaves the server. */
 export const cacheAffinity = (userId: string) => `okc-${sha256(`cache:${userId}`).slice(0, 32)}`;
 
-export function createModel(info: ModelInfo, conn: Connection, opts: { userId: string; effort?: ReasoningEffort }): ModelHandle {
+export interface CreateModelOptions {
+  userId: string;
+  effort?: ReasoningEffort;
+  /** Chat turns stream a visible "Retrying in Ns…" notice; background calls simply wait. */
+  onRetry?: (notice: RetryNotice) => void;
+  /** Test seam for the retry clock and fake provider; never set in production code. */
+  retry?: Omit<RetryingFetchOptions, "onRetry" | "fetchImpl">;
+}
+
+export function createModel(info: ModelInfo, conn: Connection, opts: CreateModelOptions): ModelHandle {
   // Recheck the live policy here, not only where the model was listed: a turn can run after an admin
   // revoked access, and a caller can hand over an earlier model/connection pair. Nothing reaches the
   // provider before this passes.
@@ -62,7 +73,9 @@ export function createModel(info: ModelInfo, conn: Connection, opts: { userId: s
   const headers = affinityHeaders(info.providerId, affinity);
   const apiKey = conn.apiKey ?? "not-needed";
   const baseURL = info.baseURL;
-  const fetch = conn.guarded ? publicFetch : undefined;
+  // All provider retries happen here, before a response body is consumed. Every caller disables the
+  // SDK's own retry (maxRetries: 0), so delays never compound. See docs/implementation/errors.md.
+  const fetch = createRetryingFetch({ ...(opts.retry ?? {}), onRetry: opts.onRetry, fetchImpl: conn.guarded ? publicFetch : undefined });
   // OpenAI-style caches are partitioned by prompt_cache_key: a per-chat key made every new chat start cold.
   const cacheKey = affinity;
   const effort = opts.effort && info.reasoning && (!info.reasoningEfforts || info.reasoningEfforts.includes(opts.effort)) ? opts.effort : undefined;
@@ -71,7 +84,9 @@ export function createModel(info: ModelInfo, conn: Connection, opts: { userId: s
   switch (info.format) {
     case "openai-responses": {
       const chatgpt = info.providerId === CHATGPT;
-      const provider = createOpenAI(chatgpt ? { apiKey: "chatgpt-login", baseURL, headers, fetch: chatgptFetch(opts.userId) } : { apiKey, baseURL, headers, fetch });
+      const provider = createOpenAI(chatgpt
+        ? { apiKey: "chatgpt-login", baseURL, headers, fetch: createRetryingFetch({ ...(opts.retry ?? {}), onRetry: opts.onRetry, fetchImpl: chatgptFetch(opts.userId) }) }
+        : { apiKey, baseURL, headers, fetch });
       const openai: Record<string, JSONValue> = { promptCacheKey: cacheKey, store: false };
       if (effort) {
         openai.reasoningEffort = effort;
@@ -121,6 +136,8 @@ export function createModel(info: ModelInfo, conn: Connection, opts: { userId: s
           thinkingOff: info.reasoningEfforts ? info.reasoningEfforts.includes("none") : info.reasoning,
           context,
           reasoning: effort,
+          // Same retry boundary as every other provider, injected before ollamaRequest maps errors.
+          fetch,
         }),
         providerOptions: {},
         markCache: passthrough,

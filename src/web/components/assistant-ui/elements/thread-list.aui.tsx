@@ -768,6 +768,7 @@ const ThreadListItemMenu: FC<{
   const activeProject = useData((s) => s.activeProject);
   const [sharing, setSharing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [rowError, setRowError] = useState<string | null>(null);
   // Rename and the dialogs take focus themselves; returning it to the trigger would blur the rename field.
   const keepFocusRef = useRef(false);
   const rowRef = useRef<HTMLDivElement>(null);
@@ -783,10 +784,12 @@ const ThreadListItemMenu: FC<{
 
   const busyWhile = async (failure: string, task: () => Promise<void>) => {
     onBusy(true);
+    setRowError(null);
     try {
       await task();
     } catch (cause) {
-      window.alert(cause instanceof Error ? cause.message : failure);
+      // Inline on the row, not a browser alert: the message is already the safe ApiError text.
+      setRowError(cause instanceof Error ? cause.message : failure);
     } finally {
       onBusy(false);
     }
@@ -918,6 +921,7 @@ const ThreadListItemMenu: FC<{
           </MenuItem>
         </MenuContent>
       </ContextMenu.Root>
+      {rowError && <p role="alert" className="text-destructive px-3 pb-1 text-xs break-words">{rowError}</p>}
 
       {remoteId && (
         <Dialog open={sharing} onOpenChange={setSharing}>

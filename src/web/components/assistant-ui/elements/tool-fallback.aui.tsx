@@ -31,6 +31,7 @@ import {
   type ToolCallMessagePartComponent,
 } from "@assistant-ui/react";
 import { t, type MessageKey, type PlainMessageKey } from "@/i18n";
+import { presentError, toolErrorPresentation } from "@/lib/error-presentation";
 import { formatDuration, formatList, formatNumber } from "@/i18n/format";
 import { Trans } from "@/i18n/react";
 import { cn } from "@/lib/utils";
@@ -374,14 +375,11 @@ function ToolFallbackError({
 }) {
   if (status?.type !== "incomplete") return null;
 
-  const error = status.error;
-  const errorText =
-    error === undefined || error === null ? null : formatUnknownValue(error);
-
-  if (!errorText) return null;
-
   const isCancelled = status.reason === "cancelled";
   const headerText = isCancelled ? t("tools.cancelledReason") : t("tools.errorLabel");
+  // Tool errors are wire JSON from the server. A historical raw string or object is not printed:
+  // the card falls back to the translated generic tool failure, which is never silent.
+  const presentation = isCancelled ? undefined : toolErrorPresentation(status.error) ?? presentError({ code: "tool_failed", message: "", retryable: false }, "tool");
 
   return (
     <div
@@ -395,9 +393,12 @@ function ToolFallbackError({
       <p className="aui-tool-fallback-error-header text-muted-foreground font-semibold">
         {headerText}
       </p>
-      <p className="aui-tool-fallback-error-reason text-muted-foreground break-words whitespace-pre-line">
-        {errorText}
-      </p>
+      {presentation ? (
+        <>
+          <p className="aui-tool-fallback-error-reason break-words">{t(presentation.messageKey)}</p>
+          <p className="aui-tool-fallback-error-hint text-muted-foreground text-xs break-words">{t(presentation.hintKey)}</p>
+        </>
+      ) : null}
     </div>
   );
 }

@@ -14,7 +14,7 @@ import { createAssistantStream } from "assistant-stream";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { ThreadSummary } from "@shared/types";
 import { t } from "@/i18n";
-import { api, takePrefetched } from "@/lib/api";
+import { api, structuredResponseError, takePrefetched } from "@/lib/api";
 import { toolkit, widgetHelperRenders } from "@/components/chat/tool-ui";
 import { WidgetInstructions, widgets } from "@/components/genui/toolkit";
 import { chatIdFromPath, getActiveModel, selectedThreadKey, threadsPath, useData } from "@/state/data";
@@ -26,6 +26,7 @@ import { chatSearchFor, useChatSearch, useChatSearchStore } from "@/state/chat-s
 import { chatResearchFor, useChatResearchStore } from "@/state/chat-research";
 import { dropThread, readThread, sameRows, ServerRows, writeThread } from "./threadCache";
 import { setThreadSync, useThreadSyncStore } from "@/state/thread-sync";
+import { applyRetryNotice, clearRetryNotice, retryChunkData, retryOwnerId } from "@/state/retry-status";
 
 /** Thread metadata the sidebar reads from `threadListItem.custom`. */
 export type ThreadCustom = { pinned: boolean; projectId: string | null };
@@ -59,6 +60,25 @@ function whenThread(aui: Aui, ready: (s: ReturnType<Aui["thread"]["getState"]>) 
 
 const whenLoaded = (aui: Aui, then: () => void) => whenThread(aui, (s) => !s.isLoading, then);
 const whenIdle = (aui: Aui, then: () => void) => whenThread(aui, (s) => !s.isRunning, then);
+
+/**
+ * Applies a live retry notice to the chat this runtime owns. `aui` is scoped to the runtime's own
+ * `threadListItem`, so a run finishing in a background chat never writes or clears the notice of the
+ * chat on screen. A new chat has no remote id until `initialize()` resolves; wait for it then.
+ */
+function onOwningThread(aui: Aui, apply: (threadId: string) => void) {
+  const threadId = retryOwnerId(aui.threadListItem.getState());
+  if (threadId) {
+    apply(threadId);
+    return;
+  }
+  const unsubscribe = aui.subscribe(() => {
+    const remoteId = retryOwnerId(aui.threadListItem.getState());
+    if (!remoteId) return;
+    unsubscribe();
+    apply(remoteId);
+  });
+}
 
 function tracked<T>(remoteId: string, write: Promise<T>): Promise<T> {
   const settled = write.catch(() => {});
@@ -295,19 +315,22 @@ addEventListener("pagehide", () => (unloading = true));
 addEventListener("pageshow", () => (unloading = false));
 
 const cancellableFetch = (onCancel: () => void): typeof fetch => async (input, init) => {
+  let streamId: string | undefined;
+  const cancel = () => {
+    if (unloading) return;
+    onCancel();
+    if (streamId) void fetch(`/api/chat/${streamId}/cancel`, { method: "POST", credentials: "same-origin", keepalive: true }).catch(() => {});
+  };
+  // Listen before the first byte arrives, so a Stop also clears the live retry notice while the
+  // provider is still deciding. The cancel endpoint only exists once the response names its stream.
+  if (init?.signal?.aborted) cancel();
+  else init?.signal?.addEventListener("abort", cancel, { once: true });
   const res = await fetch(input, init);
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  const streamId = res.headers.get(RESUMABLE_STREAM_ID_HEADER) ?? url.match(/\/api\/chat\/resume\/([\w-]+)/)?.[1];
-  init?.signal?.addEventListener(
-    "abort",
-    () => {
-      if (streamId && !unloading) {
-        onCancel();
-        void fetch(`/api/chat/${streamId}/cancel`, { method: "POST", credentials: "same-origin", keepalive: true }).catch(() => {});
-      }
-    },
-    { once: true },
-  );
+  streamId = res.headers.get(RESUMABLE_STREAM_ID_HEADER) ?? url.match(/\/api\/chat\/resume\/([\w-]+)/)?.[1];
+  // A send that never opened the stream still carries the wire JSON; keep it for the error block.
+  const failure = await structuredResponseError(res);
+  if (failure) throw new Error(failure);
   return res;
 };
 
@@ -324,7 +347,11 @@ function useThreadTransport() {
     return new AssistantChatTransport({
       api: "/api/chat",
       credentials: "same-origin",
-      fetch: cancellableFetch(() => storage.clear()),
+      // Stop also drops this chat's live retry notice; the runtime is scoped to the chat that owns it.
+      fetch: cancellableFetch(() => {
+        storage.clear();
+        clearRetryNotice(retryOwnerId(aui.threadListItem.getState()));
+      }),
       resumable: { storage, resumeApi: (streamId) => `/api/chat/resume/${streamId}` },
     });
   }, [aui]);
@@ -364,17 +391,32 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         // Session storage may be disabled.
       }
     },
-    runtimeHook: () =>
+    runtimeHook: () => {
       // eslint-disable-next-line react-hooks/rules-of-hooks
-      useChatRuntime({
-        // eslint-disable-next-line react-hooks/rules-of-hooks
-        transport: useThreadTransport(),
-        // eslint-disable-next-line react-hooks/rules-of-hooks
-        adapters: useVoiceAdapters(),
-        onFinish: () => { void useData.getState().refreshStorage().catch(() => {}); },
+      const aui = useAui();
+      // eslint-disable-next-line react-hooks/rules-of-hooks
+      const transport = useThreadTransport();
+      // eslint-disable-next-line react-hooks/rules-of-hooks
+      const adapters = useVoiceAdapters();
+      // eslint-disable-next-line react-hooks/rules-of-hooks
+      return useChatRuntime({
+        transport,
+        adapters,
+        // A provider retry is a live wait, not a message part: the server sends transient data-retry chunks.
+        onData: (chunk) => {
+          const data = retryChunkData(chunk);
+          if (data === undefined) return;
+          onOwningThread(aui, (threadId) => applyRetryNotice(threadId, data));
+        },
+        onError: () => clearRetryNotice(retryOwnerId(aui.threadListItem.getState())),
+        onFinish: () => {
+          clearRetryNotice(retryOwnerId(aui.threadListItem.getState()));
+          void useData.getState().refreshStorage().catch(() => {});
+        },
         // Browser-executed tools (generative UI) and tool approvals resolve locally; this sends them back to finish the turn.
         sendAutomaticallyWhen: (options) => lastAssistantMessageIsCompleteWithToolCalls(options) || lastAssistantMessageIsCompleteWithApprovalResponses(options),
-      }),
+      });
+    },
     adapter: threadListAdapter,
   });
   const config = useMemo(() => {

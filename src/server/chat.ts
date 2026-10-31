@@ -12,7 +12,6 @@ import {
 import { frontendTools, type FrontendTools } from "assistant-stream/ai-sdk";
 import { createInMemoryResumableStreamStore, createResumableStreamContext, RESUMABLE_STREAM_ID_HEADER } from "assistant-stream/resumable";
 import { Hono, type Context } from "hono";
-import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { AssistantMetadata, ModelInfo, ReasoningEffort, TokenUsage, UserSettings } from "../shared/types.js";
 import type { AppEnv } from "./auth.js";
@@ -32,6 +31,8 @@ import type { VisualShot } from "./documents/visual.js";
 import { webTools } from "./tools/web.js";
 import { SearchBudget, StepBudget, searchesInCurrentTurn, agentStepsInCurrentTurn } from "./tools/search-budget.js";
 import { hasResearch, RESEARCH_PARALLEL, RESEARCH_TOOL, researchedThisTurn, researchInput, researchTool, runResearch } from "./research.js";
+import { errorJson, AppError } from "./errors.js";
+import { describeBoundaryError, describeProviderError, toolErrorWireText, wireErrorText } from "./provider-errors.js";
 import { conversationMemory, factsContext, memoryPreferences, temporaryMemory } from "./memory.js";
 import { contextText, insertTurnContexts, saveTurnContext, shownFactIds, storedTurnContexts } from "./turn-context.js";
 import { adaptPdfParts } from "./pdf-parts.js";
@@ -45,6 +46,27 @@ import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "./usa
 // AssistantChatTransport sends the thread's remote id as `id` and model context as `config`, `system`, and `tools`.
 // After an automatic trim the context must fall below this share of the threshold, or it is summarized too.
 const TRIM_HEADROOM = 0.75;
+
+/** Kept as a type alias so the transform stays independent of the inferred UI message type. */
+type UiChunk = { type: string };
+
+/**
+ * The model already received the original tool error in its tool result. This reshapes only the UI
+ * chunk, so a raw string, object, or stack can never reach a tool card while the model keeps the
+ * detail it needs to react to.
+ */
+function normalizeToolErrorChunks<T extends UiChunk>(stream: ReadableStream<T>): ReadableStream<T> {
+  return stream.pipeThrough(new TransformStream<T, T>({
+    transform(chunk, controller) {
+      if (chunk.type !== "tool-output-error") {
+        controller.enqueue(chunk);
+        return;
+      }
+      const errorText = (chunk as T & { errorText?: unknown }).errorText;
+      controller.enqueue({ ...chunk, errorText: toolErrorWireText(errorText) } as T);
+    },
+  }));
+}
 
 const chatBody = z.object({
   messages: z.array(z.any()),
@@ -119,11 +141,12 @@ export async function turnStream(opts: TurnOptions) {
   const { userId, threadId, modelRef, uiMessages, signal } = opts;
   const temporary = isTemporaryThread(threadId);
   const personalized = !temporary || opts.temporaryPersonalization === true;
-  const describeError = (error: unknown) => describeProviderError(error, !temporary);
   const user = { id: userId };
   const settings = getSettings(userId);
   const effort = (opts.effort ?? settings.reasoningEffort[modelRef]) as ReasoningEffort | undefined;
   const { model, conn } = await resolveModel(userId, modelRef);
+  const describeError = (error: unknown) =>
+    wireErrorText(describeProviderError(error, { log: !temporary, model: model.ref, provider: model.providerId }));
   if (!temporary) {
     ensureThread(user.id, threadId);
     if (!opts.keepThreadModel) updateThread(user.id, threadId, { modelRef });
@@ -132,9 +155,9 @@ export async function turnStream(opts: TurnOptions) {
   // A retry or edit ends with a user message and researches again; a tool continuation does not.
   const research = opts.deepResearch === true && uiMessages.at(-1)?.role === "user" && !researchedThisTurn(uiMessages);
   if (research) {
-    if (!model.toolCall) throw new Error(`Deep research needs a model that can use tools. ${model.name} cannot.`);
-    if (!settings.webTools) throw new Error("Deep research needs web tools. Turn them on in Settings → General.");
-    if (settings.maxSearches === 0) throw new Error("Deep research needs web searches, and your search limit is 0. Raise it in Settings → General.");
+    if (!model.toolCall) throw new AppError({ code: "validation", message: `Deep research needs a model that can use tools. ${model.name} cannot.` });
+    if (!settings.webTools) throw new AppError({ code: "validation", message: "Deep research needs web tools. Turn them on in Settings → General." });
+    if (settings.maxSearches === 0) throw new AppError({ code: "validation", message: "Deep research needs web searches, and your search limit is 0. Raise it in Settings → General." });
   }
 
   const stream = createUIMessageStream({
@@ -217,7 +240,12 @@ export async function turnStream(opts: TurnOptions) {
       };
       const applied = applyCompaction(uiMessages, compaction);
       const { messages: live, summary } = applied;
-      const handle = createModel(model, conn, { userId, effort });
+      const handle = createModel(model, conn, {
+        userId,
+        effort,
+        // Transient so the notice never becomes part of the stored reply or its prompt prefix.
+        onRetry: (notice) => writer.write({ type: "data-retry", data: notice, transient: true }),
+      });
       const modelMessages = applyUntrustedEnvelopes(await historyMessages(applied, (tail) => adaptPdfParts(tail, model), tools));
       // Per-turn taint: project files and every replayed attachment/tool result are third-party content.
       // The approval gate below also checks each step's messages, so a run_code or MCP result taints the
@@ -291,7 +319,10 @@ export async function turnStream(opts: TurnOptions) {
             onProgress: (progress) => writer.write({ type: "tool-output-available", toolCallId, output: progress, preliminary: true }),
           });
         } catch (error) {
-          writer.write({ type: "tool-output-error", toolCallId, errorText: signal?.aborted ? "Stopped." : describeProviderError(error, false) });
+          const failure = signal?.aborted
+            ? new AppError({ code: "aborted", message: "Stopped." })
+            : describeProviderError(error, { log: false, model: model.ref, provider: model.providerId, kind: "tool" });
+          writer.write({ type: "tool-output-error", toolCallId, errorText: wireErrorText(failure) });
           throw error;
         }
         writer.write({ type: "tool-output-available", toolCallId, output });
@@ -372,6 +403,8 @@ export async function turnStream(opts: TurnOptions) {
           };
         },
         providerOptions: handle.providerOptions,
+        // llm.ts retries at the fetch boundary with jitter and a visible notice; the SDK must not add its own.
+        maxRetries: 0,
         maxOutputTokens: model.maxOutput,
         abortSignal: signal,
         onStepEnd: (step) => {
@@ -387,7 +420,7 @@ export async function turnStream(opts: TurnOptions) {
       });
 
       writer.merge(
-        result.toUIMessageStream({
+        normalizeToolErrorChunks(result.toUIMessageStream({
           sendStart: !research,
           sendReasoning: true,
           sendSources: true,
@@ -407,7 +440,7 @@ export async function turnStream(opts: TurnOptions) {
             }
             return undefined;
           },
-        }),
+        })),
       );
     },
   });
@@ -492,7 +525,7 @@ export const chatRoutes = new Hono<AppEnv>()
         return createUIMessageStreamResponse({ stream: releasing(stream, releaseTurn, c.req.raw.signal), headers: { "Cache-Control": "no-store" } });
       } catch (error) {
         releaseTurn();
-        return c.json({ error: (error as Error).message }, 400);
+        return errorJson(c, chatRouteError(error, parsed.data.config.modelName));
       }
     }
     // Generation is decoupled from this request so a reload can reattach. Stop sends an explicit cancel.
@@ -523,7 +556,7 @@ export const chatRoutes = new Hono<AppEnv>()
       controller.abort();
       release();
       runs.delete(streamId);
-      return c.json({ error: (error as Error).message }, 400);
+      return errorJson(c, chatRouteError(error, parsed.data.config.modelName));
     }
   })
   .get("/chat/resume/:streamId", async (c) => {
@@ -553,9 +586,15 @@ export const chatRoutes = new Hono<AppEnv>()
       resolveModel(user.id, body.modelRef),
     );
     // Provider errors explain themselves; the global handler would hide them behind a generic 500.
-    const state = await compact({ userId: user.id, threadId, messages: body.messages, previous: thread.compaction, model, conn }).catch((error: unknown) => {
-      throw new HTTPException(502, { message: describeProviderError(error) });
-    });
+    let state;
+    try {
+      state = await compact({ userId: user.id, threadId, messages: body.messages, previous: thread.compaction, model, conn });
+    } catch (error) {
+      const failure = describeProviderError(error, { model: model.ref, provider: model.providerId });
+      // A provider 401 is not this session's 401; keep the upstream failure away from the auth handler.
+      const status = failure.code === "validation" || failure.code === "model_not_found" ? 400 : 502;
+      return errorJson(c, failure, status);
+    }
     setCompaction(user.id, threadId, state);
     return c.json(state);
   })
@@ -598,6 +637,7 @@ export const chatRoutes = new Hono<AppEnv>()
         const result = await generateText({
           model: handle.model,
           providerOptions: handle.providerOptions,
+          maxRetries: 0,
           maxOutputTokens: 400,
           prompt: promptText("title", { message: text.slice(0, 4000) }),
         });
@@ -619,11 +659,12 @@ async function allowedSubagentModels(userId: string, settings: UserSettings, cha
   return refs.map((ref) => models.find((m) => m.ref === ref)).filter((m): m is ModelInfo => !!m?.toolCall);
 }
 
-function describeProviderError(error: unknown, log = true): string {
-  if (log) console.error("[chat]", error);
-  const e = error as { statusCode?: number; message?: string; responseBody?: string };
-  if (e?.statusCode === 401 || e?.statusCode === 403) return `The provider rejected the API key: ${e.message ?? "unauthorized"} Update it in Settings → Providers.`;
-  if (e?.statusCode === 429) return "Rate or usage limit reached. Wait, or switch models.";
-  const detail = e?.responseBody ? `${e.message} — ${e.responseBody.slice(0, 300)}` : e?.message;
-  return detail ?? "The request failed.";
+/** A failure before the stream opens: model resolution, research preconditions, or a route check. */
+function chatRouteError(error: unknown, modelRef: string): AppError {
+  if (error instanceof AppError) return error;
+  if (typeof (error as { status?: unknown })?.status === "number") {
+    // resolveModel throws HTTPException(400) with a model or connection explanation.
+    return describeProviderError(error, { model: modelRef });
+  }
+  return describeBoundaryError(error, { model: modelRef, kind: "background" });
 }

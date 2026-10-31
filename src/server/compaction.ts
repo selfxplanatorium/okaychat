@@ -170,6 +170,8 @@ export async function compact(opts: {
   const result = await generateText({
     model: handle.model,
     providerOptions: handle.providerOptions,
+    // llm.ts owns retries at the fetch boundary; the SDK must not add a second, compounded policy.
+    maxRetries: 0,
     messages: [...history, { role: "user", content: promptText("compaction") }],
     maxOutputTokens: Math.min(8_000, opts.model.maxOutput),
   });

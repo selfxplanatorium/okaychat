@@ -236,7 +236,9 @@ test("a failing worker is reported while the others' evidence is kept", async (t
   const chunks = await run("failure-chat");
   const final = finalOutput(chunks);
   assert.deepEqual(final.questions.map((q) => q.status), ["failed", "done"]);
-  assert.match(final.questions[0]!.error ?? "", /provider exploded/);
+  // The card gets the safe taxonomy message; the raw provider body stays in the server log.
+  assert.equal(final.questions[0]!.error, "That request was not valid.");
+  assert.ok(!JSON.stringify(final).includes("provider exploded"));
   assert.ok(final.findings?.includes("No notes: "));
   assert.equal(fake.of("chat").length, 1);
 });
@@ -245,7 +247,9 @@ test("research that collects no evidence fails the reply instead of inventing on
   const fake = transport(t, { worker: () => ({ status: 400 }) });
   const chunks = await run("empty-chat");
   const failed = chunks.find((c) => c.type === "tool-output-error");
-  assert.match(String(failed?.errorText), /could not collect evidence/);
+  const wire = JSON.parse(String(failed?.errorText)) as { code: string; message: string };
+  assert.equal(wire.code, "tool_failed");
+  assert.match(wire.message, /could not collect evidence/);
   assert.ok(chunks.some((c) => c.type === "error"));
   assert.equal(fake.of("chat").length, 0);
   assert.deepEqual(usageKinds(), ["research:1"], "spent research is still metered");
@@ -263,7 +267,9 @@ test("Stop cancels in-flight searches and every later stage", async (t) => {
   });
   const chunks = await run("stopped-chat", { signal: controller.signal });
   assert.ok(searchAborted, "the search request saw the abort");
-  assert.equal(chunks.find((c) => c.type === "tool-output-error")?.errorText, "Stopped.");
+  const stopped = JSON.parse(String(chunks.find((c) => c.type === "tool-output-error")?.errorText)) as { code: string; message: string };
+  assert.equal(stopped.code, "aborted");
+  assert.equal(stopped.message, "Stopped.");
   assert.equal(fake.of("review").length, 0);
   assert.equal(fake.of("chat").length, 0);
   assert.equal(fake.of("worker").length, 1);

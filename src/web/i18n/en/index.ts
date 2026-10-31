@@ -8,6 +8,7 @@ import auth from "./auth";
 import common from "./common";
 import composer from "./composer";
 import entitlements from "./entitlements";
+import errors from "./errors";
 import format from "./format";
 import general from "./general";
 import genui from "./genui";
@@ -41,6 +42,7 @@ export const en = {
   common,
   composer,
   entitlements,
+  errors,
   format,
   general,
   genui,

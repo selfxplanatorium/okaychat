@@ -12,6 +12,8 @@ import {
   OllamaError,
   type OllamaConnection,
 } from "./ollama.js";
+import { describeProviderError } from "../provider-errors.js";
+import { errorJson } from "../errors.js";
 import {
   getConnection,
   getOwnConnection,
@@ -85,7 +87,8 @@ function mutableConnection(scope: OllamaScope, userId: string): Connection {
 
 function failure(c: Context<AppEnv>, error: unknown) {
   const status = error instanceof OllamaError && error.status === 404 ? 404 : 502;
-  return c.json({ error: (error as Error).message }, status);
+  // Ollama's own body can echo a path or an arbitrary message; keep it in the log, send the taxonomy.
+  return errorJson(c, describeProviderError(error, { provider: "ollama" }), status);
 }
 
 export function ollamaManagementRoutes(scope: OllamaScope) {
@@ -179,7 +182,10 @@ export function ollamaManagementRoutes(scope: OllamaScope) {
               send(progress);
             }
           } catch (error) {
-            if (!cancelled && !signal.aborted) send({ error: (error as Error).message });
+            if (!cancelled && !signal.aborted) {
+              // The progress channel shows one sentence; the raw daemon body is logged at the boundary.
+              send({ error: describeProviderError(error, { provider: "ollama" }).message });
+            }
           } finally {
             pulls.delete(key);
             if (!cancelled) {

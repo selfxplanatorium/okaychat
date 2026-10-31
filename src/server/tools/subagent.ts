@@ -56,6 +56,7 @@ export function subagentTools(opts: { userId: string; threadId: string; allowed:
             content: [opts.searchBudget ? promptText("subagentSearchBudget", { remaining: opts.searchBudget.remaining }) : "", task].filter((part) => part.trim()).join("\n\n"),
           }]),
           allowSystemInMessages: true,
+          maxRetries: 0,
           tools: opts.subTools,
           stopWhen: stepCountIs(maxSteps + 1),
           // Same as the parent loop: a constant tool list keeps the prefix cached; the last step forbids calls.

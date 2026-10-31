@@ -6,6 +6,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AppEnv } from "./auth.js";
 import { htmlToPdf } from "./documents/render.js";
+import { redactSecrets } from "./errors.js";
 import { attachmentName, currentBranch, getThread, isTemporaryThread } from "./threads.js";
 
 /** Only what a reader of the conversation saw: text and attachment names. Reasoning, tools, and data parts stay out. */
@@ -72,7 +73,7 @@ export const exportRoutes = new Hono<AppEnv>().get("/threads/:id/export", async 
     const pdf = new Uint8Array(await htmlToPdf(markdownHtml(markdown, title)));
     return c.body(pdf, 200, { ...headers, "Content-Type": "application/pdf", "Content-Disposition": disposition(title, "pdf") });
   } catch (error) {
-    console.error("[export]", error);
+    console.error("[export]", redactSecrets(String((error as Error)?.message ?? error)).slice(0, 500));
     return c.json({ error: "PDF rendering is unavailable on this server" }, 503);
   }
 });

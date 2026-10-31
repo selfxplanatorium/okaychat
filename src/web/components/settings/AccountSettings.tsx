@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { StorageMeter } from "@/components/StorageMeter";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
+import { errorText } from "@/lib/error-text";
 import { useData } from "@/state/data";
 import { SettingsPage, SettingsRow, SettingsSection } from "./SettingsUI";
 
@@ -42,7 +43,7 @@ function SecuritySection() {
     try {
       setStatus(await fn());
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("account.somethingWrong"));
+      setError(errorText(cause, "account.somethingWrong"));
     } finally {
       setBusy(null);
     }
@@ -151,7 +152,7 @@ export function AccountSettings() {
       if (useData.getState().me?.id === updated.id) useData.setState({ me: updated });
       setStatus(message);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("account.profileFailed"));
+      setError(errorText(cause, "account.profileFailed"));
     } finally {
       setBusy(null);
     }
