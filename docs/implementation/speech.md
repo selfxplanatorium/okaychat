@@ -77,7 +77,8 @@ Whisper can use an NVIDIA GPU when the host exposes one. The CPU image and the p
 Requirements: an NVIDIA driver on the host and the NVIDIA Container Toolkit (Docker runtime `nvidia`). The GPU image is x86-64 only, like the speech lock.
 
 ```sh
-# Build and start the GPU override.
+# Build the GPU image even if a CPU image already exists, then start the override.
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml build speech
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 
 # Or in dev, with an isolated container:
@@ -88,14 +89,14 @@ scripts/dev-speech.sh
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `SPEECH_DEVICE` | `auto` | `auto` uses CUDA when a device is visible, `cuda` requires it, `cpu` never probes CUDA |
+| `SPEECH_DEVICE` | `auto` | `auto` uses CUDA when a device is visible, `cuda` requests it (with CPU fallback if unavailable), `cpu` never probes CUDA |
 | `SPEECH_COMPUTE_TYPE` | `float16` on CUDA, `int8` on CPU | ctranslate2 compute type for the attempted device |
 
 Detection is cheap and cached for the process lifetime: `speech/device.py` runs ctranslate2's CUDA device count in a short-lived child interpreter (with `nvidia-smi` as a fallback), so the long-running HTTP parent never holds a CUDA context and no model is loaded for `/health` or `/preload`. `gpuName` comes from the CUDA driver; `cudaVersion` is the CUDA runtime version when `libcudart` is present, not the driver's maximum supported version, so it can be `null`.
 
 faster-whisper loads the model on the first transcription, never during a health check. On CUDA the worker tries `float16`, then `int8_float16` when the GPU cannot use `float16`, then CPU `int8`. `SPEECH_COMPUTE_TYPE` replaces the first CUDA attempt but never removes the CPU fallback. A CUDA load or inference failure (the generator is consumed inside the same try) logs once, moves that child to CPU `int8`, and keeps serving. `/health` then reports `device: "cpu"`, `degraded: true`, the reason, and the model that actually loaded; Admin → Voice shows the note. The model cache key is `(model, device, compute_type)`, so a CPU model is never reused for CUDA.
 
-An explicit `SPEECH_DEVICE=cuda` without a visible GPU still starts and serves on CPU, with the reason in `/health`. With `auto`, a CPU-only host is reported as CPU without a warning. The idle exit is what frees GPU memory: the child process ends after `SPEECH_IDLE_MINUTES`, releasing its CUDA context and VRAM, and health then reports `model: null` while keeping the last fallback diagnostic. Expect roughly 0.5–1 GB of VRAM for `base` and several GB for `large-v3` while a child is transcribing; the CUDA wheels add about 1.3 GB to the GPU image.
+An explicit `SPEECH_DEVICE=cuda` without a visible GPU still starts and serves on CPU, with the reason in `/health`. With `auto`, a CPU-only host is reported as CPU without a warning. Failed CUDA attempts also report their diagnostic when the CPU retry fails. The idle exit is what frees GPU memory: the child process ends after `SPEECH_IDLE_MINUTES`, releasing its CUDA context and VRAM, and health then reports `model: null` while keeping the last fallback diagnostic. Expect roughly 0.5–1 GB of VRAM for `base` and several GB for `large-v3` while a child is transcribing; the CUDA wheels add about 1.3 GB to the GPU image.
 
 Regenerate the lock (x86-64 wheels only):
 

@@ -5,7 +5,8 @@
 # Then set OKAYCHAT_SPEECH_URL=http://127.0.0.1:8793 in .env and restart `npm run dev`.
 set -e
 cd "$(dirname "$0")/.."
-DATA=$(sed -n 's/^OKAYCHAT_DATA_DIR=//p' .env 2>/dev/null)
+DATA=$(sed -n 's/^OKAYCHAT_DATA_DIR=//p' .env 2>/dev/null || true)
+mkdir -p "${DATA:-./data}"
 TOKEN_FILE="$(cd "${DATA:-./data}" && pwd)/speech-token"
 if [ ! -s "$TOKEN_FILE" ]; then
   # Same format the app writes; the app reads it on its next start.

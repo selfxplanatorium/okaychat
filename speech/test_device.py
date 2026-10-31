@@ -5,10 +5,11 @@ Run from the repository root: python3 -m unittest discover -s speech -p 'test_*.
 
 import os
 import unittest
+from unittest.mock import patch
 
 import device
 from device import DevicePlan, Probe, reset_device_cache, resolve_device
-from server import SttEngine
+from server import Engine, Failure, SttEngine, engine_main
 
 
 def clean_env(**values):
@@ -196,6 +197,42 @@ class SttFallbackTests(unittest.TestCase):
         self.assertEqual(engine.device, "cpu")
         self.assertTrue(engine.degraded)
         self.assertEqual(engine.key, ("base", "cpu", "int8"))
+
+
+class StatusFailureTests(unittest.TestCase):
+    def test_failed_cpu_retry_reaches_parent_health(self):
+        class Pipe:
+            def __init__(self):
+                self.reply = None
+
+            def recv(self):
+                if self.reply is None:
+                    return ("load", ("base",))
+                raise EOFError
+
+            def send(self, reply):
+                self.reply = reply
+
+            def poll(self, timeout):
+                return True
+
+        pipe = Pipe()
+        with patch.object(SttEngine, "load_whisper", side_effect=RuntimeError("load failed")):
+            engine_main("stt", pipe, CUDA_PLAN.__dict__)
+        self.assertEqual(pipe.reply[:3], ("err", 500, "The speech worker failed."))
+        self.assertEqual(pipe.reply[3]["device"], "cpu")
+        self.assertTrue(pipe.reply[3]["degraded"])
+        self.assertIsNone(pipe.reply[3]["model"])
+
+        # Consume the same wire reply in the parent without starting a process.
+        pipe.recv = lambda: pipe.reply
+        pipe.send = lambda value: None
+        parent = Engine("stt")
+        parent.proc = type("Process", (), {"is_alive": lambda self: True})()
+        parent.conn = pipe
+        with self.assertRaises(Failure):
+            parent.call("load", "base")
+        self.assertEqual(parent.report, pipe.reply[3])
 
 
 if __name__ == "__main__":

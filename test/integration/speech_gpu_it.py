@@ -37,7 +37,7 @@ def child_processes():
         "import os\n"
         "n = 0\n"
         "for p in os.listdir('/proc'):\n"
-        "  if not p.isdigit(): continue\n"
+        "  if not p.isdigit() or int(p) == os.getpid(): continue\n"
         "  try:\n"
         "    data = open(f'/proc/{p}/cmdline', 'rb').read()\n"
         "  except OSError:\n"

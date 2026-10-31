@@ -283,10 +283,10 @@ def engine_main(kind: str, conn, plan: dict | None = None):
         try:
             conn.send(("ok", getattr(engine, op)(*args)))
         except Failure as e:
-            conn.send(("err", e.status, str(e)))
+            conn.send(("err", e.status, str(e), engine.status() if kind == "stt" else None))
         except Exception as e:
             print(f"{kind} {op} failed: {type(e).__name__}", flush=True)
-            conn.send(("err", 500, "The speech worker failed."))
+            conn.send(("err", 500, "The speech worker failed.", engine.status() if kind == "stt" else None))
 
 
 # ---- HTTP server: standard library only ----
@@ -322,6 +322,14 @@ class Engine:
                 self.stop()
                 raise Failure(504, f"The local {self.label} engine timed out.")
             reply = self.conn.recv()
+            # Publish the diagnostic even when both CUDA and the CPU retry fail.
+            if self.kind == "stt":
+                if reply[0] == "err":
+                    self.report = reply[3]
+                elif isinstance(reply[1], dict):
+                    status = reply[1].pop("_status", None)
+                    if isinstance(status, dict):
+                        self.report = status
         except (EOFError, BrokenPipeError, OSError):
             self.stop()
             raise Failure(500, f"The local {self.label} engine stopped unexpectedly.")
@@ -330,12 +338,7 @@ class Engine:
             self.lock.release()
         if reply[0] == "err":
             raise Failure(reply[1], reply[2])
-        value = reply[1]
-        if self.kind == "stt" and isinstance(value, dict):
-            status = value.pop("_status", None)
-            if isinstance(status, dict):
-                self.report = status
-        return value
+        return reply[1]
 
     def stop(self):
         if self.proc is not None:
