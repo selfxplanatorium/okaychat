@@ -17,6 +17,7 @@ const { requireUser } = await import("./auth.js");
 const { sha256 } = await import("./crypto.js");
 const { runSchedule, scheduleRoutes } = await import("./schedules.js");
 const { currentBranch, getThread } = await import("./threads.js");
+const { threadBusy } = await import("./thread-runs.js");
 const app = new Hono().use(requireUser).route("/", scheduleRoutes);
 // Admin: a non-admin base URL goes through the address-checked fetch, which bypasses the mocked global fetch.
 for (const [id, role] of [["alice", "admin"], ["bob", "user"]]) {
@@ -101,6 +102,18 @@ test("a picked chat keeps its model and is never recreated", async (t) => {
   assert.equal(after.last_status, "error");
   assert.equal(after.thread_id, null);
   assert.equal((db.prepare("SELECT COUNT(*) AS n FROM threads WHERE user_id = 'alice'").get() as { n: number }).n, 0);
+});
+
+test("a run keeps its chat busy until its reply is stored, so message edits wait", async (t) => {
+  const s = await create({ threadId: "t_alice" });
+  let busyDuringRun = false;
+  t.mock.method(globalThis, "fetch", async () => {
+    busyDuringRun = threadBusy("t_alice");
+    return new Response("unavailable", { status: 400 });
+  });
+  await run(s.id);
+  assert.equal(busyDuringRun, true);
+  assert.equal(threadBusy("t_alice"), false, "released after the run, also when it fails");
 });
 
 test("editing keeps the schedule's own chat and releases a picked one", async () => {

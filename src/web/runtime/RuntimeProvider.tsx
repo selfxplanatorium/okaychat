@@ -12,7 +12,7 @@ import {
 import { generateId, lastAssistantMessageIsCompleteWithApprovalResponses, lastAssistantMessageIsCompleteWithToolCalls } from "ai";
 import { createAssistantStream } from "assistant-stream";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import type { ThreadSummary } from "@shared/types";
+import type { MessageEditResult, ThreadSummary } from "@shared/types";
 import { t } from "@/i18n";
 import { api, structuredResponseError, takePrefetched } from "@/lib/api";
 import { toolkit, widgetHelperRenders } from "@/components/chat/tool-ui";
@@ -26,6 +26,7 @@ import { chatSearchFor, useChatSearch, useChatSearchStore } from "@/state/chat-s
 import { chatResearchFor, useChatResearchStore } from "@/state/chat-research";
 import { persistKnowledgeAttachments, useChatKnowledgeStore } from "@/state/chat-knowledge";
 import { dropThread, readThread, sameRows, ServerRows, writeThread } from "./threadCache";
+import { editedAtOf, rememberEdits } from "@/state/message-edits";
 import { setThreadSync, useThreadSyncStore } from "@/state/thread-sync";
 import { applyRetryNotice, clearRetryNotice, retryChunkData, retryOwnerId } from "@/state/retry-status";
 
@@ -33,7 +34,7 @@ import { applyRetryNotice, clearRetryNotice, retryChunkData, retryOwnerId } from
 export type ThreadCustom = { pinned: boolean; projectId: string | null };
 const threadCustom = (t: ThreadSummary): ThreadCustom => ({ pinned: t.pinned, projectId: t.projectId });
 
-type MessageRow = { id: string; parent_id: string | null; format: string; content: unknown };
+type MessageRow = { id: string; parent_id: string | null; format: string; content: unknown; edited_at?: number };
 
 // Ids the server returned per chat. assistant-ui persists every settled message it did not load itself, so after a
 // swap it would POST the server's own rows back (and drop the cache entry each time); append skips those ids.
@@ -104,8 +105,43 @@ async function saveRow(remoteId: string, row: MessageRow): Promise<void> {
     cacheRows(remoteId, serverRows.failed(remoteId), undefined);
     throw error;
   }
-  cacheRows(remoteId, serverRows.acknowledged(remoteId, JSON.parse(body) as MessageRow), Date.now());
+  // The body of a re-sent message never carries `edited_at`; the server keeps the row's edit, so the cache must too.
+  const stored = JSON.parse(body) as MessageRow;
+  const editedAt = editedAtOf(remoteId, stored.id);
+  cacheRows(remoteId, serverRows.acknowledged(remoteId, editedAt === undefined ? stored : { ...stored, edited_at: editedAt }), Date.now());
 }
+
+/**
+ * The edit routes are message writes like any other: tracked while in flight so a concurrent GET is not trusted,
+ * then acknowledged into `serverRows` so the IndexedDB copy carries the new text and `edited_at`.
+ */
+async function saveEdit(remoteId: string, path: string, method: "PATCH" | "DELETE", json?: unknown): Promise<MessageEditResult> {
+  serverRows.beginWrite(remoteId);
+  try {
+    const result = await tracked(remoteId, api<MessageEditResult>(path, { method, ...(json === undefined ? {} : { json }) }));
+    const row: MessageRow = {
+      id: result.message.id,
+      parent_id: result.message.parent_id,
+      format: result.message.format,
+      content: result.message.content,
+      ...(result.editedAt === null ? {} : { edited_at: result.editedAt }),
+    };
+    serverIds.get(remoteId)?.add(row.id);
+    cacheRows(remoteId, serverRows.acknowledged(remoteId, row), Date.now());
+    return result;
+  } catch (error) {
+    cacheRows(remoteId, serverRows.failed(remoteId), undefined);
+    throw error;
+  }
+}
+
+/** Saves the user's text for one assistant reply. The server replaces only text parts and keeps everything else. */
+export const editStoredMessage = (remoteId: string, messageId: string, input: { text?: string; parts?: Array<{ type: "text"; text: string }> }) =>
+  saveEdit(remoteId, `/threads/${remoteId}/messages/${encodeURIComponent(messageId)}`, "PATCH", input);
+
+/** Restores the reply's first original text. Works even after the account setting was turned off. */
+export const undoStoredMessage = (remoteId: string, messageId: string) =>
+  saveEdit(remoteId, `/threads/${remoteId}/messages/${encodeURIComponent(messageId)}/edit`, "DELETE");
 
 const threadListAdapter: RemoteThreadListAdapter = {
   async list() {
@@ -212,6 +248,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
               const token = serverRows.beginLoad(remoteId);
               return request().then((rows) => {
                 serverIds.set(remoteId, new Set(rows.map((row) => row.id)));
+                rememberEdits(remoteId, rows);
                 cacheRows(remoteId, serverRows.loaded(remoteId, token, rows), aui.threadListItem.getState().lastMessageAt?.getTime());
                 return rows;
               });
@@ -224,6 +261,8 @@ const threadListAdapter: RemoteThreadListAdapter = {
               network.then(() => undefined, () => readThread<MessageRow>(remoteId)),
             ]);
             if (!cached) return decode(await network);
+            // The cached rows carry the last acknowledged edit state, so the badge paints with the text.
+            rememberEdits(remoteId, cached);
             setThreadSync(remoteId, "pending");
             const shownIds = () => aui.thread.getState().messages.map((m) => m.id);
             // A resumed stream owns the messages, and the rows fetched at load lack its reply. Once it ends and the

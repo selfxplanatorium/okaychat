@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Thread } from "@/components/assistant-ui/elements/thread.aui";
 import { CompactionMarker, ContextMeter, MessageMeta } from "./ContextMeter";
 import { McpPromptsButton, MobileComposerMenu, ResearchToggle, SearchToggle } from "./ComposerControls";
@@ -12,7 +12,8 @@ import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 import { useChatPrivacy } from "@/state/chat-privacy";
 import { useKnowledgeCitationStore } from "@/state/chat-knowledge";
-import { ThreadMetaSync } from "@/state/thread-meta";
+import { ThreadMetaSync, useCurrentThreadId } from "@/state/thread-meta";
+import { closeReplyEditor } from "@/state/message-edits";
 
 function Welcome() {
   const privacy = useChatPrivacy();
@@ -82,11 +83,24 @@ function BeforeMessages() {
   );
 }
 
+/** An editor belongs to one chat: switching chats closes it instead of leaving a draft aimed at the old reply. */
+function ReplyEditorSync() {
+  const threadId = useCurrentThreadId();
+  const seen = useRef(threadId);
+  useEffect(() => {
+    if (seen.current === threadId) return;
+    seen.current = threadId;
+    closeReplyEditor();
+  }, [threadId]);
+  return null;
+}
+
 export function ChatView() {
   useEffect(() => () => useKnowledgeCitationStore.getState().close(), []);
   return (
     <>
       <ThreadMetaSync />
+      <ReplyEditorSync />
       <Thread components={{ Welcome, ComposerToolbar, MessageMeta, AfterMessage, BeforeMessages, BranchAction: BranchMenu }} />
       <KnowledgeCitationHost />
     </>

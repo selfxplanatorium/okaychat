@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { UIMessage } from "ai";
 import { HTTPException } from "hono/http-exception";
 import type { CompactionState, ThreadSummary } from "../shared/types.js";
@@ -5,6 +6,7 @@ import { assertStorage, messageBytes } from "./quota.js";
 import { storeInlineAttachments } from "./attachment-storage.js";
 import { db, tx } from "./db.js";
 import { copyDraftsForBranch } from "./email/drafts.js";
+import { AppError } from "./errors.js";
 
 /** Temporary conversations exist only in browser memory; their ids must never become stored threads. */
 export const isTemporaryThread = (id: string): boolean => id.startsWith("tmp_");
@@ -116,6 +118,17 @@ export function deleteThread(userId: string, id: string) {
   db.prepare("DELETE FROM threads WHERE user_id = ? AND id = ?").run(userId, id);
 }
 
+interface EditState {
+  edited_at: number | null;
+  original_enc: string | null;
+}
+
+/** The edit columns `listMessages` deliberately leaves out (the encrypted original must never leave the server). */
+function editStates(threadId: string): Map<string, EditState> {
+  const rows = db.prepare("SELECT id, edited_at, original_enc FROM messages WHERE thread_id = ?").all(threadId) as unknown as Array<EditState & { id: string }>;
+  return new Map(rows.map((row) => [row.id, row]));
+}
+
 /**
  * Forks a chat at `messageId`: the new thread gets that message and its ancestors (ids kept, since message
  * keys are per thread) and the source's settings. Compaction carries over only when its boundary is inside
@@ -129,6 +142,7 @@ export function branchThread(userId: string, sourceId: string, messageId: string
   const chain: MessageRow[] = [];
   for (let row = byId.get(messageId); row; row = row.parent_id ? byId.get(row.parent_id) : undefined) chain.unshift(row);
   if (!chain.length) throw new HTTPException(404, { message: "Message not found" });
+  const edits = editStates(sourceId);
   const boundaries = [source.compaction?.boundaryMessageId, source.compaction?.trim?.throughMessageId];
   const compaction = source.compaction && chain.some((m) => boundaries.includes(m.id)) ? source.compaction : null;
   const now = Date.now();
@@ -138,12 +152,17 @@ export function branchThread(userId: string, sourceId: string, messageId: string
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       // The copied messages belong to the source chat's memory review; the fork only reviews what follows.
     ).run(id, userId, source.title, modelRef ?? source.modelRef, source.projectId, compaction ? JSON.stringify(compaction) : null, Number(source.memoryDisabled), sourceId, messageId, JSON.stringify(source.knowledgeIds), now, now);
-    const insert = db.prepare("INSERT INTO messages (id, thread_id, parent_id, format, content, bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)");
-    const copies = chain.map((m) => ({ m, json: JSON.stringify(m.content) }));
-    // A fork stores its own copy of the conversation.
-    assertStorage(userId, copies.reduce((sum, { json }) => sum + messageBytes(json), 0));
+    const insert = db.prepare("INSERT INTO messages (id, thread_id, parent_id, format, content, bytes, created_at, edited_at, original_enc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    // An edited reply keeps its current text, its Edited state, and the encrypted first original, so the fork
+    // shows the same text and can still Undo. Both the message and the original are charged to the fork.
+    const copies = chain.map((m) => {
+      const edit = edits.get(m.id);
+      return { m, json: JSON.stringify(m.content), editedAt: edit?.edited_at ?? null, original: edit?.original_enc ?? null };
+    });
+    assertStorage(userId, copies.reduce((sum, { json, original }) => sum + messageBytes(json) + (original ? Buffer.byteLength(original) : 0), 0));
     // Distinct timestamps keep the copied order, which defines the current branch.
-    copies.forEach(({ m, json }, i) => insert.run(m.id, id, m.parent_id, m.format, json, messageBytes(json), now - chain.length + i));
+    copies.forEach(({ m, json, editedAt, original }, i) =>
+      insert.run(m.id, id, m.parent_id, m.format, json, messageBytes(json), now - chain.length + i, editedAt, original));
     // Draft cards in the copied messages keep working in the fork.
     copyDraftsForBranch(userId, sourceId, id, copies.map(({ json }) => json));
   });
@@ -172,18 +191,35 @@ export function listMessages(userId: string, threadId: string): MessageRow[] {
 export function listMessagesJson(userId: string, threadId: string): string {
   if (!getThread(userId, threadId)) return "[]";
   const rows = db
-    .prepare("SELECT id, parent_id, format, content FROM messages WHERE thread_id = ? ORDER BY created_at, rowid")
-    .all(threadId) as Array<{ id: string; parent_id: string | null; format: string; content: string }>;
-  const items = rows.map((r) => `{"id":${JSON.stringify(r.id)},"parent_id":${JSON.stringify(r.parent_id)},"format":${JSON.stringify(r.format)},"content":${r.content}}`);
+    .prepare("SELECT id, parent_id, format, content, edited_at FROM messages WHERE thread_id = ? ORDER BY created_at, rowid")
+    .all(threadId) as Array<{ id: string; parent_id: string | null; format: string; content: string; edited_at: number | null }>;
+  // `edited_at` appears only on edited replies; the client shows their Edited badge from it.
+  const items = rows.map((r) => `{"id":${JSON.stringify(r.id)},"parent_id":${JSON.stringify(r.parent_id)},"format":${JSON.stringify(r.format)},"content":${r.content}${r.edited_at === null ? "" : `,"edited_at":${r.edited_at}`}}`);
   return `[${items.join(",")}]`;
 }
 
 export function appendMessage(userId: string, threadId: string, row: MessageRow) {
   tx(() => {
     ensureThread(userId, threadId);
-    const previous = db.prepare("SELECT content, bytes FROM messages WHERE thread_id = ? AND id = ?").get(threadId, row.id) as { content: string; bytes: number } | undefined;
+    const previous = db.prepare("SELECT content, bytes, edited_at, original_enc FROM messages WHERE thread_id = ? AND id = ?").get(threadId, row.id) as { content: string; bytes: number; edited_at: number | null; original_enc: string | null } | undefined;
     const json = JSON.stringify(row.content);
     const bytes = messageBytes(json);
+    // A user edit changes a reply only through the edit route. A tab still holding text from before it (or from
+    // before an Undo, when only `original_enc` remains) re-sends old content, which must not silently rewrite it.
+    // Compare parsed values too: a client re-encoding the same reply may order keys differently.
+    if (previous && (previous.edited_at !== null || previous.original_enc !== null)) {
+      let same = previous.content === json;
+      if (!same) {
+        try {
+          same = isDeepStrictEqual(JSON.parse(previous.content), JSON.parse(json));
+        } catch {
+          same = false;
+        }
+      }
+      if (!same) throw new AppError({ code: "conflict", message: "This reply was edited. Reload the chat to see the current text." });
+      // A re-sent identical edited row is not news: keep its stored bytes and do not bump the chat's activity.
+      return;
+    }
     if (previous?.content !== json) {
       storeInlineAttachments(db, userId, threadId, row.content, (size) => { assertStorage(userId, size); });
       assertStorage(userId, bytes - (previous?.bytes ?? 0));

@@ -1,5 +1,8 @@
+import { Loader2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { DEFAULT_USER_SETTINGS, SIDEBAR_ITEMS, type ModelInfo } from "@shared/types";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { t } from "@/i18n";
@@ -26,11 +29,32 @@ export function GeneralSettings() {
   const update = useData((s) => s.updateSettings);
   const [prompt, setPrompt] = useState(settings?.systemPrompt ?? "");
   const [sandbox, setSandbox] = useState<{ configured: boolean; reachable: boolean; error?: string } | null>(null);
+  const [confirmEditReplies, setConfirmEditReplies] = useState(false);
+  const [savingEditSetting, setSavingEditSetting] = useState(false);
+  const [editSettingError, setEditSettingError] = useState<string | null>(null);
   useEffect(() => setPrompt(settings?.systemPrompt ?? ""), [settings?.systemPrompt]);
   useEffect(() => {
     api<{ configured: boolean; reachable: boolean; error?: string }>("/sandbox").then(setSandbox, () => setSandbox({ configured: false, reachable: false }));
   }, []);
   if (!settings) return null;
+  const editRepliesOn = settings.editAssistantMessages === true;
+
+  const saveEditSetting = async (next: boolean) => {
+    if (savingEditSetting) return;
+    const previous = editRepliesOn;
+    setSavingEditSetting(true);
+    setEditSettingError(null);
+    try {
+      await update({ editAssistantMessages: next });
+      setConfirmEditReplies(false);
+    } catch (error) {
+      // `updateSettings` applies its patch before the request; a rejected save must not look like it worked.
+      useData.setState((s) => ({ settings: s.settings ? { ...s.settings, editAssistantMessages: previous } : s.settings }));
+      setEditSettingError(t("general.editAssistantMessagesFailed", { error: error instanceof Error ? error.message : t("common.somethingWentWrong") }));
+    } finally {
+      setSavingEditSetting(false);
+    }
+  };
 
   return (
     <SettingsPage title={t("general.title")}>
@@ -106,6 +130,29 @@ export function GeneralSettings() {
         />
       </SettingsSection>
 
+      <SettingsSection title={t("general.editingTitle")}>
+        <SettingsRow
+          id="setting-edit-assistant-messages"
+          label={t("general.editAssistantMessages")}
+          description={t("general.editAssistantMessagesDescription")}
+          control={
+            <Switch
+              aria-label={t("general.editAssistantMessages")}
+              checked={editRepliesOn}
+              disabled={savingEditSetting}
+              onCheckedChange={(checked) => {
+                setEditSettingError(null);
+                if (checked) setConfirmEditReplies(true);
+                else void saveEditSetting(false);
+              }}
+            />
+          }
+        />
+        {editSettingError && !confirmEditReplies && (
+          <p role="alert" className="text-destructive px-4 pb-3 text-xs">{editSettingError}</p>
+        )}
+      </SettingsSection>
+
       <SettingsSection title={t("general.toolsTitle")}>
         <SettingsRow
           id="setting-web-tools"
@@ -177,6 +224,32 @@ export function GeneralSettings() {
           />
         </div>
       </SettingsSection>
+
+      <Dialog open={confirmEditReplies} onOpenChange={(open) => !open && !savingEditSetting && setConfirmEditReplies(false)}>
+        <DialogContent showCloseButton={!savingEditSetting} className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t("general.editAssistantMessagesDialogTitle")}</DialogTitle>
+            <DialogDescription>{t("general.editAssistantMessagesDialogIntro")}</DialogDescription>
+          </DialogHeader>
+          <ul className="text-muted-foreground flex list-disc flex-col gap-2 ps-5 text-sm">
+            <li>{t("general.editAssistantMessagesConsequenceModel")}</li>
+            <li>{t("general.editAssistantMessagesConsequenceOriginal")}</li>
+            <li>{t("general.editAssistantMessagesConsequenceCache")}</li>
+            <li>{t("general.editAssistantMessagesConsequenceShare")}</li>
+            <li>{t("general.editAssistantMessagesConsequenceTools")}</li>
+          </ul>
+          {editSettingError && <p role="alert" className="text-destructive text-sm">{editSettingError}</p>}
+          <DialogFooter>
+            <Button type="button" variant="outline" className="min-h-10 pointer-coarse:min-h-11" disabled={savingEditSetting} onClick={() => setConfirmEditReplies(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button type="button" className="min-h-10 pointer-coarse:min-h-11" disabled={savingEditSetting} onClick={() => void saveEditSetting(true)}>
+              {savingEditSetting && <Loader2Icon className="size-3.5 animate-spin motion-reduce:animate-none" />}
+              {t("general.editAssistantMessagesEnable")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </SettingsPage>
   );
 }

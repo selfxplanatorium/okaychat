@@ -50,6 +50,7 @@ Use a context-tier price when input exceeds its threshold; invalid token breakdo
 - Screenshots and MCP images are injected for one model step without persisting the image content, so later requests can diverge there.
 - Idle provider caches expire independently of the app.
 - Changing tools, model settings, account instructions, or the per-chat system context can change the reusable prefix.
+- Editing an assistant reply rewrites text inside the conversation, so the next request diverges at that message and re-primes the cache from there. The server sends the stored edited text even when the requesting tab still holds the old copy (`withStoredEdits`). See `docs/implementation/message-editing.md`.
 - Summary/trim compaction resets the affected prefix. Trim boundaries move forward, keep deterministic placeholders, and leave headroom to avoid repeated compaction.
 
 ## Skills and attachments

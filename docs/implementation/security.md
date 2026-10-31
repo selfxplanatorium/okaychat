@@ -10,7 +10,7 @@ Defended against:
 - Anyone on the internet without an account. Only `/api/auth`, `/api/health`, the MCP OAuth callback, and share links (random 256-bit tokens) are reachable without a session.
 - Content the model reads: web pages, files, MCP results, past chats. It can steer the model (prompt injection), so third-party text is spotlighted as data, remote Markdown images wait for consent, and destructive/outbound tools need approval after outside content. See `docs/implementation/prompt-injection.md`.
 - Model-written code and markup. Code runs in the sandbox container, in a per-run jail with no network. Markup runs in opaque-origin frames with a CSP, or in a fresh Chromium context in the browser worker container.
-- A copied database file. Provider keys, MCP secrets, and memory are AES-256-GCM encrypted with `OKAYCHAT_SECRET`.
+- A copied database file. Provider keys, MCP secrets, memory, email passwords, and the retained original text of edited replies are AES-256-GCM encrypted with `OKAYCHAT_SECRET`.
 
 Not defended against: an admin (who controls the server), anyone who can run code in the app container or read its environment, or a provider/MCP server you chose to trust with your data.
 

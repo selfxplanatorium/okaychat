@@ -32,6 +32,7 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       db.exec("ALTER TABLE images DROP COLUMN mime");
       db.exec("ALTER TABLE threads DROP COLUMN branched_from");
       db.exec("ALTER TABLE messages DROP COLUMN bytes");
+      for (const column of ["edited_at", "original_enc"]) db.exec("ALTER TABLE messages DROP COLUMN " + column);
       for (const column of ["thread_mode", "thread_attached", "project_id"]) db.exec("ALTER TABLE schedules DROP COLUMN " + column);
       db.prepare("INSERT INTO server_settings (key, value) VALUES ('prompt:anonymous', ?)").run("Keep this temporary chat out of history.");
       db.exec('PRAGMA user_version = 14');

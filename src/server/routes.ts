@@ -22,6 +22,7 @@ import { fontRoutes } from "./fonts.js";
 import { knowledgeRoutes } from "./knowledge/routes.js";
 import { collectionAccessible } from "./knowledge/store.js";
 import { libraryRoutes } from "./library.js";
+import { messageEditRoutes } from "./message-edits.js";
 import { clearAudience, setAudience } from "./groups.js";
 import { getProject, projectRoutes } from "./projects.js";
 import { scheduleRoutes } from "./schedules.js";
@@ -214,6 +215,7 @@ const api = new Hono<AppEnv>()
     appendMessage(c.get("user").id, c.req.param("id"), { ...parsed.data, parent_id: parsed.data.parent_id ?? null });
     return c.json({ ok: true });
   })
+  .route("/", messageEditRoutes)
 
   // Usage
   .get("/usage", (c) => {

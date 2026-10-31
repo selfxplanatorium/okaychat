@@ -93,6 +93,8 @@ import { mcpAppOf } from "@/components/chat/McpApp";
 import { ReplyFiles } from "@/components/chat/reply-files";
 import { RetryWithModel } from "@/components/chat/retry-model";
 import { ChatErrorMessage } from "@/components/chat/message-error";
+import { EditableReplyTexts, EditedReplyBadge, ReplyEditAction, ReplyEditorFooter, ReplyEditorShell } from "@/components/chat/AssistantMessageEditor";
+import { editKey, useMessageEdits } from "@/state/message-edits";
 import { RetryStatus } from "@/components/chat/retry-status";
 import { ShortcutHints } from "@/components/chat/ShortcutHints";
 import { DictationSend, ReadAloudAutoPlay, useDictateLabel, useSendDictation, VoiceNotice } from "@/speech/ChatVoice";
@@ -1288,11 +1290,15 @@ const AssistantMessage: FC = () => {
   } = useContext(ThreadComponentsContext);
   const baseGroupBy = TaskGroupComponent ? taskAwareMcpGroupBy : messageMcpGroupBy;
   const parts = useAuiState((s) => s.message.parts);
-  // Live replies show every step; a finished one shows only its outcome.
+  // Live replies show every step; a finished one shows only its outcome. An open editor must show every
+  // part, because text written between tool calls is editable too.
   const finished = useAuiState((s) => s.message.status?.type === "complete");
+  const remoteId = useAuiState((s) => s.threadListItem.remoteId);
+  const messageId = useAuiState((s) => s.message.id);
+  const editing = useMessageEdits((s) => !!remoteId && s.editing === editKey(remoteId, messageId));
   const groupBy = useMemo(
-    () => (finished ? foldWork(baseGroupBy, parts) : baseGroupBy),
-    [finished, baseGroupBy, parts],
+    () => (finished && !editing ? foldWork(baseGroupBy, parts) : baseGroupBy),
+    [finished, editing, baseGroupBy, parts],
   );
   const entering = useContext(MessageEnteringContext);
   const waitingForFirstToken = useAuiState((s) => {
@@ -1321,6 +1327,7 @@ const AssistantMessage: FC = () => {
         data-slot="aui_assistant-message-content"
         className="text-foreground px-2 leading-relaxed wrap-break-word"
       >
+        <ReplyEditorShell active={editing} threadId={remoteId ?? ""} messageId={messageId} parts={parts}>
         <MessagePrimitive.GroupedParts groupBy={groupBy} indicator="never">
           {({ part, children }) => {
             switch (part.type) {
@@ -1396,7 +1403,8 @@ const AssistantMessage: FC = () => {
                 );
               }
               case "text":
-                return <MarkdownText />;
+                // The editor shows all text parts below the tools, so each section keeps its own field.
+                return editing ? null : <MarkdownText />;
               case "reasoning":
                 return (
                   <ReasoningRow
@@ -1434,17 +1442,20 @@ const AssistantMessage: FC = () => {
             }
           }}
         </MessagePrimitive.GroupedParts>
+        {editing && <EditableReplyTexts />}
         {finished && <ReplyFiles parts={parts} verify={!entering} />}
         <StreamingIndicator waiting={waitingForFirstToken} />
         <MessageError />
+        {editing ? <ReplyEditorFooter /> : <EditedReplyBadge />}
+        </ReplyEditorShell>
       </div>
 
       <div
         data-slot="aui_assistant-message-footer"
         className={cn("ms-2 flex items-center", ACTION_BAR_HEIGHT)}
       >
-        <BranchPicker />
-        <AssistantActionBar />
+        {!editing && <BranchPicker />}
+        {!editing && <AssistantActionBar />}
         {MessageMeta && <MessageMeta />}
       </div>
     </MessagePrimitive.Root>
@@ -1463,6 +1474,7 @@ const AssistantActionBar: FC = () => {
       className="aui-assistant-action-bar-root text-muted-foreground animate-fade-in col-start-3 row-start-2 -ms-1 flex shrink-0 gap-1 [animation-delay:80ms]"
     >
       <CopyActionButton />
+      <ReplyEditAction />
       {BranchAction && <BranchAction />}
       <ActionBarPrimitive.Reload asChild disabled={!!sync}>
         <TooltipIconButton tooltip={t("common.retry")} command="message.retry">

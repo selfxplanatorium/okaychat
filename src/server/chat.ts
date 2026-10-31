@@ -45,6 +45,8 @@ import { applyUntrustedEnvelopes, approvalRiskReason, messagesHaveUntrustedConte
 import { turnSkills } from "./skills.js";
 import { getSettings, subagentModelRefs } from "./settings.js";
 import { branchMessages, currentBranch, ensureThread, getThread, isTemporaryThread, setCompaction, updateThread, userText } from "./threads.js";
+import { markBusy, threadBusy } from "./thread-runs.js";
+import { withStoredEdits } from "./message-edits.js";
 import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "./usage.js";
 
 // AssistantChatTransport sends the thread's remote id as `id` and model context as `config`, `system`, and `tools`.
@@ -142,8 +144,10 @@ export interface TurnOptions {
 
 /** One assistant turn as a UI message stream. Used by /api/chat and by scheduled runs. */
 export async function turnStream(opts: TurnOptions) {
-  const { userId, threadId, modelRef, uiMessages, signal } = opts;
+  const { userId, threadId, modelRef, signal } = opts;
   const temporary = isTemporaryThread(threadId);
+  // An edited reply is sent as stored, also from a tab that still shows the text from before the edit.
+  const uiMessages = temporary ? opts.uiMessages : withStoredEdits(userId, threadId, opts.uiMessages);
   const personalized = !temporary || opts.temporaryPersonalization === true;
   const user = { id: userId };
   const settings = getSettings(userId);
@@ -519,22 +523,9 @@ function reserveTurn(userId: string): (() => void) | null {
   };
 }
 
-// Threads with an interactive turn streaming. The client persists that turn when it ends, so a scheduled run waits.
-const busyThreads = new Map<string, number>();
-export const threadBusy = (threadId: string) => busyThreads.has(threadId);
-
-function markBusy(threadId: string, release: () => void): () => void {
-  busyThreads.set(threadId, (busyThreads.get(threadId) ?? 0) + 1);
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    const left = (busyThreads.get(threadId) ?? 1) - 1;
-    if (left > 0) busyThreads.set(threadId, left);
-    else busyThreads.delete(threadId);
-    release();
-  };
-}
+// Threads with an interactive turn streaming or a scheduled run writing (shared with thread-runs.ts). A scheduled
+// run also waits for an interactive one, because the client stores that turn only when it ends.
+export { threadBusy };
 
 /** Releases the slot when the turn's stream ends, errors, or is cancelled. */
 function releasing<T>(stream: ReadableStream<T>, release: () => void, signal: AbortSignal): ReadableStream<T> {
