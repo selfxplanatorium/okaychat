@@ -4,6 +4,7 @@ import type { CompactionState, ThreadSummary } from "../shared/types.js";
 import { assertStorage, messageBytes } from "./quota.js";
 import { storeInlineAttachments } from "./attachment-storage.js";
 import { db, tx } from "./db.js";
+import { copyDraftsForBranch } from "./email/drafts.js";
 
 /** Temporary conversations exist only in browser memory; their ids must never become stored threads. */
 export const isTemporaryThread = (id: string): boolean => id.startsWith("tmp_");
@@ -143,6 +144,8 @@ export function branchThread(userId: string, sourceId: string, messageId: string
     assertStorage(userId, copies.reduce((sum, { json }) => sum + messageBytes(json), 0));
     // Distinct timestamps keep the copied order, which defines the current branch.
     copies.forEach(({ m, json }, i) => insert.run(m.id, id, m.parent_id, m.format, json, messageBytes(json), now - chain.length + i));
+    // Draft cards in the copied messages keep working in the fork.
+    copyDraftsForBranch(userId, sourceId, id, copies.map(({ json }) => json));
   });
   return getThread(userId, id)!;
 }

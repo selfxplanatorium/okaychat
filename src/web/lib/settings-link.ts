@@ -8,6 +8,7 @@ export type SettingsSection =
   | "account"
   | "memory"
   | "providers"
+  | "email"
   | "mcp"
   | "projects"
   | "schedules"
@@ -34,6 +35,7 @@ export const SETTINGS_DESTINATIONS = {
   webSearchLimit: { section: "general", anchor: "web-search-limit" },
   providers: { section: "providers" },
   account: { section: "account" },
+  email: { section: "email" },
   memory: { section: "memory" },
   keyboard: { section: "keyboard" },
 } as const satisfies Record<string, SettingsDestination>;

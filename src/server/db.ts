@@ -593,6 +593,43 @@ const migrations: Array<string | (() => void)> = [
   ALTER TABLE turn_context ADD COLUMN knowledge TEXT;
   ALTER TABLE turn_context ADD COLUMN knowledge_ids TEXT;
   `,
+  // Editable email drafts (src/server/email/drafts.ts). Owned by a user and a chat; ids repeat across
+  // a branch's copy, so the key is per thread like messages. `revision` is the compare-and-set token
+  // for every content write. `account_id` has no foreign key on purpose: a removed account must stay
+  // visible so edits and sends can be refused until the user picks another one. The review columns
+  // hold one single-use confirmation: a hashed token bound to a revision and a payload hash.
+  `
+  CREATE TABLE email_drafts (
+    id TEXT NOT NULL,
+    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    message_id TEXT,
+    tool_call_id TEXT,
+    account_id TEXT,
+    to_json TEXT NOT NULL DEFAULT '[]',
+    cc_json TEXT NOT NULL DEFAULT '[]',
+    bcc_json TEXT NOT NULL DEFAULT '[]',
+    subject TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    in_reply_to TEXT,
+    revision INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'sending', 'sent')),
+    updated_by TEXT NOT NULL DEFAULT 'model' CHECK (updated_by IN ('user', 'model')),
+    sending_at INTEGER,
+    sending_from TEXT,
+    sent_at INTEGER,
+    send_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    review_hash TEXT,
+    review_revision INTEGER,
+    review_payload TEXT,
+    review_expires INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (thread_id, id)
+  );
+  CREATE INDEX email_drafts_user ON email_drafts(user_id, thread_id);
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

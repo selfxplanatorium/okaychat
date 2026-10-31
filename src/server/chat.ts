@@ -30,6 +30,7 @@ import { injectScreenshots, injectToolImages, type ToolImage } from "./tools/scr
 import type { VisualShot } from "./documents/visual.js";
 import { emailTools } from "./email/tools.js";
 import { hasAccounts } from "./email/accounts.js";
+import { draftTools } from "./email/draft-tool.js";
 import { webTools } from "./tools/web.js";
 import { SearchBudget, StepBudget, searchesInCurrentTurn, agentStepsInCurrentTurn } from "./tools/search-budget.js";
 import { hasResearch, RESEARCH_PARALLEL, RESEARCH_TOOL, researchedThisTurn, researchInput, researchTool, runResearch } from "./research.js";
@@ -213,6 +214,9 @@ export async function turnStream(opts: TurnOptions) {
       const email = model.toolCall && !temporary && hasAccounts(user.id)
         ? emailTools({ userId: user.id, signal })
         : { tools: {}, subTools: {} };
+      // Drafts need no mailbox (the card can copy, download, or open them in a mail app), so the tool
+      // is offered in every stored chat and the tool block stays the same when an account is added.
+      const drafts = model.toolCall && !temporary ? draftTools({ userId: user.id, threadId }) : {};
       // Attached knowledge is read from the thread, never from the request body, so a forged list cannot
       // widen scope. Retrieval runs only for a new user message; continuations replay the stored block.
       const memoryRevision = temporary ? null : memory.instructions !== undefined ? memoryPreferences(userId).revision : null;
@@ -256,6 +260,7 @@ export async function turnStream(opts: TurnOptions) {
         ...(model.toolCall ? knowledge.tools : {}),
         ...(skills.tools),
         ...email.tools,
+        ...drafts,
         ...subagents,
         ...(useArtifacts ? artifactTools(threadId, user.id, { shots, canViewImages: model.inputModalities.includes("image"), savedThisTurn: artifactsInCurrentTurn(uiMessages) }) : {}),
         ...(imageServices.length ? imageTools(user.id, threadId, imageServices, signal) : {}),

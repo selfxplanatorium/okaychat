@@ -12,6 +12,7 @@ import { useData } from "@/state/data";
 import { useKnowledgeCitationStore } from "@/state/chat-knowledge";
 import { RunFiles, type RunFile } from "./reply-files";
 import { EmailFoldersCard, EmailListCard, EmailReadCard, EmailReplyCard, EmailSearchCard, EmailSendCard } from "./email-tools";
+import { EmailDraftCard } from "./EmailDraftCard";
 import { cn } from "@/lib/utils";
 
 type SearchResult = { title: string; url: string; snippet: string };
@@ -223,6 +224,7 @@ export const toolkit = defineToolkit({
   email_read: { type: "backend", render: (props) => <EmailReadCard {...props} /> },
   email_send: { type: "backend", render: (props) => <EmailSendCard {...props} /> },
   email_reply: { type: "backend", render: (props) => <EmailReplyCard {...props} /> },
+  draft_email: { type: "backend", render: (props) => <EmailDraftCard {...props} /> },
   search_knowledge: {
     type: "backend",
     render: ({ args, result, status }) => {
