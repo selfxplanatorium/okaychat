@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { emailResultKey } from "./fold-key.js";
+import { draftResultKey, emailResultKey } from "./fold-key.js";
 
 // Regression for the folding bug: email_read/send/reply cards were added to messageGroupBy but had
 // no result key, so foldWork collapsed them into the work log once the reply completed.
@@ -19,4 +19,11 @@ test("each send and reply is its own outcome", () => {
   assert.notEqual(emailResultKey("email_send", "send-1", args), emailResultKey("email_send", "send-2", args));
   assert.equal(emailResultKey("email_reply", "reply-1", args), "email_reply:reply-1");
   assert.equal(emailResultKey("email_list", "list-1", args), undefined);
+});
+
+test("a draft is one card per id, including a later update or read", () => {
+  assert.equal(draftResultKey({}, { draft: { id: "drf_one" } }), "email-draft:drf_one");
+  assert.equal(draftResultKey({ draftId: "drf_one" }, undefined), "email-draft:drf_one");
+  assert.equal(draftResultKey({}, { draft: { id: "drf_one" } }), draftResultKey({ draftId: "drf_one" }, undefined));
+  assert.equal(draftResultKey({}, undefined), undefined);
 });

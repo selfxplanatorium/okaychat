@@ -21,6 +21,7 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       db.exec("ALTER TABLE threads DROP COLUMN knowledge_ids");
       db.exec("DROP TABLE turn_context");
       db.exec("DROP TABLE speech_recordings");
+      db.exec("DROP TABLE email_drafts");
       db.exec("DROP TABLE email_accounts");
       db.exec("DROP TABLE mcp_server_users");
       db.exec("ALTER TABLE mcp_servers DROP COLUMN shared");

@@ -8,6 +8,7 @@ import { SETTINGS_ANCHOR_PREFIX, SETTINGS_DESTINATIONS, settingsHref, focusSetti
 test("settings links name their section and carry anchors as a focus query", () => {
   assert.equal(settingsHref("providers"), "/settings/providers");
   assert.equal(settingsHref("memory"), "/settings/memory");
+  assert.equal(settingsHref("email"), "/settings/email");
   assert.equal(settingsHref("keyboard"), "/settings/keyboard");
   assert.equal(settingsHref("compaction"), "/settings/general?focus=compaction");
   assert.equal(settingsHref("webTools"), "/settings/general?focus=web-tools");

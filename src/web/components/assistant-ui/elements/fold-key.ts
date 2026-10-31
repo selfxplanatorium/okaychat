@@ -12,3 +12,16 @@ export function emailResultKey(toolName: string, toolCallId: string, args: unkno
   if (toolName === "email_send" || toolName === "email_reply") return `${toolName}:${toolCallId}`;
   return undefined;
 }
+
+/**
+ * One card per saved draft: a read or update call on the same id is the same letter, and only the
+ * newest result survives folding. A call still streaming has no id yet and stays in the work log.
+ */
+export function draftResultKey(args: unknown, result: unknown): string | undefined {
+  const fromResult = typeof result === "object" && result !== null
+    ? (result as { draft?: { id?: unknown } }).draft?.id
+    : undefined;
+  const fromArgs = (args as { draftId?: unknown } | null | undefined)?.draftId;
+  const id = typeof fromResult === "string" ? fromResult : typeof fromArgs === "string" ? fromArgs : undefined;
+  return id ? `email-draft:${id}` : undefined;
+}

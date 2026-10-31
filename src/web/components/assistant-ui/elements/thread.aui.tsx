@@ -17,7 +17,7 @@ import {
   ReasoningTrigger,
 } from "@/components/assistant-ui/elements/reasoning.aui";
 import { ToolFallback } from "@/components/assistant-ui/elements/tool-fallback.aui";
-import { emailResultKey } from "@/components/assistant-ui/elements/fold-key";
+import { draftResultKey, emailResultKey } from "@/components/assistant-ui/elements/fold-key";
 import {
   ToolGroupContent,
   ToolGroupRoot,
@@ -161,6 +161,8 @@ const messageGroupBy = groupPartByType({
   "tool-call:email_read": [],
   "tool-call:email_send": [],
   "tool-call:email_reply": [],
+  // The draft is the result: it must stay editable after the reply finishes.
+  "tool-call:draft_email": [],
   // Citation cards stay visible: their sources are clickable.
   "tool-call:search_knowledge": [],
 });
@@ -226,6 +228,8 @@ const resultKey = (part: GroupablePart): string | undefined => {
     case "email_send":
     case "email_reply":
       return emailResultKey(part.toolName, part.toolCallId, part.args);
+    case "draft_email":
+      return draftResultKey(part.args, part.result);
     // Each knowledge search keeps its citation list, like an image or an app card.
     case "search_knowledge":
       return `knowledge:${part.toolCallId}`;

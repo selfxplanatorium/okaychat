@@ -15,8 +15,8 @@ Each account has one limit: `OKAYCHAT_STORAGE_LIMIT` bytes (default 1 GiB), over
 - Skill names, descriptions, instructions, reference paths and reference contents, counted as UTF-8 bytes across `skills` and `skill_files`.
 - Message JSON (`messages.bytes`), without inline `data:` URLs, which are charged once as uploads. Branching charges the copy. Existing rows are backfilled by a migration.
 
-Settings, provider/MCP credentials, skill-source credentials and other small configuration rows do not
-count. Retained speech recordings (`speech_recordings`, only when an admin sets a retention period) do not
+Settings, provider/MCP credentials, skill-source credentials, editable email drafts (`email_drafts`,
+bounded by 100 per chat and 2,000 per account) and other small configuration rows do not count. Retained speech recordings (`speech_recordings`, only when an admin sets a retention period) do not
 count either: the admin chose to keep them, and the purge bounds them (see `speech.md`). Message JSON is charged after stripping inline file data URLs; the owned original attachment
 is charged once rather than counting those bytes again in the message. Existing inline attachments are materialized by a one-time
 migration without rewriting messages. Existing files are grandfathered even if migration puts an

@@ -1,7 +1,8 @@
 # Email
 
 Email accounts connect one mailbox for reading through IMAP and sending through SMTP. The assistant
-gets six tools, and every send or reply waits for an approval that shows the exact payload. OAuth is
+gets six mailbox tools plus `draft_email`, which writes an editable inline letter, and every send or
+reply waits for a review that shows the exact payload. OAuth is
 deliberately out of scope for v1: the account form and provider notes tell the user to create an app
 password, and the server exposes an auth-method list so a future OAuth provider can be added without
 changing the UI contract.
@@ -13,13 +14,19 @@ changing the UI contract.
 | `src/server/email/accounts.ts` | Owned CRUD, AES-256-GCM encryption, validation, defaults, live toggles, connect-time host guard and DNS pinning |
 | `src/server/email/discover.ts` | Ordered discovery chain, autoconfig/autodiscover/SRV parsers, TLS/STARTTLS probes |
 | `src/server/email/imap.ts` | imapflow client: folders, list, search, read, explicit attachment download |
-| `src/server/email/smtp.ts` | nodemailer transport: send, verify |
+| `src/server/email/smtp.ts` | nodemailer transport: send, verify, Bcc in the envelope only |
 | `src/server/email/mime.ts` | Header-injection checks, MIME build/parse, transfer decoding, HTML-to-text |
+| `src/server/email/send.ts` | The one approved-send path shared by the model tools and the draft card: live send/read switches, exact sender and signature, reply participants |
 | `src/server/email/tools.ts` | The six model tools, live toggle checks, envelopes, approval metadata |
+| `src/server/email/drafts.ts` | Persisted editable drafts, revision CAS, review tokens, the draft `.eml` builder, branch copies |
+| `src/server/email/draft-tool.ts` | `draft_email`: create, read the latest user-edited draft, or update with a revision |
+| `src/server/email/draft-routes.ts` | Owned draft API: get, patch, delete, `.eml`, review, send |
 | `src/server/email/routes.ts` | Settings API, NDJSON discovery stream, connection tests |
 | `src/server/email/errors.ts` | Actionable error mapping; never echoes an auth reply |
 | `src/web/components/settings/EmailSettings.tsx` | Account cards and the add/edit wizard: live discovery progress, cancellation, manual-entry usernames, honest test status |
 | `src/web/components/chat/email-tools.tsx` | List/search/read cards and the send/reply review card |
+| `src/web/components/chat/EmailDraftCard.tsx` | Inline editable letter: fields, autosave status, review dialog, send/copy/.eml/mailto/discard/rewrite |
+| `src/web/components/chat/email-draft-state.ts` | Debounced revision-checked autosave controller, scoped reload outbox, card-state derivation |
 
 ## Data
 
@@ -34,6 +41,15 @@ new destination. Message bodies are not mirrored into SQLite. Downloaded attachm
 A user may connect at most 10 accounts. The first account becomes the default; deleting the default
 promotes the oldest remaining one. The default cannot be cleared to nothing.
 
+`email_drafts` holds the inline editable letters. The key is `(thread_id, id)`, like messages, so a
+branch can keep the same opaque card id. Every row belongs to a user and a chat, stores the recipient
+arrays, subject, plain-text body, optional reply handle, sending account, `revision`, `status`
+(`draft|sending|sent`), last writer (`user|model`), sent timestamp/count, last send error, and one
+pending review. `account_id` deliberately has no foreign key: deleting an account must leave the
+draft visible with `accountMissing` so the user can choose another sender. Drafts are text and are
+not charged to the storage quota; the caps are 100 per chat and 2,000 per account. A card binds
+`message_id` only when that message exists in the same chat.
+
 ## Tools
 
 `email_folders` doubles as the account inventory: with no `accountId` it returns every owned
@@ -42,6 +58,14 @@ account id to fetch folders; inventory itself opens no mail connection, so an un
 read-disabled default cannot hide the other accounts. Send/reply require an explicit `accountId`;
 list/search/read can fall back to the default. The inventory is scanned and enveloped like mail
 content because signatures and labels are user-supplied text.
+
+`draft_email` is separate from the six mailbox tools and exists in every stored chat, even with no
+mailbox: a draft can still be copied, downloaded, or opened in a mail app. A call without `draftId`
+creates a draft (a default account is chosen when one exists); a call with only `draftId` returns the
+latest stored version, including the user's edits; a call with `draftId`, `revision`, and changed
+fields updates it. A stale model revision fails and tells the model to read the draft again, so it
+never overwrites newer user text. Its result is enveloped as `kind="email_draft"` and taints later
+actions; it is not offered to temporary chats or delegates and can never send.
 
 `email_search` maps the model-facing `query` field to IMAP `TEXT`, and keeps `from`, `subject`,
 `since`, `unseen`, and `limit`. `email_read` returns the opaque mailbox+UIDVALIDITY+UID handle as
@@ -81,6 +105,66 @@ confidence (`high` preset, `medium` document/SRV, `low` guess). Discovery docume
 exchange — DNS, connect, greeting, EHLO, STARTTLS, and the TLS handshake — and the request's abort
 signal is forwarded to every stage, so a server that accepts and then stays silent cannot hold the
 wizard open. Response lines and queued lines are bounded (4 KB, 40 lines).
+
+## Draft card
+
+The inline letter is a view of one persisted `email_drafts` row, not a copy of the tool output. On
+mount it hydrates through `GET /api/email/threads/:threadId/drafts/:id`; a streaming or stale tool
+result is only a disabled preview until that record arrives. A missing row shows "Draft discarded"
+and is never recreated from old chat history.
+
+Routes, all scoped to the signed-in user and the live chat (another user's id, a deleted chat, or a
+deleted account is a 404/422, never a cross-account read):
+
+| Route | Purpose |
+| --- | --- |
+| `GET /threads/:threadId/drafts/:id` | The current record |
+| `PATCH /threads/:threadId/drafts/:id` | `{ revision, fields, messageId? }`; compare-and-set, 409 on a stale revision |
+| `DELETE /threads/:threadId/drafts/:id` | Discard (refused while sending) |
+| `GET /threads/:threadId/drafts/:id/eml` | RFC 5322 download through the real MIME builder; no send switch needed |
+| `POST /threads/:threadId/drafts/:id/review` | `{ revision }`; builds the exact payload and a single-use review token |
+| `POST /threads/:threadId/drafts/:id/send` | `{ reviewId, revision }`; the token is the only accepted input |
+
+Autosave is debounced at 600 ms in `EmailDraftCard`/`DraftAutosave`. Each PATCH carries the last
+acknowledged revision and the complete fields. A response never replaces text typed while its request
+was in flight; that newer text is queued against the acknowledged revision. A 409 keeps the local
+text, shows a conflict, and offers "Keep my version" (fetch the latest revision, then save the local
+text) or "Reload latest" (adopt the server text). A network failure is `offline`; the text is kept
+and retried on reconnect, window focus, or the manual Retry. Unacknowledged text is mirrored to a
+localStorage outbox keyed by user, chat, and draft, so a reload restores its unsaved text. If the
+server revision has advanced, the card keeps both versions and asks for explicit conflict resolution
+instead of clearing the outbox. Saves that arrive after a newer model write do not move the card
+backwards.
+
+A model update that lands while the card is open is fetched and shown with a quiet "Updated"; unsaved
+local text is preserved as the next pending save rather than being silently discarded. User edits
+always win until the model writes again, and then the server revision is authoritative for what the
+next save targets.
+
+Send is deliberately two-step and works without the model. The card first flushes every pending save,
+then asks the server to review the current revision. The review shows the live account label and From
+address, exact To/Cc/Bcc, subject, full body, and signature. Confirming sends only the review id and
+revision; the server rebuilds the payload from the stored row and the live account, hashes it against
+the reviewed payload, and claims the row in one conditional update so two sends cannot both start. It
+then goes through `send.ts`, the same approved path as `email_send`/`email_reply`: the live send
+switch, sender, signature, reply participants, host check, TLS, and Bcc-as-envelope-only rules all
+apply. A changed draft or account invalidates the token. Content writes clear it. A review lasts 10
+minutes and is single-use. A successful send stores `sent_at`, increments `send_count`, makes the
+fields read-only, and shows "Sent"; a card reloaded during sending refreshes the record until
+the send settles; resending is a new review and another approval. A failed send
+returns the draft to editable with the mapped error in `last_error`. The server never appends a
+signature after approval; the card offers an explicit "Add signature" before review when the account
+requires one.
+
+The toolbar also copies a readable message (with the HTTPS clipboard fallback), downloads a Unicode
+`.eml` built by `buildMime`, opens `mailto:` with encoded subject/body/recipients, discards after a
+confirmation dialog, and asks for a rewrite after saving local changes by appending a user turn
+that names the draft id. All other actions keep working with no account. When no connected account can send, Send is disabled and
+a Settings → Email link explains why. At 360px the header, fields, and toolbar wrap with `min-w-0`;
+the body auto-grows without a fixed-height jump. Fields have labels; status is announced through a
+polite live region, copy feedback included; Ctrl/⌘+Enter opens the review, Escape only blurs a field;
+every button has a command in `commands.ts` and keeps its focus ring and 44px touch target on coarse
+pointers. Mail HTML is never rendered.
 
 ## Security model
 
@@ -126,7 +210,10 @@ wizard open. Response lines and queued lines are bounded (4 KB, 40 lines).
   and rejects any recipient that was not in its From/To/Cc/Reply-To (and must include the sender), so
   no hidden recipient can be added after approval; `In-Reply-To` and `References` are derived from
   the original. Custom send/reply cards render the existing approval controls below the review panel;
-  the review panel starts expanded while approval is pending.
+  the review panel starts expanded while approval is pending. The draft card uses the same send
+  service after its own exact-payload review, but keeps a single-use hashed token instead of the model
+  approval; it cannot approve a changed revision, sender, or signature, and it never calls SMTP
+  directly. Bcc exists only in the SMTP envelope, never in message headers.
 - **Attachments.** Never fetched by list, search, or read. `email_read` downloads only part ids named
   in `downloadAttachments`, caps each at 20 MB and the whole message at 50 MB, stops a stream as soon
   as the budget is crossed, sanitizes name/MIME, and stores the file through `storeUpload` (quota).
@@ -187,3 +274,13 @@ yet.
   complete body (signature included) before Allow, names the outbound risk after untrusted content,
   honours a replayed approval without asking a human again, and auto-denies in an unattended
   schedule.
+- `drafts.test.ts`: route ownership, deleted chat/account, revision CAS, CRLF and size validation with
+  valid blanks, review/send with a fake sender, stale/changed review, single-use tokens, concurrent
+  sends, resend, Bcc envelope-only, signature and live send switch, reply Bcc refusal, branch copies,
+  message binding inside the chat, `.eml` Unicode round-trip, and `draft_email` create/read/update
+  with the user's latest text and an envelope.
+- `draft-chat.test.ts`: a real chat turn offers `draft_email` without any mailbox, runs it without
+  approval, stores the draft, and sends only the enveloped result to the next model step.
+- `src/web/components/chat/email-draft-state.test.ts`: the 600 ms debounce, in-flight edit
+  preservation, conflict/retry, offline retry, reload outbox and server hydration, and card-state
+  derivation (draft, saving, sent, no account).

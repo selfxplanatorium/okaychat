@@ -155,6 +155,8 @@ export interface EmailSendResult {
   from: string;
   to: string[];
   cc: string[];
+  /** Present only when the message had envelope-only recipients. */
+  bcc?: string[];
   subject: string;
   accepted: string[];
   rejected: string[];

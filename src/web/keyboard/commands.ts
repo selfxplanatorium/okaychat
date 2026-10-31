@@ -130,6 +130,13 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "email.removeAccount", labelKey: "keyboard.cmdEmailRemoveAccount", group: "Settings", keys: [] },
   { id: "email.setDefault", labelKey: "keyboard.cmdEmailSetDefault", group: "Settings", keys: [] },
   { id: "email.confirmRemove", labelKey: "keyboard.cmdEmailConfirmRemove", group: "Settings", keys: [] },
+  { id: "email.draftSend", labelKey: "keyboard.cmdEmailDraftSend", group: "Messages", keys: [] },
+  { id: "email.draftCopy", labelKey: "keyboard.cmdEmailDraftCopy", group: "Messages", keys: [] },
+  { id: "email.draftDownload", labelKey: "keyboard.cmdEmailDraftDownload", group: "Messages", keys: [] },
+  { id: "email.draftMailto", labelKey: "keyboard.cmdEmailDraftMailto", group: "Messages", keys: [] },
+  { id: "email.draftRewrite", labelKey: "keyboard.cmdEmailDraftRewrite", group: "Messages", keys: [] },
+  { id: "email.draftSignature", labelKey: "keyboard.cmdEmailDraftSignature", group: "Messages", keys: [] },
+  { id: "email.draftDiscard", labelKey: "keyboard.cmdEmailDraftDiscard", group: "Messages", keys: [] },
 ];
 
 export const COMMAND_GROUPS: readonly CommandGroup[] = ["General", "Navigation", "Chat", "Composer", "Messages", "Settings"];

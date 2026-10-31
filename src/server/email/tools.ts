@@ -2,12 +2,12 @@ import type { ConnectionOptions } from "node:tls";
 import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 import type { EmailAccount, EmailAddress } from "../../shared/email.js";
-import { accountForRead, accountForSend, accountSecrets, defaultAccount, listAccounts } from "./accounts.js";
+import { accountForRead, accountSecrets, defaultAccount, listAccounts } from "./accounts.js";
 import { EmailError } from "./errors.js";
 import { downloadAttachment, listFolders, listMessages, readMessage, searchMessages, MAX_MESSAGE_ATTACHMENT_BYTES } from "./imap.js";
 import { injectionMetadata, riskMetadata, scanForInjection, wrapUntrusted } from "../prompt-injection.js";
 import { storeUpload } from "../files.js";
-import { sendEmail, type OutgoingMail } from "./smtp.js";
+import { sendApproved, sendApprovedReply } from "./send.js";
 import { isEmailAddress } from "./mime.js";
 
 // Model tools for email. Reads re-check the account's live read switch on every call; sends re-check
@@ -71,31 +71,6 @@ function validateAttachments(parts: string[] | undefined): string[] {
   return parts;
 }
 
-/**
- * The approved body is exactly what leaves the server. A signature is user data, so it must already
- * be in the tool input the user reviewed; appending it after approval would hide content from them.
- */
-function approvedBody(account: EmailAccount, body: string): string {
-  const signature = account.signature.trim();
-  if (!signature) return body;
-  const block = `\n\n-- \n${signature}`;
-  if (!body.endsWith(block)) {
-    throw new EmailError(
-      "protocol",
-      `The message body must end with the account signature exactly as email_folders returned it:\n\n-- \n${signature}`,
-    );
-  }
-  return body;
-}
-
-/** The From address is part of the approval; a later account change must invalidate it. */
-function approvedSender(account: EmailAccount, from: string): EmailAccount {
-  if (account.address.trim().toLowerCase() !== from.trim().toLowerCase()) {
-    throw new EmailError("protocol", `Send from the connected account address (${account.address}). The account address changed after review.`);
-  }
-  return account;
-}
-
 export interface EmailTools {
   tools: ToolSet;
   subTools: ToolSet;
@@ -110,7 +85,6 @@ export function emailTools(opts: { userId: string; temporary?: boolean; signal?:
   const { userId } = opts;
 
   const readAccount = (id?: string) => accountForRead(userId, id);
-  const sendAccount = (id?: string) => accountForSend(userId, id);
 
   const email_folders = tool({
     description:
@@ -283,12 +257,8 @@ export function emailTools(opts: { userId: string; temporary?: boolean; signal?:
     }).refine((value) => value.to.length + (value.cc?.length ?? 0) <= MAX_RECIPIENTS, `At most ${MAX_RECIPIENTS} recipients.`),
     metadata: riskMetadata("outbound"),
     needsApproval: true,
-    execute: async ({ accountId: id, from, to, cc, subject, body }) => {
-      const account = approvedSender(sendAccount(id), from);
-      const text = approvedBody(account, body);
-      const mail: OutgoingMail = { to: getEmails(to), cc: cc ? getEmails(cc) : undefined, subject, text };
-      return sendEmail(accountSecrets(userId, account.id), mail, { tls: opts.tls });
-    },
+    execute: async ({ accountId: id, from, to, cc, subject, body }) =>
+      sendApproved(userId, { accountId: id, from, to: getEmails(to), cc: cc ? getEmails(cc) : undefined, subject, body }, { tls: opts.tls }),
   });
 
   const email_reply = tool({
@@ -305,46 +275,8 @@ export function emailTools(opts: { userId: string; temporary?: boolean; signal?:
     }).refine((value) => value.to.length + (value.cc?.length ?? 0) <= MAX_RECIPIENTS, `At most ${MAX_RECIPIENTS} recipients.`),
     metadata: riskMetadata("outbound"),
     needsApproval: true,
-    execute: async ({ accountId: id, from, messageId: message, to, cc, subject, body }) => {
-      const account = approvedSender(sendAccount(id), from);
-      const text = approvedBody(account, body);
-      // A reply also reads the original message, so the live read switch applies just as it does
-      // to email_read; a send-only account cannot use a disabled read path.
-      accountForRead(userId, account.id);
-      const secrets = accountSecrets(userId, account.id);
-      const original = (await readMessage(secrets, message, opts.tls)).message;
-      const normalize = (address: string) => address.trim().toLowerCase();
-      const own = normalize(account.address);
-      const replyTargets = (original.replyTo.length ? original.replyTo : original.from).map((entry) => normalize(entry.address)).filter((address) => address && address !== own);
-      const participants = new Set([...original.from, ...original.to, ...original.cc, ...original.replyTo].map((entry) => normalize(entry.address)).filter((address) => address && address !== own));
-      const toAddresses = to.map((entry) => normalize(entry.address));
-      const ccAddresses = (cc ?? []).map((entry) => normalize(entry.address));
-      if (!replyTargets.length) throw new EmailError("protocol", "That message has no sender to reply to.");
-      if (!toAddresses.some((address) => replyTargets.includes(address))) {
-        throw new EmailError("protocol", `A reply must go to the original sender (${replyTargets[0]}).`);
-      }
-      for (const address of [...toAddresses, ...ccAddresses]) {
-        if (!replyTargets.includes(address) && !participants.has(address)) {
-          throw new EmailError("protocol", `${address} did not appear in the original conversation, so it cannot be added to a reply.`);
-        }
-      }
-      const expectedSubject = `Re: ${original.subject}`.trim();
-      const normalizeSubject = (value: string) => value.replace(/^(?:\s*(?:re|fwd?):\s*)+/gi, "").trim().toLowerCase();
-      if (normalizeSubject(subject) !== normalizeSubject(expectedSubject)) {
-        throw new EmailError("protocol", `A reply keeps the original subject. Use "${expectedSubject.slice(0, 300)}".`);
-      }
-      const references = [ ...original.references, ...(original.messageId ? [original.messageId] : []) ].slice(-20);
-      const mail: OutgoingMail = {
-        to: getEmails(to),
-        cc: cc ? getEmails(cc) : undefined,
-        subject,
-        text,
-        inReplyTo: original.messageId ?? undefined,
-        references,
-      };
-      const result = await sendEmail(secrets, mail, { tls: opts.tls });
-      return { ...result, replyTo: original.messageId, originalSubject: original.subject };
-    },
+    execute: async ({ accountId: id, from, messageId: message, to, cc, subject, body }) =>
+      sendApprovedReply(userId, { accountId: id, from, messageId: message, to: getEmails(to), cc: cc ? getEmails(cc) : undefined, subject, body }, { tls: opts.tls }),
   });
 
   // Read tools are safe for delegates; anything that sends is never exposed to them.

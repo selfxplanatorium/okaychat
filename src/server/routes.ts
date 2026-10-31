@@ -15,6 +15,7 @@ import { adminRoutes, audienceInput } from "./admin.js";
 import { artifactRoutes } from "./artifacts.js";
 import { chatRoutes } from "./chat.js";
 import { emailRoutes } from "./email/routes.js";
+import { draftRoutes } from "./email/draft-routes.js";
 import { exportRoutes } from "./export.js";
 import { fileRoutes } from "./files.js";
 import { fontRoutes } from "./fonts.js";
@@ -381,6 +382,7 @@ const api = new Hono<AppEnv>()
   .route("/", projectRoutes)
   .route("/skills", skillRoutes)
   .route("/email", emailRoutes)
+  .route("/email", draftRoutes)
   .route("/", searchRoutes)
   .route("/", shareRoutes)
   .route("/", adminRoutes)

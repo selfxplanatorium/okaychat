@@ -42,6 +42,8 @@ function transportFor(secrets: EmailSecrets, target: { host: string; servername?
 export interface OutgoingMail {
   to: EmailAddress[];
   cc?: EmailAddress[];
+  /** Envelope-only recipients: they receive the message but never appear in its headers. */
+  bcc?: EmailAddress[];
   subject: string;
   text: string;
   replyTo?: EmailAddress[];
@@ -51,9 +53,10 @@ export interface OutgoingMail {
 
 function validate(mail: OutgoingMail): void {
   if (!mail.to.length) throw new EmailError("protocol", "Add at least one recipient.");
-  if (mail.to.length + (mail.cc?.length ?? 0) > MAX_RECIPIENTS) throw new EmailError("protocol", `A message can have at most ${MAX_RECIPIENTS} recipients.`);
+  if (mail.to.length + (mail.cc?.length ?? 0) + (mail.bcc?.length ?? 0) > MAX_RECIPIENTS) throw new EmailError("protocol", `A message can have at most ${MAX_RECIPIENTS} recipients.`);
   assertAddressList("To", mail.to);
   assertAddressList("Cc", mail.cc ?? []);
+  assertAddressList("Bcc", mail.bcc ?? []);
   assertAddressList("Reply-To", mail.replyTo ?? []);
   assertHeaderValue("Subject", mail.subject, 998);
   if (mail.inReplyTo) assertHeaderValue("In-Reply-To", mail.inReplyTo, 998);
@@ -74,7 +77,8 @@ export async function sendEmail(secrets: EmailSecrets, mail: OutgoingMail, opts:
     inReplyTo: mail.inReplyTo,
     references: mail.references,
   });
-  const recipients = [...mail.to, ...(mail.cc ?? [])].map((entry) => entry.address);
+  // Bcc is not passed to buildMime, so no header can reveal it; it exists only in the SMTP envelope.
+  const recipients = [...mail.to, ...(mail.cc ?? []), ...(mail.bcc ?? [])].map((entry) => entry.address);
   const target = await emailConnectTarget(secrets.userId, secrets.smtp.host).catch((error: unknown) => {
     throw mapEmailError(error, "SMTP server");
   });
@@ -86,6 +90,7 @@ export async function sendEmail(secrets: EmailSecrets, mail: OutgoingMail, opts:
       from,
       to: mail.to.map((entry) => entry.address),
       cc: (mail.cc ?? []).map((entry) => entry.address),
+      ...(mail.bcc?.length ? { bcc: mail.bcc.map((entry) => entry.address) } : {}),
       subject: mail.subject,
       accepted: (info.accepted ?? []).map(String),
       rejected: (info.rejected ?? []).map(String),
