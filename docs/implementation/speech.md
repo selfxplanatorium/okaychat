@@ -61,14 +61,42 @@ With retention on, dictated recordings (not attached files, never temporary chat
 
 ## Speech worker (`speech/`)
 
-A Python container with faster-whisper and Piper (`speech/server.py`, hashed lock `speech/requirements.txt`). The HTTP server imports only the standard library. Each engine runs in a child process that starts on the first request and exits after `SPEECH_IDLE_MINUTES` (default 5) without one, because Python does not reliably return freed memory to the system. Measured on a 4-core host: about 37–58 MB for the idle worker, about 570–670 MB with Whisper `base` and Piper both loaded, Piper at 0.2 s for a warm sentence, Whisper `base` at 1–5 s for a short recording on CPU. The TTS process keeps the three most recently used voices loaded.
+A Python container with faster-whisper and Piper (`speech/server.py`, hashed lock `speech/requirements.txt`). The HTTP server imports only the standard library. Each engine runs in a child process that starts on the first request and exits after `SPEECH_IDLE_MINUTES` (default 5) without one, because Python does not reliably return freed memory to the system. On a GPU the child also owns the CUDA context, so its exit releases the VRAM. Measured on a 4-core host: about 37–58 MB for the idle worker, about 570–670 MB with Whisper `base` and Piper both loaded, Piper at 0.2 s for a warm sentence, Whisper `base` at 1–5 s for a short recording on CPU. The TTS process keeps the three most recently used voices loaded. `speech/device.py` chooses CUDA or CPU; see below.
 
 - One transcription and one synthesis run at a time; others wait up to two minutes.
 - Models download from Hugging Face on first use into the `okaychat-speech` volume (`Systran/faster-whisper-*`, `rhasspy/piper-voices`), so the worker's network is not internal. It holds no app data or secrets.
 - Bearer token: the app generates `OKAYCHAT_SPEECH_TOKEN_FILE` into the `okaychat-speech-token` volume (0640, group 10100 set by `docker-entrypoint.sh`), and the worker reads it until it appears. Dev uses `data/speech-token` and `scripts/dev-speech.sh`.
 - Limits: 25 MB per recording, the admin's maximum length (checked after decoding), 5000 characters per synthesis.
-- Hardening in compose: read-only root, `/tmp` tmpfs, no capabilities, `no-new-privileges`, uid 10100, 2 GB and 2 CPUs.
+- Hardening in compose: read-only root, `/tmp` tmpfs, no capabilities, `no-new-privileges`, uid 10100, 2 GB and 2 CPUs (4 GB with the GPU override).
 - PyAV is pinned below 19: version 19 dropped the `metadata_errors` argument faster-whisper 1.2.1 passes, which breaks every decode.
+
+## GPU acceleration
+
+Whisper can use an NVIDIA GPU when the host exposes one. The CPU image and the plain `docker-compose.yml` are unchanged, so existing installs keep running on the CPU.
+
+Requirements: an NVIDIA driver on the host and the NVIDIA Container Toolkit (Docker runtime `nvidia`). The GPU image is x86-64 only, like the speech lock.
+
+```sh
+# Build the GPU image even if a CPU image already exists, then start the override.
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml build speech
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+
+# Or in dev, with an isolated container:
+scripts/dev-speech.sh
+```
+
+`docker-compose.gpu.yml` builds with `INSTALL_CUDA=1`, reserves all NVIDIA GPUs (`driver: nvidia`, `capabilities: [gpu]`), raises the memory limit to 4 GB, and passes the device variables below. `INSTALL_CUDA=1` adds only the pinned cuBLAS and cuDNN 9 runtime wheels (`speech/requirements-cuda.txt`) that the existing ctranslate2 4.x build dlopens for CUDA 12; the base image stays `python:3.12-slim-bookworm`. Their libraries are put on `LD_LIBRARY_PATH` before ctranslate2 is imported.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SPEECH_DEVICE` | `auto` | `auto` uses CUDA when a device is visible, `cuda` requests it (with CPU fallback if unavailable), `cpu` never probes CUDA |
+| `SPEECH_COMPUTE_TYPE` | `float16` on CUDA, `int8` on CPU | ctranslate2 compute type for the attempted device |
+
+Detection is cheap and cached for the process lifetime: `speech/device.py` runs ctranslate2's CUDA device count in a short-lived child interpreter (with `nvidia-smi` as a fallback), so the long-running HTTP parent never holds a CUDA context and no model is loaded for `/health` or `/preload`. `gpuName` comes from the CUDA driver; `cudaVersion` is the CUDA runtime version when `libcudart` is present, not the driver's maximum supported version, so it can be `null`.
+
+faster-whisper loads the model on the first transcription, never during a health check. On CUDA the worker tries `float16`, then `int8_float16` when the GPU cannot use `float16`, then CPU `int8`. `SPEECH_COMPUTE_TYPE` replaces the first CUDA attempt but never removes the CPU fallback. A CUDA load or inference failure (the generator is consumed inside the same try) logs once, moves that child to CPU `int8`, and keeps serving. `/health` then reports `device: "cpu"`, `degraded: true`, the reason, and the model that actually loaded; Admin → Voice shows the note. The model cache key is `(model, device, compute_type)`, so a CPU model is never reused for CUDA.
+
+An explicit `SPEECH_DEVICE=cuda` without a visible GPU still starts and serves on CPU, with the reason in `/health`. With `auto`, a CPU-only host is reported as CPU without a warning. Failed CUDA attempts also report their diagnostic when the CPU retry fails. The idle exit is what frees GPU memory: the child process ends after `SPEECH_IDLE_MINUTES`, releasing its CUDA context and VRAM, and health then reports `model: null` while keeping the last fallback diagnostic. Expect roughly 0.5–1 GB of VRAM for `base` and several GB for `large-v3` while a child is transcribing; the CUDA wheels add about 1.3 GB to the GPU image.
 
 Regenerate the lock (x86-64 wheels only):
 
@@ -84,7 +112,9 @@ and put the header line back on top of `requirements.txt`.
 
 - `src/server/speech.test.ts`: request shapes for every cloud engine against fakes (including a minimal WebSocket server for Realtime), settings validation, keys and sharing, retention and purge, limits, attached-file fallback, list parsing.
 - `src/web/speech/text.test.ts`: Markdown cleanup and splitting.
-- `test/integration/speech.sh`: the real worker container: auth, Piper in two languages, a Piper → Whisper round trip, limits, read-only root, and that memory returns to baseline after the idle timeout.
+- `speech/test_device.py`: pure device-resolution and fallback tests (`python3 -m unittest discover -s speech -p 'test_*.py'`), run by `test/integration/speech.sh`.
+- `test/integration/speech.sh`: the real CPU worker container: auth, forced CPU health, Piper in two languages, a Piper → Whisper round trip, limits, read-only root, and that memory returns to baseline after the idle timeout.
+- `test/integration/speech-gpu.sh`: the CUDA container. Skips with exit 0 when there is no Docker/NVIDIA runtime, and otherwise asserts a real CUDA transcription plus the idle child exit that releases VRAM. Uses its own container and volume names.
 
 ## Compared with Open WebUI and LibreChat
 

@@ -25,10 +25,13 @@ cleanup() {
 trap cleanup EXIT
 head -c 32 /dev/urandom | base64 | tr -d '/+=\n' > "$SHARE/token"
 chmod 0644 "$SHARE/token"
+# Pure device-resolution and fallback tests: no GPU, models, or downloads needed.
+python3 -m unittest discover -s speech -p 'test_*.py'
 [ "$BUILD" = 1 ] && docker build -q -t "okaychat-speech:$IT_TAG" speech >/dev/null
 docker rm -f okaychat-it-speech >/dev/null 2>&1 || true
 docker run -d --name okaychat-it-speech -p 127.0.0.1:18793:8080 \
   -e SPEECH_TOKEN_FILE=/run/okaychat-speech/token -e SPEECH_IDLE_MINUTES=0.25 \
+  -e SPEECH_DEVICE=cpu -e SPEECH_COMPUTE_TYPE= \
   -v "$SHARE/token":/run/okaychat-speech/token:ro -v okaychat-it-speech-models:/models \
   --init --read-only --tmpfs /tmp:size=64m,mode=1777 --cap-drop ALL \
   --security-opt no-new-privileges:true --pids-limit 256 --memory 2g --cpus 2 \

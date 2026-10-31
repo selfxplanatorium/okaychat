@@ -290,6 +290,42 @@ test("Whisper on the server: worker call, admin switch, and the admin's model ch
   assert.equal(status.stt.find((e) => e.id === "local")?.reason, "Turned off by your admin.");
 });
 
+test("admin speech status: reports the worker's actual device, model, and fallback; old payloads stay safe", async () => {
+  reply = (s) => {
+    if (s.url === "/worker/health") {
+      return {
+        body: {
+          ok: true, stt: false, tts: false, requestedDevice: "cuda", device: "cpu", computeType: "int8",
+          gpuName: null, cudaVersion: null, cudaAvailable: false, degraded: true,
+          reason: "CUDA was requested, but no NVIDIA GPU is visible to the speech container.", model: null,
+        },
+      };
+    }
+    if (s.url === "/worker/models") return { body: { models: [], downloaded: ["base"] } };
+    return { body: {} };
+  };
+  const body = (await (await call("admin", "/admin/speech")).json()) as { worker: Record<string, unknown> };
+  assert.deepEqual(body.worker, {
+    configured: true, reachable: true, sttRunning: false, ttsRunning: false,
+    requestedDevice: "cuda", device: "cpu", computeType: "int8", gpuName: null, cudaVersion: null,
+    cudaAvailable: false, degraded: true,
+    reason: "CUDA was requested, but no NVIDIA GPU is visible to the speech container.", model: null, downloaded: ["base"],
+  });
+
+  // A worker from before GPU support has none of the device fields.
+  reply = (s) => {
+    if (s.url === "/worker/health") return { body: { ok: true, stt: false, tts: false } };
+    if (s.url === "/worker/models") return { body: { models: [], downloaded: [] } };
+    return { body: {} };
+  };
+  const old = (await (await call("admin", "/admin/speech")).json()) as { worker: Record<string, unknown> };
+  assert.deepEqual(old.worker, {
+    configured: true, reachable: true, sttRunning: false, ttsRunning: false,
+    requestedDevice: null, device: null, computeType: null, gpuName: null, cudaVersion: null,
+    cudaAvailable: null, degraded: false, reason: null, model: null, downloaded: [],
+  });
+});
+
 test("uploads: audio is checked by type or bytes, size is capped, worker errors pass through", async () => {
   updateSettings("bob", { speech: { stt: { engine: "local" } } });
   reply = () => ({ status: 413, body: { error: "The recording is 12.0 minutes long; the limit is 10." } });
