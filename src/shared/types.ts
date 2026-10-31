@@ -100,6 +100,8 @@ export interface UserSettings {
   appearance?: UserAppearance;
   /** The user dismissed the first-run provider screen and explores without a connection. */
   onboardingSkipped?: boolean;
+  /** The quiet shortcut hints in an empty chat were dismissed for this account. */
+  shortcutHintsDismissed?: boolean;
   defaultModel?: string | null;
   /** Used for titles and compaction summaries. Falls back to the chat model. */
   utilityModel?: string | null;

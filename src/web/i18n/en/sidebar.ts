@@ -1,6 +1,6 @@
 export default {
   searchChats: "Search chats",
-  searchDescription: "Search chat titles and messages across all projects. Use arrow keys to choose a chat and Enter to open it.",
+  searchDescription: "Search chat titles and messages across all projects, or run an app command. Use arrow keys to choose and Enter to select.",
   searchPlaceholder: "Search chats…",
   searchLoadFailed: "Could not load chats. Close search and try again.",
   searchOpenFailed: "Could not open this chat. Try again.",
@@ -12,7 +12,7 @@ export default {
   searching: "Searching…",
   noChatsFound: "No chats found. Try another word.",
   chatsAppearHere: "Your chats will appear here.",
-  searchHints: "↑ ↓ to choose · Enter to open · Esc to close",
+  searchHints: "↑ ↓ to choose · Enter to select · Esc to close",
   closeSidebar: "Close sidebar",
   mainNavigation: "Main navigation",
   scheduled: "Scheduled",

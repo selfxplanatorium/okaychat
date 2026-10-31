@@ -1,12 +1,14 @@
 import { ComposerPrimitive, useAui } from "@assistant-ui/react";
-import { BrainIcon, CheckIcon, ChevronRightIcon, GlobeIcon, GlobeOffIcon, Loader2Icon, PaperclipIcon, PlusIcon, SquareSlashIcon, TelescopeIcon, TriangleAlertIcon, ZapIcon } from "lucide-react";
+import { BrainIcon, CheckIcon, ChevronRightIcon, GlobeIcon, GlobeOffIcon, Loader2Icon, PaperclipIcon, PlusIcon, SettingsIcon, SquareSlashIcon, TelescopeIcon, TriangleAlertIcon, ZapIcon } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
+import { useLocation } from "wouter";
 import type { McpPromptInfo } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
+import { settingsHref } from "@/lib/settings-link";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 import { useChatModel } from "@/state/thread-meta";
@@ -236,6 +238,7 @@ export function MobileComposerMenu() {
   const hasPrompts = useData((s) => s.mcpPrompts.length > 0);
   const loadPrompts = useData((s) => s.refreshMcpPrompts);
   const { pick, dialog } = usePromptPicker();
+  const [, navigate] = useLocation();
   return (
     <div className="hidden shrink-0 max-sm:block pointer-coarse:block">
       {dialog}
@@ -294,6 +297,18 @@ export function MobileComposerMenu() {
                 <span className="text-xs opacity-70">{research.unavailable ? t(research.unavailable) : t("composer.researchSearchNotice")}</span>
               </span>
               <CheckIcon className={cn("mt-0.5 ml-auto", research.enabled ? "opacity-100" : "opacity-0")} />
+            </MenuItem>
+          )}
+          {research.unavailable === "composer.researchNeedsWeb" && (
+            <MenuItem onClick={() => navigate(settingsHref("webTools"))}>
+              <SettingsIcon />
+              {t("ux.openWebToolSettings")}
+            </MenuItem>
+          )}
+          {research.unavailable === "composer.researchNeedsSearches" && (
+            <MenuItem onClick={() => navigate(settingsHref("webSearchLimit"))}>
+              <SettingsIcon />
+              {t("ux.openSearchLimitSettings")}
             </MenuItem>
           )}
           {hasPrompts && (

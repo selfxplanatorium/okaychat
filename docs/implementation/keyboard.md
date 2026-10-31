@@ -52,7 +52,7 @@ A command runs its newest `useCommand()` handler; a handler may return `false` t
 
 ## Messages
 
-Message roots are `tabIndex=-1` focus stops with `data-message-root`. assistant-ui mounts an older message's action bar only on hover (`autohide="not-last"`, driven by `message.isHovering`), so `useMessageFocus()` sets `isHovering` on focus and holds it while focus stays inside, also when the pointer leaves. Action buttons carry `message.copy`, `message.edit`, `message.retry`, `message.branch`, `message.readAloud` (when read aloud is on), `message.more`. `chat.readLast` (Alt+Shift+V) reads the last answer aloud or stops it. "Jump to the last message" (`Alt+Shift+J`) enters the list, Escape returns to the message box.
+Message roots are `tabIndex=-1` focus stops with `data-message-root`. assistant-ui mounts an older message's action bar only on hover (`autohide="not-last"`, driven by `message.isHovering`), so `useMessageFocus()` sets `isHovering` on focus and holds it while focus stays inside, also when the pointer leaves. Action buttons carry `message.copy`, `message.edit`, `message.retry`, `message.retryWithModel`, `message.branch`, `message.readAloud` (when read aloud is on), `message.more`. `W` opens "Retry with another model" for the focused message; `R` is the plain retry. `chat.readLast` (Alt+Shift+V) reads the last answer aloud or stops it. "Jump to the last message" (`Alt+Shift+J`) enters the list, Escape returns to the message box.
 
 Chat-level actions on the last message (retry, edit, copy, copy code) click those same buttons inside the last message of that role. Copy and retry click without moving focus, so the message box keeps the cursor.
 
@@ -74,4 +74,8 @@ Stored in `user_settings.keyboard` (`KeyboardSettings` in `shared/types.ts`), va
 
 1. Add a `CommandDef` to `COMMANDS` (id, `labelKey` from the `keyboard` namespace, group, default combos, scope). Show labels with `commandLabel()` and `groupLabel()`, never a stored string. Run the tests: a default that clashes fails.
 2. Either `useCommand(id, handler)` in the component that owns the state, or `data-command={id}` (or `command={id}` on `TooltipIconButton`) on the control.
-3. Nothing else: the command list, settings page, and tooltips read the catalogue.
+3. Nothing else: the command list, the Ctrl/⌘+K Commands group, settings page, and tooltips read the catalogue.
+
+Availability is read through `commandAvailable()` (a registered handler, or a visible enabled `[data-command]`). Both palettes snapshot it **before** their modal mounts, because an open dialog makes everything behind it inert; do not compute it from the DOM after opening. Commands with `palette: false` are not runnable rows in either palette (the Ctrl/⌘+/ list still shows message-scope commands as a reference under "while a message has focus"), though their shortcuts and handlers still work.
+
+Context actions register only while they can succeed: `chat.openContext` while a window size is known, `chat.compactNow`/`chat.trimContext` only for a saved, non-temporary chat that is not running, compacting, or showing cached history. `nav.createProject` and `nav.createSchedule` live in `KeyboardShortcuts`, so hiding a sidebar shortcut in General settings does not remove the commands.

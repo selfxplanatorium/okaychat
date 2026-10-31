@@ -49,6 +49,7 @@ export function SettingsRow({
   control,
   reset,
   className,
+  id,
 }: {
   label: ReactNode;
   description?: ReactNode;
@@ -56,9 +57,19 @@ export function SettingsRow({
   /** Shown when the value differs from its default. */
   reset?: (() => void) | null;
   className?: string;
+  /** Deep-link target. `SettingsLayout` focuses `setting-<anchor>` after the page mounts. */
+  id?: string;
 }) {
   return (
-    <div className={cn("flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-4 py-3 sm:flex-nowrap", className)}>
+    <div
+      id={id}
+      tabIndex={id ? -1 : undefined}
+      className={cn(
+        "flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-4 py-3 sm:flex-nowrap",
+        id && "scroll-mt-24 outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        className,
+      )}
+    >
       {/* Short controls (switches, small buttons) share the label's line like a native list row; wide ones wrap below it. */}
       <div className="min-w-0 flex-[1_1_12rem]">
         <div className="flex items-center gap-1.5 text-sm font-medium">

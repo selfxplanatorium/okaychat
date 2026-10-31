@@ -89,6 +89,8 @@ export function KeyboardShortcuts() {
     useCommand(`nav.${page}`, () => navigate(`/${page}`));
   }
   useCommand("nav.settings", () => navigate("/settings"));
+  useCommand("nav.createProject", () => navigate("/projects?new=1"));
+  useCommand("nav.createSchedule", () => navigate("/scheduled?new=1"));
   for (const command of COMMANDS.filter((c) => c.group === "Settings")) {
     const section = command.id.slice("settings.".length);
     useCommand(command.id, () => {
@@ -143,7 +145,7 @@ export function KeyboardShortcuts() {
   useCommand("message.previous", () => step(-1));
   useCommand("message.first", () => focusMessage(messages()[0]));
   useCommand("message.last", () => focusMessage(messages().at(-1)));
-  for (const action of ["copy", "edit", "retry", "branch", "more"] as const) {
+  for (const action of ["copy", "edit", "retry", "retryWithModel", "branch", "more"] as const) {
     useCommand(`message.${action}`, () => {
       const message = focusedMessage();
       if (!message) return false;

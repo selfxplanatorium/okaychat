@@ -50,6 +50,8 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "nav.plugins", labelKey: "keyboard.cmdNavPlugins", group: "Navigation", keys: [] },
   { id: "nav.settings", labelKey: "keyboard.cmdNavSettings", group: "Navigation", keys: ["Alt+Shift+O"] },
   { id: "nav.projectFilter", labelKey: "keyboard.cmdNavProjectFilter", group: "Navigation", keys: [] },
+  { id: "nav.createProject", labelKey: "keyboard.cmdNavCreateProject", group: "Navigation", keys: [] },
+  { id: "nav.createSchedule", labelKey: "keyboard.cmdNavCreateSchedule", group: "Navigation", keys: [] },
 
   { id: "chat.focusComposer", labelKey: "keyboard.cmdChatFocusComposer", group: "Chat", keys: ["Alt+Shift+I"] },
   { id: "chat.focusMessages", labelKey: "keyboard.cmdChatFocusMessages", group: "Chat", keys: ["Alt+Shift+J"] },
@@ -68,6 +70,9 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "chat.archive", labelKey: "keyboard.cmdChatArchive", group: "Chat", keys: [] },
   { id: "chat.delete", labelKey: "keyboard.cmdChatDelete", group: "Chat", keys: ["Alt+Shift+Backspace"] },
   { id: "chat.scrollBottom", labelKey: "keyboard.cmdChatScrollBottom", group: "Chat", keys: [] },
+  { id: "chat.openContext", labelKey: "keyboard.cmdChatOpenContext", group: "Chat", keys: [] },
+  { id: "chat.compactNow", labelKey: "keyboard.cmdChatCompactNow", group: "Chat", keys: [] },
+  { id: "chat.trimContext", labelKey: "keyboard.cmdChatTrimContext", group: "Chat", keys: [] },
 
   { id: "composer.model", labelKey: "keyboard.cmdComposerModel", group: "Composer", keys: ["Alt+Shift+M"] },
   { id: "composer.effort", labelKey: "keyboard.cmdComposerEffort", group: "Composer", keys: ["Alt+Shift+T"] },
@@ -85,11 +90,14 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "message.readAloud", labelKey: "keyboard.cmdMessageReadAloud", group: "Messages", keys: ["S"], scope: "message", palette: false },
   { id: "message.edit", labelKey: "keyboard.cmdMessageEdit", group: "Messages", keys: ["E"], scope: "message", palette: false },
   { id: "message.retry", labelKey: "keyboard.cmdMessageRetry", group: "Messages", keys: ["R"], scope: "message", palette: false },
+  { id: "message.retryWithModel", labelKey: "keyboard.cmdMessageRetryWithModel", group: "Messages", keys: ["W"], scope: "message", palette: false },
   { id: "message.branch", labelKey: "keyboard.cmdMessageBranch", group: "Messages", keys: ["B"], scope: "message", palette: false },
   { id: "message.more", labelKey: "keyboard.cmdMessageMore", group: "Messages", keys: ["M"], scope: "message", palette: false },
   { id: "message.exit", labelKey: "keyboard.cmdMessageExit", group: "Messages", keys: ["Escape"], scope: "message", palette: false },
 
   ...SETTINGS_SECTIONS.map((id): CommandDef => ({ id: `settings.${id}`, labelKey: SETTINGS_LABELS[id], group: "Settings", keys: [] })),
+
+  { id: "ux.dismissHints", labelKey: "keyboard.cmdUxDismissHints", group: "General", keys: [], palette: false },
 ];
 
 export const COMMAND_GROUPS: readonly CommandGroup[] = ["General", "Navigation", "Chat", "Composer", "Messages", "Settings"];

@@ -90,6 +90,8 @@ import { useLongPaste } from "@/components/chat/long-paste";
 import { parseAttachmentText, splitUserMessage, typedText } from "@/runtime/message-attachments";
 import { mcpAppOf } from "@/components/chat/McpApp";
 import { ReplyFiles } from "@/components/chat/reply-files";
+import { RetryWithModel } from "@/components/chat/retry-model";
+import { ShortcutHints } from "@/components/chat/ShortcutHints";
 import { DictationSend, ReadAloudAutoPlay, useDictateLabel, useSendDictation, VoiceNotice } from "@/speech/ChatVoice";
 import { useSpeech } from "@/speech/store";
 import { useThreadSync, type ThreadSync } from "@/state/thread-sync";
@@ -454,6 +456,7 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
         >
           <AuiIf condition={isNewChatView}>
             <Welcome />
+            <ShortcutHints />
           </AuiIf>
           <AuiIf condition={isHistoryLoadingView}>
             <ThreadHistorySkeleton />
@@ -1435,6 +1438,7 @@ const AssistantActionBar: FC = () => {
           <RefreshCwIcon />
         </TooltipIconButton>
       </ActionBarPrimitive.Reload>
+      <RetryWithModel />
       <AuiIf condition={(s) => s.thread.capabilities.feedback}>
         <ActionBarPrimitive.FeedbackPositive asChild>
           <TooltipIconButton

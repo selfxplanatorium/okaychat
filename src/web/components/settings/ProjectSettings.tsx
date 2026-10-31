@@ -1,5 +1,6 @@
 import { FileTextIcon, Loader2Icon, PencilIcon, PlusIcon, TrashIcon, UploadIcon } from "lucide-react";
-import { useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useLocation, useSearch } from "wouter";
 import type { Project } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -119,7 +120,18 @@ function ProjectFiles({ project }: { project: Project }) {
 export function ProjectSettings() {
   const projects = useData((s) => s.projects);
   const refresh = useData((s) => s.refreshProjects);
-  const [editing, setEditing] = useState<string | "new" | null>(null);
+  const [path, navigate] = useLocation();
+  // The sidebar's + and the command palette open this page with ?new=1 so the form is already open.
+  const requested = new URLSearchParams(useSearch()).get("new") === "1";
+  const [editing, setEditing] = useState<string | "new" | null>(requested ? "new" : null);
+  useEffect(() => {
+    if (requested) setEditing("new");
+  }, [requested]);
+  const done = () => {
+    setEditing(null);
+    // Leaving the query in place would reopen the form as soon as this page renders again.
+    if (requested) navigate(path, { replace: true });
+  };
 
   return (
     <SettingsPage title={t("projects.title")} description={t("projects.description")}>
@@ -132,11 +144,18 @@ export function ProjectSettings() {
           )
         }
       >
-        {editing === "new" && <ProjectForm onDone={() => setEditing(null)} />}
-        {projects.length === 0 && editing !== "new" && <p className="text-muted-foreground animate-fade-in px-4 py-6 text-sm">{t("projects.empty")}</p>}
+        {editing === "new" && <ProjectForm onDone={done} />}
+        {projects.length === 0 && editing !== "new" && (
+          <div className="flex flex-col items-center gap-3 px-4 py-6 text-center">
+            <p className="text-muted-foreground animate-fade-in text-sm">{t("projects.empty")}</p>
+            <Button size="sm" variant="outline" onClick={() => setEditing("new")}>
+              <PlusIcon /> {t("projects.newProject")}
+            </Button>
+          </div>
+        )}
         {projects.map((p, index) =>
           editing === p.id ? (
-            <ProjectForm key={p.id} initial={p} onDone={() => setEditing(null)} />
+            <ProjectForm key={p.id} initial={p} onDone={done} />
           ) : (
             <div key={p.id} className="stagger animate-rise-in flex items-start gap-3 px-4 py-3" style={{ "--i": index } as CSSProperties}>
               <div className="min-w-0 flex-1">
