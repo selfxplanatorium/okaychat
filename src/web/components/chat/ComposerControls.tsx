@@ -1,7 +1,7 @@
 import { ComposerPrimitive, useAui } from "@assistant-ui/react";
 import { BrainIcon, CheckIcon, ChevronRightIcon, GlobeIcon, GlobeOffIcon, Loader2Icon, PaperclipIcon, PlusIcon, SettingsIcon, SquareSlashIcon, TelescopeIcon, TriangleAlertIcon, ZapIcon } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import type { McpPromptInfo } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -69,30 +69,42 @@ export function ResearchToggle() {
   );
   if (!enabled && !(toolCall && webTools)) return null;
   return (
-    <TooltipTrigger
-      handle={sharedTooltip}
-      payload={payload}
-      render={
-        <button
-          type="button"
-          onClick={() => usable && toggle()}
-          aria-pressed={enabled}
-          aria-disabled={!usable || undefined}
-          aria-description={hint}
-          aria-keyshortcuts={combo && usable ? ariaCombo(combo) : undefined}
-          className={cn(
-            triggerClass,
-            "flex max-sm:hidden pointer-coarse:hidden",
-            !usable && "cursor-not-allowed opacity-50 hover:bg-transparent hover:text-muted-foreground",
-            enabled && !blocked && "bg-primary/12! text-primary! hover:bg-primary/18!",
-            blocked && "bg-warning/12! text-warning! hover:bg-warning/18!",
-          )}
-        />
-      }
-    >
-      {blocked ? <TriangleAlertIcon className="size-3.5" /> : <TelescopeIcon className="size-3.5" />}
-      {t("composer.deepResearch")}
-    </TooltipTrigger>
+    <>
+      <TooltipTrigger
+        handle={sharedTooltip}
+        payload={payload}
+        render={
+          <button
+            type="button"
+            onClick={() => usable && toggle()}
+            aria-pressed={enabled}
+            aria-disabled={!usable || undefined}
+            aria-description={hint}
+            aria-keyshortcuts={combo && usable ? ariaCombo(combo) : undefined}
+            className={cn(
+              triggerClass,
+              "flex max-sm:hidden pointer-coarse:hidden",
+              !usable && "cursor-not-allowed opacity-50 hover:bg-transparent hover:text-muted-foreground",
+              enabled && !blocked && "bg-primary/12! text-primary! hover:bg-primary/18!",
+              blocked && "bg-warning/12! text-warning! hover:bg-warning/18!",
+            )}
+          />
+        }
+      >
+        {blocked ? <TriangleAlertIcon className="size-3.5" /> : <TelescopeIcon className="size-3.5" />}
+        {t("composer.deepResearch")}
+      </TooltipTrigger>
+      {blocked && (unavailable === "composer.researchNeedsWeb" || unavailable === "composer.researchNeedsSearches") && (
+        <Link
+          href={settingsHref(unavailable === "composer.researchNeedsWeb" ? "webTools" : "webSearchLimit")}
+          data-command={unavailable === "composer.researchNeedsWeb" ? "settings.webTools" : "settings.webSearchLimit"}
+          aria-label={unavailable === "composer.researchNeedsWeb" ? t("ux.openWebToolSettings") : t("ux.openSearchLimitSettings")}
+          className={cn(triggerClass, "max-sm:hidden pointer-coarse:hidden focus-visible:outline-ring")}
+        >
+          <SettingsIcon className="size-3.5" />
+        </Link>
+      )}
+    </>
   );
 }
 
@@ -300,13 +312,13 @@ export function MobileComposerMenu() {
             </MenuItem>
           )}
           {research.unavailable === "composer.researchNeedsWeb" && (
-            <MenuItem onClick={() => navigate(settingsHref("webTools"))}>
+            <MenuItem data-command="settings.webTools" onClick={() => navigate(settingsHref("webTools"))}>
               <SettingsIcon />
               {t("ux.openWebToolSettings")}
             </MenuItem>
           )}
           {research.unavailable === "composer.researchNeedsSearches" && (
-            <MenuItem onClick={() => navigate(settingsHref("webSearchLimit"))}>
+            <MenuItem data-command="settings.webSearchLimit" onClick={() => navigate(settingsHref("webSearchLimit"))}>
               <SettingsIcon />
               {t("ux.openSearchLimitSettings")}
             </MenuItem>

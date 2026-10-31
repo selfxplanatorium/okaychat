@@ -60,7 +60,7 @@ export function ContextMeter() {
   const [error, setError] = useState<string | null>(null);
 
   const window = model?.context ?? usage?.window ?? 0;
-  const canCompact = !!window && !!threadId && !!model && !running && !compacting && !privacy.temporary && !sync;
+  const canCompact = !!window && !!threadId && !!model && hasMessages && !running && !compacting && !privacy.temporary && !sync;
   const canTrim = canCompact && hasMessages;
 
   const compactNow = async () => {
@@ -165,6 +165,7 @@ export function ContextMeter() {
         <p className="text-muted-foreground mt-2 text-xs">{t("ux.contextCounted")}</p>
         <Link
           href={settingsHref("compaction")}
+          data-command="settings.compaction"
           onClick={() => setOpen(false)}
           className="text-muted-foreground hover:text-foreground mt-2 inline-block text-xs underline underline-offset-4"
         >

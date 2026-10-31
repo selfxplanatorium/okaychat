@@ -95,6 +95,9 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "message.more", labelKey: "keyboard.cmdMessageMore", group: "Messages", keys: ["M"], scope: "message", palette: false },
   { id: "message.exit", labelKey: "keyboard.cmdMessageExit", group: "Messages", keys: ["Escape"], scope: "message", palette: false },
 
+  { id: "settings.compaction", labelKey: "ux.compactionSettings", group: "Settings", keys: [] },
+  { id: "settings.webTools", labelKey: "ux.openWebToolSettings", group: "Settings", keys: [] },
+  { id: "settings.webSearchLimit", labelKey: "ux.openSearchLimitSettings", group: "Settings", keys: [] },
   ...SETTINGS_SECTIONS.map((id): CommandDef => ({ id: `settings.${id}`, labelKey: SETTINGS_LABELS[id], group: "Settings", keys: [] })),
 
   { id: "ux.dismissHints", labelKey: "keyboard.cmdUxDismissHints", group: "General", keys: [], palette: false },

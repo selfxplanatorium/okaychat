@@ -229,7 +229,7 @@ export function ModelPicker() {
 
   if (models.length === 0) {
     return (
-      <button type="button" onClick={() => navigate(settingsHref("providers"))} className="text-muted-foreground hover:text-foreground rounded-lg px-2 py-1 text-xs">
+      <button type="button" data-command="settings.providers" onClick={() => navigate(settingsHref("providers"))} className="text-muted-foreground hover:text-foreground rounded-lg px-2 py-1 text-xs">
         {t("composer.connectProvider")}
       </button>
     );

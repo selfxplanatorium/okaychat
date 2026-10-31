@@ -82,7 +82,7 @@ export function RetryWithModel() {
           <Repeat2Icon />
         </TooltipIconButton>
       </ActionBarMorePrimitive.Root>
-      <Popover open={open} onOpenChange={(next) => !blocked && setOpen(next)}>
+      <Popover open={open} onOpenChange={(next) => (!next || !blocked) && setOpen(next)}>
         <PopoverContent
           anchor={anchor}
           side="bottom"

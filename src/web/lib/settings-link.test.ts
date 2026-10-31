@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { SETTINGS_ANCHOR_PREFIX, SETTINGS_DESTINATIONS, settingsHref, type SettingsDestination } from "./settings-link.js";
+import { SETTINGS_ANCHOR_PREFIX, SETTINGS_DESTINATIONS, settingsHref, focusSettingAnchor, type SettingsDestination } from "./settings-link.js";
 
 test("settings links name their section and carry anchors as a focus query", () => {
   assert.equal(settingsHref("providers"), "/settings/providers");
@@ -30,5 +30,26 @@ test("every destination section is a page SettingsLayout renders", () => {
   const layout = readFileSync(join(import.meta.dirname, "..", "components", "settings", "SettingsLayout.tsx"), "utf8");
   for (const destination of Object.values(SETTINGS_DESTINATIONS) as SettingsDestination[]) {
     assert.ok(layout.includes(`\n  ${destination.section}: `), `SettingsLayout must map ${destination.section}`);
+  }
+});
+
+test("focusing a settings link scrolls to its control without a second focus scroll", () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const calls: unknown[] = [];
+  const target = {
+    scrollIntoView: (options: unknown) => calls.push(["scroll", options]),
+    focus: (options: unknown) => calls.push(["focus", options]),
+  };
+  Object.defineProperty(globalThis, "document", { configurable: true, value: {
+    getElementById: (id: string) => id === "setting-compaction" ? target : null,
+  } });
+  try {
+    assert.equal(focusSettingAnchor("missing"), false);
+    assert.deepEqual(calls, []);
+    assert.equal(focusSettingAnchor("compaction"), true);
+    assert.deepEqual(calls, [["scroll", { block: "center" }], ["focus", { preventScroll: true }]]);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else Reflect.deleteProperty(globalThis, "document");
   }
 });
