@@ -2,8 +2,8 @@ import { create } from "zustand";
 
 /**
  * Edited assistant replies, from the server's `edited_at` row field, and the reply whose editor is open.
- * Keys are `<thread id> <message id>`. The history adapter reads `isEdited` so assistant-ui never re-posts a
- * reply the user edited; the server refuses such writes anyway.
+ * Keys are `<thread id> <message id>`. The history adapter keeps edit times alongside raw cache rows;
+ * the server also refuses stale writes to replies that have been edited.
  */
 interface MessageEditsState {
   editedAt: Record<string, number>;

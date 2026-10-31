@@ -126,6 +126,7 @@ async function saveEdit(remoteId: string, path: string, method: "PATCH" | "DELET
       content: result.message.content,
       ...(result.editedAt === null ? {} : { edited_at: result.editedAt }),
     };
+    serverIds.get(remoteId)?.add(row.id);
     cacheRows(remoteId, serverRows.acknowledged(remoteId, row), Date.now());
     return result;
   } catch (error) {

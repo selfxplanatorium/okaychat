@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { COMMANDS } from "../keyboard/commands.js";
-import { editBlock, replaceMessageParts, textsOf, undoBlock } from "./message-edit.js";
+import { applyEditWhenReady, editBlock, replaceMessageParts, textsOf, undoBlock } from "./message-edit.js";
 import { editedAtOf, isEdited, rememberEdits, setEditedAt } from "../state/message-edits.js";
 
 const gate = {
@@ -82,4 +82,26 @@ test("server rows remember which replies were edited, and Undo clears the badge"
   assert.equal(editedAtOf("t1", "a"), undefined);
   setEditedAt("t1", "a", 20);
   assert.equal(editedAtOf("t1", "a"), 20);
+});
+
+test("a late edit waits for its owning chat and an idle runtime, then imports only once", () => {
+  let active = false;
+  let running = false;
+  let listener: (() => void) | undefined;
+  let imports = 0;
+  let unsubscribed = false;
+  applyEditWhenReady(() => active && !running, (callback) => {
+    listener = callback;
+    return () => { unsubscribed = true; };
+  }, () => { imports++; listener?.(); });
+  listener!();
+  assert.equal(imports, 0, "switching to another chat cannot apply the edit there");
+  active = true;
+  running = true;
+  listener!();
+  assert.equal(imports, 0, "a late save cannot interrupt a new run");
+  running = false;
+  listener!();
+  assert.equal(imports, 1, "synchronous import notifications do not import recursively");
+  assert.equal(unsubscribed, true);
 });

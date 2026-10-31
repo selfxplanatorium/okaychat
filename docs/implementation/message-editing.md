@@ -58,7 +58,7 @@ Saving updates three places:
 
 1. the server row (through the normal edit route);
 2. `serverRows` and the IndexedDB message cache, as an acknowledged write (`edited_at` included, `sameRows()` compares it), so a reload paints the edited text and badge;
-3. the runtime, by exporting its external state, replacing only that message's parts, and importing it with the same head and every other message, so the branch does not fork and no other message loses metadata.
+3. the runtime, by exporting its external state, replacing only that message's parts, and importing it with the same head and every other message, so the branch does not fork and no other message loses metadata. The request captures a runtime bound to the owning thread; if the user switches chats or starts a run before the response arrives, the import waits until that thread is visible and idle.
 
 `state/message-edits.ts` remembers `edited_at` per `<thread> <message>` from loaded rows and from the cache. The badge shows a locale-formatted relative time (full date/time in its title) and an Undo button. Undo has a registered message command (`message.undoEdit`) and is available even when the setting was turned off; switching chats or turning the setting off closes an open editor. There is no cross-tab live push: another tab's edit appears on its next history load.
 

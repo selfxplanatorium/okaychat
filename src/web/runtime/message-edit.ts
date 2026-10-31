@@ -48,3 +48,15 @@ export function replaceMessageParts<S extends ExternalState>(state: S, messageId
     messages: state.messages.map((item) => (item.message.id === messageId ? { ...item, message: { ...item.message, parts } } : item)),
   };
 }
+
+/** Defer a saved edit until its owning thread is visible and idle; imports can emit synchronously. */
+export function applyEditWhenReady(ready: () => boolean, subscribe: (listener: () => void) => () => void, apply: () => void): void {
+  if (ready()) { apply(); return; }
+  let applying = false;
+  const unsubscribe = subscribe(() => {
+    if (applying || !ready()) return;
+    applying = true;
+    unsubscribe();
+    apply();
+  });
+}

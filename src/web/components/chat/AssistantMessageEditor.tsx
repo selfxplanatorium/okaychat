@@ -12,7 +12,7 @@ import { formatDateTime, formatRelativeTime } from "@/i18n/format";
 import { useCommand } from "@/keyboard/registry";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { editBlock, replaceMessageParts, textsOf, undoBlock, type EditBlock } from "@/runtime/message-edit";
+import { applyEditWhenReady, editBlock, replaceMessageParts, textsOf, undoBlock, type EditBlock } from "@/runtime/message-edit";
 import { editStoredMessage, undoStoredMessage } from "@/runtime/RuntimeProvider";
 import { isTemporaryChat } from "@/state/chat-privacy";
 import { useData } from "@/state/data";
@@ -25,16 +25,22 @@ import { useThreadSync } from "@/state/thread-sync";
 
 const errorText = (error: unknown) => (error instanceof ApiError ? error.message : t("common.somethingWentWrong"));
 
-/** Replace the message's parts in the runtime without moving the head or touching any other message. */
-function applyReplyParts(aui: ReturnType<typeof useAui>, messageId: string, result: MessageEditResult) {
-  const parts = (result.message.content as { parts?: unknown[] }).parts ?? [];
-  try {
-    const runtime = aui.thread.__internal_getRuntime?.();
-    if (!runtime) return;
-    runtime.importExternalState(replaceMessageParts(runtime.exportExternalState(), messageId, parts));
-  } catch {
-    // The server stored the text; the next history load shows it even if this runtime cannot import in place.
-  }
+/** Capture a fixed thread before a request; the main-thread client follows chat switches. */
+function replyTarget(aui: ReturnType<typeof useAui>, messageId: string) {
+  const localId = aui.threadListItem.getState().id;
+  const threads = aui.threads.__internal_getAssistantRuntime?.().threads;
+  if (!threads) throw new Error("Thread runtime unavailable");
+  const runtime = threads.getById(localId);
+  return (result: MessageEditResult) => {
+    applyEditWhenReady(
+      () => threads.getState().mainThreadId === localId && !runtime.getState().isRunning && !runtime.getState().isLoading,
+      threads.subscribe,
+      () => {
+        const parts = (result.message.content as { parts?: unknown[] }).parts ?? [];
+        runtime.importExternalState(replaceMessageParts(runtime.exportExternalState(), messageId, parts));
+      },
+    );
+  };
 }
 
 /** The message's summary boundary, when the open chat has one. */
@@ -98,6 +104,7 @@ export function ReplyEditAction() {
   return (
     <TooltipIconButton
       ref={buttonRef}
+      command="message.editReply"
       tooltip={tooltip}
       disabled={block !== null}
       onClick={() => openReplyEditor(remoteId, messageId)}
@@ -138,10 +145,19 @@ export function ReplyEditorProvider({ threadId, messageId, parts, children }: { 
   const initial = useMemo(() => textsOf(parts), [parts]);
   const [drafts, setDrafts] = useState<string[]>(initial);
   const [saving, setSaving] = useState(false);
+  const savePending = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const running = useAuiState((s) => s.thread.isRunning || s.thread.isLoading);
   const syncing = !!useThreadSync();
   const enabled = useData((s) => s.settings?.editAssistantMessages === true);
+  const editorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const root = editorRef.current?.closest<HTMLElement>("[data-message-root]");
+    return () => {
+      // Do not steal focus when closing because the user selected another chat/control.
+      if (root?.isConnected && (root.contains(document.activeElement) || document.activeElement === document.body)) root.focus({ preventScroll: true });
+    };
+  }, []);
 
   useEffect(() => {
     setDrafts((current) => (current.length === initial.length && current.every((text, i) => text === initial[i]) ? current : initial));
@@ -156,21 +172,24 @@ export function ReplyEditorProvider({ threadId, messageId, parts, children }: { 
   const canSave = !saving && !busy && drafts.some((text) => text.trim().length > 0) && total <= MAX_EDITED_TEXT;
 
   const save = async () => {
-    if (!canSave) return;
+    if (!canSave || savePending.current) return;
+    savePending.current = true;
     setSaving(true);
     setError(null);
     try {
+      const apply = replyTarget(aui, messageId);
       const result = await editStoredMessage(threadId, messageId, drafts.length === 1
         ? { text: drafts[0]! }
         : { parts: drafts.map((text) => ({ type: "text" as const, text })) });
       setEditedAt(threadId, messageId, result.editedAt);
-      applyReplyParts(aui, messageId, result);
+      apply(result);
       // The server may have shifted a trim estimate; the context meter owner re-reads it explicitly.
       void useThreadMetaStore.getState().refresh(threadId);
-      closeReplyEditor();
+      if (useMessageEdits.getState().editing === editKey(threadId, messageId)) closeReplyEditor();
     } catch (failure) {
       setError(t("thread.editReplyFailed", { error: errorText(failure) }));
     } finally {
+      savePending.current = false;
       setSaving(false);
     }
   };
@@ -189,6 +208,7 @@ export function ReplyEditorProvider({ threadId, messageId, parts, children }: { 
   return (
     <ReplyEditorContext.Provider value={value}>
       <div
+        ref={editorRef}
         data-slot="aui_reply-editor"
         onKeyDown={(event) => {
           if (event.key === "Escape") {
@@ -226,7 +246,7 @@ export function EditableReplyTexts() {
             <Textarea
               autoFocus={index === 0}
               aria-label={label}
-              className="aui-reply-edit-input min-h-24 max-h-72 resize-y overflow-y-auto border-0 bg-transparent px-1 py-1 text-base leading-6 shadow-none focus-visible:bg-transparent focus-visible:ring-0"
+              className="aui-reply-edit-input min-h-24 max-h-72 resize-y overflow-y-auto border-0 bg-transparent px-1 py-1 text-base leading-6 shadow-none focus-visible:bg-transparent focus-visible:ring-2 focus-visible:ring-ring"
               value={text}
               maxLength={MAX_EDITED_TEXT}
               disabled={saving}
@@ -285,9 +305,10 @@ function EditedReplyBadgeContent({ threadId, messageId, editedAt }: { threadId: 
     setUndoing(true);
     setError(null);
     try {
+      const apply = replyTarget(aui, messageId);
       const result = await undoStoredMessage(threadId, messageId);
       setEditedAt(threadId, messageId, null);
-      applyReplyParts(aui, messageId, result);
+      apply(result);
       void useThreadMetaStore.getState().refresh(threadId);
     } catch (failure) {
       setError(t("thread.undoEditFailed", { error: errorText(failure) }));
