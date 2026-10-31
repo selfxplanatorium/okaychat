@@ -8,7 +8,7 @@ import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-ic
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { t } from "@/i18n";
-import { formatDateTime, formatRelativeTime } from "@/i18n/format";
+import { formatDateTime, formatNumber, formatRelativeTime } from "@/i18n/format";
 import { useCommand } from "@/keyboard/registry";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -212,8 +212,9 @@ export function ReplyEditorProvider({ threadId, messageId, parts, children }: { 
         data-slot="aui_reply-editor"
         onKeyDown={(event) => {
           if (event.key === "Escape") {
+            // A save in flight must finish so its failure can show here; Cancel is disabled for the same reason.
             event.preventDefault();
-            closeReplyEditor();
+            if (!savePending.current) closeReplyEditor();
           } else if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
             event.preventDefault();
             void save();
@@ -248,14 +249,13 @@ export function EditableReplyTexts() {
               aria-label={label}
               className="aui-reply-edit-input min-h-24 max-h-72 resize-y overflow-y-auto border-0 bg-transparent px-1 py-1 text-base leading-6 shadow-none focus-visible:bg-transparent focus-visible:ring-2 focus-visible:ring-ring"
               value={text}
-              maxLength={MAX_EDITED_TEXT}
               disabled={saving}
               onChange={(event) => setDraft(index, event.target.value)}
             />
           </label>
         );
       })}
-      {tooLong && <p role="alert" className="text-destructive text-xs">{t("thread.editReplyTooLong", { max: MAX_EDITED_TEXT })}</p>}
+      {tooLong && <p role="alert" className="text-destructive text-xs">{t("thread.editReplyTooLong", { max: formatNumber(MAX_EDITED_TEXT) })}</p>}
     </div>
   );
 }
@@ -307,7 +307,10 @@ function EditedReplyBadgeContent({ threadId, messageId, editedAt }: { threadId: 
     try {
       const apply = replyTarget(aui, messageId);
       const result = await undoStoredMessage(threadId, messageId);
+      const root = buttonRef.current?.closest<HTMLElement>("[data-message-root]");
       setEditedAt(threadId, messageId, null);
+      // The badge unmounts with the edit; keep focus in the message unless the user moved it elsewhere.
+      if (root?.isConnected && (root.contains(document.activeElement) || document.activeElement === document.body)) root.focus({ preventScroll: true });
       apply(result);
       void useThreadMetaStore.getState().refresh(threadId);
     } catch (failure) {

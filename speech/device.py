@@ -200,6 +200,9 @@ def _resolve(requested_raw: str, compute_raw: str, probe) -> DevicePlan:
             )
             if notes:
                 reason = f"{_note(notes)} {reason}"
+        elif result.gpu_name and result.error:
+            # Auto stays quiet on CPU when no GPU is visible, but a visible GPU this image cannot use is worth reporting.
+            reason = _note([*notes, result.error])
         return DevicePlan(
             requested=requested,
             device="cpu",

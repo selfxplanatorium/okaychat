@@ -61,6 +61,8 @@ export async function persistKnowledgeAttachments(threadId: string, ids: string[
   }
 }
 
+let toggleQueue: Promise<void> = Promise.resolve();
+
 export function useChatKnowledge(): {
   ids: string[];
   collections: KnowledgeCollection[] | null;
@@ -95,11 +97,20 @@ export function useChatKnowledge(): {
     loading,
     temporary,
     refresh,
-    toggle: async (collectionId) => {
-      const next = ids.includes(collectionId) ? ids.filter((value) => value !== collectionId) : [...ids, collectionId];
-      // Persist first for a stored chat, so the next request can never see a scope the sidebar does not.
-      if (remoteId && !isTemporaryChat(remoteId)) await api(`/threads/${remoteId}`, { method: "PATCH", json: { knowledgeIds: next } });
-      set(key, next);
+    toggle: (collectionId) => {
+      // Toggles run one after another and read the store when they start, so two quick clicks build on
+      // each other instead of on the render-time list. Persist first for a stored chat, so the next
+      // request can never see a scope the selector does not.
+      const run = async () => {
+        const byId = useChatKnowledgeStore.getState().byId;
+        const before = byId[remoteId ?? ""] ?? byId[id] ?? [];
+        const next = before.includes(collectionId) ? before.filter((value) => value !== collectionId) : [...before, collectionId];
+        if (remoteId && !isTemporaryChat(remoteId)) await api(`/threads/${remoteId}`, { method: "PATCH", json: { knowledgeIds: next } });
+        set(key, next);
+      };
+      const result = toggleQueue.then(run, run);
+      toggleQueue = result.catch(() => {});
+      return result;
     },
   };
 }

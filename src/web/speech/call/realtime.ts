@@ -89,13 +89,19 @@ export function createRealtimeAdapter(options: RealtimeAdapterOptions): Realtime
 
         const peer = new RTCPeerConnection();
         const channel = peer.createDataChannel("oai-events");
+        // Each remote track gets a fresh meter; the previous one must release its context and timer first.
+        const stopMeter = () => {
+          if (volumeTimer) clearInterval(volumeTimer);
+          volumeTimer = undefined;
+          void meterContext?.close().catch(() => {});
+          meterContext = undefined;
+        };
         const cleanup = () => {
           if (closed) return;
           closed = true;
           abort.abort();
-          if (volumeTimer) clearInterval(volumeTimer);
           if (setupTimer) clearTimeout(setupTimer);
-          void meterContext?.close().catch(() => {});
+          stopMeter();
           channel.onopen = channel.onmessage = channel.onclose = channel.onerror = null;
           peer.ontrack = peer.onconnectionstatechange = null;
           stream?.getTracks().forEach((track) => track.stop());
@@ -144,6 +150,7 @@ export function createRealtimeAdapter(options: RealtimeAdapterOptions): Realtime
               if (!closed && !session.isDisposed()) fail("Audio playback could not start.");
             });
             // A compact meter from the assistant's own audio.
+            stopMeter();
             try {
               const context = new AudioContext();
               meterContext = context;

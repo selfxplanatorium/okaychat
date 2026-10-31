@@ -12,7 +12,7 @@ file text, and stacks stay on the server.
 | `src/server/errors.ts` | `AppError`, the code catalog (status, retryability, keys, safe English fallback), `toWireError`, `handleAppError` |
 | `src/server/provider-errors.ts` | Provider shape/status mapping, `Retry-After` parsing, safe logging behind a reference |
 | `src/server/retry.ts` | Capped jittered delay, abortable sleep, the retrying provider fetch |
-| `src/server/llm.ts` | Every model provider call goes through `createRetryingFetch`; the SDK's own retry is disabled |
+| `src/server/llm.ts` | Model calls made through `llm.ts` go through `createRetryingFetch`; the SDK's own retry is disabled. Exceptions are listed under Retries |
 | `src/web/lib/api.ts` | `ApiError`, structured JSON parsing, safe network/abort failures, stream-error parsing |
 | `src/web/lib/error-presentation.ts` | The one pure inline/page/action decision and the "Copy details" allowlist |
 | `src/web/i18n/en/errors.ts` | All user-visible messages, hints, and actions |
@@ -35,15 +35,16 @@ extends `AppError` so every write path answers `storage_quota` (413) without a s
 | `timeout` | 504 | yes | `TimeoutError`, `ETIMEDOUT`, deadline messages |
 | `aborted` | 499 | no | `AbortError`, `ABORT_ERR`, a cancelled wait |
 | `tool_failed` | 500 | no | a tool boundary failure that is not a provider failure |
-| `service_unavailable` | 503 | yes | a required service (worker, sidecar) is down; raised by the registry's fail-fast guard, PDF export/creation, and the speech/sandbox clients, with a safe fix hint (`docs/implementation/service-health.md`) |
+| `service_unavailable` | 503 | yes | a required service (worker, sidecar) is down; raised by the registry's fail-fast guard, a worker 503 or unreachable worker in PDF export/creation, and the speech/sandbox clients, with a safe fix hint (`docs/implementation/service-health.md`) |
 | `storage_quota` | 413 | no | `assertStorage` and every write path |
 | `validation` | 400 | no | invalid input, unsupported file, model preconditions |
 | `not_found` | 404 | no | deleted or missing owned row |
 | `forbidden` | 403 | no | permission refusal, blocked outbound address |
-| `conflict` | 409 | no | duplicate name, concurrent change, route-level "too many attempts" |
+| `conflict` | 409 | no | duplicate name, concurrent change |
+| `rate_limited` | 429 | yes | a 429 from this server's own route, such as the speech concurrency cap. Provider 429s stay `provider_rate_limit` |
 | `unknown` | 500 | no | anything no boundary identified; retry is still a manual action |
 
-The brief lists 17 codes in total; `ERROR_CODES` contains exactly that list. If a feature adds a new one,
+`ERROR_CODES` lists 18 codes. The table above matches it. If a feature adds a new one,
 follow the rule at the end of this file.
 
 ## Mapping
@@ -89,9 +90,16 @@ defense in depth; `errorJson` always also sets `error` to the same safe message 
 
 ## Retries
 
-`createRetryingFetch` wraps every provider call in `llm.ts` (OpenAI, OpenAI-compatible, Anthropic,
+`createRetryingFetch` wraps the provider calls made through `llm.ts` (OpenAI, OpenAI-compatible, Anthropic,
 Google, ChatGPT/Codex, and native Ollama `/api/chat`). Every `generateText`/`streamText` caller passes
-`maxRetries: 0`, so the SDK never adds a second compounding policy. Native Ollama keeps its own
+`maxRetries: 0`, so the SDK never adds a second compounding policy. Two paths sit outside this rule:
+
+- **Embeddings** (`src/server/knowledge/embeddings.ts`, OpenAI and Google) use their own `withRetry`, not
+  `createRetryingFetch`. Four attempts by default, 500 ms base doubling to an 8 s cap, and no jitter. It
+  retries 429, 5xx, and failures without a status. A provider `Retry-After` is used exactly, capped at 120 s
+  (not the 30 s cutoff above).
+- **Image APIs** (`src/server/tools/image.ts`, `generateImage` from the AI SDK) pass `maxRetries: 1`, so the
+  SDK retries once, so a failed image call can bill a second time at most. Native Ollama keeps its own
 transport, abort, `num_ctx`, thinking, and capability behavior; the retrying fetch is injected into
 that connection for `/api/chat` only. Management calls (pull, delete, status, inventory) use the plain
 transport, so a mutation is never retried.
@@ -146,9 +154,10 @@ transport, so a mutation is never retried.
 
 - `chat` → inline; Retry for every code except `aborted` (an automatic retry is limited to transient
   codes, but a manual retry is a valid next step for auth, validation, context length, and permanent
-  failures too); Switch model for provider/network/timeout/unknown failures; Open setting for
-  provider/auth/quota/model (`providers`), context (`compaction`), and storage (`account`); Copy
-  details always.
+  failures too); Switch model for the `SWITCH_MODEL` set in `error-presentation.ts`: `provider_auth`,
+  `provider_rate_limit`, `provider_quota`, `model_not_found`, `context_length`, `provider_overloaded`,
+  `network`, `timeout`, `unknown`. Open setting for provider/auth/quota/model (`providers`), context
+  (`compaction`), and storage (`account`); Copy details always.
 - `tool` → inline message + hint, no actions.
 - `settings`, `upload`, `background` → inline; a safe specific server detail is added only for
   validation/not-found/forbidden/conflict/storage/unknown.

@@ -70,6 +70,7 @@ export default {
   workerGpuCuda: "{gpu} · CUDA {version}",
   workerGpuName: "{gpu}",
   workerNoGpu: "Running on CPU — the GPU is not visible to the speech container.",
+  workerGpuNoCuda: "GPU found, but CUDA could not be used. Speech runs on the CPU.",
   workerCudaFallback: "Whisper could not run on the GPU, so it is using the CPU.",
   voice: "Voice",
   voiceDescription: "Local speech engines run in the speech worker container. Each loads its model on first use and frees the memory after a few idle minutes.",

@@ -66,6 +66,7 @@ export const UNTRUSTED_TOOL_NAMES: ReadonlySet<string> = new Set([
   "email_search",
   "email_read",
   "draft_email",
+  "install_skill",
 ]);
 
 export type ToolRisk = "destructive" | "outbound" | "persistent";

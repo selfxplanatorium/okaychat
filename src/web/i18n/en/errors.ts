@@ -35,6 +35,8 @@ export default {
   forbiddenHint: "Ask an admin if it should be allowed.",
   conflictMessage: "That change conflicts with the current state.",
   conflictHint: "Refresh and try again.",
+  rateLimitedMessage: "Too many requests are running at once.",
+  rateLimitedHint: "Wait a moment and try again.",
   unknownMessage: "Something went wrong.",
   unknownHint: "The server log has the details. Retry, or copy the details for support.",
 

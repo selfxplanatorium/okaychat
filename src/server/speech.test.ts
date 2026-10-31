@@ -330,14 +330,16 @@ test("admin speech status: reports the worker's actual device, model, and fallba
   });
 });
 
-test("uploads: audio is checked by type or bytes, size is capped, worker errors pass through", async () => {
+test("uploads: audio is checked by type or bytes, size is capped, worker errors become fixed messages", async () => {
   updateSettings("bob", { speech: { stt: { engine: "local" } } });
   reply = () => ({ status: 413, body: { error: "The recording is 12.0 minutes long; the limit is 10." } });
   assert.equal((await upload("bob", Buffer.from("<html>not audio</html>"), {}, "text/html")).status, 400);
   assert.equal((await upload("bob", Buffer.from("plain bytes"), {}, "application/octet-stream")).status, 400);
   const sniffed = await upload("bob", AUDIO, {}, "application/octet-stream");
   assert.equal(sniffed.status, 413);
-  assert.match(((await sniffed.json()) as { error: string }).error, /minutes long/);
+  const refused = ((await sniffed.json()) as { error: string }).error;
+  assert.match(refused, /too long or too large/);
+  assert.doesNotMatch(refused, /minutes long/, "the worker's own text stays in the server log");
   const big = await upload("bob", Buffer.alloc(25 * 1024 * 1024 + 10));
   assert.equal(big.status, 413);
 });

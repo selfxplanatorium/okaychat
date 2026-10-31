@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AppEnv } from "./auth.js";
+import { BrowserJobError } from "./browser.js";
 import { htmlToPdf, rendererAvailable } from "./documents/render.js";
 import { AppError, errorJson, redactSecrets } from "./errors.js";
 import { serviceUnavailable } from "./services.js";
@@ -77,6 +78,13 @@ export const exportRoutes = new Hono<AppEnv>().get("/threads/:id/export", async 
     return c.body(pdf, 200, { ...headers, "Content-Type": "application/pdf", "Content-Disposition": disposition(title, "pdf") });
   } catch (error) {
     if (error instanceof AppError) return errorJson(c, error);
+    // The worker answered and refused the render (for example a 422). That is not an outage, and its text stays here.
+    if (error instanceof BrowserJobError) {
+      console.error("[export] worker refused pdf:", redactSecrets(error.message).slice(0, 500));
+      // browser.ts words a missed deadline this way; a slow render is a timeout, not a bad request.
+      if (/did not answer in time/.test(error.message)) return errorJson(c, new AppError({ code: "timeout" }));
+      return errorJson(c, new AppError({ code: "validation", message: "The browser worker could not render this chat as a PDF." }));
+    }
     console.error("[export]", redactSecrets(String((error as Error)?.message ?? error)).slice(0, 500));
     // A failed render is still this server's rendering service failing, never a raw worker message.
     return errorJson(c, serviceUnavailable("browser"));

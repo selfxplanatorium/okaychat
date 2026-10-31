@@ -16,7 +16,7 @@ export function ServiceAvailability({ id, className, describeId, messageKey }: {
   const services = useServices();
   const state = availabilityOf(services, id);
   const check = () => void services.refresh(true);
-  useCommand("services.checkAgain", check, state === "down" || state === "degraded" || state === "unconfigured");
+  useCommand("services.checkAgain", check, state === "down" || state === "degraded" || state === "unconfigured" || state === "failed");
   if (state === "up" || state === "unknown") return null;
   const status = statusOf(services, id);
   // A speech outage has a compose fix and a "pick another engine" link; a CPU fallback still offers the
@@ -28,6 +28,22 @@ export function ServiceAvailability({ id, className, describeId, messageKey }: {
       <p id={describeId} role="status" className={cn("text-muted-foreground text-xs", className)}>
         {t("services.checking")}
       </p>
+    );
+  }
+  if (state === "failed") {
+    return (
+      <div id={describeId} role="status" className={cn("text-muted-foreground flex flex-wrap items-center gap-2 text-xs", className)}>
+        <p>{t("services.checkFailed")}</p>
+        <button
+          type="button"
+          onClick={check}
+          data-command="services.checkAgain"
+          className="focus-visible:ring-ring/50 inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-border px-2 py-1 font-medium outline-none focus-visible:ring-2 pointer-coarse:min-h-11"
+        >
+          <RefreshCwIcon aria-hidden className="size-3.5" />
+          {t("services.checkAgain")}
+        </button>
+      </div>
     );
   }
   const name = t(serviceNameKey(id));

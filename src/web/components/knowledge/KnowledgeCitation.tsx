@@ -13,20 +13,19 @@ import { useKnowledgeCitationStore } from "@/state/chat-knowledge";
 export function KnowledgeCitationHost() {
   const chunkId = useKnowledgeCitationStore((s) => s.chunkId);
   const close = useKnowledgeCitationStore((s) => s.close);
-  const [passage, setPassage] = useState<KnowledgePassage | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  // The result carries the chunk it answers, so a new chunk is loading on its first render, never "failed".
+  const [result, setResult] = useState<{ chunkId: string; passage?: KnowledgePassage; failed?: boolean } | null>(null);
+  const current = result?.chunkId === chunkId ? result : null;
+  const passage = current?.passage ?? null;
+  const error = current?.failed ? t("knowledge.citationFailed") : null;
+  const loading = !!chunkId && !current;
 
   useEffect(() => {
     if (!chunkId) return;
     let live = true;
-    setLoading(true);
-    setError(null);
-    setPassage(null);
     api<KnowledgePassage>(`/knowledge/chunks/${encodeURIComponent(chunkId)}`)
-      .then((result) => { if (live) setPassage(result); })
-      .catch(() => { if (live) setError(t("knowledge.citationFailed")); })
-      .finally(() => { if (live) setLoading(false); });
+      .then((passage) => { if (live) setResult({ chunkId, passage }); })
+      .catch(() => { if (live) setResult({ chunkId, failed: true }); });
     return () => { live = false; };
   }, [chunkId]);
 

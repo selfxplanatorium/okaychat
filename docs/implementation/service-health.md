@@ -149,7 +149,8 @@ be cleaned up.
 - **Inline** (`ServiceAvailability`): a panel that needs one service explains the state instead of
   showing a request error, with "Check again" and, when a settings page owns the fix, a deep link.
   Used in Settings → Voice, the Library, the PDF export menus, and the composer's local voice hint.
-  `checking` is its own state; a control is never disabled while the answer is unknown. A caller's
+  `checking` is its own state; a control is never disabled while the answer is unknown. If the first
+  `/services` request fails, the panel shows `failed` with "Check again" and never `down`. A caller's
   custom note describes a **down** or **unconfigured** service only: `degraded` always explains its own limitation (a CPU
   fallback is slower, not unavailable).
 - **Speech controls** stay visible while their engine is configured. When the selected engine is the

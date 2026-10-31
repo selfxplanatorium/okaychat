@@ -47,6 +47,7 @@ export default {
   fixMcp: "Check the server in Settings → MCP servers.",
 
   checking: "Checking availability…",
+  checkFailed: "Could not check availability.",
   checkAgain: "Check again",
   dismiss: "Dismiss service notice",
   openSettings: "Open settings",

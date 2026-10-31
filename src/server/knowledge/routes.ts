@@ -25,6 +25,7 @@ import {
   getCollection,
   getCollectionRow,
   listCollections,
+  KnowledgeInputError,
   listSources,
   requeueCollection,
   requeueSource,
@@ -171,7 +172,8 @@ export const knowledgeRoutes = new Hono<AppEnv>()
     try {
       page = await fetchKnowledgeUrl(parsed.data.url, { signal: c.req.raw.signal });
     } catch (error) {
-      return c.json({ error: (error as Error).message }, 422);
+      // Only messages this module wrote are shown; transport failures keep a generic text.
+      return c.json({ error: error instanceof KnowledgeInputError ? error.message : "Could not read that URL." }, 422);
     }
     // The original response body is the upload; `page.text` is only the extraction used for chunking.
     const source = addSource(userId, collection.id, {

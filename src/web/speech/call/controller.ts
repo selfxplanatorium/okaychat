@@ -97,6 +97,8 @@ export class CallController {
   private playerOpening: Promise<void> | null = null;
   private maxUtteranceSeconds = 60;
   private readonly waitingAudio: Array<{ id: number; pcm: Uint8Array }> = [];
+  /** One context for the call's ding sounds, closed with the call. */
+  private dingContext: AudioContext | null = null;
   /** `said` arrived while the player was still opening; applied after its audio is queued, in wire order. */
   private readonly saidPending = new Set<number>();
   private reply = { active: false, messageId: null as string | null, seen: 0, complete: false, after: 0 };
@@ -550,6 +552,7 @@ export class CallController {
     if (this.playerReady && this.playerRate === rate) return;
     if (this.playerOpening && this.playerRate === rate) return;
     this.playerRate = rate;
+    this.jitter.setSampleRate(rate);
     this.playerReady = false;
     const generation = this.generation;
     let opening!: Promise<void>;
@@ -664,7 +667,12 @@ export class CallController {
   private ding() {
     if (!useData.getState().settings?.speech?.call?.ding) return;
     try {
-      const context = new AudioContext();
+      const context = (this.dingContext ??= new AudioContext());
+      // A context created without a user gesture can start suspended; a tone scheduled on it would never play.
+      if (context.state !== "running") {
+        void context.resume().catch(() => {});
+        return;
+      }
       const oscillator = context.createOscillator();
       const gain = context.createGain();
       oscillator.frequency.value = 880;
@@ -675,7 +683,6 @@ export class CallController {
       gain.connect(context.destination);
       oscillator.start();
       oscillator.stop(context.currentTime + 0.2);
-      oscillator.onended = () => void context.close().catch(() => {});
     } catch {}
   }
 
@@ -804,6 +811,9 @@ export class CallController {
     this.playerOpening = null;
     this.playerRate = 0;
     void player?.dispose();
+    const ding = this.dingContext;
+    this.dingContext = null;
+    void ding?.close().catch(() => {});
     if (this.realtimeConnected) {
       try {
         this.boundThread?.disconnectVoice();

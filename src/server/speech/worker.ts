@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { HTTPException } from "hono/http-exception";
 import { USER_AGENT } from "../env.js";
+import { redactSecrets } from "../errors.js";
 import { reportServiceFailure, reportServiceSuccess, serviceDown, serviceUnavailable, speechWorkerDetail } from "../services.js";
 
 // Client for the speech worker (speech/, its own container in compose): faster-whisper and Piper, on the CPU
@@ -67,7 +68,11 @@ async function call(pathAndQuery: string, init: { method?: string; body?: BodyIn
       throw serviceUnavailable("speech");
     }
     reportServiceSuccess("speech");
-    throw new HTTPException(res.status === 413 ? 413 : 502, { message: message.slice(0, 300) });
+    // The worker's sentence stays in the server log. The client gets a fixed message, never raw worker text.
+    console.error(`[speech worker] ${res.status}:`, redactSecrets(message).slice(0, 300));
+    throw res.status === 413
+      ? new HTTPException(413, { message: "This recording is too long or too large to transcribe." })
+      : new HTTPException(502, { message: "The speech worker could not complete the request." });
   }
   reportServiceSuccess("speech");
   return res;

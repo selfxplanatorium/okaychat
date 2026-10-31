@@ -79,7 +79,7 @@ export function EmailListCard({ args, result, status }: { args: Unknown; result?
       injection={r?.injection as InjectionReport | undefined}
       label={running ? t("email.toolListRunning", { mailbox }) : t("email.toolListDone", { count: messages.length, mailbox })}
     >
-      {messages.length === 0 ? <p className="text-muted-foreground text-xs">{t("email.toolListEmpty", { mailbox })}</p> : <ul>{messages.map((message) => <MessageRow key={message.id} message={message} />)}</ul>}
+      {messages.length === 0 ? (running ? null : <p className="text-muted-foreground text-xs">{t("email.toolListEmpty", { mailbox })}</p>) : <ul>{messages.map((message) => <MessageRow key={message.id} message={message} />)}</ul>}
     </ToolShell>
   );
 }
@@ -98,7 +98,7 @@ export function EmailSearchCard({ args, result, status }: { args: Unknown; resul
       injection={r?.injection as InjectionReport | undefined}
       label={running ? t("email.toolSearchRunning", { query }) : t("email.toolSearchDone", { count: messages.length })}
     >
-      {messages.length === 0 ? <p className="text-muted-foreground text-xs">{t("email.toolSearchEmpty")}</p> : <ul>{messages.map((message) => <MessageRow key={message.id} message={message} />)}</ul>}
+      {messages.length === 0 ? (running ? null : <p className="text-muted-foreground text-xs">{t("email.toolSearchEmpty")}</p>) : <ul>{messages.map((message) => <MessageRow key={message.id} message={message} />)}</ul>}
     </ToolShell>
   );
 }

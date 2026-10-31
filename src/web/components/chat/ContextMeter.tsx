@@ -1,6 +1,6 @@
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { ChevronDownIcon, Loader2Icon, ScissorsIcon, ShrinkIcon } from "lucide-react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Link } from "wouter";
 import type { CompactionState } from "@shared/types";
 import { Button } from "@/components/ui/button";
@@ -243,6 +243,7 @@ export function CompactionMarker() {
 function CompactionDivider({ kind }: { kind: "trim" | "summary" }) {
   const meta = useThreadMeta();
   const [open, setOpen] = useState(false);
+  const summaryId = useId();
   const trim = meta?.compaction?.trim;
   if (kind === "trim" && trim) {
     return (
@@ -257,14 +258,14 @@ function CompactionDivider({ kind }: { kind: "trim" | "summary" }) {
   if (!meta?.compaction?.summary) return null;
   return (
     <div className="text-muted-foreground animate-fade-in my-2 px-2 text-xs">
-      <button type="button" onClick={() => setOpen(!open)} className="hover:text-foreground flex w-full items-center gap-3 transition-colors duration-(--motion-fast) ease-out-quart">
+      <button type="button" aria-expanded={open} aria-controls={open ? summaryId : undefined} onClick={() => setOpen(!open)} className="hover:text-foreground flex w-full items-center gap-3 transition-colors duration-(--motion-fast) ease-out-quart">
         <span className="bg-border h-px flex-1" />
         <ShrinkIcon className="size-3.5" />
         {t("composer.summaryMarker", { tokens: formatTokens(meta.compaction.tokensBefore ?? 0) })}
         <ChevronDownIcon className={cn("size-3.5 transition-transform duration-(--motion-base) ease-out-expo", open && "rotate-180")} />
         <span className="bg-border h-px flex-1" />
       </button>
-      {open && <pre className="bg-muted/50 animate-rise-in mt-2 max-h-80 overflow-auto rounded-lg p-3 font-sans whitespace-pre-wrap">{meta.compaction.summary}</pre>}
+      {open && <pre id={summaryId} className="bg-muted/50 animate-rise-in mt-2 max-h-80 overflow-auto rounded-lg p-3 font-sans whitespace-pre-wrap">{meta.compaction.summary}</pre>}
     </div>
   );
 }

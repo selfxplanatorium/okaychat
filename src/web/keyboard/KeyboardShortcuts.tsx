@@ -178,7 +178,8 @@ function CommandList() {
     if (open) {
       setQuery("");
       setSelected(0);
-      setAvailable(new Set(COMMANDS.filter((c) => c.palette !== false && c.id !== "app.commands" && commandAvailable(c.id)).map((c) => c.id)));
+      const admin = useData.getState().me?.role === "admin";
+      setAvailable(new Set(COMMANDS.filter((c) => c.palette !== false && c.id !== "app.commands" && (admin || c.id !== "settings.admin") && commandAvailable(c.id)).map((c) => c.id)));
     }
   }
 
@@ -290,7 +291,7 @@ function CommandList() {
         </div>
         <div className="text-muted-foreground border-border flex items-center justify-between gap-3 border-t px-5 py-3 text-xs">
           <span>{t("keyboard.paletteHint")}</span>
-          <Link href="/settings/keyboard" onClick={close} className="hover:text-foreground underline underline-offset-4">
+          <Link href={settingsHref("keyboard")} onClick={close} className="hover:text-foreground underline underline-offset-4">
             {t("keyboard.customize")}
           </Link>
         </div>

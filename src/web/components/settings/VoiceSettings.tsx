@@ -26,6 +26,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { currentLocale, t } from "@/i18n";
+import { settingsHref } from "@/lib/settings-link";
 import { ServiceAvailability } from "@/components/ServiceAvailability";
 import { formatBytes, formatNumber } from "@/i18n/format";
 import { Trans } from "@/i18n/react";
@@ -438,7 +439,7 @@ export function Credential({
     return (
       <p className="text-muted-foreground px-4 pb-3 text-xs">
         {status?.ready ? (status.shared ? t("voice.usesSharedKey") : t("voice.usesProviderKey")) : `${t("voice.usesChatKey")} `}
-        {!status?.ready && <Link href="/settings/providers" className="text-primary hover:underline">{t("voice.connectProvider", { provider: credential.providerId === "openai" ? "OpenAI" : credential.providerId === "groq" ? "Groq" : "Mistral" })}</Link>}
+        {!status?.ready && <Link href={settingsHref("providers")} className="text-primary hover:underline">{t("voice.connectProvider", { provider: credential.providerId === "openai" ? "OpenAI" : credential.providerId === "groq" ? "Groq" : "Mistral" })}</Link>}
       </p>
     );
   }

@@ -97,7 +97,7 @@ export function ResearchToggle() {
         {blocked ? <TriangleAlertIcon className="size-3.5" /> : <TelescopeIcon className="size-3.5" />}
         {t("composer.deepResearch")}
       </TooltipTrigger>
-      {blocked && (unavailable === "composer.researchNeedsWeb" || unavailable === "composer.researchNeedsSearches") && (
+      {(unavailable === "composer.researchNeedsWeb" || unavailable === "composer.researchNeedsSearches") && (
         <Link
           href={settingsHref(unavailable === "composer.researchNeedsWeb" ? "webTools" : "webSearchLimit")}
           data-command={unavailable === "composer.researchNeedsWeb" ? "settings.webTools" : "settings.webSearchLimit"}

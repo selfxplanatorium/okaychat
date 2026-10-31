@@ -12,6 +12,7 @@ import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
 import { AccountAvatar } from "@/components/ui/account-avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ProjectSwitcher } from "./ProjectSwitcher";
+import { settingsHref } from "@/lib/settings-link";
 import { signOut } from "@/lib/sign-out";
 import { cn } from "@/lib/utils";
 import { showChat, useData } from "@/state/data";
@@ -170,7 +171,7 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
                   </span>
                 </MenuTrigger>
                 <MenuContent side="top" className="w-60">
-                  <MenuItem onClick={() => navigate("/settings/account")}>
+                  <MenuItem onClick={() => navigate(settingsHref("account"))}>
                     <UserRoundIcon /> {t("sidebar.account")}
                   </MenuItem>
                   <MenuItem onClick={() => navigate("/settings")}>

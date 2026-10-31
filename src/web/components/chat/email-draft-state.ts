@@ -208,15 +208,23 @@ export class DraftAutosave {
     }
     const outbox = readOutbox(this.storage, this.options.key);
     this.draft = draft;
-    this.revision = draft.revision;
     this.error = null;
     if (outbox && JSON.stringify(outbox.fields) !== JSON.stringify(fieldsOf(draft))) {
       this.fields = outbox.fields;
       this.dirty = true;
-      this.status = outbox.revision === draft.revision ? "pending" : "conflict";
-      if (this.status === "pending") this.schedule();
-      else this.clearPendingTimer();
+      if (outbox.revision === draft.revision) {
+        this.revision = draft.revision;
+        this.status = "pending";
+        this.schedule();
+      } else {
+        // The text was written against outbox.revision. Keep that as the compare-and-set base so no
+        // save can overwrite the other writer until retry() or reload() resolves the conflict.
+        this.revision = outbox.revision;
+        this.status = "conflict";
+        this.clearPendingTimer();
+      }
     } else {
+      this.revision = draft.revision;
       this.fields = fieldsOf(draft);
       this.dirty = false;
       this.status = "saved";
@@ -242,10 +250,13 @@ export class DraftAutosave {
     if (this.disposed) return;
     this.fields = { ...this.fields, ...patch };
     this.dirty = true;
-    this.status = "pending";
     this.error = null;
     writeOutbox(this.storage, this.options.key, { revision: this.revision, fields: this.fields, savedAt: this.now() });
-    this.schedule();
+    // A conflict stays until retry() or reload() decides; keystrokes only extend the local text.
+    if (this.status !== "conflict") {
+      this.status = "pending";
+      this.schedule();
+    }
     this.emit();
   }
 
@@ -273,7 +284,7 @@ export class DraftAutosave {
       this.flushAgain = true;
       return this.inFlight;
     }
-    if (!this.dirty) return;
+    if (!this.dirty || this.status === "conflict") return;
     this.dirty = false;
     this.status = "saving";
     this.error = null;

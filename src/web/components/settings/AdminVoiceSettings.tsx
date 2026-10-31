@@ -85,8 +85,9 @@ export function AdminVoiceSettings() {
       ? t("admin.workerGpuCuda", { gpu: w.gpuName, version: w.cudaVersion })
       : t("admin.workerGpuName", { gpu: w.gpuName })
     : null;
-  const fallbackNote = !w.degraded ? null : w.cudaAvailable === false ? t("admin.workerNoGpu") : t("admin.workerCudaFallback");
-  const diagnostic = w.degraded && w.cudaAvailable !== false && w.reason ? w.reason : null;
+  const gpuUnusable = w.cudaAvailable === false && !!w.gpuName;
+  const fallbackNote = gpuUnusable ? t("admin.workerGpuNoCuda") : !w.degraded ? null : w.cudaAvailable === false ? t("admin.workerNoGpu") : t("admin.workerCudaFallback");
+  const diagnostic = w.reason && (gpuUnusable || (w.degraded && w.cudaAvailable !== false)) ? w.reason : null;
   const workerDescription = (
     <div className="space-y-1 break-words">
       <p>{workerState}</p>

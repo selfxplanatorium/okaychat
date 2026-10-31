@@ -303,7 +303,7 @@ export function describeBoundaryError(error: unknown, context: ProviderErrorCont
   }
   // HTTPException from a route carries a message the author intended the user to read.
   if (status !== undefined) {
-    const code = status === 404 ? "not_found" : status === 403 ? "forbidden" : status === 409 ? "conflict" : status === 429 ? "conflict" : "validation";
+    const code = status === 404 ? "not_found" : status === 403 ? "forbidden" : status === 409 ? "conflict" : status === 429 ? "rate_limited" : "validation";
     return new AppError({ code, status, message, details: { message }, cause: error });
   }
   const app = new AppError({

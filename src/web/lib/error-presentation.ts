@@ -45,6 +45,7 @@ const MESSAGES: Record<ErrorCode, PlainMessageKey> = {
   not_found: "errors.notFoundMessage",
   forbidden: "errors.forbiddenMessage",
   conflict: "errors.conflictMessage",
+  rate_limited: "errors.rateLimitedMessage",
   unknown: "errors.unknownMessage",
 };
 
@@ -65,6 +66,7 @@ const HINTS: Record<ErrorCode, PlainMessageKey> = {
   not_found: "errors.notFoundHint",
   forbidden: "errors.forbiddenHint",
   conflict: "errors.conflictHint",
+  rate_limited: "errors.rateLimitedHint",
   unknown: "errors.unknownHint",
 };
 

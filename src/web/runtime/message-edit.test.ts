@@ -69,7 +69,8 @@ test("the edit and undo commands are message-scoped and registered", () => {
   assert.deepEqual(edit?.keys, ["Y"]);
   const undo = COMMANDS.find((command) => command.id === "message.undoEdit");
   assert.equal(undo?.scope, "message");
-  assert.deepEqual(undo?.keys, []);
+  assert.deepEqual(undo?.keys, ["Alt+Shift+Z"]);
+  assert.notEqual(undo?.palette, false, "listed by name; with no message focused it does nothing");
 });
 
 test("server rows remember which replies were edited, and Undo clears the badge", () => {

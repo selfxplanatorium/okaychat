@@ -21,7 +21,7 @@ Turning it off takes effect immediately. Existing edits still show their badge a
 `messages` gains two nullable columns (one append-only migration, bumped with the migration transaction):
 
 - `edited_at`: milliseconds of the latest edit, `NULL` when the reply currently holds its original text.
-- `original_enc`: the **first** original text parts, encrypted with `OKAYCHAT_SECRET` (`AES-256-GCM`). It is written once, reused by later edits, and kept after Undo. Only Undo uses it. It never leaves the server; `GET /threads/:id/messages` returns `edited_at` only.
+- `original_enc`: the **first** original text parts, encrypted with `OKAYCHAT_SECRET` (`AES-256-GCM`). It is written once, reused by later edits, and kept after Undo. Only Undo decrypts it; `withStoredEdits()` uses its presence as a marker, and `branchThread` copies it. It never leaves the server; `GET /threads/:id/messages` returns `edited_at` only.
 
 The encrypted original counts toward the user's storage quota, together with the message JSON. Undo keeps charging it until the message or chat is deleted. Forking a chat copies the current text, `edited_at`, and `original_enc` into the fork (and charges the original again); the fork can Undo independently.
 
@@ -62,7 +62,7 @@ Saving updates three places:
 
 `state/message-edits.ts` remembers `edited_at` per `<thread> <message>` from loaded rows and from the cache. The badge shows a locale-formatted relative time (full date/time in its title) and an Undo button. Undo has a registered message command (`message.undoEdit`) and is available even when the setting was turned off; switching chats or turning the setting off closes an open editor. There is no cross-tab live push: another tab's edit appears on its next history load.
 
-Commands: `message.editReply` (Y while a message has focus, also in the message command list) and `message.undoEdit`. Ctrl/⌘+Enter and Escape are local to the editor.
+Commands: `message.editReply` (Y while a message has focus, also in the message command list) and `message.undoEdit` (Alt+Shift+Z while a message has focus, also listed by name; with no edited reply focused it does nothing). Ctrl/⌘+Enter and Escape are local to the editor.
 
 ## Limits and non-goals
 

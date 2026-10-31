@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { t, type PlainMessageKey } from "@/i18n";
 import { formatBytes, formatPercent, formatTokens } from "@/i18n/format";
 import { api, isSessionUnauthorized } from "@/lib/api";
+import { errorText } from "@/lib/error-text";
 import { useCommand } from "@/keyboard/registry";
 
 type Scope = "/providers" | "/admin/providers";
@@ -210,8 +211,9 @@ export function OllamaSettings({ provider, base, onChanged }: { provider: Provid
       void onChanged().catch(() => {});
     } catch (error) {
       if (controller.signal.aborted || !mounted.current || current !== sequence.current) return;
-      setLoadError((error as Error).message);
-      setStatus({ kind: "error", message: (error as Error).message });
+      const message = errorText(error, "providers.ollamaInventoryFailed");
+      setLoadError(message);
+      setStatus({ kind: "error", message });
     } finally {
       if (mounted.current && current === sequence.current) setLoading(false);
     }
@@ -236,7 +238,7 @@ export function OllamaSettings({ provider, base, onChanged }: { provider: Provid
       if (provider.connected && normalizeURL(data.url) === normalizeURL(savedURL)) void loadInventory();
     } catch (error) {
       if (!mounted.current) return;
-      setStatus({ kind: "error", message: (error as Error).message });
+      setStatus({ kind: "error", message: errorText(error, "providers.ollamaConnectionFailed") });
     } finally {
       if (mounted.current) setTesting(false);
     }
@@ -252,7 +254,7 @@ export function OllamaSettings({ provider, base, onChanged }: { provider: Provid
       await onChanged();
       await testConnection();
     } catch (error) {
-      setSaveError((error as Error).message);
+      setSaveError(errorText(error, "providers.ollamaSaveFailed"));
     } finally {
       saveActive.current = false;
       if (mounted.current) setSaving(false);
@@ -270,6 +272,19 @@ export function OllamaSettings({ provider, base, onChanged }: { provider: Provid
     setPullCancelled(false);
     setPullProgress(null);
     let complete = false;
+    // Ollama reports total/completed per layer digest; the bar shows their sums.
+    const layers = new Map<string, { total: number; completed: number }>();
+    const publish = (event: OllamaPullProgress) => {
+      if (event.digest && event.total !== undefined) layers.set(event.digest, { total: event.total, completed: event.completed ?? 0 });
+      if (layers.size === 0) return setPullProgress(event);
+      let total = 0;
+      let completed = 0;
+      for (const layer of layers.values()) {
+        total += layer.total;
+        completed += layer.completed;
+      }
+      setPullProgress({ ...event, total, completed });
+    };
     try {
       const res = await fetch(`/api${base}/ollama/pull`, {
         method: "POST",
@@ -299,7 +314,7 @@ export function OllamaSettings({ provider, base, onChanged }: { provider: Provid
             const event = JSON.parse(line) as OllamaPullProgress & { error?: string };
             if (event.error) throw new Error(event.error);
             if (!mounted.current) return;
-            setPullProgress(event);
+            publish(event);
             if (event.status === "success") complete = true;
           }
           newline = buffer.indexOf("\n");
@@ -316,7 +331,7 @@ export function OllamaSettings({ provider, base, onChanged }: { provider: Provid
       if (controller.signal.aborted) {
         if (mounted.current) setPullCancelled(true);
       } else if (mounted.current) {
-        setPullError((error as Error).message);
+        setPullError(errorText(error, "providers.ollamaPullFailed"));
       }
     } finally {
       pullActive.current = false;
@@ -334,10 +349,11 @@ export function OllamaSettings({ provider, base, onChanged }: { provider: Provid
     try {
       await api(`${base}/ollama/models`, { method: "DELETE", json: { model: deleteTarget } });
       if (!mounted.current) return;
+      setActiveModel((current) => (current === deleteTarget ? null : current));
       setDeleteTarget(null);
       await loadInventory();
     } catch (error) {
-      if (mounted.current) setDeleteError((error as Error).message);
+      if (mounted.current) setDeleteError(errorText(error, "providers.ollamaDeleteFailed"));
     } finally {
       deleteActive.current = false;
       if (mounted.current) setDeleting(false);

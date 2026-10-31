@@ -41,7 +41,8 @@ export function ChatSearch({ open, onOpenChange }: { open: boolean; onOpenChange
     setWasOpen(open);
     if (open) {
       setSelected(0);
-      setAvailable(new Set(COMMANDS.filter((c) => c.palette !== false && c.id !== "app.search" && commandAvailable(c.id)).map((c) => c.id)));
+      const admin = useData.getState().me?.role === "admin";
+      setAvailable(new Set(COMMANDS.filter((c) => c.palette !== false && c.id !== "app.search" && (admin || c.id !== "settings.admin") && commandAvailable(c.id)).map((c) => c.id)));
     }
   }
 
@@ -233,7 +234,7 @@ export function ChatSearch({ open, onOpenChange }: { open: boolean; onOpenChange
         </div>
         {loading && <p role="status" className="text-muted-foreground flex items-center gap-2 px-5 py-3 text-sm"><Loader2Icon className="size-4 animate-spin" /> {t("sidebar.searching")}</p>}
         {error && <p role="alert" className="text-destructive px-5 py-3 text-sm">{error}</p>}
-        {!loading && !error && chats.length === 0 && <p role="status" className="text-muted-foreground px-5 py-3 text-sm">{q ? t("sidebar.noChatsFound") : t("sidebar.chatsAppearHere")}</p>}
+        {!loading && !error && (q ? rows.length === 0 : chats.length === 0) && <p role="status" className="text-muted-foreground px-5 py-3 text-sm">{q ? t("sidebar.noChatsFound") : t("sidebar.chatsAppearHere")}</p>}
         <div className="text-muted-foreground border-border border-t px-5 py-3 text-xs">{t("sidebar.searchHints")}</div>
       </DialogContent>
     </Dialog>

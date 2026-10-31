@@ -23,7 +23,11 @@ for (const id of ["alice", "bob"]) {
   db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, `${id}@example.test`, id, "unused", "user", Date.now());
   db.prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)").run(sha256(id), id, Date.now() + 60_000);
 }
+// Probe deadlines are unref'd so they never block shutdown. Without another handle, a test awaiting
+// only such a deadline leaves the event loop empty and node:test cancels the rest of the file.
+const hold = setInterval(() => {}, 60_000);
 after(() => {
+  clearInterval(hold);
   db.close();
   rmSync(dataDir, { recursive: true, force: true });
 });

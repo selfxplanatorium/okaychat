@@ -22,7 +22,7 @@ const { drainKnowledgeJobs, resumeKnowledgeIngestion, setEmbedderFactoryForTests
 const { chunkRow, createCollection, createSource, deleteCollection, requeueSource, sourceRow, replaceChunks } = await import("./store.js");
 const { searchKnowledge, setRetrievalEmbedderFactoryForTests, fuseRankings, VECTOR_CACHE_LIMIT } = await import("./retrieval.js");
 const { saveTurnContext, storedTurnContexts } = await import("../turn-context.js");
-const { normalizeVector } = await import("./embeddings.js");
+const { EmbeddingError, normalizeVector } = await import("./embeddings.js");
 const { storeUpload } = await import("../files.js");
 const { MAX_URL_BYTES, setKnowledgeUrlFetchForTests } = await import("./url.js");
 
@@ -278,7 +278,7 @@ test("a failing embedder marks the source failed, and retry recovers", async () 
     provider: "openai",
     providerId: "openai",
     model: "broken",
-    embed: async () => { throw new Error("provider is down"); },
+    embed: async () => { throw new EmbeddingError("provider is down"); },
   }));
   const id = await create({ provider: "openai", model: "broken" });
   const sourceId = await paste(id, "Quasar notes that should fail to embed.");
@@ -294,6 +294,33 @@ test("a failing embedder marks the source failed, and retry recovers", async () 
   const ready = sourceRow("alice", sourceId)!;
   assert.equal(ready.status, "ready");
   assert.ok(ready.chunk_count > 0);
+});
+
+test("a provider timeout fails the source visibly instead of reading as a cancel, and raw errors stay private", async (t) => {
+  t.mock.method(console, "error", () => {});
+  setEmbedderFactoryForTests(() => ({
+    provider: "openai",
+    providerId: "openai",
+    model: "slow",
+    embed: async () => { throw new DOMException("The operation was aborted due to timeout", "TimeoutError"); },
+  }));
+  const id = await create({ provider: "openai", model: "slow" });
+  const timedOut = await paste(id, "Quasar notes that time out.");
+  await waitFor();
+  assert.equal(sourceRow("alice", timedOut)!.status, "failed");
+  assert.equal(sourceRow("alice", timedOut)!.error, "The embedding provider did not respond in time.");
+
+  setEmbedderFactoryForTests(() => ({
+    provider: "openai",
+    providerId: "openai",
+    model: "leaky",
+    embed: async () => { throw new Error("socket to /data/okaychat.sqlite closed"); },
+  }));
+  const leaky = await paste(id, "Quasar notes with an unexpected error.");
+  await waitFor();
+  assert.equal(sourceRow("alice", leaky)!.status, "failed");
+  assert.equal(sourceRow("alice", leaky)!.error, "Ingestion failed.");
+  assert.equal(console.error.mock.callCount(), 1);
 });
 
 test("cancel stops a running source and leaves no chunks behind", async () => {

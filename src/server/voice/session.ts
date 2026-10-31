@@ -104,6 +104,8 @@ export class CallSession {
   private readonly lifetime = new AbortController();
   private readonly timers: NodeJS.Timeout[] = [];
   private readonly createdAt: number;
+  /** When the current `preparing` phase began; a Realtime→local fallback starts a new one. */
+  private preparingSince = 0;
   /** A final transcription is running; a new utterance start is refused until it answers. */
   private finalInFlight = false;
   private partialJobs = 0;
@@ -200,7 +202,7 @@ export class CallSession {
     }
     if (now - this.lastMessage > this.deps.limits.silentSocketSeconds * 1000) return this.end("failed");
     if (this.phase === "preparing") {
-      if (now - this.createdAt > this.deps.limits.prepareSeconds * 1000) this.fail("worker", "Preparing speech took too long.", true);
+      if (now - this.preparingSince > this.deps.limits.prepareSeconds * 1000) this.fail("worker", "Preparing speech took too long.", true);
       return;
     }
     if (this.phase !== "active") return;
@@ -251,6 +253,7 @@ export class CallSession {
   private async start(threadId: string, requested: CallEngine, takeover: boolean) {
     if (this.phase !== "waiting") return this.fail("protocol", "The call has already started.", false);
     this.phase = "preparing";
+    this.preparingSince = this.now();
     if (!this.deps.threadOwned(this.userId, threadId)) return this.fail("thread", "That chat does not exist.", true);
     const existing = this.deps.registry.get(this.userId);
     if (existing && !existing.ended && !takeover) return this.fail("busy", "This account already has a call in another tab or device.", true);
@@ -322,6 +325,7 @@ export class CallSession {
     const local = this.deps.backends.local(this.userId);
     if (!local.ok) return this.fail(code, detail, true);
     this.phase = "preparing";
+    this.preparingSince = this.now();
     this.lastActivity = this.now();
     await this.prepareLocal(local.value, { code, detail });
   }

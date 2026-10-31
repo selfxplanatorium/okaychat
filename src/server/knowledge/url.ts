@@ -1,4 +1,5 @@
 import { extract } from "../files.js";
+import { KnowledgeInputError } from "./store.js";
 import { BlockedAddressError, publicFetch, readCapped } from "../public-fetch.js";
 import { htmlToMarkdown } from "../tools/web.js";
 
@@ -52,7 +53,7 @@ const isPdf = (bytes: Uint8Array) => bytes.length >= 5 && new TextDecoder().deco
 
 export async function fetchKnowledgeUrl(raw: string, opts: { signal?: AbortSignal } = {}): Promise<KnowledgeUrlPage> {
   const parsed = new URL(raw);
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("Only http and https URLs are allowed.");
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new KnowledgeInputError("Only http and https URLs are allowed.");
   const signal = deadline(opts.signal);
   let res: Response;
   try {
@@ -66,27 +67,30 @@ export async function fetchKnowledgeUrl(raw: string, opts: { signal?: AbortSigna
       signal,
     });
   } catch (error) {
-    if (error instanceof BlockedAddressError) throw new Error("This URL must be on the public internet.");
+    if (error instanceof BlockedAddressError) throw new KnowledgeInputError("This URL must be on the public internet.");
     if (opts.signal?.aborted) throw error;
-    throw new Error(`Could not read ${parsed.href}: ${(error as Error).message}`);
+    // Transport errors are not written for the user; the detail stays out of the stored and displayed message.
+    throw new KnowledgeInputError(`Could not read ${parsed.href}.`);
   }
   if (!res.ok) {
     await res.body?.cancel().catch(() => {});
-    throw new Error(`The page answered HTTP ${res.status}.`);
+    throw new KnowledgeInputError(`The page answered HTTP ${res.status}.`);
   }
+  const tooLarge = `That page is larger than ${MAX_URL_BYTES / 1024 / 1024} MB.`;
   const declared = Number(res.headers.get("content-length") ?? 0);
   if (Number.isFinite(declared) && declared > MAX_URL_BYTES) {
     await res.body?.cancel().catch(() => {});
-    throw new Error(`That page is larger than ${MAX_URL_BYTES / 1024 / 1024} MB.`);
+    throw new KnowledgeInputError(tooLarge);
   }
   let bytes: Uint8Array;
   try {
-    bytes = await readCapped(res, MAX_URL_BYTES, `That page is larger than ${MAX_URL_BYTES / 1024 / 1024} MB.`);
+    bytes = await readCapped(res, MAX_URL_BYTES, tooLarge);
   } catch (error) {
     if (opts.signal?.aborted || signal.aborted) throw error;
-    throw new Error((error as Error).message);
+    // readCapped only throws its own size message; anything else is a transport failure.
+    throw new KnowledgeInputError((error as Error).message === tooLarge ? tooLarge : "Could not read that page.");
   }
-  if (!bytes.length) throw new Error("That page returned an empty response.");
+  if (!bytes.length) throw new KnowledgeInputError("That page returned an empty response.");
 
   const type = (res.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
   const name = fileName(parsed);
@@ -94,7 +98,7 @@ export async function fetchKnowledgeUrl(raw: string, opts: { signal?: AbortSigna
   if (type === "application/pdf" || isPdf(bytes)) {
     const { text } = await extract(name.endsWith(".pdf") ? name : `${name}.pdf`, "application/pdf", new Uint8Array(bytes));
     if (!text.trim() || text.startsWith("[This PDF has no text layer")) {
-      throw new Error("That PDF has no text layer. No OCR is available; add a text version instead.");
+      throw new KnowledgeInputError("That PDF has no text layer. No OCR is available; add a text version instead.");
     }
     return { title: name, mime: "application/pdf", bytes, text: text.slice(0, MAX_URL_TEXT) };
   }
@@ -103,13 +107,13 @@ export async function fetchKnowledgeUrl(raw: string, opts: { signal?: AbortSigna
   const html = type === "text/html" || type === "application/xhtml+xml" || (!type && body.trimStart().startsWith("<"));
   if (html) {
     const page = await htmlToMarkdown(body, res.url || parsed.href);
-    if (!page.markdown.trim()) throw new Error("That page had no readable text.");
+    if (!page.markdown.trim()) throw new KnowledgeInputError("That page had no readable text.");
     return { title: (page.title || name).slice(0, 200), mime: type === "application/xhtml+xml" ? "application/xhtml+xml" : "text/html", bytes, text: page.markdown.slice(0, MAX_URL_TEXT) };
   }
 
   const textMime = type.startsWith("text/") || type === "application/json";
-  if (type && !textMime) throw new Error(`That URL returned ${type}, which is not a readable document. Use a text, HTML, or PDF page.`);
+  if (type && !textMime) throw new KnowledgeInputError(`That URL returned ${type}, which is not a readable document. Use a text, HTML, or PDF page.`);
   const text = body.trim();
-  if (!text) throw new Error("That page had no readable text.");
+  if (!text) throw new KnowledgeInputError("That page had no readable text.");
   return { title: name.slice(0, 200), mime: type || "text/plain", bytes, text: text.slice(0, MAX_URL_TEXT) };
 }

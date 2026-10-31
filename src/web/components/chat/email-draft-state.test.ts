@@ -236,13 +236,54 @@ test("hydration uses the latest server record and keeps conflicting local text f
   controller.applyServer(draftOf(4, { body: "Server wins" }));
   assert.equal(controller.snapshot().fields.body, "Unsaved", "a newer server revision must not erase unsaved local text");
   assert.equal(controller.snapshot().status, "conflict");
-  assert.equal(controller.snapshot().revision, 4);
+  assert.equal(controller.snapshot().revision, 1, "the text keeps the revision it was written against");
   assert.notEqual(readOutbox(store, key), null);
   assert.equal(readOutbox(store, key)?.fields.body, "Unsaved");
   controller.adoptLatest(draftOf(4, { body: "Server wins" }));
   assert.equal(controller.snapshot().fields.body, "Server wins");
   assert.equal(controller.snapshot().status, "saved");
   assert.equal(readOutbox(store, key), null, "only explicit reload discards the conflicting outbox");
+  controller.dispose();
+});
+
+test("a conflict sends nothing on edit or flush until retry resolves it", async () => {
+  const clock = timers();
+  const storage = new Map<string, string>();
+  const store: DraftOutboxStorage = {
+    getItem: (key) => storage.get(key) ?? null,
+    setItem: (key, value) => void storage.set(key, value),
+    removeItem: (key) => void storage.delete(key),
+  };
+  const key = draftOutboxKey("alice", "chat-a", "drf_one");
+  writeOutbox(store, key, { revision: 1, fields: fields({ body: "Mine" }), savedAt: 1 });
+  const calls: Array<{ revision: number; fields: EmailDraftFields }> = [];
+  const controller = new DraftAutosave(draftOf(1), {
+    key,
+    storage: store,
+    setTimer: clock.setTimer,
+    clearTimer: clock.clearTimer,
+    save: async ({ revision, fields: next }) => {
+      calls.push({ revision, fields: next });
+      return draftOf(revision + 1, next);
+    },
+    fetchLatest: async () => draftOf(4, { body: "Other writer" }),
+  });
+  controller.applyServer(draftOf(4, { body: "Other writer" }));
+  assert.equal(controller.snapshot().status, "conflict");
+  controller.update({ body: "Mine, more" });
+  assert.equal(controller.snapshot().status, "conflict", "an edit does not reopen the save");
+  assert.equal(clock.pending.size, 0, "no debounce timer is armed");
+  clock.advance();
+  await controller.flush();
+  await settle();
+  assert.equal(calls.length, 0, "no PATCH while the conflict is unresolved");
+  assert.equal(controller.snapshot().fields.body, "Mine, more", "local text is kept");
+  assert.equal(readOutbox(store, key)?.revision, 1);
+  await controller.retry();
+  assert.equal(calls.length, 1, "retry is the explicit resolution");
+  assert.equal(calls[0]!.revision, 4);
+  assert.equal(calls[0]!.fields.body, "Mine, more");
+  assert.equal(controller.snapshot().status, "saved");
   controller.dispose();
 });
 

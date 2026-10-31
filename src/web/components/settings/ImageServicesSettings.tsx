@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { t } from "@/i18n";
 import { Trans } from "@/i18n/react";
 import { api } from "@/lib/api";
+import { settingsHref } from "@/lib/settings-link";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useData } from "@/state/data";
@@ -62,9 +63,9 @@ function Credential({ service: s }: { service: ImageServiceStatus }) {
   if (s.shared) return <>{t("providers.imageShared")}</>;
   if (s.credential === "own") return <>{s.connected ? t("providers.imageOwnSaved") : t("providers.imageOwnNeeded")}</>;
   return s.connected ? (
-    <Trans k="providers.imageUsesKey" params={{ name: s.name, link: <Link href="/settings/providers" className="text-primary hover:underline">{t("settings.sectionProviders")}</Link> }} />
+    <Trans k="providers.imageUsesKey" params={{ name: s.name, link: <Link href={settingsHref("providers")} className="text-primary hover:underline">{t("settings.sectionProviders")}</Link> }} />
   ) : (
-    <Trans k="providers.imageConnect" params={{ name: s.name, link: <Link href="/settings/providers" className="text-primary hover:underline">{t("settings.sectionProviders")}</Link> }} />
+    <Trans k="providers.imageConnect" params={{ name: s.name, link: <Link href={settingsHref("providers")} className="text-primary hover:underline">{t("settings.sectionProviders")}</Link> }} />
   );
 }
 

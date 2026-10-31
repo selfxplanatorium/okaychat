@@ -16,6 +16,9 @@ import { assertStorage } from "../quota.js";
 // Account-owned collections, sources, and chunks. Every query carries `user_id`; a chat may only use a
 // collection that is global or bound to the chat's own project (docs/implementation/knowledge.md).
 
+/** A message this module wrote for the user (validation, unsupported input). Routes and jobs show it; any other error is generic. */
+export class KnowledgeInputError extends Error {}
+
 export interface CollectionRow {
   id: string;
   user_id: string;

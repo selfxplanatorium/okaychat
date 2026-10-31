@@ -49,7 +49,8 @@ function clientFor(secrets: EmailSecrets, target: { host: string; servername?: s
 }
 
 async function withClient<T>(secrets: EmailSecrets, run: (client: ImapFlow) => Promise<T>, tls?: ConnectionOptions): Promise<T> {
-  const id = secrets.account.id;
+  // Slots are per user: the unsaved-settings test uses a synthetic id shared by every user.
+  const id = `${secrets.userId}:${secrets.account.id}`;
   // Re-check the live admin role and resolve/pin the host immediately before every connection,
   // including verify, reply, and attachment downloads.
   const target = await emailConnectTarget(secrets.userId, secrets.imap.host).catch((error: unknown) => {

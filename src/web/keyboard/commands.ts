@@ -98,7 +98,7 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "message.readAloud", labelKey: "keyboard.cmdMessageReadAloud", group: "Messages", keys: ["S"], scope: "message", palette: false },
   { id: "message.edit", labelKey: "keyboard.cmdMessageEdit", group: "Messages", keys: ["E"], scope: "message", palette: false },
   { id: "message.editReply", labelKey: "keyboard.cmdMessageEditReply", group: "Messages", keys: ["Y"], scope: "message", palette: false },
-  { id: "message.undoEdit", labelKey: "keyboard.cmdMessageUndoEdit", group: "Messages", keys: [], scope: "message", palette: false },
+  { id: "message.undoEdit", labelKey: "keyboard.cmdMessageUndoEdit", group: "Messages", keys: ["Alt+Shift+Z"], scope: "message" },
   { id: "message.retry", labelKey: "keyboard.cmdMessageRetry", group: "Messages", keys: ["R"], scope: "message", palette: false },
   { id: "message.retryWithModel", labelKey: "keyboard.cmdMessageRetryWithModel", group: "Messages", keys: ["W"], scope: "message", palette: false },
   { id: "message.branch", labelKey: "keyboard.cmdMessageBranch", group: "Messages", keys: ["B"], scope: "message", palette: false },

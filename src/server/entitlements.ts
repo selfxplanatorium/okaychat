@@ -149,5 +149,5 @@ export function isModelAccessKind(kind: string): kind is "provider" {
 
 /** Names the admin so a revoked model reads as a policy, not as a broken chat. */
 export function modelAccessMessage(ref: string): string {
-  return `Your administrator has not granted your account access to ${ref}. Ask an administrator to add it under Admin → Providers → Models.`;
+  return `Your administrator has not granted your account access to ${ref}. Ask an administrator to add it under Admin → Server-wide providers → Models… on that key.`;
 }

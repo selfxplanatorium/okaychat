@@ -38,6 +38,11 @@ test("checking is a state of its own, never shown as down", () => {
   assert.equal(availabilityOf(view([status("browser", "up")]), "speech"), "unknown", "a missing entry is not an outage");
 });
 
+test("a failed first request is its own state, not a permanent check", () => {
+  assert.equal(availabilityOf({ statuses: null, used: {}, dismissed: {}, error: true }, "browser"), "failed");
+  assert.equal(availabilityOf({ statuses: null, used: {}, dismissed: {}, error: false }, "browser"), "checking");
+});
+
 test("the registry payload keeps known fields only", () => {
   const parsed = parseServices({
     services: [
@@ -222,4 +227,15 @@ test("a failed health request keeps the last answer and never invents an outage"
   await useServices.getState().refresh(true);
   assert.equal(availabilityOf(useServices.getState(), "browser"), "down", "the previous status is still shown");
   assert.equal(useServices.getState().error, true);
+});
+
+test("a first request that fails reports failed, and a later success clears it", async (t) => {
+  let respond = async (): Promise<Response> => new Response("nope", { status: 500 });
+  t.mock.method(globalThis, "fetch", () => respond());
+  useServices.getState().start("alice");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(availabilityOf(useServices.getState(), "browser"), "failed");
+  respond = async () => payload([status("browser", "up")]);
+  await useServices.getState().refresh(true);
+  assert.equal(availabilityOf(useServices.getState(), "browser"), "up");
 });

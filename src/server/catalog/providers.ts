@@ -452,15 +452,18 @@ export async function resolveModel(userId: string, ref: string): Promise<{ model
   const models = await listModels(userId);
   const model = models.find((m) => m.ref === ref);
   if (!model) {
-    if (conn.shared && !access.all) throw new HTTPException(403, { message: modelAccessMessage(ref) });
+    // listModels keeps the last good Ollama list when the daemon is down, so a missing id may come from a
+    // failed refresh rather than a policy. Ask once more first, so a stopped daemon surfaces its own error.
     if (providerId === OLLAMA) {
-      // listModels keeps the last good list when the daemon is down. For a model that was not found,
-      // ask once more so a stopped daemon or a broken address produces an actionable error.
       try {
         await ollamaModels(conn, { strict: true });
       } catch (error) {
         throw new HTTPException(400, { message: (error as Error).message });
       }
+    }
+    // A granted id that is absent from a reachable list is a stale grant, which the policy docs say grants nothing.
+    if (conn.shared && !access.all) throw new HTTPException(403, { message: modelAccessMessage(ref) });
+    if (providerId === OLLAMA) {
       throw new HTTPException(400, {
         message: `Ollama cannot chat with ${ref.slice(OLLAMA.length + 1)}. Choose a model with the completion capability, or pull it in Settings → Providers → Ollama.`,
       });

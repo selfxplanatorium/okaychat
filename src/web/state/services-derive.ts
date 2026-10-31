@@ -15,14 +15,19 @@ import type { SettingsDestinationId } from "@/lib/settings-link";
 // components render what these functions return, so the rules can be tested in Node. See
 // docs/implementation/service-health.md.
 
-/** `checking` means no answer has arrived for this account yet; it is never shown as `down`. */
-export type ServiceAvailability = "checking" | ServiceState | "unknown";
+/**
+ * `checking` means no answer has arrived for this account yet; `failed` means the first request failed, so
+ * nothing is known. Neither is ever shown as `down`.
+ */
+export type ServiceAvailability = "checking" | "failed" | ServiceState | "unknown";
 
 /** What a screen knows: the last answer (or null), the services this session used, and what was dismissed. */
 export interface ServiceView {
   statuses: ServiceStatus[] | null;
   used: Readonly<Record<string, number>>;
   dismissed: Readonly<Record<string, number>>;
+  /** The last request failed. Only meaningful while `statuses` is still null. */
+  error?: boolean;
 }
 
 const NAMES: Record<FixedServiceId, PlainMessageKey> = {
@@ -100,9 +105,9 @@ export function parseServices(value: unknown): ServiceStatus[] {
   return out;
 }
 
-/** A status for one service; `checking` until this account has an answer. */
+/** A status for one service; `checking` until this account has an answer, `failed` if the first request failed. */
 export function availabilityOf(view: ServiceView, id: ServiceId): ServiceAvailability {
-  if (!view.statuses) return "checking";
+  if (!view.statuses) return view.error ? "failed" : "checking";
   return view.statuses.find((status) => status.id === id)?.state ?? "unknown";
 }
 

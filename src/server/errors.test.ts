@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { AppError, handleAppError, redactSecrets, toWireError } from "./errors.js";
+import { AppError, appErrorFromStatus, handleAppError, redactSecrets, toWireError } from "./errors.js";
 
 test("an AppError becomes a safe wire response and keeps its status", async () => {
   const app = new Hono()
@@ -21,6 +21,13 @@ test("an AppError becomes a safe wire response and keeps its status", async () =
   assert.equal(body.error, body.message);
   const text = JSON.stringify(body);
   for (const secret of ["SECRET", "PROMPT_SECRET", "SECRET_STACK", "apiKey", "details"]) assert.ok(!text.includes(secret), secret);
+});
+
+test("a 429 is a retryable rate limit, not a conflict", () => {
+  const error = appErrorFromStatus(429, "Too many speech requests at once. Wait a moment.");
+  assert.equal(error.code, "rate_limited");
+  assert.equal(error.status, 429);
+  assert.equal(error.retryable, true);
 });
 
 test("a route HTTPException keeps its message and gains a code", async () => {

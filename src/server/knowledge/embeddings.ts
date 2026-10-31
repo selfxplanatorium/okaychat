@@ -2,6 +2,7 @@ import type { KnowledgeEmbeddingOption, KnowledgeEmbeddingProvider, KnowledgeEmb
 import { ollamaEmbed } from "../catalog/ollama.js";
 import { getConnection, listProviders, type Connection } from "../catalog/providers.js";
 import { USER_AGENT } from "../env.js";
+import { modelAccessMessage, sharedModelAccess } from "../entitlements.js";
 import { describeProviderError } from "../provider-errors.js";
 import { publicFetch, readCapped } from "../public-fetch.js";
 
@@ -50,16 +51,27 @@ const LABELS: Record<string, string> = {
   ollama: "Ollama",
 };
 
+/**
+ * A shared key serves embeddings only when the user's model policy includes the embedding model. Own keys bypass
+ * policies. A custom endpoint has no known model until the user types one, so it needs an unrestricted policy here.
+ */
+function embeddingAllowed(userId: string, conn: Connection, model: string | undefined): boolean {
+  if (!conn.shared) return true;
+  const access = sharedModelAccess(userId, conn.providerId);
+  return access.visible && (access.all || (!!model && access.ids.has(model)));
+}
+
 /** Every backend the account can use right now, including the explicit lexical-only choice. */
 export async function embeddingOptions(userId: string): Promise<KnowledgeEmbeddingOption[]> {
   const out: KnowledgeEmbeddingOption[] = [{ provider: "none", label: "No embeddings (keyword search only)" }];
   for (const provider of ["openai", "google", "ollama"] as const) {
     const conn = getConnection(userId, provider);
-    if (!conn?.enabled) continue;
+    if (!conn?.enabled || !embeddingAllowed(userId, conn, DEFAULT_MODELS[provider])) continue;
     out.push({ provider, providerId: provider, model: DEFAULT_MODELS[provider], label: LABELS[provider]! });
   }
   for (const info of await listProviders(userId)) {
     if (!info.custom || !info.connected || !info.enabled) continue;
+    if (info.shared && !sharedModelAccess(userId, info.id).all) continue;
     out.push({ provider: "compatible", providerId: info.id, model: "", label: info.name });
   }
   return out;
@@ -282,6 +294,7 @@ export function createEmbedder(userId: string, setting: KnowledgeEmbeddingSettin
   if (!conn?.enabled) throw new EmbeddingError(`The ${providerId} connection is not enabled. Reconnect it in Settings → Providers, or use keyword search only.`);
   const model = setting.model?.trim() || defaultEmbeddingModel(setting.provider);
   if (!model) throw new EmbeddingError("Enter the embedding model name for this collection.");
+  if (!embeddingAllowed(userId, conn, model)) throw new EmbeddingError(modelAccessMessage(`${providerId}/${model}`));
   const requestOpts: RequestOptions = { ...opts };
 
   const embed = async (texts: string[], signal?: AbortSignal): Promise<Float32Array[]> => {

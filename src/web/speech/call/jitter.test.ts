@@ -89,3 +89,13 @@ test("after starting, a sentence drains below the initial cushion", () => {
   assert.equal(buffer.ready, true);
   assert.equal(buffer.take()?.length, 60);
 });
+
+test("the millisecond cushion follows the voice's real sample rate once it is known", () => {
+  // 180 ms at the 22.05 kHz default is 3,969 samples; a 16 kHz voice needs 2,880.
+  const buffer = new JitterBuffer();
+  buffer.setSampleRate(16_000);
+  buffer.push(1, new Int16Array(2_879));
+  assert.equal(buffer.ready, false);
+  buffer.push(1, new Int16Array(1));
+  assert.equal(buffer.ready, true);
+});

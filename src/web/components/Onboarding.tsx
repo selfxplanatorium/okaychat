@@ -4,6 +4,7 @@ import { Link } from "wouter";
 import { Brand } from "@/components/layout/Brand";
 import { OPENCODE_GO_CONSOLE, ProviderForm } from "@/components/settings/ProvidersSettings";
 import { t } from "@/i18n";
+import { settingsHref } from "@/lib/settings-link";
 import { useData } from "@/state/data";
 
 /** First run: OpenCode Go is the recommended connection, everything else is one click away. */
@@ -37,7 +38,7 @@ export function Onboarding() {
           </a>
           <div className="text-muted-foreground border-t pt-4 text-sm stagger animate-rise-in" style={{ "--i": 4 } as CSSProperties}>
             {t("shell.otherProvider")}{" "}
-            <Link href="/settings/providers" className="text-foreground transition-colors duration-(--motion-fast) ease-out-quart hover:underline">
+            <Link href={settingsHref("providers")} className="text-foreground transition-colors duration-(--motion-fast) ease-out-quart hover:underline">
               {t("shell.otherProviderLink")}
             </Link>
             .

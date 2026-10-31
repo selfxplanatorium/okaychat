@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ServerMessage } from "../../shared/voice.js";
-import type { CallBackends, LocalSpeech } from "./backend.js";
+import type { Availability, CallBackends, LocalSpeech, RealtimeSignal } from "./backend.js";
 
 process.env.OKAYCHAT_SECRET ??= "voice-session-test-secret-0123456789";
 const { CallFailure } = await import("./backend.js");
@@ -22,11 +22,11 @@ function fakeSpeech(overrides: Partial<LocalSpeech> = {}): LocalSpeech {
   };
 }
 
-const backends = (speech: LocalSpeech | null = fakeSpeech()) => {
+const backends = (speech: LocalSpeech | null = fakeSpeech(), realtime: Availability<RealtimeSignal> = { ok: false, code: "unavailable", detail: "No OpenAI key." }) => {
   const released: number[] = [];
   const value: CallBackends = {
     local: () => (speech ? { ok: true, value: speech } : { ok: false, code: "unavailable", detail: "No speech worker." }),
-    realtime: () => ({ ok: false, code: "unavailable", detail: "No OpenAI key." }),
+    realtime: () => realtime,
     released: () => released.push(Date.now()),
   };
   return { value, released };
@@ -51,9 +51,9 @@ class Socket {
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-function make(overrides: { speech?: LocalSpeech | null; limits?: Partial<CallLimits>; threadOwned?: boolean; now?: () => number; signedIn?: () => boolean } = {}) {
+function make(overrides: { speech?: LocalSpeech | null; realtime?: Availability<RealtimeSignal>; limits?: Partial<CallLimits>; threadOwned?: boolean; now?: () => number; signedIn?: () => boolean } = {}) {
   const socket = new Socket();
-  const b = backends(overrides.speech);
+  const b = backends(overrides.speech, overrides.realtime);
   const registry = new CallRegistry();
   const usage: Array<{ engine: string; sttSeconds: number; ttsChars: number }> = [];
   const deps: CallDeps = {
@@ -460,6 +460,37 @@ test("a final that answers after the call ended is never sent", async () => {
   release?.("late answer");
   await tick();
   assert.equal(socket.of("final").length, 0);
+});
+
+test("a Realtime fallback to local gets its own preparation window", async () => {
+  const never = new Promise<void>(() => {});
+  let now = 1_000_000;
+  const realtime: Availability<RealtimeSignal> = { ok: true, value: { model: "rt", voice: "marin", answer: async () => "v=0" } };
+  const { session, socket } = make({
+    speech: fakeSpeech({ warm: () => never }),
+    realtime,
+    now: () => now,
+    limits: { prepareSeconds: 10 },
+  });
+  session.onMessage(JSON.stringify({ t: "start", threadId: "thr_1", engine: "realtime" }));
+  await tick();
+  assert.equal(socket.of("ready").at(-1)?.engine, "realtime");
+  // A long Realtime call, then a browser-side Realtime failure: the fallback warms the local pipeline now.
+  now += 20 * 60_000;
+  session.onMessage(JSON.stringify({ t: "ping" }));
+  session.onMessage(JSON.stringify({ t: "rt.failed", reason: "lost" }));
+  await tick();
+  assert.equal(socket.of("preparing").length, 1);
+  now += 1_000;
+  session.onMessage(JSON.stringify({ t: "ping" }));
+  session.checkLimits();
+  assert.equal(session.ended, false);
+  now += 10_000;
+  session.onMessage(JSON.stringify({ t: "ping" }));
+  session.checkLimits();
+  assert.equal(session.ended, true);
+  assert.equal(socket.of("error").at(-1)?.code, "worker");
+  session.onClose();
 });
 
 test("the duration cap still applies with the constructor watchdog", async () => {

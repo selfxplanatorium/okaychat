@@ -1,11 +1,14 @@
+import { HTTPException } from "hono/http-exception";
+import { redactSecrets } from "../errors.js";
 import { db } from "../db.js";
 import { extract } from "../files.js";
 import { chunkDocument } from "./chunker.js";
-import { createEmbedder, type Embedder } from "./embeddings.js";
+import { createEmbedder, EmbeddingError, type Embedder } from "./embeddings.js";
 import { invalidateKnowledgeVectors } from "./retrieval.js";
 import {
   failSource,
   getCollectionRow,
+  KnowledgeInputError,
   markCollectionStatus,
   replaceChunks,
   setSourceProgress,
@@ -62,8 +65,6 @@ const RESUMED_BATCH = 500;
 let resumeCursor: { createdAt: number; id: string } | null = null;
 
 const activeStatus = (status: string) => status === "queued" || status === "extracting" || status === "embedding";
-
-const isAbort = (error: unknown) => error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError" || (error as { cause?: { name?: string } }).cause?.name === "AbortError");
 
 function capacity(userId: string): boolean {
   if (running.size >= MAX_JOBS_TOTAL) return false;
@@ -212,23 +213,33 @@ function abortIfStale(userId: string, sourceId: string, generation: number, sign
 
 async function extractSource(row: SourceRow): Promise<string> {
   if (row.text) return row.text;
-  if (!row.upload_id) throw new Error("The original file is gone. Add it again.");
+  if (!row.upload_id) throw new KnowledgeInputError("The original file is gone. Add it again.");
   const upload = db.prepare("SELECT name, mime, data FROM uploads WHERE id = ? AND user_id = ?").get(row.upload_id, row.user_id) as
     | { name: string; mime: string; data: Uint8Array }
     | undefined;
-  if (!upload) throw new Error("The original file is gone. Add it again.");
-  if (/^image\//.test(upload.mime)) throw new Error("Images are not supported yet: this build has no OCR for them. Add a text, PDF, DOCX, or spreadsheet file instead.");
+  if (!upload) throw new KnowledgeInputError("The original file is gone. Add it again.");
+  if (/^image\//.test(upload.mime)) throw new KnowledgeInputError("Images are not supported yet: this build has no OCR for them. Add a text, PDF, DOCX, or spreadsheet file instead.");
   const { text } = await extract(upload.name, upload.mime, upload.data);
   if (text.startsWith("[This PDF has no text layer")) {
-    throw new Error("This PDF has no text layer (it is probably scanned images). No OCR is available; add a text version instead.");
+    throw new KnowledgeInputError("This PDF has no text layer (it is probably scanned images). No OCR is available; add a text version instead.");
   }
-  if (!text.trim()) throw new Error("No text could be read from this file.");
+  if (!text.trim()) throw new KnowledgeInputError("No text could be read from this file.");
   // A decoded binary usually has NULs or a very high replacement-character rate.
   const sample = text.slice(0, 20_000);
   if (sample.includes("\u0000") || (sample.match(/\uFFFD/g)?.length ?? 0) > sample.length * 0.02) {
-    throw new Error("This file does not contain readable text. Use a text, PDF, DOCX, or spreadsheet file.");
+    throw new KnowledgeInputError("This file does not contain readable text. Use a text, PDF, DOCX, or spreadsheet file.");
   }
   return text;
+}
+
+const isSuperseded = (error: unknown) => error instanceof DOMException && error.message === "Superseded";
+
+/** Only messages this module or the embedder wrote are stored; anything else is logged and replaced. */
+function ingestFailureMessage(error: unknown): string {
+  if (error instanceof KnowledgeInputError || error instanceof EmbeddingError || error instanceof HTTPException) return error.message;
+  if (error instanceof DOMException && error.name === "TimeoutError") return "The embedding provider did not respond in time.";
+  console.error("[knowledge] ingest failed", redactSecrets(String((error as Error)?.stack ?? error)).slice(0, 500));
+  return "Ingestion failed.";
 }
 
 async function runJob(job: Job, controller: AbortController) {
@@ -248,7 +259,7 @@ async function runJob(job: Job, controller: AbortController) {
     if (!setSourceText(userId, sourceId, generation, text)) return;
 
     const chunks = chunkDocument(text, { sourceId, title: row.name });
-    if (!chunks.length) throw new Error("The source has no readable text to index.");
+    if (!chunks.length) throw new KnowledgeInputError("The source has no readable text to index.");
     const current = sourceRow(userId, sourceId);
     if (!current) return;
     const embedder = current.status === "embedding" && collection.embedding_provider !== "none" ? factory(userId, collection) : null;
@@ -259,9 +270,9 @@ async function runJob(job: Job, controller: AbortController) {
         abortIfStale(userId, sourceId, generation, signal);
         const slice = chunks.slice(i, i + EMBED_SLICE);
         const vectors = await embedder.embed(slice.map((chunk) => chunk.text), signal);
-        if (vectors.length !== slice.length) throw new Error("The embedding provider returned the wrong number of vectors.");
+        if (vectors.length !== slice.length) throw new EmbeddingError("The embedding provider returned the wrong number of vectors.");
         if (dimensions === null) dimensions = vectors[0]!.length;
-        if (vectors.some((vector) => vector.length !== dimensions)) throw new Error("The embedding provider returned vectors with different dimensions.");
+        if (vectors.some((vector) => vector.length !== dimensions)) throw new EmbeddingError("The embedding provider returned vectors with different dimensions.");
         for (let j = 0; j < slice.length; j++) stored.push({ chunk: slice[j]!, vector: vectors[j]! });
         const done = Math.min(chunks.length, i + slice.length) / chunks.length;
         setSourceProgress(userId, sourceId, generation, "embedding", 0.55 + done * 0.4);
@@ -273,7 +284,9 @@ async function runJob(job: Job, controller: AbortController) {
     const written = replaceChunks(userId, sourceId, generation, collection.id, stored, dimensions);
     if (written) invalidateKnowledgeVectors(collection.id);
   } catch (error) {
-    if (isAbort(error) || signal.aborted) {
+    // Only this job's own signal (cancel, delete, or a newer generation) means the user stopped it. A provider
+    // timeout also throws an AbortError-type error, but it is a failure the user must see.
+    if (signal.aborted || isSuperseded(error)) {
       // cancelSourceIngestion already marked the row; a delete or reindex removed it.
       const current = sourceRow(userId, sourceId);
       if (current && current.generation === generation && current.status !== "ready") {
@@ -282,7 +295,7 @@ async function runJob(job: Job, controller: AbortController) {
       }
       return;
     }
-    failSource(userId, sourceId, generation, (error as Error).message || "Ingestion failed.");
+    failSource(userId, sourceId, generation, ingestFailureMessage(error));
     markCollectionStatus(userId, collection.id, "failed");
   }
 }

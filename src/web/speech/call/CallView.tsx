@@ -307,12 +307,22 @@ export function CallView() {
                 {t("voice.callPreparingHint")}
               </p>
             )}
-            {call.phase === "starting" && <Loader2Icon className="text-muted-foreground size-4 animate-spin motion-reduce:animate-none" aria-label={t("voice.callStarting")} />}
+            {call.phase === "starting" && <Loader2Icon className="text-muted-foreground size-4 animate-spin motion-reduce:animate-none" role="img" aria-label={t("voice.callStarting")} />}
             {active && (
               <div className="text-muted-foreground flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs">
                 <span>{t(ENGINE_LABEL[call.engine])}</span>
-                {call.voice && <span aria-label={t("voice.callVoice")}>{call.voice}</span>}
-                {call.model && <span aria-label={t("voice.callModel")}>{call.model}</span>}
+                {call.voice && (
+                  <span>
+                    <span className="sr-only">{t("voice.callVoice")} </span>
+                    {call.voice}
+                  </span>
+                )}
+                {call.model && (
+                  <span>
+                    <span className="sr-only">{t("voice.callModel")} </span>
+                    {call.model}
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -360,7 +370,7 @@ export function CallView() {
                       onClick={() => useCall.getState().prefer(engine)}
                       className={cn(
                         "focus-visible:ring-ring min-h-11 rounded-lg px-3 py-2 text-left text-sm transition-colors focus-visible:ring-2 focus-visible:outline-none",
-                        preferred === engine ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                        preferred === engine ? "bg-background text-foreground shadow-[var(--depth-highlight),var(--shadow-raised)]" : "text-muted-foreground hover:text-foreground",
                         !available && "cursor-not-allowed opacity-50",
                       )}
                     >
@@ -407,7 +417,7 @@ export function CallView() {
             </div>
           )}
 
-          <div ref={scroll} className="min-h-0 flex-1 overflow-y-auto rounded-xl border bg-background/40 px-3 py-2" aria-label={t("voice.callTitle")}>
+          <div ref={scroll} role="region" className="min-h-0 flex-1 overflow-y-auto rounded-xl border bg-background/40 px-3 py-2" aria-label={t("voice.callTitle")}>
             {call.phase === "idle" || (lines.length === 0 && !call.partial) ? (
               <p className="text-muted-foreground flex h-full items-center justify-center text-center text-sm">
                 {call.phase === "error" ? t("voice.callErrFailed") : call.phase === "idle" ? t("voice.callStartHint") : t(STATUS[call.phase])}

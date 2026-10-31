@@ -157,7 +157,7 @@ export function ollamaManagementRoutes(scope: OllamaScope) {
       }
     })
     .post("/pull", async (c) => {
-      const body = pullInput.safeParse(await c.req.json());
+      const body = pullInput.safeParse(await c.req.json().catch(() => ({})));
       if (!body.success) return c.json({ error: body.error.issues[0]?.message ?? "Invalid model name" }, 400);
       const userId = c.get("user").id;
       let conn: Connection;
@@ -220,7 +220,7 @@ export function ollamaManagementRoutes(scope: OllamaScope) {
       });
     })
     .delete("/models", async (c) => {
-      const body = deleteInput.safeParse(await c.req.json());
+      const body = deleteInput.safeParse(await c.req.json().catch(() => ({})));
       if (!body.success) return c.json({ error: body.error.issues[0]?.message ?? "Invalid model name" }, 400);
       const userId = c.get("user").id;
       let conn: Connection;

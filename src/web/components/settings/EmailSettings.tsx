@@ -10,7 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { t, type PlainMessageKey } from "@/i18n";
 import { formatDateTime } from "@/i18n/format";
-import { ApiError, api } from "@/lib/api";
+import { ApiError, api, responseError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { SettingsPage, SettingsSection } from "./SettingsUI";
 
@@ -169,6 +169,18 @@ function Wizard({ account, onClose, onSaved }: { account?: EmailAccount; onClose
 
   const clearTest = () => setTest(null);
 
+  // Discovery copies the address into both usernames. Keep them in step while they still hold the old
+  // address, and leave a username the user typed on purpose alone.
+  const changeAddress = (next: string) => {
+    const previous = email.trim();
+    const current = next.trim();
+    setEmail(next);
+    clearTest();
+    if (!previous || previous === current) return;
+    setImap((value) => (value.username === previous ? { ...value, username: current } : value));
+    setSmtp((value) => (value.username === previous ? { ...value, username: current } : value));
+  };
+
   const discover = async () => {
     if (discoveringRef.current) return;
     if (!email.trim()) {
@@ -192,7 +204,7 @@ function Wizard({ account, onClose, onSaved }: { account?: EmailAccount; onClose
         body: JSON.stringify({ email: email.trim(), allowInsecureProbe }),
         signal: controller.signal,
       });
-      if (!response.ok) throw new Error((await response.text()) || t("email.discoveryFailed"));
+      if (!response.ok) throw await responseError(response, "/api/email/discover", t("email.discoveryFailed"));
       if (!response.body) throw new Error(t("email.discoveryFailed"));
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -434,7 +446,7 @@ function Wizard({ account, onClose, onSaved }: { account?: EmailAccount; onClose
               className="pointer-coarse:h-10"
               type="email"
               value={email}
-              onChange={(e) => { setEmail(e.target.value); clearTest(); }}
+              onChange={(e) => changeAddress(e.target.value)}
               placeholder={t("email.emailPlaceholder")}
               autoComplete="email"
               required
@@ -538,6 +550,7 @@ export function EmailSettings() {
   const [removing, setRemoving] = useState<EmailAccount | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   const toggle = async (account: EmailAccount, patch: { readEnabled?: boolean; sendEnabled?: boolean }) => {
     setBusy(account.id);
@@ -568,12 +581,13 @@ export function EmailSettings() {
   const remove = async () => {
     if (!removing) return;
     setBusy(removing.id);
+    setRemoveError(null);
     try {
       await api(`/email/accounts/${removing.id}`, { method: "DELETE" });
       setRemoving(null);
       refresh();
     } catch (e) {
-      setActionError((e as Error).message);
+      setRemoveError((e as Error).message);
     } finally {
       setBusy(null);
     }
@@ -593,6 +607,14 @@ export function EmailSettings() {
           <div role="status" className="text-muted-foreground flex items-center gap-2 px-4 py-6 text-xs">
             <Loader2Icon aria-hidden className="size-4 animate-spin motion-reduce:animate-none" />
             {t("email.accountsLoading")}
+          </div>
+        ) : error && accounts.length === 0 ? (
+          <div role="alert" className="flex flex-col items-start gap-2 px-4 py-6">
+            <AlertCircleIcon aria-hidden className="text-destructive size-6" />
+            <p className="text-destructive text-sm">{t("email.draftAccountsError")}</p>
+            <Button type="button" variant="outline" size="sm" className="mt-1 min-h-10" onClick={() => refresh()}>
+              {t("common.retry")}
+            </Button>
           </div>
         ) : accounts.length === 0 ? (
           <div className="flex flex-col items-start gap-2 px-4 py-6">
@@ -636,12 +658,13 @@ export function EmailSettings() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={removing !== null} onOpenChange={(open) => { if (!open) setRemoving(null); }}>
+      <Dialog open={removing !== null} onOpenChange={(open) => { if (!open) { setRemoving(null); setRemoveError(null); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{t("email.removeTitle")}</DialogTitle>
             <DialogDescription>{t("email.removeBody", { address: removing?.address ?? "" })}</DialogDescription>
           </DialogHeader>
+          {removeError && <p role="alert" className="text-destructive text-xs">{removeError}</p>}
           <DialogFooter>
             <Button type="button" variant="outline" className="min-h-10" onClick={() => setRemoving(null)}>{t("common.cancel")}</Button>
             <Button type="button" variant="destructive" className="min-h-10" data-command="email.confirmRemove" disabled={busy !== null} onClick={() => void remove()}>

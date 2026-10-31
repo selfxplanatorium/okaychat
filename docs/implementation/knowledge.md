@@ -81,7 +81,10 @@ values: when any row has one, every row must have a unique in-range index and th
 request order. Providers that omit indexes keep their response order. 429 and 5xx responses retry with
 exponential backoff up to four attempts; a provider `Retry-After` is honored up to a two-minute bound
 rather than being shortened to the 8 s backoff cap, and the request's abort signal cancels the wait. A
-provider outage fails the source visibly instead of storing unusable vectors.
+provider outage fails the source visibly instead of storing unusable vectors. A provider request that
+exceeds its 30 s deadline fails the source with "The embedding provider did not respond in time." It is a
+failure, not a cancel: only the job's own signal (cancel, delete, or a newer generation) marks a source
+`cancelled`.
 
 Provider HTTP errors and native Ollama failures go through the shared provider error taxonomy before
 their safe message and fix are stored in source status. Raw response bodies can echo credentials or
@@ -89,6 +92,10 @@ document passages and must never appear in ingestion status or its management UI
 Unexpected management writes reach the central error handler unchanged, so database details stay in
 the log behind a reference; they must not be promoted to user-visible validation text. A failed source
 insert still removes its just-created upload and releases the quota.
+
+Ingestion and URL failures store and return only messages from `KnowledgeInputError` (this module's
+validation text), `EmbeddingError`, and `HTTPException`. Any other error is logged and replaced with
+"Ingestion failed.", and a URL transport error becomes "Could not read that page."
 
 ## Retrieval
 
@@ -235,7 +242,8 @@ and touch/focus-visible sizing.
 
 ## Known limits
 
-- Scanning a source is one job at a time; a huge PDF can take a while and only progress is shown.
+- Scanning is bounded to two sources per account and three overall (`MAX_JOBS_PER_USER`/`MAX_JOBS_TOTAL`), one
+  per collection; a huge PDF can take a while and only progress is shown.
 - No OCR for scanned PDFs or images, no crawling, and no re-ranker. Keyword retrieval misses pure
   paraphrases in lexical-only mode.
 - Embedding batches are bounded by character/token estimates rather than provider tokens; an unusual

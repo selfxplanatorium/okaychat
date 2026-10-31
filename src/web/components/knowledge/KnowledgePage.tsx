@@ -368,7 +368,7 @@ function CollectionDetail({ id, onBack, onChanged }: { id: string; onBack: () =>
       setNotice(t("knowledge.reindexQueued", { count: result.queued }));
       await load();
     } catch {
-      setError(t("knowledge.sourceAddFailed"));
+      setError(t("knowledge.reindexFailed"));
     } finally {
       setBusy(false);
     }
@@ -379,18 +379,26 @@ function CollectionDetail({ id, onBack, onChanged }: { id: string; onBack: () =>
     if (!files.length) return;
     setBusy(true);
     setError(null);
+    const failures: string[] = [];
+    let added = 0;
     try {
+      // One bad file must not hide the rest: keep going, then report every failure.
       for (const file of files) {
         const form = new FormData();
         form.set("file", file);
-        await api(`/knowledge/collections/${encodeURIComponent(id)}/sources/file`, { method: "POST", body: form });
+        try {
+          await api(`/knowledge/collections/${encodeURIComponent(id)}/sources/file`, { method: "POST", body: form });
+          added++;
+        } catch (cause) {
+          failures.push(cause instanceof Error ? cause.message : t("knowledge.sourceAddFailed"));
+        }
       }
-      setNotice(t("knowledge.sourceAdded"));
+      if (added) setNotice(t("knowledge.sourceAdded"));
+      if (failures.length) setError([...new Set(failures)].join(" "));
+    } finally {
+      // Files that did upload must appear even when a later one failed.
       onChanged();
       await load();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("knowledge.sourceAddFailed"));
-    } finally {
       setBusy(false);
     }
   };
@@ -438,7 +446,7 @@ function CollectionDetail({ id, onBack, onChanged }: { id: string; onBack: () =>
                   onChanged();
                   onBack();
                 } catch {
-                  setError(t("knowledge.collectionSaveFailed"));
+                  setError(t("knowledge.deleteFailed"));
                 }
               }}
             />
@@ -662,6 +670,9 @@ function ChunkBrowser({ collection, open, onOpenChange }: { collection: Knowledg
         {error && <p role="alert" className="text-destructive text-sm">{error}</p>}
         {!chunks && !error && <p role="status" className="text-muted-foreground text-sm">{t("common.loading")}</p>}
         {chunks?.length === 0 && <p className="text-muted-foreground text-sm">{t("knowledge.noChunks")}</p>}
+        {chunks && chunks.length > 0 && chunks.length < collection.chunkCount && (
+          <p className="text-muted-foreground text-sm">{t("knowledge.chunksShowing", { count: collection.chunkCount, shown: formatNumber(chunks.length) })}</p>
+        )}
         <ul className="flex flex-col gap-1.5">
           {chunks?.map((chunk) => (
             <li key={chunk.id}>

@@ -477,13 +477,15 @@ export interface McpTurnOptions {
 async function presentResult(
   server: McpServerRecord,
   tool: string,
+  source: UntrustedSource,
   result: ToolOutput,
   toolCallId: string,
   opts: McpTurnOptions,
   appUri?: string,
 ): Promise<McpToolResult> {
   const text = toModelText(result);
-  if (result.isError) throw new Error(text || "MCP tool returned an error");
+  // A thrown error reaches the model as error text without toModelOutput, so it gets the same envelope.
+  if (result.isError) throw new Error(text ? wrapUntrusted(text, source).text : "MCP tool returned an error");
   const parts = (result.content ?? []).filter((p) => p.type === "image" && typeof p.data === "string");
   const app = appUri ? { app: { serverId: server.id, resourceUri: appUri }, result: appResult(result) } : {};
   const injection = scanForInjection(text);
@@ -616,7 +618,7 @@ function resourceTools(servers: McpServerRecord[], opts: McpTurnOptions): ToolSe
           if (item.blob && item.mimeType?.startsWith("image/")) return { type: "image", data: item.blob, mimeType: item.mimeType };
           return { type: "resource", resource: item };
         });
-        return presentResult(record, `resource ${uri}`, { content }, toolCallId, opts);
+        return presentResult(record, `resource ${uri}`, { kind: "mcp_resource", name: `resource ${uri}`, url: uri, server }, { content }, toolCallId, opts);
       },
       toModelOutput: ({ input, output }) =>
         mcpModelText(output, { kind: "mcp_resource", name: `resource ${input.uri}`, url: input.uri, server: input.server }),
@@ -768,6 +770,7 @@ export async function toolsForUser(userId: string, opts: McpTurnOptions = {}): P
           presentResult(
             server,
             raw.name,
+            { kind: "mcp_tool", name: `${server.name} · ${raw.name}`, server: server.name },
             await callTool(server, raw.name, args as Record<string, unknown>, abortSignal, elicit),
             toolCallId,
             opts,

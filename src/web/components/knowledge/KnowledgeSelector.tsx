@@ -21,7 +21,8 @@ const phoneLayout = () =>
 export function KnowledgeMenuItems() {
   const { ids, collections, loading, toggle, refresh, temporary } = useChatKnowledge();
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
+  // Several collections can be in flight at once; each clears only its own id.
+  const [busy, setBusy] = useState<string[]>([]);
   const [, navigate] = useLocation();
   useEffect(() => {
     void refresh().catch(() => setError(t("knowledge.loadFailed")));
@@ -46,16 +47,16 @@ export function KnowledgeMenuItems() {
           <MenuItem
             key={collection.id}
             closeOnClick={false}
-            disabled={busy === collection.id}
+            disabled={busy.includes(collection.id)}
             onClick={async () => {
-              setBusy(collection.id);
+              setBusy((list) => [...list, collection.id]);
               setError(null);
               try {
                 await toggle(collection.id);
               } catch {
                 setError(t("knowledge.attachFailed"));
               } finally {
-                setBusy(null);
+                setBusy((list) => list.filter((value) => value !== collection.id));
               }
             }}
           >

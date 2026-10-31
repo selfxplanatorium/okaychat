@@ -36,6 +36,10 @@ export function GeneralSettings() {
   const sandbox = sandboxStatus ? { configured: sandboxStatus.state !== "unconfigured", reachable: sandboxStatus.state === "up" || sandboxStatus.state === "degraded", refuses: sandboxStatus.reasonKey === "refuses" } : null;
   useEffect(() => setPrompt(settings?.systemPrompt ?? ""), [settings?.systemPrompt]);
   if (!settings) return null;
+  const closeEditConfirm = () => {
+    setEditSettingError(null);
+    setConfirmEditReplies(false);
+  };
   const editRepliesOn = settings.editAssistantMessages === true;
 
   const saveEditSetting = async (next: boolean) => {
@@ -226,7 +230,7 @@ export function GeneralSettings() {
         </div>
       </SettingsSection>
 
-      <Dialog open={confirmEditReplies} onOpenChange={(open) => !open && !savingEditSetting && setConfirmEditReplies(false)}>
+      <Dialog open={confirmEditReplies} onOpenChange={(open) => !open && !savingEditSetting && closeEditConfirm()}>
         <DialogContent showCloseButton={!savingEditSetting} className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{t("general.editAssistantMessagesDialogTitle")}</DialogTitle>
@@ -241,7 +245,7 @@ export function GeneralSettings() {
           </ul>
           {editSettingError && <p role="alert" className="text-destructive text-sm">{editSettingError}</p>}
           <DialogFooter>
-            <Button type="button" variant="outline" className="min-h-10 pointer-coarse:min-h-11" disabled={savingEditSetting} onClick={() => setConfirmEditReplies(false)}>
+            <Button type="button" variant="outline" className="min-h-10 pointer-coarse:min-h-11" disabled={savingEditSetting} onClick={closeEditConfirm}>
               {t("common.cancel")}
             </Button>
             <Button type="button" className="min-h-10 pointer-coarse:min-h-11" disabled={savingEditSetting} onClick={() => void saveEditSetting(true)}>

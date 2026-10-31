@@ -19,9 +19,11 @@ interface Sentence {
 }
 
 export class JitterBuffer {
-  private readonly minSamples: number;
-  private readonly maxSamples: number;
-  private readonly rate: number;
+  private minSamples = 0;
+  private maxSamples = 0;
+  private rate: number;
+  private readonly minBufferMs: number;
+  private readonly maxBufferMs: number;
   private readonly order: number[] = [];
   private readonly sentences = new Map<number, Sentence>();
   private samples = 0;
@@ -30,8 +32,21 @@ export class JitterBuffer {
 
   constructor(options: JitterOptions = {}) {
     this.rate = options.sampleRate ?? 22_050;
-    this.minSamples = Math.max(1, Math.round(((options.minBufferMs ?? 180) / 1000) * this.rate));
-    this.maxSamples = Math.max(this.minSamples, Math.round(((options.maxBufferMs ?? 4000) / 1000) * this.rate));
+    this.minBufferMs = options.minBufferMs ?? 180;
+    this.maxBufferMs = options.maxBufferMs ?? 4000;
+    this.recompute();
+  }
+
+  /** The voice's real rate is known only when its first audio arrives; the millisecond cushions depend on it. */
+  setSampleRate(rate: number): void {
+    if (!(rate > 0) || rate === this.rate) return;
+    this.rate = rate;
+    this.recompute();
+  }
+
+  private recompute(): void {
+    this.minSamples = Math.max(1, Math.round((this.minBufferMs / 1000) * this.rate));
+    this.maxSamples = Math.max(this.minSamples, Math.round((this.maxBufferMs / 1000) * this.rate));
   }
 
   /** Adds PCM for one sentence. Chunks past the overflow cap are dropped. */

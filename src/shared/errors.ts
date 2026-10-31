@@ -20,6 +20,7 @@ export const ERROR_CODES = [
   "not_found",
   "forbidden",
   "conflict",
+  "rate_limited",
   "unknown",
 ] as const;
 

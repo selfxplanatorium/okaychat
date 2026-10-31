@@ -262,12 +262,14 @@ test("a card binds only to a message in its own chat", () => {
 test("the .eml download is owned, unicode-safe MIME, and never needs a send switch", async () => {
   const work = await account();
   db.prepare("UPDATE email_accounts SET send_enabled = 0").run();
-  const draft = createDraft("alice", "chat-a", { accountId: work.id, to: ["Bob <bob@example.test>"], cc: ["carol@example.test"], subject: "Grüße aus Köln", body: "Hallo ✓\nZeile zwei" }, { by: "model" });
+  const draft = createDraft("alice", "chat-a", { accountId: work.id, to: ["Bob <bob@example.test>"], cc: ["carol@example.test"], bcc: ["dave@example.test"], subject: "Grüße aus Köln", body: "Hallo ✓\nZeile zwei" }, { by: "model" });
   const response = await call("alice", "GET", `/threads/chat-a/drafts/${draft.id}/eml`);
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /message\/rfc822/);
   assert.match(response.headers.get("content-disposition") ?? "", /attachment; filename="email-draft-drf_/);
-  const parsed = await parseMime(Buffer.from(await response.arrayBuffer()));
+  const emlBytes = Buffer.from(await response.arrayBuffer());
+  assert.doesNotMatch(emlBytes.toString("utf8"), /^Bcc:/im, "Bcc is never written into the .eml headers");
+  const parsed = await parseMime(emlBytes);
   assert.equal(parsed.parsed.subject, "Grüße aus Köln");
   assert.equal(parsed.text.trim(), "Hallo ✓\nZeile zwei");
   assert.equal((await call("bob", "GET", `/threads/chat-a/drafts/${draft.id}/eml`)).status, 404);

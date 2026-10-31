@@ -8,8 +8,9 @@ const dataDir = mkdtempSync(path.join(os.tmpdir(), "okaychat-knowledge-embedding
 process.env.OKAYCHAT_DATA_DIR = dataDir;
 process.env.OKAYCHAT_SECRET = "knowledge-embeddings-test-secret";
 const { db } = await import("../db.js");
-const { saveConnection } = await import("../catalog/providers.js");
-const { EmbeddingError, cosine, createEmbedder, decodeVector, encodeVector, normalizeVector, withRetry, MAX_RESPONSE_BYTES, MAX_VECTOR_DIMENSIONS, MAX_RETRY_AFTER_MS } = await import("./embeddings.js");
+const { deleteConnection, saveConnection } = await import("../catalog/providers.js");
+const { setModelAccessPolicies } = await import("../entitlements.js");
+const { EmbeddingError, cosine, createEmbedder, decodeVector, embeddingOptions, encodeVector, normalizeVector, withRetry, MAX_RESPONSE_BYTES, MAX_VECTOR_DIMENSIONS, MAX_RETRY_AFTER_MS } = await import("./embeddings.js");
 
 db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES ('alice', 'alice@example.test', 'Alice', 'x', 'admin', 1)").run();
 saveConnection("alice", "custom-mock", { baseURL: "http://mock.test/v1", apiKey: "test-key" });
@@ -122,7 +123,9 @@ test("embedding requests time out, cancel, and bound the response body", async (
     init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
   })) as typeof fetch;
   const timed = createEmbedder("alice", { provider: "compatible", providerId: "custom-mock", model: "embed" }, { fetchImpl: hanging, timeoutMs: 25 })!;
-  await assert.rejects(timed.embed(["hello"]), (error) => (error as Error).name === "TimeoutError" || (error as Error).name === "AbortError");
+  // AbortSignal.timeout does not keep the event loop alive, so hold it open or node:test cancels the rest of the file.
+  const hold = setInterval(() => {}, 1_000);
+  await assert.rejects(timed.embed(["hello"]).finally(() => clearInterval(hold)),(error) => (error as Error).name === "TimeoutError" || (error as Error).name === "AbortError");
 
   const controller = new AbortController();
   const cancelled = createEmbedder("alice", { provider: "compatible", providerId: "custom-mock", model: "embed" }, { fetchImpl: hanging, timeoutMs: 5_000 })!;
@@ -178,5 +181,25 @@ test("embedding failures never store provider bodies containing credentials or d
       assert.match(error.message, /credentials|overloaded/);
       return true;
     });
+  }
+});
+
+test("a shared key serves embeddings only when the user's model policy allows the embedding model", async () => {
+  saveConnection(null, "openai", { apiKey: "sk-shared", enabled: true });
+  const everyone = { kind: "everyone" as const, id: "" };
+  try {
+    const offered = async () => (await embeddingOptions("alice")).some((option) => option.provider === "openai");
+    assert.equal(await offered(), true);
+    assert.ok(createEmbedder("alice", { provider: "openai" }));
+
+    setModelAccessPolicies("openai", [{ target: everyone, mode: "selected", modelIds: ["gpt-a"] }]);
+    assert.equal(await offered(), false);
+    assert.throws(() => createEmbedder("alice", { provider: "openai" }), (error) => error instanceof EmbeddingError && /administrator/.test(error.message));
+
+    setModelAccessPolicies("openai", [{ target: everyone, mode: "selected", modelIds: ["text-embedding-3-small"] }]);
+    assert.equal(await offered(), true);
+    assert.ok(createEmbedder("alice", { provider: "openai" }));
+  } finally {
+    deleteConnection(null, "openai");
   }
 });

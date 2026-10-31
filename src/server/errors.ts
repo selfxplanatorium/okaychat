@@ -146,6 +146,14 @@ export const ERROR_CATALOG: Record<ErrorCode, CatalogEntry> = {
     message: "That change conflicts with the current state.",
     hint: "Refresh and try again.",
   },
+  rate_limited: {
+    status: 429,
+    retryable: true,
+    messageKey: "errors.rateLimitedMessage",
+    hintKey: "errors.rateLimitedHint",
+    message: "Too many requests are running at once.",
+    hint: "Wait a moment and try again.",
+  },
   unknown: {
     status: 500,
     retryable: false,
@@ -243,7 +251,7 @@ const STATUS_CODES: Record<number, ErrorCode> = {
   409: "conflict",
   413: "validation",
   422: "validation",
-  429: "conflict",
+  429: "rate_limited",
   499: "aborted",
   502: "network",
   503: "service_unavailable",

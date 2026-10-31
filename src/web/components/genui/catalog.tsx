@@ -1,6 +1,7 @@
 import { defineCatalog, type JsonSchema } from "generative-frame/spec";
 import type { SpecComponentProps, SpecComponents } from "generative-frame/spec/react";
 import type { ReactNode } from "react";
+import { ProtectedMarkdownImage } from "@/components/ui/protected-markdown-image";
 import { t } from "@/i18n";
 import { formatPercent } from "@/i18n/format";
 import { cn } from "@/lib/utils";
@@ -307,7 +308,7 @@ export const components: SpecComponents = {
   Image: ({ props }: P<{ src: string; alt: string; caption?: string }>) =>
     safeUrl(props.src) ? (
       <figure className="flex flex-col gap-1">
-        <img src={safeUrl(props.src)} alt={props.alt} className="max-h-96 rounded-xl border object-contain" />
+        <ProtectedMarkdownImage src={safeUrl(props.src)} alt={props.alt} className="max-h-96 rounded-xl border object-contain" />
         {props.caption && <figcaption className="text-muted-foreground text-xs">{props.caption}</figcaption>}
       </figure>
     ) : null,
