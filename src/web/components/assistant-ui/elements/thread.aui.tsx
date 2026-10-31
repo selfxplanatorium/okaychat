@@ -17,6 +17,7 @@ import {
   ReasoningTrigger,
 } from "@/components/assistant-ui/elements/reasoning.aui";
 import { ToolFallback } from "@/components/assistant-ui/elements/tool-fallback.aui";
+import { emailResultKey } from "@/components/assistant-ui/elements/fold-key";
 import {
   ToolGroupContent,
   ToolGroupRoot,
@@ -218,6 +219,10 @@ const resultKey = (part: GroupablePart): string | undefined => {
     // The research card stays above its report: it holds the questions and the pages read.
     case "deep_research":
       return `research:${part.toolCallId}`;
+    case "email_read":
+    case "email_send":
+    case "email_reply":
+      return emailResultKey(part.toolName, part.toolCallId, part.args);
     default:
       // Each MCP App call is its own result, like a generated image.
       return mcpAppOf(part.result) ? `app:${part.toolCallId}` : undefined;
@@ -1397,7 +1402,16 @@ const AssistantMessage: FC = () => {
                   />
                 );
               case "tool-call":
-                return part.toolUI ?? <ToolFallbackComponent {...part} />;
+                // A custom card replaces the fallback, but the fallback also owns the approval
+                // controls (Allow/Deny, reason, receipt). Without this a custom UI would hide them.
+                return part.toolUI ? (
+                  <>
+                    {part.toolUI}
+                    {part.approval ? <ToolFallback.Approval {...part} /> : null}
+                  </>
+                ) : (
+                  <ToolFallbackComponent {...part} />
+                );
               case "data":
                 return part.dataRendererUI;
               case "file":

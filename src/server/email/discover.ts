@@ -24,6 +24,9 @@ const PROBE_TIMEOUT = 6_000;
 const MAX_XML_BYTES = 512 * 1024;
 const MAX_JSON_BYTES = 256 * 1024;
 const MAX_LINE = 4_000;
+const MAX_QUEUED_LINES = 40;
+const MAX_HTTP_REDIRECTS = 4;
+const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
 
 type Side = "imap" | "smtp";
 type Security = EmailSecurity;
@@ -302,10 +305,19 @@ export function srvServers(records: { imaps: SrvRecord[]; imap: SrvRecord[]; sub
   };
 }
 
-async function resolveSrvOrEmpty(name: string): Promise<SrvRecord[]> {
+async function resolveSrvOrEmpty(name: string, signal?: AbortSignal): Promise<SrvRecord[]> {
+  if (signal?.aborted) throw abortReason(signal);
   try {
-    return (await dns.resolveSrv(name)).map((record) => ({ name: record.name, port: record.port, priority: record.priority, weight: record.weight }));
-  } catch {
+    return await new Promise<SrvRecord[]>((resolve, reject) => {
+      const onAbort = () => reject(abortReason(signal!));
+      signal?.addEventListener("abort", onAbort, { once: true });
+      dns.resolveSrv(name).then(
+        (records) => { signal?.removeEventListener("abort", onAbort); resolve(records.map((record) => ({ name: record.name, port: record.port, priority: record.priority, weight: record.weight }))); },
+        () => { signal?.removeEventListener("abort", onAbort); resolve([]); },
+      );
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
     return [];
   }
 }
@@ -339,8 +351,9 @@ class LineReader {
     socket.setEncoding("utf8");
     socket.on("data", (chunk: string) => {
       this.buffer += chunk;
-      if (this.buffer.length > MAX_LINE * 16) this.fail(new Error("The server sent an oversized response."));
       this.pump();
+      // Only a partial line (no newline yet) is bounded here; complete lines were consumed above.
+      if (!this.error && this.buffer.length > MAX_LINE) this.fail(new Error("The server sent an oversized response line."));
     });
     socket.on("error", (error) => this.fail(error));
     socket.on("close", () => this.fail(new Error("The connection closed early.")));
@@ -356,9 +369,17 @@ class LineReader {
       if (index < 0) return;
       const line = this.buffer.slice(0, index).replace(/\r$/, "");
       this.buffer = this.buffer.slice(index + 1);
+      if (line.length > MAX_LINE) {
+        this.fail(new Error("The server sent an oversized response line."));
+        return;
+      }
       const waiter = this.waiters.shift();
       if (waiter) waiter.resolve(line);
-      else this.lines.push(line);
+      else if (this.lines.length >= MAX_QUEUED_LINES) {
+        // A server can otherwise flood lines faster than a probe reads them.
+        this.fail(new Error("The server sent too many response lines."));
+        return;
+      } else this.lines.push(line);
     }
   }
   read(): Promise<string> {
@@ -369,18 +390,64 @@ class LineReader {
   }
 }
 
-function deadline<T>(run: (signal: AbortSignal) => Promise<T>, ms = PROBE_TIMEOUT): Promise<T> {
-  return run(AbortSignal.timeout(ms));
+function abortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new Error("The mail server probe was cancelled.");
+}
+
+/** Reads one line, but rejects as soon as the caller's deadline or request signal aborts. */
+function readLine(reader: LineReader, signal: AbortSignal): Promise<string> {
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(abortReason(signal));
+    signal.addEventListener("abort", onAbort, { once: true });
+    reader.read().then(
+      (line) => { signal.removeEventListener("abort", onAbort); resolve(line); },
+      (error: Error) => { signal.removeEventListener("abort", onAbort); reject(error); },
+    );
+  });
+}
+
+/** A DNS/guard helper cannot cancel its resolver, but a probe must stop waiting on it. */
+function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(abortReason(signal));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => { signal.removeEventListener("abort", onAbort); resolve(value); },
+      (error: unknown) => { signal.removeEventListener("abort", onAbort); reject(error); },
+    );
+  });
+}
+
+/**
+ * One deadline for the whole probe: DNS/connect, greeting, EHLO, STARTTLS, and the TLS handshake.
+ * Without it a server that accepts a socket and then never writes keeps the discovery wizard waiting
+ * forever. The caller's request signal is forwarded too.
+ */
+async function withProbeDeadline<T>(run: (signal: AbortSignal) => Promise<T>, external?: AbortSignal, ms = PROBE_TIMEOUT): Promise<T> {
+  if (external?.aborted) throw abortReason(external);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error("The mail server probe timed out.")), ms);
+  const forward = () => controller.abort(abortReason(external!));
+  external?.addEventListener("abort", forward, { once: true });
+  try {
+    return await run(controller.signal);
+  } finally {
+    clearTimeout(timer);
+    external?.removeEventListener("abort", forward);
+  }
 }
 
 function guardedLookup(userId: string) {
   return emailLookup(userId);
 }
 
-async function secureSocket(userId: string, candidate: ProbeCandidate, tlsOptions?: ConnectionOptions): Promise<tls.TLSSocket> {
-  await assertEmailHost(userId, candidate.host);
+async function secureSocket(userId: string, candidate: ProbeCandidate, signal: AbortSignal, tlsOptions?: ConnectionOptions): Promise<tls.TLSSocket> {
+  await abortable(assertEmailHost(userId, candidate.host), signal);
+  if (signal.aborted) throw abortReason(signal);
   const lookup = guardedLookup(userId) as ConnectionOptions["lookup"];
-  const socket = await deadline((signal) => new Promise<tls.TLSSocket>((resolve, reject) => {
+  return new Promise<tls.TLSSocket>((resolve, reject) => {
     const attempt = tls.connect({
       host: candidate.host,
       port: candidate.port,
@@ -389,137 +456,155 @@ async function secureSocket(userId: string, candidate: ProbeCandidate, tlsOption
       lookup,
       ...tlsOptions,
     });
-    const fail = (error: Error) => { attempt.destroy(); reject(error); };
-    attempt.once("secureConnect", () => { attempt.off("error", fail); resolve(attempt); });
+    let onAbort: () => void = () => {};
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const fail = (error: Error) => { cleanup(); attempt.destroy(); reject(error); };
+    onAbort = () => fail(abortReason(signal));
+    attempt.once("secureConnect", () => { cleanup(); attempt.off("error", fail); resolve(attempt); });
     attempt.once("error", fail);
-    signal.addEventListener("abort", () => fail(new Error("Timed out connecting to the mail server.")), { once: true });
-  }));
-  return socket;
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
-async function plainSocket(userId: string, candidate: ProbeCandidate): Promise<net.Socket> {
-  await assertEmailHost(userId, candidate.host);
+async function plainSocket(userId: string, candidate: ProbeCandidate, signal: AbortSignal): Promise<net.Socket> {
+  await abortable(assertEmailHost(userId, candidate.host), signal);
+  if (signal.aborted) throw abortReason(signal);
   const lookup = guardedLookup(userId);
-  return deadline((signal) => new Promise<net.Socket>((resolve, reject) => {
+  return new Promise<net.Socket>((resolve, reject) => {
     const socket = net.createConnection({ host: candidate.host, port: candidate.port, lookup } as unknown as net.NetConnectOpts);
-    const fail = (error: Error) => { socket.destroy(); reject(error); };
-    socket.once("connect", () => { socket.off("error", fail); resolve(socket); });
+    let onAbort: () => void = () => {};
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const fail = (error: Error) => { cleanup(); socket.destroy(); reject(error); };
+    onAbort = () => fail(abortReason(signal));
+    socket.once("connect", () => { cleanup(); socket.off("error", fail); resolve(socket); });
     socket.once("error", fail);
-    signal.addEventListener("abort", () => fail(new Error("Timed out connecting to the mail server.")), { once: true });
-  }));
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
-async function upgrade(socket: net.Socket, candidate: ProbeCandidate, tlsOptions?: ConnectionOptions): Promise<tls.TLSSocket> {
-  return deadline((signal) => new Promise<tls.TLSSocket>((resolve, reject) => {
+async function upgrade(socket: net.Socket, candidate: ProbeCandidate, signal: AbortSignal, tlsOptions?: ConnectionOptions): Promise<tls.TLSSocket> {
+  return new Promise<tls.TLSSocket>((resolve, reject) => {
     const upgraded = tls.connect({
       socket,
       servername: isIP(candidate.host) ? undefined : candidate.host,
       rejectUnauthorized: true,
       ...tlsOptions,
     });
-    const fail = (error: Error) => { upgraded.destroy(); reject(error); };
-    upgraded.once("secureConnect", () => { upgraded.off("error", fail); resolve(upgraded); });
+    let onAbort: () => void = () => {};
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const fail = (error: Error) => { cleanup(); upgraded.destroy(); reject(error); };
+    onAbort = () => fail(abortReason(signal));
+    upgraded.once("secureConnect", () => { cleanup(); upgraded.off("error", fail); resolve(upgraded); });
     upgraded.once("error", fail);
-    signal.addEventListener("abort", () => fail(new Error("Timed out during the TLS upgrade.")), { once: true });
-  }));
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
-async function probeImapTls(userId: string, candidate: ProbeCandidate, tlsOptions?: ConnectionOptions): Promise<void> {
-  const socket = await secureSocket(userId, candidate, tlsOptions);
+async function probeImapTls(userId: string, candidate: ProbeCandidate, signal: AbortSignal, tlsOptions?: ConnectionOptions): Promise<void> {
+  const socket = await secureSocket(userId, candidate, signal, tlsOptions);
   try {
     const reader = new LineReader(socket);
-    const greeting = await reader.read();
+    const greeting = await readLine(reader, signal);
     if (!/^\*\s+(OK|PREAUTH)/i.test(greeting)) throw new EmailError("protocol", "The server did not answer as an IMAP server.");
   } finally {
     socket.destroy();
   }
 }
 
-async function probeSmtpTls(userId: string, candidate: ProbeCandidate, tlsOptions?: ConnectionOptions): Promise<void> {
-  const socket = await secureSocket(userId, candidate, tlsOptions);
+async function probeSmtpTls(userId: string, candidate: ProbeCandidate, signal: AbortSignal, tlsOptions?: ConnectionOptions): Promise<void> {
+  const socket = await secureSocket(userId, candidate, signal, tlsOptions);
   try {
     const reader = new LineReader(socket);
-    const greeting = await reader.read();
+    const greeting = await readLine(reader, signal);
     if (!/^220[\s-]/.test(greeting)) throw new EmailError("protocol", "The server did not answer as an SMTP server.");
   } finally {
     socket.destroy();
   }
 }
 
-async function probeImapStartTls(userId: string, candidate: ProbeCandidate, tlsOptions?: ConnectionOptions): Promise<void> {
-  const socket = await plainSocket(userId, candidate);
+async function probeImapStartTls(userId: string, candidate: ProbeCandidate, signal: AbortSignal, tlsOptions?: ConnectionOptions): Promise<void> {
+  const socket = await plainSocket(userId, candidate, signal);
   let upgraded: tls.TLSSocket | null = null;
   try {
     const reader = new LineReader(socket);
-    const greeting = await reader.read();
+    const greeting = await readLine(reader, signal);
     if (!/^\*\s+OK/i.test(greeting)) throw new EmailError("protocol", "The server did not answer as an IMAP server.");
     socket.write("a1 STARTTLS\r\n");
     for (;;) {
-      const line = await reader.read();
+      const line = await readLine(reader, signal);
       if (/^a1\s+(OK|BAD|NO)/i.test(line)) {
         if (!/^a1\s+OK/i.test(line)) throw new EmailError("protocol", "The IMAP server refused STARTTLS; refusing to sign in without encryption.");
         break;
       }
     }
-    upgraded = await upgrade(socket, candidate, tlsOptions);
+    upgraded = await upgrade(socket, candidate, signal, tlsOptions);
     // A successful verified handshake is enough; no credentials are sent during discovery.
   } finally {
     (upgraded ?? socket).destroy();
   }
 }
 
-async function probeSmtpStartTls(userId: string, candidate: ProbeCandidate, tlsOptions?: ConnectionOptions): Promise<void> {
-  const socket = await plainSocket(userId, candidate);
+async function probeSmtpStartTls(userId: string, candidate: ProbeCandidate, signal: AbortSignal, tlsOptions?: ConnectionOptions): Promise<void> {
+  const socket = await plainSocket(userId, candidate, signal);
   let upgraded: tls.TLSSocket | null = null;
   try {
     const reader = new LineReader(socket);
-    const greeting = await reader.read();
+    const greeting = await readLine(reader, signal);
     if (!/^220[\s-]/.test(greeting)) throw new EmailError("protocol", "The server did not answer as an SMTP server.");
     socket.write("EHLO okaychat.local\r\n");
     let offersTls = false;
     for (;;) {
-      const line = await reader.read();
+      const line = await readLine(reader, signal);
       if (/^250[\s-]/i.test(line) && /STARTTLS/i.test(line)) offersTls = true;
       if (/^250\s/.test(line)) break;
       if (!/^250-/i.test(line)) throw new EmailError("protocol", "The SMTP server did not answer EHLO.");
     }
     if (!offersTls) throw new EmailError("protocol", "The SMTP server does not offer STARTTLS; refusing to sign in without encryption.");
     socket.write("STARTTLS\r\n");
-    const ready = await reader.read();
+    const ready = await readLine(reader, signal);
     if (!/^220[\s-]/.test(ready)) throw new EmailError("protocol", "The SMTP server refused STARTTLS; refusing to sign in without encryption.");
-    upgraded = await upgrade(socket, candidate, tlsOptions);
+    upgraded = await upgrade(socket, candidate, signal, tlsOptions);
   } finally {
     (upgraded ?? socket).destroy();
   }
 }
 
-export async function probeServer(userId: string, candidate: ProbeCandidate, tlsOptions?: ConnectionOptions): Promise<void> {
+export async function probeServer(
+  userId: string,
+  candidate: ProbeCandidate,
+  tlsOptions?: ConnectionOptions,
+  opts: { signal?: AbortSignal; timeoutMs?: number } = {},
+): Promise<void> {
   try {
-    if (candidate.side === "imap") {
-      if (candidate.security === "tls") await probeImapTls(userId, candidate, tlsOptions);
-      else await probeImapStartTls(userId, candidate, tlsOptions);
-    } else if (candidate.security === "tls") {
-      await probeSmtpTls(userId, candidate, tlsOptions);
-    } else {
-      await probeSmtpStartTls(userId, candidate, tlsOptions);
-    }
+    await withProbeDeadline(async (signal) => {
+      if (candidate.side === "imap") {
+        if (candidate.security === "tls") await probeImapTls(userId, candidate, signal, tlsOptions);
+        else await probeImapStartTls(userId, candidate, signal, tlsOptions);
+      } else if (candidate.security === "tls") {
+        await probeSmtpTls(userId, candidate, signal, tlsOptions);
+      } else {
+        await probeSmtpStartTls(userId, candidate, signal, tlsOptions);
+      }
+    }, opts.signal, opts.timeoutMs ?? PROBE_TIMEOUT);
   } catch (error) {
     throw mapEmailError(error, candidate.side === "imap" ? "IMAP server" : "SMTP server");
   }
 }
 
 /** Unauthenticated plaintext banner check, only when the user opted in to insecure probing. */
-async function plainBanner(userId: string, candidate: ProbeCandidate): Promise<boolean> {
-  let socket: net.Socket | null = null;
+async function plainBanner(userId: string, candidate: ProbeCandidate, external?: AbortSignal): Promise<boolean> {
+  const holder: { socket: net.Socket | null } = { socket: null };
   try {
-    socket = await plainSocket(userId, candidate);
-    const reader = new LineReader(socket);
-    const greeting = await reader.read();
-    return candidate.side === "imap" ? /^\*\s+(OK|PREAUTH)/i.test(greeting) : /^220[\s-]/.test(greeting);
+    return await withProbeDeadline(async (signal) => {
+      holder.socket = await plainSocket(userId, candidate, signal);
+      const reader = new LineReader(holder.socket);
+      const greeting = await readLine(reader, signal);
+      return candidate.side === "imap" ? /^\*\s+(OK|PREAUTH)/i.test(greeting) : /^220[\s-]/.test(greeting);
+    }, external);
   } catch {
     return false;
   } finally {
-    socket?.destroy();
+    holder.socket?.destroy();
   }
 }
 
@@ -527,15 +612,40 @@ async function plainBanner(userId: string, candidate: ProbeCandidate): Promise<b
 // HTTP discovery documents
 // ---------------------------------------------------------------------------
 
-async function fetchBounded(userId: string, url: string, init: RequestInit, max: number, signal?: AbortSignal): Promise<Uint8Array> {
+/** Exported for tests: every hop is bounded, and TLS can never be downgraded. */
+export async function fetchBounded(userId: string, url: string, init: RequestInit, max: number, signal?: AbortSignal): Promise<Uint8Array> {
+  if (new URL(url).protocol !== "https:") throw new Error("Discovery documents must use HTTPS.");
   const request = canUsePrivateHosts(userId) ? fetch : publicFetch;
   const combined = signal ? AbortSignal.any([signal, AbortSignal.timeout(HTTP_TIMEOUT)]) : AbortSignal.timeout(HTTP_TIMEOUT);
-  const response = await request(url, { ...init, signal: combined, redirect: "follow" });
-  if (!response.ok) {
+  let target = url;
+  let method = (init.method ?? "GET").toUpperCase();
+  let body = init.body;
+  const headers = new Headers(init.headers);
+  for (let hop = 0; hop <= MAX_HTTP_REDIRECTS; hop++) {
+    const response = await request(target, { ...init, method, body, headers, signal: combined, redirect: "manual" });
+    if (!REDIRECT_STATUS.has(response.status)) {
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new Error(`HTTP ${response.status}`);
+      }
+      return readCapped(response, max, "The discovery document is larger than the limit.");
+    }
+    const location = response.headers.get("location");
     await response.body?.cancel();
-    throw new Error(`HTTP ${response.status}`);
+    if (!location) throw new Error("The discovery document redirected without a location.");
+    if (hop === MAX_HTTP_REDIRECTS) throw new Error("The discovery document redirected too many times.");
+    const next = new URL(location, target);
+    // TLS downgrade would let a network attacker rewrite server settings and steal credentials.
+    if (next.protocol !== "https:") throw new Error("The discovery document redirected to an insecure address.");
+    if (response.status === 303 || ((response.status === 301 || response.status === 302) && method === "POST")) {
+      method = "GET";
+      body = undefined;
+      headers.delete("content-type");
+      headers.delete("content-length");
+    }
+    target = next.href;
   }
-  return readCapped(response, max, "The discovery document is larger than the limit.");
+  throw new Error("The discovery document redirected too many times.");
 }
 
 const THUNDERBIRD_URLS = (domain: string, email: string) => [
@@ -567,6 +677,8 @@ export interface DiscoveryOptions {
   onAttempt?: (attempt: EmailDiscoveryAttempt) => void;
   /** Test seam for TLS certificates; the app never passes this. */
   tls?: ConnectionOptions;
+  /** Test seam for the total per-probe deadline. */
+  probeTimeout?: number;
 }
 
 export async function discoverEmail(opts: DiscoveryOptions): Promise<EmailDiscoveryResult> {
@@ -601,7 +713,10 @@ export async function discoverEmail(opts: DiscoveryOptions): Promise<EmailDiscov
     });
   };
 
+  const checkAbort = () => opts.signal?.throwIfAborted();
+
   // 1. Known providers.
+  checkAbort();
   const preset = presetFor(email.email);
   if (preset === "bridge") {
     report({ stage: "preset", status: "ok", label: "Proton Mail", detail: "Proton needs the Proton Mail Bridge desktop app; there is no direct IMAP server.", confidence: "high" });
@@ -622,6 +737,7 @@ export async function discoverEmail(opts: DiscoveryOptions): Promise<EmailDiscov
 
   // 2. Thunderbird autoconfig XML.
   for (const url of THUNDERBIRD_URLS(email.domain, email.email)) {
+    checkAbort();
     if (both()) break;
     report({ stage: "thunderbird", status: "running", label: "Thunderbird autoconfig", detail: url });
     try {
@@ -636,6 +752,7 @@ export async function discoverEmail(opts: DiscoveryOptions): Promise<EmailDiscov
 
   // 3. Microsoft Autodiscover: XML POST, then the JSON endpoint.
   if (!both()) {
+    checkAbort();
     const base = `https://autodiscover.${email.domain}/autodiscover`;
     report({ stage: "microsoft", status: "running", label: "Microsoft Autodiscover", detail: `${base}/autodiscover.xml` });
     try {
@@ -650,6 +767,7 @@ export async function discoverEmail(opts: DiscoveryOptions): Promise<EmailDiscov
     }
   }
   if (!both()) {
+    checkAbort();
     const url = `https://autodiscover.${email.domain}/autodiscover/autodiscover.json?Email=${encodeURIComponent(email.email)}&Protocol=IMAP`;
     report({ stage: "microsoft", status: "running", label: "Microsoft Autodiscover JSON", detail: url });
     try {
@@ -662,13 +780,14 @@ export async function discoverEmail(opts: DiscoveryOptions): Promise<EmailDiscov
 
   // 4. RFC 6186 SRV records.
   if (!both()) {
+    checkAbort();
     report({ stage: "srv", status: "running", label: "RFC 6186 SRV records", detail: email.domain });
     try {
       const records = {
-        imaps: await resolveSrvOrEmpty(`_imaps._tcp.${email.domain}`),
-        imap: await resolveSrvOrEmpty(`_imap._tcp.${email.domain}`),
-        submissions: await resolveSrvOrEmpty(`_submissions._tcp.${email.domain}`),
-        submission: await resolveSrvOrEmpty(`_submission._tcp.${email.domain}`),
+        imaps: await resolveSrvOrEmpty(`_imaps._tcp.${email.domain}`, opts.signal),
+        imap: await resolveSrvOrEmpty(`_imap._tcp.${email.domain}`, opts.signal),
+        submissions: await resolveSrvOrEmpty(`_submissions._tcp.${email.domain}`, opts.signal),
+        submission: await resolveSrvOrEmpty(`_submission._tcp.${email.domain}`, opts.signal),
       };
       const servers = srvServers(records, email.email);
       const got: string[] = [];
@@ -683,10 +802,11 @@ export async function discoverEmail(opts: DiscoveryOptions): Promise<EmailDiscov
   // 5. Hostname guesses, verified with a real TLS/STARTTLS probe.
   if (!both()) {
     for (const candidate of heuristicCandidates(email.domain)) {
+      checkAbort();
       if (candidate.side === "imap" ? !!found.imap : !!found.smtp) continue;
       report({ stage: "heuristic", status: "running", label: `${candidate.side.toUpperCase()} ${candidate.host}:${candidate.port}`, detail: candidate.security === "starttls" ? "Checking STARTTLS" : "Checking TLS" });
       try {
-        await probeServer(opts.userId, candidate, opts.tls);
+        await probeServer(opts.userId, candidate, opts.tls, { signal: opts.signal, timeoutMs: opts.probeTimeout });
         const { side, ...server } = candidate;
         consider(side, { ...server, username: email.email }, "Guessed server", "low", "Server answered over verified TLS.");
       } catch (error) {
@@ -703,7 +823,7 @@ export async function discoverEmail(opts: DiscoveryOptions): Promise<EmailDiscov
       ? { side, host: `imap.${email.domain}`, port: 143, security: "starttls", username: email.email }
       : { side, host: `smtp.${email.domain}`, port: 587, security: "starttls", username: email.email };
     report({ stage: "probe", status: "running", label: "Unauthenticated plaintext check", detail: `${diagnostic.host}:${diagnostic.port}` });
-    if (await plainBanner(opts.userId, diagnostic)) {
+    if (await plainBanner(opts.userId, diagnostic, opts.signal)) {
       notes.push(
         `A mail service answered in plaintext on ${diagnostic.host}:${diagnostic.port}. okaychat still requires TLS for sign-in; use a server and port with a valid certificate.`,
       );

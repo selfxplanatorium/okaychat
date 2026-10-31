@@ -3,6 +3,7 @@ import { ImapFlow, type FetchMessageObject, type MessageStructureObject } from "
 import { parseAddressHeader } from "mailparser";
 import type { EmailAddress, EmailAttachmentInfo, EmailFolder, EmailMessage, EmailMessageSummary } from "../../shared/email.js";
 import type { EmailSecrets } from "./accounts.js";
+import { emailConnectTarget } from "./accounts.js";
 import { EmailError, mapEmailError } from "./errors.js";
 import { htmlToText, sanitizeFilename, sanitizeMime } from "./mime.js";
 import { verifySmtp } from "./smtp.js";
@@ -26,23 +27,24 @@ const SOCKET_TIMEOUT = 60_000;
 const active = new Map<string, number>();
 const MAX_PER_ACCOUNT = 2;
 
-function clientFor(secrets: EmailSecrets, tls?: ConnectionOptions): ImapFlow {
+function clientFor(secrets: EmailSecrets, target: { host: string; servername?: string }, tls?: ConnectionOptions): ImapFlow {
   const { imap } = secrets;
-  const servername = /^\d{1,3}(?:\.\d{1,3}){3}$/.test(imap.host) || imap.host.includes(":") ? undefined : imap.host;
   return new ImapFlow({
-    host: imap.host,
+    // The address is already resolved and checked (pinned for non-admins), so imapflow's own
+    // resolver cannot be rebound between the guard and this connection.
+    host: target.host,
     port: imap.port,
     secure: imap.security === "tls",
     // Required STARTTLS: refuse to authenticate if the upgrade is missing or fails.
     doSTARTTLS: imap.security === "starttls",
-    servername,
+    servername: target.servername,
     auth: { user: imap.username, pass: secrets.password, loginMethod: "LOGIN" },
     logger: false,
     disableAutoIdle: true,
     connectionTimeout: CONNECTION_TIMEOUT,
     greetingTimeout: GREETING_TIMEOUT,
     socketTimeout: SOCKET_TIMEOUT,
-    tls: { rejectUnauthorized: true, servername, ...tls },
+    tls: { rejectUnauthorized: true, servername: target.servername, ...tls },
   });
 }
 
@@ -52,8 +54,13 @@ async function withClient<T>(secrets: EmailSecrets, run: (client: ImapFlow) => P
   if (count >= MAX_PER_ACCOUNT) {
     throw new EmailError("connections", "This email account already has two open connections. Wait for the current request to finish and try again.");
   }
+  // Re-check the live admin role and resolve/pin the host immediately before every connection,
+  // including verify, reply, and attachment downloads.
+  const target = await emailConnectTarget(secrets.userId, secrets.imap.host).catch((error: unknown) => {
+    throw mapEmailError(error, "IMAP server");
+  });
   active.set(id, count + 1);
-  const client = clientFor(secrets, tls);
+  const client = clientFor(secrets, target, tls);
   try {
     await client.connect();
     return await run(client);
@@ -106,8 +113,10 @@ function walk(part: MessageStructureObject | undefined, out: MessageStructureObj
 
 function isAttachment(part: MessageStructureObject): boolean {
   if (part.disposition?.toLowerCase() === "attachment") return true;
+  // A named text part is an attachment too (text/plain; name="notes.txt"). Without this a named
+  // text attachment could be mistaken for the message body.
   const name = part.dispositionParameters?.filename ?? part.parameters?.name;
-  return !!name && !part.type.toLowerCase().startsWith("text/");
+  return !!name;
 }
 
 export function attachmentsOf(structure: MessageStructureObject | undefined): EmailAttachmentInfo[] {
@@ -280,6 +289,21 @@ async function readStream(stream: NodeJS.ReadableStream, max: number): Promise<B
   return Buffer.concat(chunks, size);
 }
 
+/**
+ * imapflow converts known text charsets to UTF-8 and reports that in `meta.charset`. If conversion
+ * was skipped (an unknown charset), decode the transfer-decoded bytes with the declared charset
+ * before falling back to UTF-8. Decoding a UTF-8 body again is a no-op.
+ */
+function textBody(buffer: Buffer, charset: string | undefined): string {
+  const name = (charset ?? "").trim().toLowerCase();
+  if (!name || name === "utf-8" || name === "utf8" || name === "us-ascii" || name === "ascii") return buffer.toString("utf8");
+  try {
+    return new TextDecoder(name).decode(buffer);
+  } catch {
+    return buffer.toString("utf8");
+  }
+}
+
 export async function readMessage(secrets: EmailSecrets, messageId: string, tls?: ConnectionOptions): Promise<EmailReadResult> {
   const { mailbox, uidValidity, uid } = decodeMessageId(messageId);
   return withClient(secrets, async (client) => {
@@ -307,12 +331,12 @@ export async function readMessage(secrets: EmailSecrets, messageId: string, tls?
       if (plain) {
         const partId = plain.part ?? "1";
         const download = await client.download(String(uid), partId, { uid: true, maxBytes: MAX_PART_BYTES });
-        if (download.content) body = (await readStream(download.content, MAX_PART_BYTES)).toString("utf8");
+        if (download.content) body = textBody(await readStream(download.content, MAX_PART_BYTES), download.meta?.charset);
       }
       if (!body.trim() && html) {
         const partId = html.part ?? "1";
         const download = await client.download(String(uid), partId, { uid: true, maxBytes: MAX_PART_BYTES });
-        if (download.content) body = await htmlToText((await readStream(download.content, MAX_PART_BYTES)).toString("utf8"));
+        if (download.content) body = await htmlToText(textBody(await readStream(download.content, MAX_PART_BYTES), download.meta?.charset));
       }
       const truncated = body.length > MAX_BODY_CHARS;
       if (truncated) body = `${body.slice(0, MAX_BODY_CHARS)}\n\n[truncated]`;

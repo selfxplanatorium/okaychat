@@ -41,6 +41,7 @@ test("stores encrypted endpoints and password, and returns no secret", async () 
   assert.ok(!row.password_enc.includes("app-secret-password"));
   assert.equal(decrypt(row.password_enc), "app-secret-password");
   const secrets = accountSecrets("alice", created.id);
+  assert.equal(secrets.userId, "alice");
   assert.equal(secrets.password, "app-secret-password");
   assert.deepEqual(secrets.imap, { host: "127.0.0.1", port: 993, security: "tls", username: "alice@example.test" });
   assert.doesNotMatch(JSON.stringify(listAccounts("alice")), /app-secret-password/);
@@ -83,6 +84,9 @@ test("default selection follows the account and is never left empty", async () =
 
 test("validates hosts, ports, addresses, headers, and the account cap", async () => {
   await assert.rejects(createAccount("alice", input({ address: "not-an-address" })), /valid email address/i);
+  for (const address of ["a@b.test,c@d.test", '"a"@b.test', "a(b)@c.test", "a@b.test;c@d.test"]) {
+    await assert.rejects(createAccount("alice", input({ address })), /valid email address/i, address);
+  }
   await assert.rejects(createAccount("alice", input({ label: "Line\nBreak" })), /line breaks/i);
   await assert.rejects(createAccount("alice", input({ imap: { host: "localhost", port: 993, security: "tls", username: "a@b.test" } })), /valid mail server/i);
   await assert.rejects(createAccount("alice", input({ imap: { host: "127.0.0.1", port: 0, security: "tls", username: "a@b.test" } })), /port between/i);

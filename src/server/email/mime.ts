@@ -9,6 +9,27 @@ import type { EmailAddress } from "../../shared/email.js";
 export class EmailHeaderError extends Error {}
 
 const HEADER_FORBIDDEN = /[\r\n\0]/u;
+const MAILBOX_FORBIDDEN = /[\s\u0000-\u001f\u007f<>()",;:\\[\]]/u;
+const LOCAL_PART = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*$/;
+const DOMAIN_LABEL = /^(?!-)[A-Za-z0-9-]{1,63}(?<!-)$/;
+const IPV4 = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+
+/**
+ * Exactly one mailbox in dotted-atom form. Commas, semicolons, quotes, parentheses, groups, and
+ * comments are refused so a reviewed address can never be parsed by the mail library as a list or
+ * as a different mailbox than the one shown to the user.
+ */
+export function isEmailAddress(value: unknown): boolean {
+  if (typeof value !== "string" || value.length === 0 || value.length > 320 || MAILBOX_FORBIDDEN.test(value)) return false;
+  const at = value.lastIndexOf("@");
+  if (at <= 0 || at !== value.indexOf("@")) return false;
+  const local = value.slice(0, at);
+  const domain = value.slice(at + 1);
+  if (local.length > 64 || !LOCAL_PART.test(local)) return false;
+  if (!domain || domain.length > 253) return false;
+  if (IPV4.test(domain)) return domain.split(".").every((part) => Number(part) <= 255);
+  return domain.split(".").every((label) => DOMAIN_LABEL.test(label));
+}
 
 /** Throws when a value could break out of its header line. Never trims silently. */
 export function assertHeaderValue(name: string, value: string, max = 4000): string {
@@ -20,7 +41,7 @@ export function assertHeaderValue(name: string, value: string, max = 4000): stri
 export function assertAddressList(field: string, values: readonly EmailAddress[]): void {
   for (const value of values) {
     assertHeaderValue(field, value.address, 320);
-    if (!/^[^\s@<>]{1,64}@[^\s@<>]+$/.test(value.address)) throw new EmailHeaderError(`${field} contains an invalid address: ${value.address.slice(0, 80)}`);
+    if (!isEmailAddress(value.address)) throw new EmailHeaderError(`${field} contains an invalid address: ${value.address.slice(0, 80)}`);
     if (value.name !== undefined) assertHeaderValue(field, value.name, 200);
   }
 }
@@ -118,6 +139,7 @@ export interface MailMessage {
 /** Builds an RFC 5322 message. Every header field is checked before composition. */
 export async function buildMime(message: MailMessage): Promise<Buffer> {
   assertHeaderValue("From", message.from.address, 320);
+  if (!isEmailAddress(message.from.address)) throw new EmailHeaderError("From contains an invalid address.");
   if (message.from.name) assertHeaderValue("From", message.from.name, 200);
   assertAddressList("To", message.to);
   assertAddressList("Cc", message.cc ?? []);

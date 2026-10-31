@@ -10,7 +10,7 @@ changing the UI contract.
 
 | File | Role |
 | --- | --- |
-| `src/server/email/accounts.ts` | Owned CRUD, AES-256-GCM encryption, validation, defaults, live toggles, host guard |
+| `src/server/email/accounts.ts` | Owned CRUD, AES-256-GCM encryption, validation, defaults, live toggles, connect-time host guard and DNS pinning |
 | `src/server/email/discover.ts` | Ordered discovery chain, autoconfig/autodiscover/SRV parsers, TLS/STARTTLS probes |
 | `src/server/email/imap.ts` | imapflow client: folders, list, search, read, explicit attachment download |
 | `src/server/email/smtp.ts` | nodemailer transport: send, verify |
@@ -18,7 +18,7 @@ changing the UI contract.
 | `src/server/email/tools.ts` | The six model tools, live toggle checks, envelopes, approval metadata |
 | `src/server/email/routes.ts` | Settings API, NDJSON discovery stream, connection tests |
 | `src/server/email/errors.ts` | Actionable error mapping; never echoes an auth reply |
-| `src/web/components/settings/EmailSettings.tsx` | Account cards and the add/edit wizard |
+| `src/web/components/settings/EmailSettings.tsx` | Account cards and the add/edit wizard: live discovery progress, cancellation, manual-entry usernames, honest test status |
 | `src/web/components/chat/email-tools.tsx` | List/search/read cards and the send/reply review card |
 
 ## Data
@@ -34,10 +34,28 @@ new destination. Message bodies are not mirrored into SQLite. Downloaded attachm
 A user may connect at most 10 accounts. The first account becomes the default; deleting the default
 promotes the oldest remaining one. The default cannot be cleared to nothing.
 
+## Tools
+
+`email_folders` doubles as the account inventory: with no `accountId` it returns every owned
+account's id, label, address, default marker, read/send switches, and signature, plus the default
+account's folders when that account can be read. If the default's read switch is off it still returns
+the inventory (and no folders), so the model can pick any other account instead of failing. Every
+write and send tool requires an explicit `accountId`; only the read tools fall back to the default.
+The inventory is scanned and enveloped like mail content because a signature and labels are
+user-supplied text.
+
+`email_search` maps the model-facing `query` field to IMAP `TEXT`, and keeps `from`, `subject`,
+`since`, `unseen`, and `limit`. `email_read` returns the opaque mailbox+UIDVALIDITY+UID handle as
+`id`, the RFC `Message-ID`, `replyTo`, the full address lists, dates, flags, attachment part ids, and
+the body, so a later read, reply, or explicit download can use the same message without guessing.
+Read bodies decode through imapflow's charset pipeline; a named `text/*` part is treated as an
+attachment, never as the message body.
+
 ## Discovery
 
 `POST /api/email/discover` streams one NDJSON line per attempt, then a final result. The wizard shows
-each line and fills an editable form; a failed attempt never becomes a success. The order is fixed:
+the progress block live on the address step as well as the server step, cancels the stream when it is
+dismissed, and fills an editable form; a failed attempt never becomes a success. The order is fixed:
 
 1. **Known providers** (`presetFor`): Gmail/googlemail, Outlook/hotmail/live/msn, iCloud/me, any
    `yahoo.*`, Fastmail, any `gmx.*`, and Proton. Proton has no direct IMAP server; the result explains
@@ -60,7 +78,10 @@ each line and fills an editable form; a failed attempt never becomes a success. 
 
 The first result for each side wins, and later stages only fill a missing side. Each result carries a
 confidence (`high` preset, `medium` document/SRV, `low` guess). Discovery documents are capped at
-512 KB (XML) or 256 KB (JSON) with an 8 s timeout; probes time out after 6 s.
+512 KB (XML) or 256 KB (JSON) with an 8 s timeout. A probe has one 6 s deadline for the whole
+exchange — DNS, connect, greeting, EHLO, STARTTLS, and the TLS handshake — and the request's abort
+signal is forwarded to every stage, so a server that accepts and then stays silent cannot hold the
+wizard open. Response lines and queued lines are bounded (4 KB, 40 lines).
 
 ## Security model
 
@@ -69,12 +90,19 @@ confidence (`high` preset, `medium` document/SRV, `low` guess). Discovery docume
   authenticating in clear text. nodemailer uses `requireTLS` for STARTTLS. Certificates are always
   verified (`rejectUnauthorized: true`) with the server hostname as SNI/servername. Self-signed
   certificates are refused.
-- **Hosts.** Every save, discovery result, probe, and connection re-checks the destination. Non-admins
-  may only reach public addresses; private, loopback, link-local, CGNAT, and tailnet addresses are
-  refused. Admins may point an account at a LAN server, as with provider base URLs and MCP servers.
+- **Hosts.** Every save, discovery result, probe, and connection re-checks the destination, and the
+  live admin role is read again on every connection. Non-admins may only reach public addresses;
+  private, loopback, link-local, CGNAT, and tailnet addresses are refused. Admins may point an
+  account at a LAN server, as with provider base URLs and MCP servers. For non-admins
+  `emailConnectTarget()` resolves the host, rejects any non-public answer, and returns the checked
+  IP literal that IMAP and SMTP must connect to (with the original hostname kept only as the TLS
+  SNI/certificate name). The clients therefore never run a second DNS lookup between the check and
+  the socket. Draft tests, verified accounts, replies, and attachment downloads all go through the
+  same check; a saved account stops working after its owner is demoted from admin.
   Discovery documents go through `publicFetch` for non-admins (pinned DNS, revalidated redirects) and
-  ordinary `fetch` for admins, so an internal autoconfig endpoint remains reachable. Socket probes
-  pass a guarded DNS lookup at connection time.
+  ordinary `fetch` for admins, so an internal autoconfig endpoint remains reachable. Every document
+  redirect is followed manually, bounded to four hops, and must stay HTTPS: an HTTPS-to-HTTP
+  downgrade is refused. Socket probes also pass a guarded DNS lookup at connection time.
 - **Plaintext.** The per-account "allow unauthenticated plaintext discovery" switch permits only a
   banner check on a plaintext port when TLS probing fails. It never permits credentials, reads, or
   sends over plaintext; those still require TLS.
@@ -87,11 +115,19 @@ confidence (`high` preset, `medium` document/SRV, `low` guess). Discovery docume
   in `UNTRUSTED_TOOL_NAMES`, so replayed history taints later turns. Mail HTML is never rendered; the
   server converts it to text and the UI shows plain text.
 - **Sending.** `email_send` and `email_reply` always have `needsApproval: true` and
-  `riskMetadata("outbound")`. The approval card shows the exact recipients, subject, and body. After
-  untrusted content the generic gate names the outbound risk. Scheduled runs auto-deny; delegates and
-  sub-agents never receive send or reply. A reply re-reads the original message and rejects any
-  recipient that was not in its From/To/Cc/Reply-To (and must include the sender), so no hidden
-  recipient can be added after approval; `In-Reply-To` and `References` are derived from the original.
+  `riskMetadata("outbound")`. `accountId` and `from` are required, so the approval never guesses the
+  default or another account. The review shows the from address, exact recipients, subject, and the
+  complete body. The server sends that body verbatim and never appends a signature: when the account
+  has one, the model must already include it at the end of the body, and `email_folders` returns the
+  exact signature text. Execution re-reads the live account and refuses a changed sender, a changed
+  signature, or a body that no longer contains the current signature; nothing is silently
+  substituted. After untrusted content the generic gate names the outbound risk. Scheduled runs
+  auto-deny; delegates and sub-agents never receive send or reply. A reply re-reads the original
+  message (also enforcing the live read switch, so a send-only account cannot read through a reply)
+  and rejects any recipient that was not in its From/To/Cc/Reply-To (and must include the sender), so
+  no hidden recipient can be added after approval; `In-Reply-To` and `References` are derived from
+  the original. Custom send/reply cards render the existing approval controls below the review panel;
+  the review panel starts expanded while approval is pending.
 - **Attachments.** Never fetched by list, search, or read. `email_read` downloads only part ids named
   in `downloadAttachments`, caps each at 20 MB and the whole message at 50 MB, stops a stream as soon
   as the budget is crossed, sanitizes name/MIME, and stores the file through `storeUpload` (quota).
@@ -99,11 +135,11 @@ confidence (`high` preset, `medium` document/SRV, `low` guess). Discovery docume
 
 ### Residual risks
 
-- **DNS rebinding TOCTOU.** The host is checked before connecting and again through a guarded lookup
-  where the client exposes one. A hostile resolver can still change its answer between a pre-check and
-  a connection inside a library that does not accept a lookup hook (notably nodemailer and imapflow's
-  initial STARTTLS socket). The window is small and matches the provider/MCP posture documented in
-  `security.md`; keep untrusted mail providers on public DNS.
+- **DNS rebinding TOCTOU.** For non-admins the DNS answer is checked and the connection is pinned to
+  the checked IP literal for both IMAP and SMTP, so the libraries cannot resolve the name a second
+  time. Admins keep hostname behaviour so LAN names work. The remaining window is the ordinary gap
+  between the role/DNS check and the already-pinned `connect()` call; an admin demoted in that exact
+  interval could finish one connection. The next connection re-checks the role and fails.
 - **Server-supplied data.** A provider can publish misleading autoconfig/SRV records. The user sees
   and can correct every server, and the Test button verifies TLS and authentication before saving.
 - **Discovery probes are unauthenticated.** They reveal that a host exists and speaks IMAP/SMTP and
@@ -139,10 +175,16 @@ yet.
   XML/JSON, SRV ordering, heuristic order, host refusal.
 - `mime.test.ts`: header-injection rejection, unicode round-trip, quoted-printable/base64, multipart
   parsing, filename/MIME sanitation, HTML-to-text.
-- `protocol.test.ts`: in-process `node:net`/`node:tls` mock IMAP and SMTP servers for connect, auth,
-  folders, list, search, read, attachment streaming, SMTP send, STARTTLS success and fail-closed, and
-  certificate verification.
+- `protocol.test.ts`: in-process `node:net`/`node:tls` mock IMAP and SMTP servers for connect, real
+  AUTH validation, folders, list, search, read, non-UTF-8 charset conversion, a named text part as an
+  attachment, attachment streaming, SMTP send, STARTTLS success and fail-closed (no AUTH before TLS),
+  certificate verification, a demoted non-admin blocked before any socket, and probe deadlines/abort.
 - `tools.test.ts`: approval metadata, delegate exclusion, temporary chats, live read/send toggles,
-  model envelopes, reply recipient validation, explicit attachment download and quota.
-- `approval.test.ts`: the real chat turn asks for approval on a clean send, names the outbound risk
-  after untrusted content, and auto-denies in an unattended schedule.
+  account inventory with a read-disabled default, `email_search` query → `TEXT`, the opaque id /
+  Message-ID / Reply-To in the read envelope, reply recipient validation and the live read switch,
+  reviewed from/body exactness including signature and stale-change rejection, explicit account
+  choice after a default change, explicit attachment download, and quota.
+- `approval.test.ts`: the real chat turn asks for approval on a clean send, shows the exact from and
+  complete body (signature included) before Allow, names the outbound risk after untrusted content,
+  honours a replayed approval without asking a human again, and auto-denies in an unattended
+  schedule.

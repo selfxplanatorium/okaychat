@@ -41,9 +41,10 @@ function message(error: unknown): string {
   return mapEmailError(error).message;
 }
 
-function syntheticSecrets(draft: Awaited<ReturnType<typeof parseAccountDraft>>): EmailSecrets {
+function syntheticSecrets(userId: string, draft: Awaited<ReturnType<typeof parseAccountDraft>>): EmailSecrets {
   const now = Date.now();
   return {
+    userId,
     account: {
       id: "draft",
       label: draft.address,
@@ -118,7 +119,7 @@ export const emailRoutes = new Hono<AppEnv>()
     if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? "Check the server settings." }, 400);
     try {
       const draft = await parseAccountDraft(c.get("user").id, raw);
-      const result = await verifyAccount(syntheticSecrets(draft));
+      const result = await verifyAccount(syntheticSecrets(c.get("user").id, draft));
       return c.json({ ok: true, folders: result.folders });
     } catch (error) {
       return c.json({ error: message(error) }, 422);

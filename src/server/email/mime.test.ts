@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  assertAddressList,
   assertHeaderValue,
   buildMime,
   decodeQuotedPrintable,
   decodeTransferEncoding,
   htmlToText,
+  isEmailAddress,
   parseMime,
   sanitizeFilename,
   sanitizeMime,
@@ -94,4 +96,34 @@ test("HTML mail becomes text, keeping link targets and dropping scripts", async 
   const text = await htmlToText('<html><body><script>alert(1)</script><p>Hello <a href="https://example.test/a">world</a></p><style>p{}</style></body></html>');
   assert.match(text, /Hello world \(https:\/\/example\.test\/a\)/);
   assert.doesNotMatch(text, /alert/);
+});
+
+test("one mailbox per address: lists, quotes, comments, and groups are refused", async () => {
+  for (const value of [
+    "a@b.test,c@d.test",
+    "a@b.test;c@d.test",
+    '"a"@b.test',
+    "a(b)@c.test",
+    "a b@c.test",
+    "a@b.test (comment)",
+    "Group: a@b.test;",
+    "a..b@c.test",
+    ".a@b.test",
+    "a@b..test",
+    "a@-b.test",
+    "a@[127.0.0.1]",
+    "a@b.test\r\nBcc: x@y.test",
+    "a@@b.test",
+    "a@",
+  ]) {
+    assert.equal(isEmailAddress(value), false, `${JSON.stringify(value)} must be refused`);
+    assert.throws(() => assertAddressList("To", [{ address: value }]));
+  }
+  for (const value of ["a.b+tag@example.test", "a_b-c@sub.example.test", "a@127.0.0.1"]) {
+    assert.equal(isEmailAddress(value), true, `${value} is one plain mailbox`);
+  }
+  await assert.rejects(
+    buildMime({ from: { address: "me@example.test" }, to: [{ address: "one@example.test, two@example.test" }], subject: "Hi", text: "body" }),
+    /invalid address/i,
+  );
 });

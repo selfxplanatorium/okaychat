@@ -42,8 +42,8 @@ export function InjectionBadge({ report, className }: { report?: InjectionReport
   );
 }
 
-export function ToolShell({ icon, label, running, error, injection, children }: { icon: ReactNode; label: ReactNode; running: boolean; error?: string; injection?: InjectionReport; children?: ReactNode }) {
-  const [open, setOpen] = useState(false);
+export function ToolShell({ icon, label, running, error, injection, children, defaultOpen = false }: { icon: ReactNode; label: ReactNode; running: boolean; error?: string; injection?: InjectionReport; children?: ReactNode; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="my-2 text-sm">
       <button type="button" onClick={() => setOpen(!open)} className="text-muted-foreground hover:text-foreground flex max-w-full items-center gap-2 transition-colors duration-(--motion-fast) ease-out-quart" disabled={!children}>

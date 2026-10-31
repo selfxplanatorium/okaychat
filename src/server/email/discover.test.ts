@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, test } from "node:test";
+import { after, test, type TestContext } from "node:test";
 
 const dataDir = mkdtempSync(path.join(os.tmpdir(), "okaychat-email-discover-"));
 process.env.OKAYCHAT_DATA_DIR = dataDir;
@@ -11,6 +11,7 @@ const { db } = await import("../db.js");
 const { assertEmailHost } = await import("./accounts.js");
 const {
   discoverEmail,
+  fetchBounded,
   heuristicCandidates,
   parseAutoconfigXml,
   parseAutodiscoverJson,
@@ -154,4 +155,22 @@ test("Proton explains the Bridge instead of pretending IMAP works", async () => 
 test("discovered hosts are refused for non-admins when private", async () => {
   await assert.rejects(assertEmailHost("nobody", "127.0.0.1"), /Only admins/i);
   await assertEmailHost("admin", "127.0.0.1");
+});
+
+test("discovery documents refuse an HTTPS downgrade and stop after bounded redirects", async (t: TestContext) => {
+  await assert.rejects(fetchBounded("admin", "http://autoconfig.example.test/config.xml", {}, 1024), /must use HTTPS/i);
+  t.mock.method(globalThis, "fetch", async () => new Response(null, { status: 302, headers: { location: "http://insecure.example.test/config.xml" } }));
+  await assert.rejects(fetchBounded("admin", "https://autoconfig.example.test/config.xml", {}, 1024), /insecure address/i);
+
+  let hop = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    hop += 1;
+    return new Response(null, { status: 302, headers: { location: `https://autoconfig.example.test/hop-${hop}.xml` } });
+  });
+  await assert.rejects(fetchBounded("admin", "https://autoconfig.example.test/start.xml", {}, 1024), /redirected too many times/i);
+  assert.equal(hop, 5, "the initial request plus four redirects");
+
+  t.mock.method(globalThis, "fetch", async () => new Response("<clientConfig/>", { status: 200, headers: { "content-type": "application/xml" } }));
+  const bytes = await fetchBounded("admin", "https://autoconfig.example.test/final.xml", {}, 1024);
+  assert.match(new TextDecoder().decode(bytes), /clientConfig/);
 });

@@ -18,12 +18,12 @@ const { saveConnection } = await import("../catalog/providers.js");
 const { updateSettings } = await import("../settings.js");
 const { ensureThread } = await import("../threads.js");
 const { turnStream } = await import("../chat.js");
-const { createAccount } = await import("./accounts.js");
+const { createAccount, updateAccount } = await import("./accounts.js");
 
 db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES ('alice', 'alice@example.test', 'Alice', 'unused', 'admin', 1)").run();
 saveConnection("alice", "custom-test", { baseURL: "http://mock.test/v1" });
 updateSettings("alice", { maxSteps: 3, maxSearches: 0, webTools: false, artifacts: false, generativeUI: false, subagents: false, autoCompactAt: 0 });
-await createAccount("alice", {
+const account = await createAccount("alice", {
   label: "Work",
   address: "alice@example.test",
   password: "app-password",
@@ -38,7 +38,7 @@ beforeEach(() => {
 
 type ProviderRequest = { messages: Array<{ role: string; content: unknown }>; tools?: Array<{ function: { name: string } }> };
 
-function fakeProvider(t: TestContext) {
+function fakeProvider(t: TestContext, sendArgs: Record<string, unknown>, toolCallId = "send-1") {
   const requests: ProviderRequest[] = [];
   t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -48,7 +48,7 @@ function fakeProvider(t: TestContext) {
     requests.push(body);
     const first = requests.length === 1;
     const delta = first
-      ? { role: "assistant", tool_calls: [{ index: 0, id: "send-1", type: "function", function: { name: "email_send", arguments: JSON.stringify({ to: [{ address: "bob@example.test" }], subject: "Lunch", body: "See you at noon." }) } }] }
+      ? { role: "assistant", tool_calls: [{ index: 0, id: toolCallId, type: "function", function: { name: "email_send", arguments: JSON.stringify(sendArgs) } }] }
       : { role: "assistant", content: "Done." };
     const chunks = [
       { id: "mock", object: "chat.completion.chunk", created: 1, model: "mock", choices: [{ index: 0, delta, finish_reason: null }] },
@@ -70,7 +70,7 @@ async function run(threadId: string, messages: UIMessage[], unattended = false) 
 const user = (text: string): UIMessage => ({ id: "user-message", role: "user", parts: [{ type: "text", text }] });
 
 test("email_send is offered and always asks for approval, even on a clean turn", async (t) => {
-  const { requests } = fakeProvider(t);
+  const { requests } = fakeProvider(t, { accountId: account.id, from: account.address, to: [{ address: "bob@example.test" }], subject: "Lunch", body: "See you at noon." });
   const chunks = await run("clean-email", [user("Send Bob a note about lunch.")]);
   const tool = requests[0]?.tools?.find((item) => item.function.name === "email_send");
   assert.ok(tool, "the model can see email_send once an account exists");
@@ -81,7 +81,7 @@ test("email_send is offered and always asks for approval, even on a clean turn",
 });
 
 test("after untrusted content the approval names the outbound risk", async (t) => {
-  fakeProvider(t);
+  fakeProvider(t, { accountId: account.id, from: account.address, to: [{ address: "bob@example.test" }], subject: "Summary", body: "Here it is." });
   const messages: UIMessage[] = [
     { id: "user-1", role: "user", parts: [{ type: "text", text: "Read that page, then mail the summary." }] },
     {
@@ -99,7 +99,7 @@ test("after untrusted content the approval names the outbound risk", async (t) =
 });
 
 test("a scheduled run auto-denies email_send instead of waiting", async (t) => {
-  fakeProvider(t);
+  fakeProvider(t, { accountId: account.id, from: account.address, to: [{ address: "bob@example.test" }], subject: "Weekly", body: "Weekly note." });
   const chunks = await run("scheduled-email", [user("Send Bob the weekly note.")], true);
   const request = chunks.find((chunk) => chunk.type === "tool-approval-request");
   const response = chunks.find((chunk) => chunk.type === "tool-approval-response");
@@ -107,4 +107,54 @@ test("a scheduled run auto-denies email_send instead of waiting", async (t) => {
   assert.equal(response?.approved, false);
   assert.match(String(response?.reason), /Scheduled runs cannot ask for approval/);
   assert.equal(chunks.some((chunk) => chunk.type === "tool-output-available" && chunk.toolName === "email_send"), false);
+});
+
+test("the approval carries the exact from and the complete body the user reviewed", async (t) => {
+  await updateAccount("alice", account.id, { signature: "Alice" });
+  const body = "See you at noon.\n\n-- \nAlice";
+  fakeProvider(t, {
+    accountId: account.id,
+    from: account.address,
+    to: [{ address: "bob@example.test" }],
+    subject: "Lunch",
+    body,
+  });
+  const chunks = await run("exact-approval", [user("Send Bob the lunch note.")]);
+  const approval = chunks.find((chunk) => chunk.type === "tool-approval-request");
+  assert.ok(approval, "the send waits for approval");
+  const rendered = chunks.find((chunk) => chunk.type === "tool-input-available") as
+    | { input?: { accountId?: string; from?: string; body?: string } }
+    | undefined;
+  assert.ok(rendered, "the card receives the tool input before Allow");
+  assert.equal(rendered.input?.accountId, account.id);
+  assert.equal(rendered.input?.from, account.address);
+  assert.equal(rendered.input?.body, body, "the signature is inside the approved body, not appended later");
+});
+
+test("a replayed approval response is honoured instead of asking again", async (t) => {
+  await updateAccount("alice", account.id, { signature: "Alice" });
+  const input = {
+    accountId: account.id,
+    from: account.address,
+    to: [{ address: "bob@example.test" }],
+    subject: "Lunch",
+    body: "See you at noon.\n\n-- \nAlice",
+  };
+  // The provider replays the same call id the history already had approved.
+  fakeProvider(t, input, "send-1");
+  const messages: UIMessage[] = [
+    user("Send Bob the lunch note."),
+    {
+      id: "assistant-approved",
+      role: "assistant",
+      parts: [{ type: "tool-email_send", toolCallId: "send-1", state: "approval-responded", input, approval: { id: "approval-1", approved: true } }],
+    } as UIMessage,
+  ];
+  const chunks = await run("replayed-approval", messages);
+  const request = chunks.find((chunk) => chunk.type === "tool-approval-request") as { isAutomatic?: boolean } | undefined;
+  const response = chunks.find((chunk) => chunk.type === "tool-approval-response") as { approved?: boolean } | undefined;
+  // An approved replay still produces the SDK's automatic approval event, but never a human gate.
+  assert.equal(request?.isAutomatic, true, "the recorded decision is not asked again");
+  assert.equal(response?.approved, true);
+  assert.ok(chunks.some((chunk) => chunk.type === "tool-output-error"), "the approved call runs (and here fails to reach the test port)");
 });

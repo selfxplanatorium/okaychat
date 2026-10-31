@@ -165,9 +165,9 @@ export function EmailReadCard({ args, result, status }: { args: Unknown; result?
   );
 }
 
-type OutgoingArgs = { to?: Array<{ address: string; name?: string }>; cc?: Array<{ address: string; name?: string }>; subject?: string; body?: string };
+type OutgoingArgs = { from?: string; to?: Array<{ address: string; name?: string }>; cc?: Array<{ address: string; name?: string }>; subject?: string; body?: string };
 
-function OutgoingPreview({ args, result, running, reply }: { args: Unknown; result: unknown; running: boolean; reply: boolean }) {
+function OutgoingPreview({ args, result, running, reply, approval }: { args: Unknown; result: unknown; running: boolean; reply: boolean; approval?: { approved?: boolean } }) {
   const a = (args ?? {}) as OutgoingArgs;
   const recipients = formatList([...(a.to ?? []), ...(a.cc ?? [])].map((entry) => entry.address));
   const r = typeof result === "object" && result ? (result as { accepted?: string[]; rejected?: string[] }) : undefined;
@@ -187,9 +187,13 @@ function OutgoingPreview({ args, result, running, reply }: { args: Unknown; resu
       running={running}
       error={typeof result === "string" ? result : undefined}
       label={label}
+      // While an outbound call waits for approval, the exact reviewed payload is open, not hidden
+      // behind a collapsed row. The approval controls render directly below this card.
+      defaultOpen={pending || approval !== undefined}
     >
       <div className="flex flex-col gap-2 text-xs">
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+          <dt className="text-muted-foreground">{t("email.toolFrom")}</dt><dd className="min-w-0 break-words">{a.from ?? ""}</dd>
           <dt className="text-muted-foreground">{t("email.toolTo")}</dt><dd className="min-w-0 break-words">{addresses(a.to)}</dd>
           {(a.cc ?? []).length ? <><dt className="text-muted-foreground">{t("email.toolCc")}</dt><dd className="min-w-0 break-words">{addresses(a.cc)}</dd></> : null}
           <dt className="text-muted-foreground">{t("email.toolSubject")}</dt><dd className="min-w-0 break-words">{a.subject ?? ""}</dd>
@@ -201,10 +205,10 @@ function OutgoingPreview({ args, result, running, reply }: { args: Unknown; resu
   );
 }
 
-export function EmailSendCard({ args, result, status }: { args: Unknown; result?: unknown; status: { type: string } | undefined }) {
-  return <OutgoingPreview args={args} result={result} running={status?.type === "running"} reply={false} />;
+export function EmailSendCard({ args, result, status, approval }: { args: Unknown; result?: unknown; status: { type: string } | undefined; approval?: { approved?: boolean } }) {
+  return <OutgoingPreview args={args} result={result} running={status?.type === "running"} reply={false} approval={approval} />;
 }
 
-export function EmailReplyCard({ args, result, status }: { args: Unknown; result?: unknown; status: { type: string } | undefined }) {
-  return <OutgoingPreview args={args} result={result} running={status?.type === "running"} reply />;
+export function EmailReplyCard({ args, result, status, approval }: { args: Unknown; result?: unknown; status: { type: string } | undefined; approval?: { approved?: boolean } }) {
+  return <OutgoingPreview args={args} result={result} running={status?.type === "running"} reply approval={approval} />;
 }

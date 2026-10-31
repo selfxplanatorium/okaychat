@@ -42,7 +42,7 @@ export function mapEmailError(error: unknown, context = "mail server"): EmailErr
   const message = value?.message ?? String(error);
   const text = `${code} ${message} ${value?.responseText ?? ""}`;
   if (/Only admins can connect/i.test(message)) return new EmailError("protocol", message, { cause: error });
-  if (value?.authenticationFailed || /AUTHENTICATIONFAILED|AUTHENTICATE failed|LOGIN failed|invalid credentials|authentication failed|auth failed|LOGINDISABLED/i.test(text)) {
+  if (value?.authenticationFailed || /AUTHENTICATIONFAILED|AUTHENTICATE failed|LOGIN failed|invalid credentials|authentication credentials invalid|authentication failed|auth failed|LOGINDISABLED|\b535\b/i.test(text)) {
     return new EmailError(
       "auth",
       `The ${context} rejected the sign-in for this account. Check the email address and password. Gmail, Outlook, iCloud, and Yahoo need an app password, not your normal password.`,

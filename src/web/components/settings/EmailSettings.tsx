@@ -1,6 +1,6 @@
 import { AlertCircleIcon, CheckCircle2Icon, Loader2Icon, MailIcon, PencilIcon, PlusIcon, StarIcon, TrashIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { EmailAccount, EmailAuthMethod, EmailDiscoveryAttempt, EmailDiscoveryResult, EmailDiscoveryServer } from "@shared/email";
+import type { EmailAccount, EmailDiscoveryAttempt, EmailDiscoveryResult, EmailDiscoveryServer } from "@shared/email";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -37,19 +37,19 @@ const CONFIDENCE_KEYS = {
 
 function useEmailData() {
   const [accounts, setAccounts] = useState<EmailAccount[]>([]);
-  const [methods, setMethods] = useState<EmailAuthMethod[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const refresh = () => {
-    Promise.all([api<EmailAccount[]>("/email/accounts"), api<EmailAuthMethod[]>("/email/auth-methods")])
-      .then(([list, authMethods]) => {
+    api<EmailAccount[]>("/email/accounts")
+      .then((list) => {
         setAccounts(list);
-        setMethods(authMethods);
         setError(null);
       })
-      .catch((e) => setError((e as Error).message));
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setLoading(false));
   };
   useEffect(refresh, []);
-  return { accounts, methods, error, refresh };
+  return { accounts, error, loading, refresh };
 }
 
 function StatusLine({ account }: { account: EmailAccount }) {
@@ -132,7 +132,7 @@ function sameServer(a: ServerDraft, b: ServerDraft) {
   return a.host === b.host && a.port === b.port && a.security === b.security && a.username === b.username;
 }
 
-function Wizard({ account, methods, onClose, onSaved }: { account?: EmailAccount; methods: EmailAuthMethod[]; onClose: () => void; onSaved: () => void }) {
+function Wizard({ account, onClose, onSaved }: { account?: EmailAccount; onClose: () => void; onSaved: () => void }) {
   const [step, setStep] = useState<"email" | "configure">(account ? "configure" : "email");
   const [email, setEmail] = useState(account?.address ?? "");
   const [label, setLabel] = useState(account?.label ?? "");
@@ -151,23 +151,33 @@ function Wizard({ account, methods, onClose, onSaved }: { account?: EmailAccount
   const [error, setError] = useState<string | null>(null);
   const emailRef = useRef<HTMLInputElement>(null);
   const statusRef = useRef<HTMLParagraphElement>(null);
+  const controllerRef = useRef<AbortController | null>(null);
+  const discoveringRef = useRef(false);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => (step === "email" && !account ? emailRef.current : statusRef.current)?.focus());
     return () => cancelAnimationFrame(frame);
   }, [step, account]);
 
-  const oauth = methods.find((method) => method.id === "oauth" && !method.available);
+  // The discovery stream can outlive a dismissed dialog; cancel it on unmount and drop its events.
+  useEffect(() => () => controllerRef.current?.abort(), []);
+
   const originalImap = account ? account.imap : null;
   const originalSmtp = account ? account.smtp : null;
   const serversDirty = !!account && (!sameServer(imap, originalImap!) || !sameServer(smtp, originalSmtp!));
 
+  const clearTest = () => setTest(null);
+
   const discover = async () => {
+    if (discoveringRef.current) return;
     if (!email.trim()) {
       setDiscoveryError(t("email.enterEmailFirst"));
       emailRef.current?.focus();
       return;
     }
+    discoveringRef.current = true;
+    const controller = new AbortController();
+    controllerRef.current = controller;
     setDiscovering(true);
     setDiscoveryError(null);
     setDiscovery(null);
@@ -179,6 +189,7 @@ function Wizard({ account, methods, onClose, onSaved }: { account?: EmailAccount
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim(), allowInsecureProbe }),
+        signal: controller.signal,
       });
       if (!response.ok) throw new Error((await response.text()) || t("email.discoveryFailed"));
       if (!response.body) throw new Error(t("email.discoveryFailed"));
@@ -209,8 +220,10 @@ function Wizard({ account, methods, onClose, onSaved }: { account?: EmailAccount
       }
       if (!completed) throw new Error(t("email.discoveryFailed"));
     } catch (e) {
-      setDiscoveryError((e as Error).message);
+      if (!controller.signal.aborted) setDiscoveryError((e as Error).message);
     } finally {
+      discoveringRef.current = false;
+      if (controllerRef.current === controller) controllerRef.current = null;
       setDiscovering(false);
     }
   };
@@ -233,7 +246,14 @@ function Wizard({ account, methods, onClose, onSaved }: { account?: EmailAccount
           method: "POST",
           json: { address: email.trim(), password, imap, smtp, allowInsecureProbe },
         });
-        setTest({ ok: true, message: t("email.testOk", { count: result.folders }) });
+        // A draft test is not a saved-account check: saving is a separate step and the account's
+        // own "last checked" status stays untouched until it is tested after saving.
+        setTest({
+          ok: true,
+          message: account
+            ? t("email.testDraftOk", { count: result.folders })
+            : t("email.testOk", { count: result.folders }),
+        });
       }
     } catch (e) {
       setTest({ ok: false, message: (e as Error).message });
@@ -276,8 +296,25 @@ function Wizard({ account, methods, onClose, onSaved }: { account?: EmailAccount
   };
 
   const setServer = (side: "imap" | "smtp", patch: Partial<ServerDraft>) => {
+    // Any change to an endpoint invalidates an earlier successful test.
+    clearTest();
     if (side === "imap") setImap((previous) => ({ ...previous, ...patch }));
     else setSmtp((previous) => ({ ...previous, ...patch }));
+  };
+
+  const enterManually = () => {
+    const value = email.trim();
+    if (!value) {
+      setDiscoveryError(t("email.enterEmailFirst"));
+      emailRef.current?.focus();
+      return;
+    }
+    setImap((previous) => ({ ...previous, username: value }));
+    setSmtp((previous) => ({ ...previous, username: value }));
+    setDiscovery(null);
+    setAttempts([]);
+    setDiscoveryError(null);
+    setStep("configure");
   };
 
   const serverFields = (side: "imap" | "smtp", value: ServerDraft, title: string) => (
@@ -323,6 +360,27 @@ function Wizard({ account, methods, onClose, onSaved }: { account?: EmailAccount
     </fieldset>
   );
 
+  const progressBlock = attempts.length > 0 || discovering ? (
+    <section className="bg-muted/40 flex flex-col gap-1 rounded-lg border p-3" aria-label={t("email.progressTitle")} role="log" aria-live="polite">
+      <h3 className="text-xs font-medium">{t("email.progressTitle")}</h3>
+      {attempts.length === 0 && discovering ? <p className="text-muted-foreground text-xs">{t("email.progressEmpty")}</p> : null}
+      <ul className="flex flex-col gap-1">
+        {attempts.map((attempt, index) => (
+          <li key={`${attempt.stage}-${index}`} className="flex min-w-0 items-start gap-2 text-xs">
+            <span className="text-muted-foreground w-28 shrink-0">{t(STAGE_KEYS[attempt.stage])}</span>
+            <span className="min-w-0 flex-1">
+              <span className="break-words">{attempt.label}</span>
+              {attempt.detail ? <span className="text-muted-foreground block break-words">{attempt.detail}</span> : null}
+            </span>
+            <span className={cn("shrink-0", attempt.status === "failed" && "text-warning")}>
+              {attempt.status === "running" ? <Loader2Icon aria-label={t("email.attemptRunning")} className="size-3.5 animate-spin motion-reduce:animate-none" /> : attempt.status === "ok" ? <CheckCircle2Icon aria-label={t("email.attemptOk")} className="text-success size-3.5" /> : <AlertCircleIcon aria-label={t("email.attemptFailed")} className="text-muted-foreground size-3.5" />}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  ) : null;
+
   return (
     <form
       className="flex flex-col gap-5"
@@ -344,13 +402,14 @@ function Wizard({ account, methods, onClose, onSaved }: { account?: EmailAccount
             <Input ref={emailRef} className="pointer-coarse:h-10" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t("email.emailPlaceholder")} autoComplete="email" required />
           </label>
           <label className="flex min-h-10 items-center gap-2 text-sm">
-            <Switch checked={allowInsecureProbe} onCheckedChange={setAllowInsecureProbe} aria-label={t("email.allowInsecure")} />
+            <Switch checked={allowInsecureProbe} onCheckedChange={(value) => { setAllowInsecureProbe(value); clearTest(); }} aria-label={t("email.allowInsecure")} />
             <span>{t("email.allowInsecure")}</span>
           </label>
           <p className="text-muted-foreground text-xs">{t("email.allowInsecureHint")}</p>
-          <p className="text-muted-foreground text-xs">{oauth?.note ?? t("email.appPasswordBody")}</p>
+          <p className="text-muted-foreground text-xs">{t("email.oauthNote")}</p>
           {discoveryError && <p role="alert" className="text-destructive text-xs">{discoveryError}</p>}
-          <Button type="button" variant="link" className="min-h-10 self-start px-0" onClick={() => setStep("configure")}>
+          {progressBlock}
+          <Button type="button" variant="link" className="min-h-10 self-start px-0" onClick={enterManually}>
             {t("email.enterManually")}
           </Button>
         </div>
@@ -364,26 +423,20 @@ function Wizard({ account, methods, onClose, onSaved }: { account?: EmailAccount
                 : t("email.manualSettings")}
           </p>
 
-          {(attempts.length > 0 || discovering) && (
-            <section className="bg-muted/40 flex flex-col gap-1 rounded-lg border p-3" aria-label={t("email.progressTitle")} role="log" aria-live="polite">
-              <h3 className="text-xs font-medium">{t("email.progressTitle")}</h3>
-              {attempts.length === 0 && discovering ? <p className="text-muted-foreground text-xs">{t("email.progressEmpty")}</p> : null}
-              <ul className="flex flex-col gap-1">
-                {attempts.map((attempt, index) => (
-                  <li key={`${attempt.stage}-${index}`} className="flex min-w-0 items-start gap-2 text-xs">
-                    <span className="text-muted-foreground w-28 shrink-0">{t(STAGE_KEYS[attempt.stage])}</span>
-                    <span className="min-w-0 flex-1">
-                      <span className="break-words">{attempt.label}</span>
-                      {attempt.detail ? <span className="text-muted-foreground block break-words">{attempt.detail}</span> : null}
-                    </span>
-                    <span className={cn("shrink-0", attempt.status === "failed" && "text-warning")}>
-                      {attempt.status === "running" ? <Loader2Icon aria-label={t("email.attemptRunning")} className="size-3.5 animate-spin motion-reduce:animate-none" /> : attempt.status === "ok" ? <CheckCircle2Icon aria-label={t("email.attemptOk")} className="text-success size-3.5" /> : <AlertCircleIcon aria-label={t("email.attemptFailed")} className="text-muted-foreground size-3.5" />}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+          {progressBlock}
+
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium">{t("email.emailLabel")}</span>
+            <Input
+              className="pointer-coarse:h-10"
+              type="email"
+              value={email}
+              onChange={(e) => { setEmail(e.target.value); clearTest(); }}
+              placeholder={t("email.emailPlaceholder")}
+              autoComplete="email"
+              required
+            />
+          </label>
 
           {discovery?.needsBridge || (discovery?.notes.length ?? 0) > 0 ? (
             <section className="flex flex-col gap-1" aria-label={t("email.notesTitle")}>
@@ -408,7 +461,7 @@ function Wizard({ account, methods, onClose, onSaved }: { account?: EmailAccount
                 className="pointer-coarse:h-10"
                 type="password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => { setPassword(e.target.value); clearTest(); }}
                 autoComplete="new-password"
                 placeholder={account ? t("email.passwordKeepPlaceholder") : t("email.passwordPlaceholder")}
                 required={!account}
@@ -442,7 +495,7 @@ function Wizard({ account, methods, onClose, onSaved }: { account?: EmailAccount
           </div>
 
           <div className="flex min-h-10 items-center gap-2 text-sm">
-            <Switch checked={allowInsecureProbe} onCheckedChange={setAllowInsecureProbe} aria-label={t("email.allowInsecure")} />
+            <Switch checked={allowInsecureProbe} onCheckedChange={(value) => { setAllowInsecureProbe(value); clearTest(); }} aria-label={t("email.allowInsecure")} />
             <span>{t("email.allowInsecure")}</span>
             <span className="text-muted-foreground text-xs">{t("email.allowInsecureHint")}</span>
           </div>
@@ -477,7 +530,7 @@ function Wizard({ account, methods, onClose, onSaved }: { account?: EmailAccount
 }
 
 export function EmailSettings() {
-  const { accounts, methods, error, refresh } = useEmailData();
+  const { accounts, error, loading, refresh } = useEmailData();
   const [wizard, setWizard] = useState<{ account?: EmailAccount } | null>(null);
   const [removing, setRemoving] = useState<EmailAccount | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -533,12 +586,17 @@ export function EmailSettings() {
           </Button>
         }
       >
-        {accounts.length === 0 ? (
+        {loading ? (
+          <div role="status" className="text-muted-foreground flex items-center gap-2 px-4 py-6 text-xs">
+            <Loader2Icon aria-hidden className="size-4 animate-spin motion-reduce:animate-none" />
+            {t("email.accountsLoading")}
+          </div>
+        ) : accounts.length === 0 ? (
           <div className="flex flex-col items-start gap-2 px-4 py-6">
             <MailIcon aria-hidden className="text-muted-foreground size-6" />
             <h3 className="text-sm font-medium">{t("email.emptyTitle")}</h3>
             <p className="text-muted-foreground max-w-prose text-xs">{t("email.emptyBody")}</p>
-            <p className="text-muted-foreground max-w-prose text-xs">{oauthNote(methods)}</p>
+            <p className="text-muted-foreground max-w-prose text-xs">{t("email.oauthNote")}</p>
             <Button type="button" size="sm" className="mt-1 min-h-10" data-command="email.addAccount" onClick={() => setWizard({})}>
               <PlusIcon className="size-4" /> {t("email.addFirstAccount")}
             </Button>
@@ -562,7 +620,7 @@ export function EmailSettings() {
         <div className="flex flex-col gap-2 px-4 py-3 text-xs">
           <p className="text-muted-foreground">{t("email.readHint")}</p>
           <p className="text-muted-foreground">{t("email.sendHint")}</p>
-          <p className="text-muted-foreground">{oauthNote(methods)}</p>
+          <p className="text-muted-foreground">{t("email.oauthNote")}</p>
         </div>
       </SettingsSection>
 
@@ -571,7 +629,7 @@ export function EmailSettings() {
 
       <Dialog open={wizard !== null} onOpenChange={(open) => { if (!open) setWizard(null); }}>
         <DialogContent className="sm:max-w-2xl">
-          {wizard && <Wizard key={wizard.account?.id ?? "new"} account={wizard.account} methods={methods} onClose={() => setWizard(null)} onSaved={refresh} />}
+          {wizard && <Wizard key={wizard.account?.id ?? "new"} account={wizard.account} onClose={() => setWizard(null)} onSaved={refresh} />}
         </DialogContent>
       </Dialog>
 
@@ -591,10 +649,4 @@ export function EmailSettings() {
       </Dialog>
     </SettingsPage>
   );
-}
-
-function oauthNote(methods: EmailAuthMethod[]): string {
-  const oauth = methods.find((method) => method.id === "oauth");
-  if (oauth?.note) return oauth.note;
-  return t("email.oauthNote");
 }

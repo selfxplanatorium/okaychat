@@ -6,6 +6,7 @@ import type { EmailAccount, EmailAccountInput, EmailAuthMethod, EmailSecurity, E
 import { decrypt, encrypt, newId } from "../crypto.js";
 import { db, tx } from "../db.js";
 import { BlockedAddressError, publicAddress } from "../public-fetch.js";
+import { isEmailAddress } from "./mime.js";
 
 // Email account storage. Endpoints and the password are encrypted with OKAYCHAT_SECRET. A password
 // is write-only: it is never part of the public account shape, never logged, and editing a server or
@@ -27,6 +28,8 @@ export interface StoredEmailServer {
 }
 
 export interface EmailSecrets {
+  /** The owning user, so every connection can re-check the live admin role. */
+  userId: string;
   account: EmailAccount;
   password: string;
   imap: StoredEmailServer;
@@ -77,7 +80,7 @@ const address = z
   .string()
   .trim()
   .max(MAX_ADDRESS)
-  .refine((value) => /^[^\s@<>()",;:\\[\]]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/.test(value), "Enter a valid email address.");
+  .refine(isEmailAddress, "Enter a valid email address.");
 
 const noHeader = (value: string) => !/[\r\n\0]/.test(value);
 
@@ -114,22 +117,39 @@ function checkServer(server: z.infer<typeof serverInput>): StoredEmailServer {
 
 /**
  * Non-admins may only reach public addresses, like provider base URLs and MCP servers. Admins may
- * point an account at a LAN mail server. The pre-check here is repeated at connection time where the
- * client exposes a lookup hook; a rebinding host can still change its answer between the two. See
- * docs/implementation/email.md#residual-risks.
+ * point an account at a LAN mail server. The role is read again on every connection, so an account
+ * saved while the user was an admin stops reaching a LAN host after a demotion.
  */
 export async function assertEmailHost(userId: string, host: string): Promise<void> {
-  if (mayUsePrivateHosts(userId)) return;
+  await emailConnectTarget(userId, host);
+}
+
+export interface EmailConnectTarget {
+  /** The address the client must connect to. For non-admins it is a checked, pinned IP literal. */
+  host: string;
+  /** The original hostname for TLS SNI and certificate verification; absent for IP literals. */
+  servername?: string;
+}
+
+/**
+ * Resolves a destination at connection time. Non-admins' answers are checked and the connection is
+ * pinned to the checked address, so the client's own resolver cannot be rebound between the check
+ * and the connect. Admins keep the hostname so a LAN name or IP works as before.
+ */
+export async function emailConnectTarget(userId: string, host: string): Promise<EmailConnectTarget> {
   const bare = host.replace(/^\[|\]$/g, "");
-  if (isIP(bare)) {
+  const literal = isIP(bare) !== 0;
+  if (mayUsePrivateHosts(userId)) return { host: bare, ...(literal ? {} : { servername: bare }) };
+  if (literal) {
     if (!publicAddress(bare)) throw new BlockedAddressError("Only admins can connect to local or private mail servers.");
-    return;
+    return { host: bare };
   }
   const addresses = await dns.lookup(bare, { all: true, verbatim: true }).catch(() => []);
   if (!addresses.length) throw new Error(`Could not resolve ${bare}.`);
   if (addresses.some(({ address: found }) => !publicAddress(found))) {
     throw new BlockedAddressError("Only admins can connect to local or private mail servers.");
   }
+  return { host: addresses[0]!.address, servername: bare };
 }
 
 /**
@@ -211,6 +231,7 @@ export function defaultAccount(userId: string): EmailAccount | null {
 export function accountSecrets(userId: string, id: string): EmailSecrets {
   const row = rowOf(userId, id);
   return {
+    userId,
     account: toPublic(row),
     password: decrypt(row.password_enc),
     imap: decryptServer(row.imap_enc),
