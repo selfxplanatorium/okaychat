@@ -3,6 +3,7 @@ import type { McpPromptInfo, McpServerInfo, Me, ModelInfo, Project, ProviderInfo
 import { api, prefetch } from "@/lib/api";
 import { setLibraryAccount } from "./library-cache";
 import { clearMessageEdits } from "./message-edits";
+import { useServices } from "./services";
 import { warmThreadCache } from "@/runtime/threadCache";
 
 interface DataState {
@@ -162,6 +163,8 @@ export function preloadData(userId: string) {
   setLibraryAccount(userId);
   // A new account must not inherit the previous one's edited-reply badges or open editor.
   if (preloaded?.userId !== userId) clearMessageEdits();
+  // The service registry is optional data: it starts alongside the rest and never holds up the chat.
+  useServices.getState().start(userId);
   // Once per signed-in user: a later status check for the same session must not refetch under a mounted shell.
   if (preloaded?.userId === userId) return;
   const promise = useData.getState().load();

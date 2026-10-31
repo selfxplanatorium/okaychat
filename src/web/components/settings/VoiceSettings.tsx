@@ -26,6 +26,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { currentLocale, t } from "@/i18n";
+import { ServiceAvailability } from "@/components/ServiceAvailability";
 import { formatBytes, formatNumber } from "@/i18n/format";
 import { Trans } from "@/i18n/react";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,8 @@ import { browserDictationSupported } from "@/speech/adapters";
 import { canRecord, RecorderDictationAdapter } from "@/speech/recorder";
 import { sttEngineOf, ttsEngineOf, useSpeech } from "@/speech/store";
 import { BrowserSpeechAdapter, browserSpeechSupported, primeAudio, ServerSpeechAdapter } from "@/speech/synthesis";
+import { markUsedServices } from "@/state/services";
+import { useServiceDown } from "@/components/chat/ServiceNotice";
 import { useData } from "@/state/data";
 import { SettingsPage, SettingsRow, SettingsSection, SettingsSlider } from "./SettingsUI";
 
@@ -66,6 +69,8 @@ export function VoiceSettings() {
 
   return (
     <SettingsPage title={t("voice.title")} description={t("voice.description")}>
+      {/* Server voices need the speech worker; cloud and browser engines keep working without it. */}
+      <ServiceAvailability id="speech" messageKey="services.voiceLocalNote" describeId="speech-service-availability" />
       <ReadAloud speech={speech} status={status} save={save} onStatus={setStatus} />
       <SpeechToText speech={speech} status={status} save={save} onStatus={setStatus} />
       <Privacy status={status} />
@@ -160,6 +165,10 @@ function Preview({ engine }: { engine: TtsEngineId }) {
   const [state, setState] = useState<"idle" | "loading" | "playing">("idle");
   const [error, setError] = useState<string | null>(null);
   const current = useRef<{ cancel: () => void } | null>(null);
+  // The server voice is the only preview that needs the speech worker. Disabled, never hidden, with the
+  // reason and fix reachable by keyboard through the note's own controls.
+  const speechDown = useServiceDown("speech");
+  const unavailable = engine === "local" && speechDown;
   useEffect(() => () => current.current?.cancel(), []);
   const play = () => {
     if (state !== "idle") {
@@ -168,6 +177,7 @@ function Preview({ engine }: { engine: TtsEngineId }) {
     }
     setError(null);
     setState("loading");
+    if (engine === "local") markUsedServices(["speech"]);
     const settings = () => useData.getState().settings?.speech?.tts ?? {};
     const adapter =
       engine === "browser"
@@ -189,7 +199,7 @@ function Preview({ engine }: { engine: TtsEngineId }) {
   };
   return (
     <div className="flex flex-col items-end gap-1">
-      <Button size="sm" variant="outline" onClick={play}>
+      <Button size="sm" variant="outline" onClick={play} disabled={unavailable} aria-describedby={unavailable ? "speech-service-availability" : undefined}>
         {state === "loading" ? <Loader2Icon className="animate-spin" /> : state === "playing" ? <SquareIcon /> : <PlayIcon />}
         {state === "idle" ? t("voice.playSample") : t("common.stop")}
       </Button>

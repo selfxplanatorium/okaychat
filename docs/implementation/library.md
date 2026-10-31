@@ -64,7 +64,9 @@ with `hidden`, so switching sections never refetches behind a skeleton.
   includes its references. Artifact versions remain part of chat history and are removed with the chat.
 
 The lazy navigation page provides grid/list layouts, filters, debounced search, infinite pagination
-with a Load more button, previews, download/open-chat actions, and confirmed deletion. Failed requests
+with a Load more button, previews, download/open-chat actions, and confirmed deletion. Everything here is served
+from SQLite and works without any sidecar; when the code sandbox is down the page shows a quiet note that new code
+execution is unavailable while saved outputs still download (`docs/implementation/service-health.md`). Failed requests
 show errors. Deletion refreshes storage usage. Tests exercise ownership of listings, previews, downloads
 and deletes, latest-version selection, name/size pagination, persistence, and quota reclamation.
 Test fixtures use distinct, deterministic creation timestamps so newest-first assertions do not depend

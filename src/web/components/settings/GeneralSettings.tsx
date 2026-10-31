@@ -7,7 +7,8 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { t } from "@/i18n";
 import { formatPercent } from "@/i18n/format";
-import { api } from "@/lib/api";
+import { useServices } from "@/state/services";
+import { ServiceAvailability } from "@/components/ServiceAvailability";
 import { useData } from "@/state/data";
 import { ModelSelect } from "../chat/ModelPicker";
 import { ImageServicesSettings } from "./ImageServicesSettings";
@@ -28,14 +29,12 @@ export function GeneralSettings() {
   const settings = useData((s) => s.settings);
   const update = useData((s) => s.updateSettings);
   const [prompt, setPrompt] = useState(settings?.systemPrompt ?? "");
-  const [sandbox, setSandbox] = useState<{ configured: boolean; reachable: boolean; error?: string } | null>(null);
   const [confirmEditReplies, setConfirmEditReplies] = useState(false);
   const [savingEditSetting, setSavingEditSetting] = useState(false);
   const [editSettingError, setEditSettingError] = useState<string | null>(null);
+  const sandboxStatus = useServices((s) => s.statuses?.find((status) => status.id === "sandbox"));
+  const sandbox = sandboxStatus ? { configured: sandboxStatus.state !== "unconfigured", reachable: sandboxStatus.state === "up" || sandboxStatus.state === "degraded", refuses: sandboxStatus.reasonKey === "refuses" } : null;
   useEffect(() => setPrompt(settings?.systemPrompt ?? ""), [settings?.systemPrompt]);
-  useEffect(() => {
-    api<{ configured: boolean; reachable: boolean; error?: string }>("/sandbox").then(setSandbox, () => setSandbox({ configured: false, reachable: false }));
-  }, []);
   if (!settings) return null;
   const editRepliesOn = settings.editAssistantMessages === true;
 
@@ -202,14 +201,16 @@ export function GeneralSettings() {
               : !sandbox.configured
               ? t("general.sandboxNotConfigured")
               : sandbox && !sandbox.reachable
-                ? sandbox.error
-                  ? t("general.sandboxRefuses", { error: sandbox.error })
+                ? sandbox.refuses
+                  ? t("general.sandboxIsolationFailed")
                   : t("general.sandboxUnreachable")
                 : t("general.sandboxDescription")}</span>
           }
           control={<Switch checked={settings.codeExecution && !!sandbox?.configured} disabled={!sandbox?.configured} onCheckedChange={(codeExecution) => update({ codeExecution })} aria-label={t("general.codeExecution")} aria-describedby="code-execution-description" />}
         />
       </SettingsSection>
+
+      <ServiceAvailability id="sandbox" />
 
       <ImageServicesSettings />
 

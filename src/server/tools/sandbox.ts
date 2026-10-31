@@ -11,6 +11,7 @@ import { assertStorage, QuotaError } from "../quota.js";
 import { scanForInjection, wrapUntrusted } from "../prompt-injection.js";
 import { getThread } from "../threads.js";
 import { resultPaths } from "../sandbox-paths.js";
+import { assertServiceAvailable, reportServiceFailure, reportServiceSuccess, serviceStatus, serviceUnavailable } from "../services.js";
 
 // run_code executes model-written Python and Bash in the sandbox container (sandbox/runner.py). Each chat
 // has its own workspace; the container wipes idle workspaces, so every produced file is copied into
@@ -44,6 +45,13 @@ Use it for calculations, data analysis, charts, file conversion, OCR, media proc
 
 export const sandboxConfigured = () => !!env.sandboxUrl && env.sandboxToken.length >= 32;
 
+/** The runner's /health (no token). 503 means it is up but refuses every run because isolation failed. Throws when unreachable. */
+export async function sandboxHealthy(signal: AbortSignal): Promise<boolean> {
+  const res = await fetch(`${env.sandboxUrl}/health`, { signal });
+  await res.body?.cancel().catch(() => {});
+  return res.ok;
+}
+
 /** Stable per chat. Hashed so the sandbox never sees user or thread ids. */
 export const workspaceId = (userId: string, threadId: string) => sha256(`sandbox:${userId}:${threadId}`).slice(0, 32);
 
@@ -69,7 +77,13 @@ export interface RunCodeResult extends Omit<RunnerResult, "files"> {
   injection?: InjectionReport;
 }
 
-async function call(route: string, init: RequestInit = {}, timeoutMs = 30_000, signal?: AbortSignal): Promise<Response> {
+/**
+ * One call to the runner. `guarded: false` is for cleanup (cancel, workspace delete) and for the health check,
+ * which must still reach a runner the registry has just marked down.
+ */
+async function call(route: string, init: RequestInit = {}, timeoutMs = 30_000, signal?: AbortSignal, guarded = true): Promise<Response> {
+  // A sandbox that just refused a connection or failed its probe answers at once instead of after a timeout.
+  if (guarded) assertServiceAvailable("sandbox");
   const timeout = AbortSignal.timeout(timeoutMs);
   let res: Response;
   try {
@@ -80,12 +94,22 @@ async function call(route: string, init: RequestInit = {}, timeoutMs = 30_000, s
     });
   } catch (error) {
     if (signal?.aborted) throw new Error("Cancelled.");
-    throw new Error(timeout.aborted ? "The code sandbox did not answer in time." : "The code sandbox is not reachable.", { cause: error });
+    if (timeout.aborted) throw new Error("The code sandbox did not answer in time.", { cause: error });
+    reportServiceFailure("sandbox");
+    throw serviceUnavailable("sandbox");
   }
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
+    // 503 is the runner saying it cannot run anything (no slot, isolation failed). That is a service outage
+    // with the registry's fix. A 400/409/422 is the model's request or its code, not the service.
+    if (res.status === 503) {
+      reportServiceFailure("sandbox");
+      throw serviceUnavailable("sandbox");
+    }
+    reportServiceSuccess("sandbox");
     throw new Error(body.error ? `Sandbox: ${body.error}` : `Sandbox request failed (${res.status}).`);
   }
+  reportServiceSuccess("sandbox");
   return res;
 }
 
@@ -190,7 +214,7 @@ export async function runCode(opts: { userId: string; threadId: string; language
   const job = newId("job");
   // Stop in the chat kills the run's processes. Without this the run would continue until its timeout.
   const cancel = () =>
-    void call(`/workspaces/${ws}/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job }) }).catch(() => {});
+    void call(`/workspaces/${ws}/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job }) }, 30_000, undefined, false).catch(() => {});
   opts.signal?.addEventListener("abort", cancel, { once: true });
   try {
     let res: Response;
@@ -238,7 +262,7 @@ export async function runCode(opts: { userId: string; threadId: string; language
  * from the caller (already ownership-checked) and the PDF never appears among the chat's files.
  */
 export async function convertToPdf(userId: string, threadId: string, name: string, data: Uint8Array, signal?: AbortSignal): Promise<Uint8Array> {
-  if (!sandboxConfigured()) throw new Error("Converting presentations needs the code sandbox, which this server does not have.");
+  if (!sandboxConfigured()) throw serviceUnavailable("sandbox");
   if (data.byteLength > RUNNER_MAX_FILE) throw new Error(`\`${name}\` is ${megabytes(data.byteLength)}; files over 50 MB cannot be converted.`);
   const ws = workspaceId(userId, threadId);
   const job = newId("job");
@@ -246,7 +270,7 @@ export async function convertToPdf(userId: string, threadId: string, name: strin
     const res = await call(`/workspaces/${ws}/convert?name=${encodeURIComponent(path.basename(name))}&job=${job}`, { method: "POST", body: Buffer.from(data) }, 180_000, signal);
     return new Uint8Array(await res.arrayBuffer());
   } catch (error) {
-    void call(`/workspaces/${ws}/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job }) }).catch(() => {});
+    void call(`/workspaces/${ws}/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job }) }, 30_000, undefined, false).catch(() => {});
     throw error;
   }
 }
@@ -254,7 +278,7 @@ export async function convertToPdf(userId: string, threadId: string, name: strin
 /** Best effort: a missing or stopped sandbox must not block deleting the chat. */
 export async function deleteSandboxWorkspace(userId: string, threadId: string) {
   if (!sandboxConfigured()) return;
-  await call(`/workspaces/${workspaceId(userId, threadId)}`, { method: "DELETE" }, 10_000).catch(() => {});
+  await call(`/workspaces/${workspaceId(userId, threadId)}`, { method: "DELETE" }, 10_000, undefined, false).catch(() => {});
 }
 
 export function sandboxTools(userId: string, threadId: string, signal?: AbortSignal, turn?: SandboxTurn): ToolSet {
@@ -311,14 +335,16 @@ const downloadHeaders = (name: string, mime: string, preview = false) => ({
 });
 
 export const sandboxRoutes = new Hono<AppEnv>()
+  // The registry's cached probe, so Settings → General and /api/services never probe the runner twice.
   .get("/sandbox", async (c) => {
     if (!sandboxConfigured()) return c.json({ configured: false, reachable: false });
-    // An unhealthy runner answers with the reason, for example that run isolation could not be set up.
-    const health = await fetch(`${env.sandboxUrl}/health`, { signal: AbortSignal.timeout(3000) }).then(
-      async (r) => ({ reachable: r.ok, error: r.ok ? undefined : ((await r.json().catch(() => ({}))) as { error?: string }).error }),
-      () => ({ reachable: false, error: undefined }),
-    );
-    return c.json({ configured: true, ...health });
+    const status = await serviceStatus("sandbox");
+    return c.json({
+      configured: true,
+      reachable: status?.state === "up" || status?.state === "degraded",
+      // The runner is up but refuses every run because its isolation check failed. No raw worker text.
+      refuses: status?.reasonKey === "refuses",
+    });
   })
   .get("/sandbox/:threadId/files", async (c) => {
     const user = c.get("user");

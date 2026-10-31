@@ -31,6 +31,7 @@ import {
   type ToolCallMessagePartComponent,
 } from "@assistant-ui/react";
 import { t, type MessageKey, type PlainMessageKey } from "@/i18n";
+import { parseErrorWire } from "@shared/errors";
 import { presentError, toolErrorPresentation } from "@/lib/error-presentation";
 import { formatDuration, formatList, formatNumber } from "@/i18n/format";
 import { Trans } from "@/i18n/react";
@@ -380,6 +381,10 @@ function ToolFallbackError({
   // Tool errors are wire JSON from the server. A historical raw string or object is not printed:
   // the card falls back to the translated generic tool failure, which is never silent.
   const presentation = isCancelled ? undefined : toolErrorPresentation(status.error) ?? presentError({ code: "tool_failed", message: "", retryable: false }, "tool");
+  // A service outage carries the server's authored fix (start the compose service, pick another engine).
+  // It is safe English, like the specific detail shown for a settings field; no worker text or URL.
+  const wire = isCancelled ? undefined : parseErrorWire(status.error);
+  const fix = wire?.code === "service_unavailable" && typeof wire.hint === "string" && wire.hint.trim().length <= 300 ? wire.hint.trim() : undefined;
 
   return (
     <div
@@ -397,6 +402,7 @@ function ToolFallbackError({
         <>
           <p className="aui-tool-fallback-error-reason break-words">{t(presentation.messageKey)}</p>
           <p className="aui-tool-fallback-error-hint text-muted-foreground text-xs break-words">{t(presentation.hintKey)}</p>
+          {fix && <p className="aui-tool-fallback-error-fix text-muted-foreground text-xs break-words">{fix}</p>}
         </>
       ) : null}
     </div>

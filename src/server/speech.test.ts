@@ -21,6 +21,7 @@ const { saveConnection } = await import("./catalog/providers.js");
 const { updateSettings, getSettings } = await import("./settings.js");
 const { purgeRecordings, setAdminSpeech, adminSpeech } = await import("./speech/config.js");
 const { speechRoutes } = await import("./speech/routes.js");
+const services = await import("./services.js");
 const { DEFAULT_ADMIN_SPEECH } = await import("../shared/speech.js");
 
 // ---- fake upstreams ----
@@ -291,6 +292,9 @@ test("Whisper on the server: worker call, admin switch, and the admin's model ch
 });
 
 test("admin speech status: reports the worker's actual device, model, and fallback; old payloads stay safe", async () => {
+  // The admin page forces a fresh probe, but production keeps the shared per-source cooldown; this test
+  // changes the fake worker twice in a row, so it permits both.
+  services.setServiceTimingForTests({ forceCooldownMs: 0 });
   reply = (s) => {
     if (s.url === "/worker/health") {
       return {

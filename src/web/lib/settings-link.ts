@@ -7,6 +7,7 @@ export type SettingsSection =
   | "general"
   | "account"
   | "memory"
+  | "email"
   | "providers"
   | "email"
   | "mcp"
@@ -38,6 +39,8 @@ export const SETTINGS_DESTINATIONS = {
   email: { section: "email" },
   memory: { section: "memory" },
   keyboard: { section: "keyboard" },
+  voice: { section: "voice" },
+  mcp: { section: "mcp" },
 } as const satisfies Record<string, SettingsDestination>;
 
 export type SettingsDestinationId = keyof typeof SETTINGS_DESTINATIONS;

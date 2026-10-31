@@ -6,6 +6,8 @@ export default {
   cmdAppLogout: "Log out",
   cmdAppReload: "Reload the app",
   cmdErrorCopyDetails: "Copy error details",
+  cmdServicesCheck: "Check service status again",
+  cmdServicesDismiss: "Dismiss the service notice",
   cmdNavNewChat: "New chat",
   cmdNavTemporaryChat: "Start or end a temporary chat",
   cmdNavPreviousChat: "Previous chat in the sidebar",

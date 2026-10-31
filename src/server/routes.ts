@@ -27,6 +27,7 @@ import { clearAudience, setAudience } from "./groups.js";
 import { getProject, projectRoutes } from "./projects.js";
 import { scheduleRoutes } from "./schedules.js";
 import { searchRoutes } from "./search.js";
+import { serviceRoutes } from "./services.js";
 import { shareRoutes } from "./shares.js";
 import { skillRoutes } from "./skills.js";
 import { settingsPatch } from "./settings-schema.js";
@@ -230,6 +231,9 @@ const api = new Hono<AppEnv>()
     const userId = c.get("user").id;
     return c.json({ used: storageUsed(userId), limit: userStorageLimit(userId), defaultLimit: env.storageLimit });
   })
+
+  // Service health for this account (sidecars cached for a few seconds, no background loop).
+  .route("/", serviceRoutes)
 
   // MCP servers
   .get("/mcp", (c) => c.json(mcpStore.visibleServers(c.get("user").id).map(serverInfo)))

@@ -54,6 +54,9 @@ import { exportThread } from "@/lib/thread-export";
 import type { ThreadCustom } from "@/runtime/RuntimeProvider";
 import { SharePanel } from "@/components/share/ShareButton";
 import { DeleteChatDialog } from "@/components/chat/DeleteChatDialog";
+import { useServiceDown } from "@/components/chat/ServiceNotice";
+import { ServiceAvailability } from "@/components/ServiceAvailability";
+import { markUsedServices } from "@/state/services";
 import { SelectionCheck, useSelectionKeys } from "@/components/ui/selection";
 import { runBatch } from "@/lib/selection";
 import { t, type PlainMessageKey } from "@/i18n";
@@ -769,6 +772,8 @@ const ThreadListItemMenu: FC<{
   const [sharing, setSharing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [rowError, setRowError] = useState<string | null>(null);
+  // PDF export renders on the server, so it is the one export that needs the browser worker.
+  const pdfDown = useServiceDown("browser");
   // Rename and the dialogs take focus themselves; returning it to the trigger would blur the rename field.
   const keepFocusRef = useRef(false);
   const rowRef = useRef<HTMLDivElement>(null);
@@ -907,9 +912,15 @@ const ThreadListItemMenu: FC<{
               <MenuItem onClick={() => void busyWhile(t("sidebar.exportChatFailed"), () => exportThread(remoteId!, "markdown", title))}>
                 <FileTextIcon /> {t("sidebar.markdown")}
               </MenuItem>
-              <MenuItem onClick={() => void busyWhile(t("sidebar.exportChatFailed"), () => exportThread(remoteId!, "pdf", title))}>
+              <MenuItem
+                aria-disabled={pdfDown || undefined}
+                aria-describedby={pdfDown ? "pdf-export-availability" : undefined}
+                onClick={pdfDown ? undefined : () => void busyWhile(t("sidebar.exportChatFailed"), () => { markUsedServices(["browser"]); return exportThread(remoteId!, "pdf", title); })}
+                className={pdfDown ? "text-muted-foreground" : undefined}
+              >
                 <FileDownIcon /> {t("sidebar.pdf")}
               </MenuItem>
+              {pdfDown && <ServiceAvailability id="browser" className="mx-1 mb-1" describeId="pdf-export-availability" messageKey="services.exportPdfNote" />}
             </MenuContent>
           </MenuSubmenuRoot>
           <MenuSeparator />

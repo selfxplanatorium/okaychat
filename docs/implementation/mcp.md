@@ -19,6 +19,13 @@ Per-server policy in `config.approval` (Settings → MCP servers → edit): `des
 - After untrusted content entered the turn — including server instructions, a tool description, project files, or a memory summary — a destructive or non-read-only tool is gated by the chat's `toolApproval` even when the server policy is `never`. The existing card names the risk. Sub-agents never receive destructive or non-read-only tools; scheduled runs auto-deny instead of waiting. See `prompt-injection.md`.
 - Text results go to the model inside a provenance envelope in `toModelOutput`; the card keeps `{ text, images }`. Descriptions are enveloped with their server and carry the static `okaychatExternalMetadata` marker, so a description alone taints the turn. Input-schema property descriptions stay raw (see `prompt-injection.md`).
 
+A server that cannot connect is named on the reply: `AssistantMetadata.unavailable` carries one entry per failed
+server (`service: "mcp"`, `name`, `mcpError` or `mcpNeedsAuth`, fix link to Settings → MCP servers). The server's own
+error text never leaves the server. The note is stored with the turn and replayed, but it does not pin the MCP tool
+block: `toolsForUser()` runs again on every request (including a continuation), so a server that reconnects can add
+its tools, and one that fails can drop them. That is the existing MCP lifecycle; only the sidecar `browser`/`sandbox`
+tools are held stable across a continuation. See `docs/implementation/service-health.md`.
+
 ## Resources, prompts, and app rendering
 
 `src/server/mcp/manager.test.ts` drives each feature against a fake Streamable HTTP server.

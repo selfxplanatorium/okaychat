@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { api, ApiError, apiErrorFromBody, isSessionUnauthorized, parseChatError, structuredResponseError } from "./api.js";
+import { api, ApiError, apiErrorFromBody, isSessionUnauthorized, parseChatError, responseError, structuredResponseError } from "./api.js";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
@@ -106,6 +106,31 @@ test("a network failure and an abort become safe ApiErrors", async () => {
     assert.equal(error.retryable, false);
     return true;
   });
+});
+
+test("a real service outage signals a registry refresh, and the health request never refreshes itself", async () => {
+  const dispatched: string[] = [];
+  (globalThis as unknown as { window?: { dispatchEvent: (event: Event) => boolean } }).window = {
+    dispatchEvent: (event) => { dispatched.push(event.type); return true; },
+  };
+  const wire = { error: "The speech worker is not reachable.", code: "service_unavailable", message: "The speech worker is not reachable.", retryable: true };
+  try {
+    const error = await responseError(Response.json(wire, { status: 503 }), "/speech/transcribe");
+    assert.equal(error.code, "service_unavailable");
+    assert.deepEqual(dispatched, ["okaychat:service-failed"], "a raw audio boundary still refreshes the registry");
+
+    dispatched.length = 0;
+    await responseError(Response.json(wire, { status: 503 }), "/services");
+    await responseError(Response.json(wire, { status: 503 }), "/services?refresh=1");
+    assert.deepEqual(dispatched, [], "the health request is not evidence and cannot loop");
+
+    dispatched.length = 0;
+    globalThis.fetch = (async () => Response.json({ services: [] })) as typeof fetch;
+    await api("/services");
+    assert.deepEqual(dispatched, [], "a successful health request raises nothing");
+  } finally {
+    delete (globalThis as unknown as { window?: unknown }).window;
+  }
 });
 
 test("a non-OK chat response is turned into parseable wire text", async () => {

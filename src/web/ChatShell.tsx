@@ -11,6 +11,7 @@ import { useDrawerSwipe } from "@/components/layout/use-drawer-swipe";
 import { useBackClose } from "@/hooks/use-back-close";
 import { Onboarding } from "@/components/Onboarding";
 import { ChatPrivacyMenu } from "@/components/chat/ChatPrivacyMenu";
+import { ServiceHealthWatcher, ServiceNotice, ServiceUsageWatcher } from "@/components/chat/ServiceNotice";
 import { StorageNotice } from "@/components/StorageNotice";
 import { ThemeEditorHost } from "@/components/settings/theme/ThemeEditorHost";
 import { RuntimeProvider } from "@/runtime/RuntimeProvider";
@@ -210,6 +211,8 @@ export function Shell({ userId }: { userId: string }) {
   return (
     <RuntimeProvider>
       <KeyboardShortcuts />
+      <ServiceHealthWatcher />
+      <ServiceUsageWatcher />
       {/* No fill mode: a held opacity animation makes this a backdrop root, which leaves the sticky
           composer's blur misplaced while the thread scrolls on mobile Chrome. */}
       <div className="animate-[fade-in_var(--motion-base)_var(--ease-out-quart)] bg-background safe-top safe-x flex h-full">
@@ -260,6 +263,7 @@ export function Shell({ userId }: { userId: string }) {
                 <ChatUrlSync />
                 <ChatHeader sidebarOpen={sidebarOpen} onToggle={() => setSidebarOpen(true)} />
                 <ChatPrivacyMenu />
+                <ServiceNotice />
                 <StorageNotice />
                 <ChatView />
               </Route>

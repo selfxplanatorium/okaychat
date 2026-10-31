@@ -1,5 +1,5 @@
 import type { PdfJobOptions, RenderResult } from "../../browser/api.js";
-import { browserConfigured, browserHealth, browserJob, browserToken } from "../browser.js";
+import { browserConfigured, browserJob, browserToken } from "../browser.js";
 
 // PDFs and screenshots are rendered by the browser worker (src/browser/), a separate container with Chromium and
 // no app data or secrets. This module holds the print helpers and the calls into it. See
@@ -12,11 +12,10 @@ export function rendererAvailable(): boolean {
   return browserConfigured();
 }
 
-/** At boot: create the worker token so the worker can start accepting jobs, and take a first health reading. */
+/** At boot: create the worker token so the worker can start accepting jobs. Never waits for the worker. */
 export function probeRenderer() {
   if (!browserConfigured()) return;
   browserToken();
-  browserHealth();
 }
 
 export interface ScreenshotOptions {

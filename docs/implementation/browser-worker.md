@@ -145,7 +145,13 @@ need host AppArmor changes. The per-user processes, firewall, and per-job slots 
 
 `src/server/browser.ts` (client, token), `documents/render.ts`, `documents/visual.ts`, `tools/scrapling.ts`.
 `browserConfigured()` checks `OKAYCHAT_BROWSER_URL`, falling back to `OKAYCHAT_DEV_BROWSER_URL` in development.
-Rendering helpers use that result; connection failures surface as tool errors.
+The service registry (`docs/implementation/service-health.md`) probes `/health` on demand, cached for 15 s, and
+splits `browser` from `scrapling`. A refused connection or a worker HTTP 503 is reported into that cache for the
+capability the route needed, so the next call fails fast with `service_unavailable` instead of waiting for its
+timeout, and the chat withholds `view_artifact` for that turn. `browserJob` maps `/v1/render` to `browser` and
+`/v1/fetch` to `scrapling`: a missing Chromium does not disable the Scrapling fallback, and a working fetch does not
+claim rendering works. A 422 (a page or format the job cannot use) and a cancellation are not outages. A job that runs
+out of time is not treated as an outage. Plain page reading never depends on this worker's renderer.
 
 ## Development
 

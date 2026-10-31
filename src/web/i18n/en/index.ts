@@ -21,6 +21,7 @@ import memory from "./memory";
 import projects from "./projects";
 import providers from "./providers";
 import schedules from "./schedules";
+import services from "./services";
 import settings from "./settings";
 import share from "./share";
 import shell from "./shell";
@@ -57,6 +58,7 @@ export const en = {
   projects,
   providers,
   schedules,
+  services,
   settings,
   share,
   shell,

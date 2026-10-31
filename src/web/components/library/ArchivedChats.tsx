@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useLocation } from "wouter";
 import type { ThreadSummary } from "@shared/types";
 import { DeleteChatDialog } from "@/components/chat/DeleteChatDialog";
+import { useServiceDown } from "@/components/chat/ServiceNotice";
+import { ServiceAvailability } from "@/components/ServiceAvailability";
 import { Button } from "@/components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
 import { FloatingSelectionBar, SelectionCheck, SelectModeToggle, useSelection, useSelectionKeys } from "@/components/ui/selection";
@@ -15,6 +17,7 @@ import { runBatch } from "@/lib/selection";
 import { cn } from "@/lib/utils";
 import { exportThread, type ThreadExportFormat } from "@/lib/thread-export";
 import { showChat, useData } from "@/state/data";
+import { markUsedServices } from "@/state/services";
 
 /** Appends the first error's message to a bulk failure summary. */
 const withReason = (message: string, error: unknown) =>
@@ -32,6 +35,8 @@ export function ArchivedChats({ tabs }: { tabs: ReactNode }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<ThreadSummary | null>(null);
   const requestId = useRef(0);
+  // PDF export renders on the server; Markdown and every other action here work without the worker.
+  const pdfDown = useServiceDown("browser");
 
   const load = useCallback(async () => {
     const id = ++requestId.current;
@@ -87,7 +92,11 @@ export function ArchivedChats({ tabs }: { tabs: ReactNode }) {
       showChat(navigate);
     });
 
-  const exportAs = (thread: ThreadSummary, format: ThreadExportFormat) => act(thread, () => exportThread(thread.id, format, thread.title));
+  const exportAs = (thread: ThreadSummary, format: ThreadExportFormat) =>
+    act(thread, () => {
+      if (format === "pdf") markUsedServices(["browser"]);
+      return exportThread(thread.id, format, thread.title);
+    });
 
   const order = useMemo(() => threads?.map((t) => t.id) ?? [], [threads]);
   const selection = useSelection(order);
@@ -214,9 +223,15 @@ export function ArchivedChats({ tabs }: { tabs: ReactNode }) {
                     <MenuItem onClick={() => void exportAs(thread, "markdown")}>
                       <FileTextIcon /> {t("library.exportMarkdown")}
                     </MenuItem>
-                    <MenuItem onClick={() => void exportAs(thread, "pdf")}>
+                    <MenuItem
+                      aria-disabled={pdfDown || undefined}
+                      aria-describedby={pdfDown ? "pdf-export-availability" : undefined}
+                      onClick={pdfDown ? undefined : () => void exportAs(thread, "pdf")}
+                      className={pdfDown ? "text-muted-foreground" : undefined}
+                    >
                       <FileDownIcon /> {t("library.exportPdf")}
                     </MenuItem>
+                    {pdfDown && <ServiceAvailability id="browser" className="mx-1 mb-1" describeId="pdf-export-availability" messageKey="services.exportPdfNote" />}
                     <MenuSeparator />
                     <MenuItem destructive onClick={() => setDeleting(thread)}>
                       <Trash2Icon /> {t("library.deletePermanently")}

@@ -7,6 +7,7 @@ import { assertPublicHost, BlockedAddressError, publicFetch, readCapped } from "
 import { injectionMetadata, scanForInjection, wrapUntrusted } from "../prompt-injection.js";
 import { scraplingFetch } from "./scrapling.js";
 import { SearchBudget } from "./search-budget.js";
+import { assertServiceAvailable } from "../services.js";
 
 // Free web access with no keys: SearXNG sidecar when configured, Brave's public HTML results otherwise.
 // DuckDuckGo's HTML endpoint often returns a bot wall; only its Lite endpoint is a fallback.
@@ -31,6 +32,8 @@ export interface SearchResult {
 }
 
 async function searxng(query: string, limit: number, signal?: AbortSignal): Promise<SearchResult[]> {
+  // A known outage skips directly to the public engines instead of spending another request timeout.
+  assertServiceAvailable("searxng");
   const url = `${SEARXNG_URL}/search?q=${encodeURIComponent(query)}&format=json&safesearch=1`;
   const res = await fetch(url, { signal: deadline(12_000, signal), headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`SearXNG ${res.status}`);

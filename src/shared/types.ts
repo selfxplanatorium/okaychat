@@ -1,5 +1,6 @@
 import type { UserAppearance } from "./appearance.js";
 import type { ImageServiceSettings } from "./image-services.js";
+import type { TurnUnavailable } from "./services.js";
 import type { SpeechSettings } from "./speech.js";
 import type { Spec } from "generative-frame/spec";
 
@@ -237,6 +238,11 @@ export interface AssistantMetadata {
   contextWindow?: number;
   durationMs?: number;
   compacted?: boolean;
+  /**
+   * Tools this reply did not offer because the service they need was down when it started. Shown under
+   * the reply and replayed on a continuation, so the tool list never changes inside one turn.
+   */
+  unavailable?: TurnUnavailable[];
 }
 
 export interface CompactionState {

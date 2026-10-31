@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { Health } from "../browser/api.js";
+import { assertServiceAvailable, reportServiceFailure, reportServiceSuccess, serviceUnavailable } from "./services.js";
 
 // Client for the browser worker (src/browser/, its own container in compose). The app keeps every ownership
 // check: it looks the bytes up, sends them with a fixed job type, and gets the result on the same request.
@@ -50,8 +51,20 @@ export class BrowserJobError extends Error {
   }
 }
 
+/**
+ * Rendering needs Chromium; page reading needs Scrapling. They are separate registry entries because one can
+ * fail while the other still works, so a job checks and reports only the capability it uses.
+ */
+const ROUTE_SERVICE: Record<string, "browser" | "scrapling"> = {
+  "/v1/render": "browser",
+  "/v1/fetch": "scrapling",
+};
+
 export async function browserJob<T>(route: string, body: unknown, timeoutMs: number, signal?: AbortSignal): Promise<T> {
-  if (!browserConfigured()) throw new BrowserJobError("The browser worker is not configured on this server (OKAYCHAT_BROWSER_URL).", false);
+  if (!browserConfigured()) throw serviceUnavailable("browser");
+  const service = ROUTE_SERVICE[route] ?? "browser";
+  // A worker that just failed to connect, or failed its health probe, answers at once instead of after a timeout.
+  assertServiceAvailable(service);
   const timeout = AbortSignal.timeout(timeoutMs);
   let res: Response;
   try {
@@ -64,25 +77,32 @@ export async function browserJob<T>(route: string, body: unknown, timeoutMs: num
   } catch (error) {
     if (signal?.aborted) throw new Error("Cancelled.");
     console.error("browser worker request failed:", (error as Error).message);
-    throw new BrowserJobError(timeout.aborted ? "The browser worker did not answer in time." : "The browser worker is not reachable.", false);
+    // A long job running out of time says nothing about the worker; a refused connection does. A refused
+    // connection is transport-level, so both capabilities of that worker are unreachable, not just this route.
+    if (timeout.aborted) throw new BrowserJobError("The browser worker did not answer in time.", false);
+    reportServiceFailure("browser");
+    reportServiceFailure("scrapling");
+    throw serviceUnavailable(service);
   }
   const value = (await res.json().catch(() => ({}))) as T & { error?: string; model?: boolean };
-  if (!res.ok) throw new BrowserJobError(value.error ?? `The browser worker failed (${res.status}).`, !!value.model);
+  if (!res.ok) {
+    // A cancellation stays a cancellation, and page/format validation (422) is the worker answering:
+    // neither is an outage. A 503 is the worker refusing work, which the registry should remember.
+    if (res.status === 499) throw new Error("Cancelled.");
+    if (res.status === 503) {
+      reportServiceFailure(service);
+      throw serviceUnavailable(service);
+    }
+    reportServiceSuccess(service);
+    throw new BrowserJobError(value.error ?? `The browser worker failed (${res.status}).`, !!value.model);
+  }
+  reportServiceSuccess(service);
   return value;
 }
 
-let health: { value: Health | null; at: number } = { value: null, at: 0 };
-
-/** The worker's last reported health, refreshed in the background at most every 30 s. */
-export function browserHealth(): Health | null {
-  if (browserConfigured() && Date.now() - health.at > 30_000) {
-    health = { ...health, at: Date.now() };
-    void fetch(`${browserUrl()}/health`, { signal: AbortSignal.timeout(3000) })
-      .then((r) => r.json() as Promise<Health>)
-      .then(
-        (value) => (health = { value, at: Date.now() }),
-        () => (health = { value: null, at: Date.now() }),
-      );
-  }
-  return health.value;
+/** The worker's /health report (no token). It answers 503 with the same body when it cannot take jobs. Throws when unreachable. */
+export async function fetchBrowserHealth(signal: AbortSignal): Promise<Health | null> {
+  const res = await fetch(`${browserUrl()}/health`, { signal });
+  const body = (await res.json().catch(() => null)) as Health | null;
+  return body && typeof body.ok === "boolean" ? body : null;
 }

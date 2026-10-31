@@ -71,6 +71,10 @@ An audit of the main interaction flows and six improvements that keep frequent a
 
 Deferred: a per-chat tools sheet (needs consolidated per-chat capability state), and hover-only message metadata (kept by design).
 
+## Pass 4: resilience (built)
+
+- **Graceful degradation**: one service registry with cached, single-flight probes (browser worker and its Scrapling fallback, speech worker, sandbox, SearXNG, and per-account Codex, providers, and email statuses that never contact a vendor), an authenticated `GET /api/services`, tools withheld per turn with the reason stored on the reply, fail-fast `service_unavailable` with a fix hint, a dismissible notice only after the service was actually used, explanatory panel states (Voice, Library, PDF export), and recovery on focus or a failed action. See `docs/implementation/service-health.md`.
+
 ## Known gaps
 
 - Voice calls (continuous spoken conversation with interruption, and Realtime speech-to-speech) are not built yet. Read aloud and dictation are.

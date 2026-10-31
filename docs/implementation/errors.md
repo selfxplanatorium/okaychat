@@ -35,7 +35,7 @@ extends `AppError` so every write path answers `storage_quota` (413) without a s
 | `timeout` | 504 | yes | `TimeoutError`, `ETIMEDOUT`, deadline messages |
 | `aborted` | 499 | no | `AbortError`, `ABORT_ERR`, a cancelled wait |
 | `tool_failed` | 500 | no | a tool boundary failure that is not a provider failure |
-| `service_unavailable` | 503 | yes | a required service (worker, sidecar) is down |
+| `service_unavailable` | 503 | yes | a required service (worker, sidecar) is down; raised by the registry's fail-fast guard, PDF export/creation, and the speech/sandbox clients, with a safe fix hint (`docs/implementation/service-health.md`) |
 | `storage_quota` | 413 | no | `assertStorage` and every write path |
 | `validation` | 400 | no | invalid input, unsupported file, model preconditions |
 | `not_found` | 404 | no | deleted or missing owned row |

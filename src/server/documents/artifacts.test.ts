@@ -142,7 +142,7 @@ test("import_document takes the caller's own run_code outputs by fileId, never a
   await assert.rejects(run("import_document", { file_id: "sbf_notes", id: "notes", title: "x" }), /notes\.txt/);
   // Without a sandbox there is no LibreOffice to turn a presentation into a PDF.
   insert.run("sbf_deck", USER, THREAD, "deck.pptx", "application/octet-stream", Buffer.from("PK"), 2, Date.now());
-  await assert.rejects(run("import_document", { file_id: "sbf_deck", id: "deck", title: "Deck" }), /needs the code sandbox/);
+  await assert.rejects(run("import_document", { file_id: "sbf_deck", id: "deck", title: "Deck" }), /code sandbox/i);
   assert.equal(artifactVersions(THREAD, "deck").length, 0);
 });
 

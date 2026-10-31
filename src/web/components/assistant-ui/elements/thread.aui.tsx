@@ -91,13 +91,15 @@ import { useLongPaste } from "@/components/chat/long-paste";
 import { parseAttachmentText, splitUserMessage, typedText } from "@/runtime/message-attachments";
 import { mcpAppOf } from "@/components/chat/McpApp";
 import { ReplyFiles } from "@/components/chat/reply-files";
+import { TurnServiceNote } from "@/components/chat/ServiceNotice";
 import { RetryWithModel } from "@/components/chat/retry-model";
 import { ChatErrorMessage } from "@/components/chat/message-error";
 import { EditableReplyTexts, EditedReplyBadge, ReplyEditAction, ReplyEditorFooter, ReplyEditorShell } from "@/components/chat/AssistantMessageEditor";
 import { editKey, useMessageEdits } from "@/state/message-edits";
 import { RetryStatus } from "@/components/chat/retry-status";
 import { ShortcutHints } from "@/components/chat/ShortcutHints";
-import { DictationSend, ReadAloudAutoPlay, useDictateLabel, useSendDictation, VoiceNotice } from "@/speech/ChatVoice";
+import { DictationSend, ReadAloudAutoPlay, SpeechServiceHint, useDictateLabel, useSendDictation, VoiceNotice } from "@/speech/ChatVoice";
+import { useLocalSpeechUnavailable } from "@/speech/adapters";
 import { useSpeech } from "@/speech/store";
 import { useThreadSync, type ThreadSync } from "@/state/thread-sync";
 import { useChatResearch } from "@/state/chat-research";
@@ -1004,6 +1006,7 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
           />
           <SyncNotice sync={sync} />
           <VoiceNotice />
+          <SpeechServiceHint />
           <ComposerAction blocked={!!sync} />
         </div>
       </ComposerPrimitive.AttachmentDropzone>
@@ -1036,6 +1039,9 @@ const ComposerAction: FC<{ blocked: boolean }> = ({ blocked }) => {
 
   const { ComposerToolbar } = useContext(ThreadComponentsContext);
   const dictateLabel = useDictateLabel();
+  // The local engine needs the speech worker. The button stays visible and disabled with the note below
+  // the composer, so the user sees why and can pick another engine.
+  const dictationUnavailable = useLocalSpeechUnavailable("stt");
 
   return (
     <div className="aui-composer-action-wrapper relative flex items-center justify-between gap-2">
@@ -1048,12 +1054,14 @@ const ComposerAction: FC<{ blocked: boolean }> = ({ blocked }) => {
           <AuiIf condition={(s) => s.composer.dictation == null}>
             <ComposerPrimitive.Dictate asChild>
               <TooltipIconButton
-                tooltip={dictateLabel}
+                tooltip={dictationUnavailable ? t("services.dictationUnavailable") : dictateLabel}
                 command="composer.dictate"
                 side="bottom"
                 type="button"
                 variant="ghost"
                 size="icon"
+                disabled={dictationUnavailable}
+                aria-describedby={dictationUnavailable ? "speech-service-availability" : undefined}
                 className="aui-composer-dictate text-muted-foreground hover:text-foreground size-7 pointer-coarse:size-9 rounded-full"
                 aria-label={t("thread.startVoiceInput")}
               >
@@ -1444,6 +1452,7 @@ const AssistantMessage: FC = () => {
         </MessagePrimitive.GroupedParts>
         {editing && <EditableReplyTexts />}
         {finished && <ReplyFiles parts={parts} verify={!entering} />}
+        {finished && <TurnServiceNote />}
         <StreamingIndicator waiting={waitingForFirstToken} />
         <MessageError />
         {editing ? <ReplyEditorFooter /> : <EditedReplyBadge />}
@@ -1466,6 +1475,9 @@ const AssistantActionBar: FC = () => {
   const { BranchAction } = useContext(ThreadComponentsContext);
   // Like the composer: a rerun from a cached copy would parent on what the cache showed.
   const sync = useThreadSync();
+  // A local server voice is disabled while the worker is down; StopSpeaking is never disabled, so an
+  // active playback can always be stopped.
+  const readAloudUnavailable = useLocalSpeechUnavailable("tts");
   return (
     <ActionBarPrimitive.Root
       hideWhenRunning
@@ -1502,8 +1514,12 @@ const AssistantActionBar: FC = () => {
       </AuiIf>
       <AuiIf condition={(s) => s.thread.capabilities.speech}>
         <AuiIf condition={(s) => s.message.speech == null}>
-          <ActionBarPrimitive.Speak asChild>
-            <TooltipIconButton tooltip={t("thread.readAloud")} command="message.readAloud">
+          <ActionBarPrimitive.Speak asChild disabled={readAloudUnavailable}>
+            <TooltipIconButton
+              tooltip={readAloudUnavailable ? t("services.readAloudUnavailable") : t("thread.readAloud")}
+              command="message.readAloud"
+              aria-describedby={readAloudUnavailable ? "speech-service-availability" : undefined}
+            >
               <Volume2Icon />
             </TooltipIconButton>
           </ActionBarPrimitive.Speak>
