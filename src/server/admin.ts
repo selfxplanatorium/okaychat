@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { AdminUser } from "../shared/types.js";
 import { requireAdmin, signupAllowed, type AppEnv } from "./auth.js";
 import { deleteConnection, listProviders, saveConnection } from "./catalog/providers.js";
+import { ollamaManagementRoutes } from "./catalog/ollama-routes.js";
 import { hashPassword, newId } from "./crypto.js";
 import { db } from "./db.js";
 import { createGroup, deleteGroup, listGroups, setAudience, updateGroup } from "./groups.js";
@@ -109,6 +110,7 @@ export const adminRoutes = new Hono<AppEnv>()
     if (!setPrompt(c.req.param("key"), body.data.value)) return c.json({ error: "Not found" }, 404);
     return c.json(listPrompts().find((p) => p.key === c.req.param("key")));
   })
+  .route("/admin/providers/ollama", ollamaManagementRoutes("admin"))
   .get("/admin/providers", async (c) => c.json(await listProviders(null)))
   .put("/admin/providers/:id", async (c) => {
     const body = providerInput.safeParse(await c.req.json());

@@ -5,7 +5,7 @@ import type { Spec } from "generative-frame/spec";
 
 // Types shared by server and web. Keep free of runtime imports.
 
-export type WireFormat = "openai-responses" | "openai-chat" | "anthropic" | "google";
+export type WireFormat = "openai-responses" | "openai-chat" | "anthropic" | "google" | "ollama";
 
 export interface ModelCost {
   input: number;
@@ -29,6 +29,8 @@ export interface ModelInfo {
   maxOutput: number;
   reasoning: boolean;
   reasoningEfforts?: string[];
+  /** Native named thinking levels for providers that take them (Ollama gpt-oss). */
+  thinkingLevels?: string[];
   toolCall: boolean;
   attachments: boolean;
   inputModalities: string[];
@@ -75,6 +77,49 @@ export interface ProviderConnectionInput {
   baseURL?: string;
   name?: string;
   enabled?: boolean;
+}
+
+/** A model installed on an Ollama daemon, from `/api/tags`, `/api/show`, and `/api/ps`. */
+export interface OllamaInstalledModel {
+  /** The native name, tag included (e.g. `qwen3:8b`). */
+  name: string;
+  size: number;
+  digest?: string;
+  modifiedAt?: string;
+  family?: string;
+  families?: string[];
+  parameterSize?: string;
+  quantization?: string;
+  context: number;
+  embeddingLength?: number;
+  /** Native `/api/show` capabilities; unknown values are kept as sent. */
+  capabilities: string[];
+  loaded: boolean;
+  sizeVram?: number;
+  expiresAt?: string;
+  /** Set when `/api/show` failed for this model; the row still lists its tag metadata. */
+  showError?: string;
+}
+
+/** What a health check reports for one Ollama connection. */
+export interface OllamaStatus {
+  url: string;
+  version?: string;
+  modelCount: number;
+  loadedCount: number;
+}
+
+export interface OllamaInventory {
+  status: OllamaStatus;
+  models: OllamaInstalledModel[];
+}
+
+/** One NDJSON line of `POST /api/pull`. */
+export interface OllamaPullProgress {
+  status: string;
+  digest?: string;
+  total?: number;
+  completed?: number;
 }
 
 export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";

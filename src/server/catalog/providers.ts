@@ -4,9 +4,10 @@ import { decrypt, encrypt } from "../crypto.js";
 import { db } from "../db.js";
 import { audienceIncludes, clearAudience, getAudience } from "../groups.js";
 import { USER_AGENT } from "../env.js";
-import { publicFetch } from "../public-fetch.js";
+import { assertPublicHost, BlockedAddressError, publicFetch } from "../public-fetch.js";
 import { CHATGPT, CHATGPT_BASE_URL, CHATGPT_NAME, chatgptConnected, chatgptModels } from "./chatgpt.js";
 import { getCatalog, isChatModelId, isSupportedProvider, resolveRoute, toModelInfo, unknownModel, type RawProvider } from "./models-dev.js";
+import { forgetOllamaModels, OLLAMA, OLLAMA_DEFAULT_URL, OLLAMA_DOC, OLLAMA_NAME, ollamaModels } from "./ollama.js";
 
 export const OPENCODE_GO = "opencode-go";
 const GO_MODELS_URL = "https://opencode.ai/inference/go/v1/models";
@@ -41,6 +42,20 @@ export interface Connection {
 export const mayUsePrivateHosts = (userId: string) =>
   (db.prepare("SELECT role FROM users WHERE id = ?").get(userId) as { role: string } | undefined)?.role === "admin";
 
+/**
+ * Non-admins may only point connections at the public internet, or any user could read the server's
+ * network through a provider or MCP URL. Requests are checked again at connection time.
+ */
+export async function privateUrlError(userId: string, url: string | undefined): Promise<string | null> {
+  if (!url || mayUsePrivateHosts(userId)) return null;
+  try {
+    await assertPublicHost(new URL(url));
+    return null;
+  } catch (error) {
+    return error instanceof BlockedAddressError ? "Only admins can use local or private network addresses." : (error as Error).message;
+  }
+}
+
 /** A user id, or null for the server-wide connections an admin shares with every user. */
 export type ConnectionScope = string | null;
 
@@ -68,7 +83,9 @@ function readScope(scope: ConnectionScope, viewer?: string): Map<string, Connect
           name: config.name,
           enabled: r.enabled === 1,
           ...(scope === null ? { shared: true } : {}),
-          ...(guarded && r.base_url ? { guarded: true } : {}),
+          // Ollama falls back to loopback even without a stored URL, so a non-admin row is guarded
+          // even when it predates the default being written.
+          ...(guarded && (r.base_url || r.provider_id === OLLAMA) ? { guarded: true } : {}),
         },
       ];
     }),
@@ -90,6 +107,16 @@ export function getConnection(userId: string, providerId: string): Connection | 
   return readConnections(userId).get(providerId);
 }
 
+/** The user's own row only, never a server-wide connection they can merely use. */
+export function getOwnConnection(userId: string, providerId: string): Connection | undefined {
+  return readScope(userId).get(providerId);
+}
+
+/** A server-wide connection as an admin sees it, for the Admin → Providers page. */
+export function getSharedConnection(providerId: string): Connection | undefined {
+  return readScope(null).get(providerId);
+}
+
 export function saveConnection(scope: ConnectionScope, providerId: string, input: ProviderConnectionInput) {
   if (providerId === CHATGPT) {
     // A ChatGPT plan belongs to one person. It is connected through the Codex login, never with a key.
@@ -97,8 +124,24 @@ export function saveConnection(scope: ConnectionScope, providerId: string, input
     input = { enabled: input.enabled };
   }
   const existing = readScope(scope).get(providerId);
+  // Ollama has a real default address, so the row always carries it (and a non-admin's row is
+  // unambiguously guarded). Other providers keep an absent or empty URL as before.
+  const fallbackURL = providerId === OLLAMA ? (existing?.baseURL ?? OLLAMA_DEFAULT_URL) : undefined;
   // An omitted key keeps the stored one, so the UI never needs to read secrets back.
-  const baseURL = input.baseURL === undefined ? existing?.baseURL : input.baseURL.trim() || undefined;
+  const baseURL = input.baseURL === undefined ? (existing?.baseURL ?? fallbackURL) : input.baseURL.trim() || fallbackURL;
+  if (providerId === OLLAMA && baseURL) {
+    // The native endpoints are appended to this value, so a query or fragment would produce a
+    // nonsense URL. Reject it here for both the user and admin routes.
+    let parsed: URL;
+    try {
+      parsed = new URL(baseURL);
+    } catch {
+      throw new HTTPException(400, { message: "Enter a valid Ollama address." });
+    }
+    if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || parsed.username || parsed.password || parsed.search || parsed.hash) {
+      throw new HTTPException(400, { message: "Enter an http or https Ollama address without a query or fragment." });
+    }
+  }
   // A kept key must never follow a new endpoint, or a hijacked session could redirect it to its own host.
   if (input.apiKey === undefined && existing?.apiKey && originOf(baseURL) !== originOf(existing.baseURL)) {
     throw new HTTPException(400, { message: "Enter the API key again when changing the base URL." });
@@ -127,6 +170,7 @@ export function saveConnection(scope: ConnectionScope, providerId: string, input
     ).run(scope, ...values);
   }
   liveCache.clear();
+  if (providerId === OLLAMA) forgetOllamaModels();
 }
 
 const originOf = (url: string | undefined) => {
@@ -142,6 +186,7 @@ export function deleteConnection(scope: ConnectionScope, providerId: string) {
     db.prepare("DELETE FROM shared_connections WHERE provider_id = ?").run(providerId);
     clearAudience("provider", providerId);
   } else db.prepare("DELETE FROM provider_connections WHERE user_id = ? AND provider_id = ?").run(scope, providerId);
+  if (providerId === OLLAMA) forgetOllamaModels();
 }
 
 const isCustom = (id: string) => id.startsWith("custom-");
@@ -161,6 +206,8 @@ export async function listProviders(scope: ConnectionScope): Promise<ProviderInf
   const connections = scope === null ? readScope(null) : readConnections(scope);
   const out: ProviderInfo[] = [];
   for (const provider of supportedProviders(catalog)) {
+    // Ollama is listed below from its native API, never from models.dev's generic entry.
+    if (provider.id === OLLAMA) continue;
     const conn = connections.get(provider.id);
     out.push({
       id: provider.id,
@@ -175,6 +222,25 @@ export async function listProviders(scope: ConnectionScope): Promise<ProviderInf
       baseURL: conn?.baseURL ?? provider.api,
       modelCount: Object.keys(provider.models).length,
       ...(scope === null && conn ? { audience: getAudience("provider", provider.id) } : {}),
+    });
+  }
+  {
+    const conn = connections.get(OLLAMA);
+    // Shown even when disconnected, so Ollama is discoverable next to the hosted providers.
+    const installed = conn?.enabled ? await ollamaModels(conn, { wait: false }) : [];
+    out.push({
+      id: OLLAMA,
+      name: OLLAMA_NAME,
+      doc: OLLAMA_DOC,
+      primary: false,
+      custom: false,
+      needsBaseURL: true,
+      connected: !!conn,
+      enabled: conn?.enabled ?? false,
+      shared: scope !== null && !!conn?.shared,
+      baseURL: conn?.baseURL ?? OLLAMA_DEFAULT_URL,
+      modelCount: installed.length,
+      ...(scope === null && conn ? { audience: getAudience("provider", OLLAMA) } : {}),
     });
   }
   if (scope !== null) {
@@ -295,11 +361,15 @@ async function modelsForCustom(conn: Connection): Promise<ModelInfo[]> {
 
 export async function listModels(userId: string): Promise<ModelInfo[]> {
   const catalog = await getCatalog();
-  const connections = [...readConnections(userId).values()].filter((c) => c.enabled && (c.apiKey || c.baseURL));
+  // Ollama needs no key and may use its default URL, so it is connected without either field.
+  const connections = [...readConnections(userId).values()].filter(
+    (c) => c.enabled && (c.providerId === OLLAMA || c.apiKey || c.baseURL),
+  );
   const lists = await Promise.all(
     connections.map((conn) => {
       if (isCustom(conn.providerId)) return modelsForCustom(conn);
       if (conn.providerId === CHATGPT) return chatgptModels(userId);
+      if (conn.providerId === OLLAMA) return ollamaModels(conn);
       const provider = catalog[conn.providerId];
       return provider ? modelsForProvider(provider, conn) : Promise.resolve([]);
     }),
@@ -314,6 +384,20 @@ export async function resolveModel(userId: string, ref: string): Promise<{ model
   if (!conn || !conn.enabled) throw new HTTPException(400, { message: `Provider ${providerId} is not connected` });
   const models = await listModels(userId);
   const model = models.find((m) => m.ref === ref);
-  if (!model) throw new HTTPException(400, { message: `Unknown model ${ref}` });
+  if (!model) {
+    if (providerId === OLLAMA) {
+      // listModels keeps the last good list when the daemon is down. For a model that was not found,
+      // ask once more so a stopped daemon or a broken address produces an actionable error.
+      try {
+        await ollamaModels(conn, { strict: true });
+      } catch (error) {
+        throw new HTTPException(400, { message: (error as Error).message });
+      }
+      throw new HTTPException(400, {
+        message: `Ollama cannot chat with ${ref.slice(OLLAMA.length + 1)}. Choose a model with the completion capability, or pull it in Settings → Providers → Ollama.`,
+      });
+    }
+    throw new HTTPException(400, { message: `Unknown model ${ref}` });
+  }
   return { model, conn };
 }

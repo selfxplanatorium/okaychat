@@ -101,6 +101,12 @@ export const COMMANDS: readonly CommandDef[] = [
   ...SETTINGS_SECTIONS.map((id): CommandDef => ({ id: `settings.${id}`, labelKey: SETTINGS_LABELS[id], group: "Settings", keys: [] })),
 
   { id: "ux.dismissHints", labelKey: "keyboard.cmdUxDismissHints", group: "General", keys: [], palette: false },
+  { id: "settings.ollamaTest", labelKey: "keyboard.cmdSettingsOllamaTest", group: "Settings", keys: [] },
+  { id: "settings.ollamaSave", labelKey: "keyboard.cmdSettingsOllamaSave", group: "Settings", keys: [] },
+  { id: "settings.ollamaRefresh", labelKey: "keyboard.cmdSettingsOllamaRefresh", group: "Settings", keys: [] },
+  { id: "settings.ollamaPull", labelKey: "keyboard.cmdSettingsOllamaPull", group: "Settings", keys: [] },
+  { id: "settings.ollamaCancelPull", labelKey: "keyboard.cmdSettingsOllamaCancelPull", group: "Settings", keys: [] },
+  { id: "settings.ollamaDelete", labelKey: "keyboard.cmdSettingsOllamaDelete", group: "Settings", keys: [] },
 ];
 
 export const COMMAND_GROUPS: readonly CommandGroup[] = ["General", "Navigation", "Chat", "Composer", "Messages", "Settings"];

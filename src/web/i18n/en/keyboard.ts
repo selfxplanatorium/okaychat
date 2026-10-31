@@ -174,4 +174,10 @@ export default {
   recordShortcut: "Press the new shortcut for {command}, Escape to cancel",
   addShortcut: "Add a shortcut for {command}",
   pressKeys: "Press keys…",
+  cmdSettingsOllamaTest: "Test the Ollama connection",
+  cmdSettingsOllamaSave: "Save the Ollama address",
+  cmdSettingsOllamaRefresh: "Refresh Ollama models",
+  cmdSettingsOllamaPull: "Focus the Ollama pull field",
+  cmdSettingsOllamaCancelPull: "Cancel the Ollama pull",
+  cmdSettingsOllamaDelete: "Delete the selected Ollama model",
 } as const;
