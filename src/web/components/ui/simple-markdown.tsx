@@ -1,6 +1,7 @@
 import Markdown from "react-markdown";
 import { isValidElement } from "react";
 import { CodeBlock } from "./code-block";
+import { ProtectedMarkdownImage } from "./protected-markdown-image";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { preprocessMarkdown } from "@/lib/markdown-math";
@@ -27,6 +28,8 @@ const components = {
     if (className?.includes("math-inline") && typeof children === "string") return <InlineMath tex={children} />;
     return <code className={className} {...props}>{children}</code>;
   },
+  // Public shares, artifact previews, and memory imports use the same remote-image consent policy.
+  img: ProtectedMarkdownImage,
 };
 
 const remarkPlugins = [remarkGfm, remarkMath];

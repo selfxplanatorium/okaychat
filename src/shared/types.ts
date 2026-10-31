@@ -506,8 +506,20 @@ export interface LibraryPage {
   nextCursor: string | null;
 }
 
+/** Heuristic spotlighting report attached to a tool result. Advisory only; never a security guarantee. */
+export interface InjectionFinding {
+  code: string;
+  reason: string;
+}
+
+export interface InjectionReport {
+  flagged: boolean;
+  findings: InjectionFinding[];
+}
+
 export type PromptKey =
   | "chat"
+  | "dataSafety"
   | "modelIdentity"
   | "date"
   | "artifacts"

@@ -1,4 +1,5 @@
 import { defineToolkit, type ToolCallMessagePartComponent } from "@assistant-ui/react";
+import type { InjectionReport } from "@shared/types";
 import { BookOpenIcon, BotIcon, CheckIcon, ChevronDownIcon, CircleDashedIcon, CircleMinusIcon, DownloadIcon, EyeIcon, FileTextIcon, GlobeIcon, ImageIcon, Loader2Icon, SearchIcon, SquareTerminalIcon, TelescopeIcon, TriangleAlertIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { ArtifactCard } from "@/components/artifacts/ArtifactCard";
@@ -20,13 +21,27 @@ const host = (url: string) => {
   }
 };
 
-function Favicon({ url }: { url: string }) {
-  const [failed, setFailed] = useState(false);
-  if (failed) return <GlobeIcon className="text-muted-foreground size-3.5 shrink-0" />;
-  return <img src={`https://icons.duckduckgo.com/ip3/${host(url)}.ico`} alt="" className="size-3.5 shrink-0 rounded-sm" onError={() => setFailed(true)} />;
+function Favicon() {
+  // A local icon, not a remote favicon service: a crafted host would otherwise be sent upstream.
+  return <GlobeIcon aria-hidden className="text-muted-foreground size-3.5 shrink-0" />;
 }
 
-function ToolShell({ icon, label, running, error, children }: { icon: ReactNode; label: ReactNode; running: boolean; error?: string; children?: ReactNode }) {
+/** Quiet advisory badge on the real tool row. Never a modal and never a block. */
+export function InjectionBadge({ report, className }: { report?: InjectionReport; className?: string }) {
+  if (!report?.flagged) return null;
+  return (
+    <span
+      data-slot="tool-injection-badge"
+      title={t("tools.injectionBadgeHint")}
+      className={cn("text-muted-foreground inline-flex max-w-full items-center gap-1.5 text-xs", className)}
+    >
+      <TriangleAlertIcon aria-hidden className="text-warning size-3.5 shrink-0" />
+      <span className="truncate">{t("tools.injectionBadge")}</span>
+    </span>
+  );
+}
+
+function ToolShell({ icon, label, running, error, injection, children }: { icon: ReactNode; label: ReactNode; running: boolean; error?: string; injection?: InjectionReport; children?: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="my-2 text-sm">
@@ -41,6 +56,7 @@ function ToolShell({ icon, label, running, error, children }: { icon: ReactNode;
         <span className={cn("truncate", running && "shimmer")}>{label}</span>
         {children && <ChevronDownIcon className={cn("size-3.5 shrink-0 transition-transform duration-(--motion-base) ease-out-expo", open && "rotate-180")} />}
       </button>
+      {injection?.flagged ? <InjectionBadge report={injection} className="mt-1 ml-6" /> : null}
       {error && <p className="text-muted-foreground animate-rise-in mt-1 ml-6 text-xs">{error}</p>}
       {open && children && <div className="animate-rise-in mt-2 ml-6">{children}</div>}
     </div>
@@ -51,19 +67,19 @@ export const toolkit = defineToolkit({
   web_search: {
     type: "backend",
     render: ({ args, result, status }) => {
-      const r = result as { engine?: string; results?: SearchResult[] } | undefined;
+      const r = result as { engine?: string; results?: SearchResult[]; injection?: InjectionReport } | undefined;
       const results = r?.results ?? [];
       const running = status?.type === "running";
       const error = status?.type === "incomplete" ? t("tools.searchFailed") : undefined;
       const query = (args as { query?: string })?.query ?? "";
       return (
-        <ToolShell icon={<SearchIcon className="size-4" />} running={running} error={error} label={running ? t("tools.searching", { query }) : t("tools.searched", { query, count: results.length })}>
+        <ToolShell icon={<SearchIcon className="size-4" />} running={running} error={error} injection={r?.injection} label={running ? t("tools.searching", { query }) : t("tools.searched", { query, count: results.length })}>
           {results.length > 0 && (
             <div className="grid gap-1.5 sm:grid-cols-2">
               {results.map((res) => (
                 <a key={res.url} href={res.url} target="_blank" rel="noreferrer" className="hover:bg-muted/60 flex flex-col gap-0.5 rounded-lg border px-2.5 py-2">
                   <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
-                    <Favicon url={res.url} /> {host(res.url)}
+                    <Favicon /> {host(res.url)}
                   </span>
                   <span className="line-clamp-1 font-medium">{res.title}</span>
                   {res.snippet && <span className="text-muted-foreground line-clamp-2 text-xs">{res.snippet}</span>}
@@ -79,7 +95,7 @@ export const toolkit = defineToolkit({
     type: "backend",
     render: ({ args, result, status }) => {
       const url = (args as { url?: string })?.url ?? "";
-      const r = result as { title?: string; via?: string; pages?: number; content?: string } | undefined;
+      const r = result as { title?: string; via?: string; pages?: number; content?: string; injection?: InjectionReport } | undefined;
       const running = status?.type === "running";
       const error = status?.type === "incomplete" ? t("tools.pageReadFailed") : undefined;
       return (
@@ -87,6 +103,7 @@ export const toolkit = defineToolkit({
           icon={<FileTextIcon className="size-4" />}
           running={running}
           error={error}
+          injection={r?.injection}
           label={
             <>
               <Trans
@@ -117,8 +134,13 @@ export const toolkit = defineToolkit({
   },
   read_artifact: {
     type: "backend",
-    render: ({ args, status }) => (
-      <ToolShell icon={<BookOpenIcon className="size-4" />} running={status?.type === "running"} label={t("tools.readArtifact", { id: (args as { id?: string })?.id ?? "" })} />
+    render: ({ args, result, status }) => (
+      <ToolShell
+        icon={<BookOpenIcon className="size-4" />}
+        running={status?.type === "running"}
+        injection={(result as { injection?: InjectionReport } | undefined)?.injection}
+        label={t("tools.readArtifact", { id: (args as { id?: string })?.id ?? "" })}
+      />
     ),
   },
   create_document: {
@@ -135,8 +157,13 @@ export const toolkit = defineToolkit({
   },
   read_document: {
     type: "backend",
-    render: ({ args, status }) => (
-      <ToolShell icon={<BookOpenIcon className="size-4" />} running={status?.type === "running"} label={t("tools.readDocument", { id: (args as { id?: string })?.id ?? "" })} />
+    render: ({ args, result, status }) => (
+      <ToolShell
+        icon={<BookOpenIcon className="size-4" />}
+        running={status?.type === "running"}
+        injection={(result as { injection?: InjectionReport } | undefined)?.injection}
+        label={t("tools.readDocument", { id: (args as { id?: string })?.id ?? "" })}
+      />
     ),
   },
   view_artifact: {
@@ -198,6 +225,7 @@ type RunCodeResult = {
   durationMs: number;
   files: RunFile[];
   tooLarge?: Array<{ path: string; size: number }>;
+  injection?: InjectionReport;
 };
 
 function RunCodeCard({ args, result, running }: { args: unknown; result: unknown; running: boolean }) {
@@ -217,7 +245,7 @@ function RunCodeCard({ args, result, running }: { args: unknown; result: unknown
           : t("tools.exited", { language, code: r.exitCode ?? "", seconds });
   return (
     <div className="my-2">
-      <ToolShell icon={<SquareTerminalIcon className="size-4" />} running={running} error={failed && typeof result === "string" ? result : undefined} label={label}>
+      <ToolShell icon={<SquareTerminalIcon className="size-4" />} running={running} error={failed && typeof result === "string" ? result : undefined} injection={r?.injection} label={label}>
         <div className="flex flex-col gap-2">
           {a.code && <pre className="bg-muted/40 max-h-80 overflow-auto rounded-lg p-3 font-mono text-xs">{a.code}</pre>}
           {r?.stdout && <pre className="max-h-80 overflow-auto rounded-lg border p-3 font-mono text-xs whitespace-pre-wrap">{r.stdout}</pre>}
@@ -273,7 +301,7 @@ function GeneratedImage({ args, result, running }: { args: unknown; result: unkn
   );
 }
 
-type SubagentProgress = { model: string; status: "running" | "done"; text: string; steps: number; tools: string[]; cost?: number };
+type SubagentProgress = { model: string; status: "running" | "done"; text: string; steps: number; tools: string[]; cost?: number; injection?: InjectionReport };
 
 function SubagentCard({ args, result, running }: { args: unknown; result: unknown; running: boolean }) {
   const [open, setOpen] = useState(false);
@@ -306,6 +334,7 @@ function SubagentCard({ args, result, running }: { args: unknown; result: unknow
         </span>
         <ChevronDownIcon className={cn("text-muted-foreground size-4 shrink-0 transition-transform duration-(--motion-base) ease-out-expo", open && "rotate-180")} />
       </button>
+      <InjectionBadge report={r?.injection} className="px-3 pb-2 -mt-0.5" />
       {open && (
         <div className="animate-rise-in flex flex-col gap-3 border-t px-3 py-3">
           {a.task && (
@@ -337,6 +366,7 @@ type ResearchProgress = {
   searches: number;
   limited?: "searches" | "steps";
   cost?: number;
+  injection?: InjectionReport;
 };
 
 function QuestionStatus({ status }: { status: ResearchQuestion["status"] }) {
@@ -389,6 +419,7 @@ function ResearchCard({ result, running }: { result: unknown; running: boolean }
         </span>
         <ChevronDownIcon className={cn("text-muted-foreground size-4 shrink-0 transition-transform duration-(--motion-base) ease-out-expo", open && "rotate-180")} />
       </button>
+      <InjectionBadge report={r?.injection} className="px-3 pb-2 -mt-0.5" />
       {open && r && (
         <div className="animate-rise-in flex flex-col gap-4 border-t px-3 py-3">
           {r.objective && (
@@ -439,7 +470,7 @@ function ResearchCard({ result, running }: { result: unknown; running: boolean }
                 {r.sources.map((source) => (
                   <li key={source.url} className="min-w-0">
                     <a href={source.url} target="_blank" rel="noreferrer" className="hover:bg-muted/60 flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-xs">
-                      <Favicon url={source.url} />
+                      <Favicon />
                       <span className="truncate">{source.title}</span>
                       <span className="text-muted-foreground shrink-0">{host(source.url)}</span>
                     </a>

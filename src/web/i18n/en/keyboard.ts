@@ -38,6 +38,7 @@ export default {
   cmdChatCompactNow: "Compact this chat now",
   cmdChatTrimContext: "Trim earlier messages",
   cmdUxDismissHints: "Dismiss shortcut hints",
+  cmdChatLoadImage: "Load a remote image in the chat",
   cmdComposerModel: "Choose model",
   cmdComposerEffort: "Reasoning effort",
   cmdComposerSearch: "Turn web search on or off",

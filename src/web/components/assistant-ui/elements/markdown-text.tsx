@@ -17,20 +17,17 @@ import {
   memo,
   useMemo,
   useRef,
-  useState,
 } from "react";
-import { ImageOffIcon } from "lucide-react";
 import type { TextMessagePartProps } from "@assistant-ui/react";
 
 import { CodeBlock } from "@/components/ui/code-block";
 import { InlineMath, MathBlock } from "@/components/ui/math";
 import { MermaidDiagram } from "@/components/ui/mermaid-diagram";
+import { ProtectedMarkdownImage } from "@/components/ui/protected-markdown-image";
 import { keepLineBreaks, preprocessMarkdown } from "@/lib/markdown-math";
 import { cn } from "@/lib/utils";
 import { useCurrentThreadId } from "@/state/thread-meta";
-import { safeHref } from "../utils/href";
 import { MarkdownTable } from "./markdown-table";
-import { t } from "@/i18n";
 
 type MarkdownTextProps = Partial<TextMessagePartProps> & {
   components?: Parameters<typeof memoizeMarkdownComponents>[0];
@@ -119,58 +116,11 @@ const MarkdownTextImpl: FC<MarkdownTextProps> = ({
 
 export const MarkdownText = memo(MarkdownTextImpl);
 
-// A model-written image URL often 404s or is blocked. The browser's broken
-// icon and wrapped alt text read as a layout bug, so a failed load becomes a
-// compact chip. The error is keyed to its src so a new URL retries the image.
-const MarkdownImage: FC<ComponentProps<"img">> = ({
-  className,
-  src: rawSrc,
-  alt,
-  onError,
-  ...props
-}) => {
+// App-owned images load; remote images wait for an explicit Load. A failed load becomes a compact chip
+// instead of the browser's broken icon. Sandbox links are rewritten to their stored copy first.
+const MarkdownImage: FC<ComponentProps<"img">> = ({ src: rawSrc, ...props }) => {
   const src = useSandboxUrl(typeof rawSrc === "string" ? rawSrc : undefined).url;
-  const [errorSrc, setErrorSrc] = useState<string | null>(null);
-  const failed = errorSrc !== null && errorSrc === (src ?? "");
-
-  if (!failed) {
-    return (
-      <img
-        src={src}
-        alt={alt}
-        className={className}
-        onError={(e) => {
-          setErrorSrc(src ?? "");
-          onError?.(e);
-        }}
-        {...props}
-      />
-    );
-  }
-
-  const label = alt?.trim() || t("thread.imageUnavailable");
-  const href = safeHref(src);
-  const isWebUrl = href !== undefined && /^https?:\/\//i.test(href);
-
-  return (
-    <span
-      data-slot="markdown-image-fallback"
-      className="bg-muted/50 border-border text-muted-foreground inline-flex max-w-full items-center gap-2 rounded-lg border px-3 py-2 align-middle text-sm"
-    >
-      <ImageOffIcon aria-hidden className="size-4 shrink-0" />
-      <span className="min-w-0 truncate">{label}</span>
-      {isWebUrl && (
-        <a
-          href={href}
-          target="_blank"
-          rel="noreferrer noopener"
-          className="text-foreground shrink-0 underline-offset-4 hover:underline"
-        >
-          {t("thread.openLink")}
-        </a>
-      )}
-    </span>
-  );
+  return <ProtectedMarkdownImage {...props} src={src} />;
 };
 
 const MarkdownLink: FC<ComponentProps<"a">> = ({ className, href, ...props }) => {

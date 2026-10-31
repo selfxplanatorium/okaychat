@@ -1,9 +1,10 @@
 import { generateText, stepCountIs, streamText, tool, type ToolSet, type UIMessage } from "ai";
 import { z } from "zod";
-import type { ModelInfo, PromptKey, ReasoningEffort, TokenUsage } from "../shared/types.js";
+import type { InjectionReport, ModelInfo, PromptKey, ReasoningEffort, TokenUsage } from "../shared/types.js";
 import type { Connection } from "./catalog/providers.js";
 import { createModel } from "./llm.js";
 import { promptText } from "./prompts.js";
+import { scanForInjection, wrapUntrusted } from "./prompt-injection.js";
 import { SearchShare, type SearchBudget, type StepBudget } from "./tools/search-budget.js";
 import { webTools } from "./tools/web.js";
 import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "./usage.js";
@@ -56,6 +57,8 @@ export interface ResearchProgress {
   cost: number;
   /** Final output only: what the chat model writes the report from. */
   findings?: string;
+  /** Advisory scan of the final findings, shown as a quiet badge on the research card. */
+  injection?: InjectionReport;
 }
 
 interface Stage {
@@ -149,7 +152,7 @@ export const hasResearch = (messages: UIMessage[]) => messages.some((message) =>
 export function researchModelOutput(output: unknown): string {
   const findings = output && typeof output === "object" ? (output as { findings?: unknown }).findings : undefined;
   if (typeof findings !== "string" || !findings) return "Deep research was stopped before it finished. Tell the user it did not complete.";
-  return `${promptText("researchReport")}\n\n<findings>\n${findings}\n</findings>`;
+  return `${promptText("researchReport")}\n\n${wrapUntrusted(findings, { kind: "research", name: "deep research findings" }).text}`;
 }
 
 /**
@@ -381,6 +384,8 @@ export async function runResearch(o: ResearchOptions): Promise<ResearchProgress>
     ]
       .filter(Boolean)
       .join("\n\n");
+    const injection = scanForInjection(progress.findings);
+    if (injection.flagged) progress.injection = injection;
     emit(true);
     return progress;
   } finally {

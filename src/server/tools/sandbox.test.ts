@@ -92,8 +92,15 @@ test("run_code authenticates, copies the owner's uploads, and hides download URL
   const stored = db.prepare("SELECT size FROM sandbox_files WHERE user_id = 'alice' AND thread_id = 'thr_alice' AND path = 'out/plot.png'").get() as { size: number } | undefined;
   assert.equal(stored?.size, 21);
   const modelView = await tool.toModelOutput!({ toolCallId: "1", input: {}, output });
-  assert.doesNotMatch(JSON.stringify(modelView), /api\/sandbox/);
-  assert.deepEqual((modelView as { value: { files: unknown } }).value.files, [{ path: "out/plot.png", size: 21, fileId: output.files[0].fileId }]);
+  assert.equal(modelView.type, "text");
+  const value = (modelView as { value: string }).value;
+  assert.doesNotMatch(value, /api\/sandbox/);
+  const end = value.lastIndexOf("\n</untrusted_data>");
+  const body = JSON.parse(value.slice(value.lastIndexOf("\n", end - 1) + 1, end)) as string;
+  const parsed = JSON.parse(body) as { stdout: string; files: unknown };
+  assert.equal(parsed.stdout, "42\n");
+  assert.deepEqual(parsed.files, [{ path: "out/plot.png", size: 21, fileId: output.files[0].fileId }]);
+  assert.match(value, /kind="code_output"/);
 });
 
 test("another user's file_id is rejected before anything reaches the sandbox", async () => {
@@ -193,9 +200,13 @@ test("an output over the 50 MB transfer limit gets a size message instead of a d
   assert.match(output.storageWarning ?? "", /video\.mp4 \(73\.0 MB\).*50 MB/);
   // The oversized file is never downloaded from the runner.
   assert.ok(!calls.some((c) => c.url.includes("video.mp4")));
-  const modelView = JSON.stringify(await tool.toModelOutput!({ toolCallId: "big", input: {}, output }));
-  assert.match(modelView, /"tooLarge":\[\{"path":"video.mp4"/);
-  assert.doesNotMatch(modelView, /api\/sandbox/);
+  const modelView = await tool.toModelOutput!({ toolCallId: "big", input: {}, output });
+  const raw = JSON.stringify(modelView);
+  assert.doesNotMatch(raw, /api\/sandbox/);
+  const value = (modelView as { value: string }).value;
+  const end = value.lastIndexOf("\n</untrusted_data>");
+  const parsed = JSON.parse(JSON.parse(value.slice(value.lastIndexOf("\n", end - 1) + 1, end))) as { tooLarge: unknown };
+  assert.deepEqual(parsed.tooLarge, [{ path: "video.mp4", size: 73 * 1024 * 1024 }]);
 });
 
 test("stopping the chat cancels exactly the run's job, even while it queues", async () => {

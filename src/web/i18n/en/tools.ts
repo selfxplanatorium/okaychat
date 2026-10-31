@@ -72,6 +72,8 @@ export default {
   toolUsed: "Used tool: {tool}",
   unserializable: "[Unserializable value]",
   result: "Result:",
+  injectionBadge: "Contains instructions aimed at the assistant",
+  injectionBadgeHint: "Heuristic warning. The result is treated as data, not instructions.",
   cancelledReason: "Cancelled reason:",
   errorLabel: "Error:",
   // Approvals

@@ -8,7 +8,7 @@ import {
   type FC,
   type PropsWithChildren,
 } from "react";
-import { ChevronDownIcon, LoaderIcon } from "lucide-react";
+import { ChevronDownIcon, LoaderIcon, TriangleAlertIcon } from "lucide-react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { useScrollLock } from "@assistant-ui/react";
 import { cn } from "@/lib/utils";
@@ -97,12 +97,15 @@ function ToolGroupRoot({
 function ToolGroupTrigger({
   count,
   active = false,
+  warning = false,
   label = t("thread.toolCalls", { count }),
   className,
   ...props
 }: React.ComponentProps<typeof CollapsibleTrigger> & {
   count: number;
   active?: boolean;
+  /** A folded result inside contains instruction-like text; keep the advisory visible above the fold. */
+  warning?: boolean;
   label?: string;
 }) {
 
@@ -136,6 +139,12 @@ function ToolGroupTrigger({
       >
         {label}
       </span>
+      {warning ? (
+        <span data-slot="tool-group-trigger-warning" className="text-warning inline-flex shrink-0 items-center" title={t("tools.injectionBadgeHint")}>
+          <TriangleAlertIcon aria-hidden className="size-3.5" />
+          <span className="sr-only">{t("tools.injectionBadge")}</span>
+        </span>
+      ) : null}
       <ChevronDownIcon
         data-slot="tool-group-trigger-chevron"
         className={cn(
