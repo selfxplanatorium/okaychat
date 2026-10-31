@@ -55,7 +55,7 @@ follow the rule at the end of this file.
    is present: a 401 whose message mentions "timeout" is still `provider_auth`.
 3. The SDK's `RetryError` is unwrapped to its `lastError`.
 4. `statusCode` (or `status` from native Ollama) selects the status table above. Every 5xx maps to
-   `provider_overloaded` (or `timeout` for `408`/`504` and timeout text); only transient 5xx statuses are
+   `provider_overloaded` (or `timeout` for HTTP 408 and timeout text); only transient 5xx statuses are
    marked retryable. A non-transient 5xx (501, 507, ...) stays `provider_overloaded` with `retryable: false`.
 5. For 400/413/422, the concatenated body type/code/status/message is matched for context length,
    model gone, auth, billing/quota, and overload, in that order. A 400 with no marker is `validation`.
@@ -157,6 +157,9 @@ transport, so a mutation is never retried.
 "Copy details" is an allowlist (`code`, `ref`, `model`, `provider`, `requestId`). It is not a
 serialization: a poisoned wire object with `apiKey`, `prompt`, `file`, or `stack` contributes nothing.
 The reference is also shown in the chat error block so support can match the server log.
+`apiErrorFromBody` also resolves catalog text for coded failures, so settings callers that already
+render `ApiError.message` get the same translated title. Safe authored field details remain available;
+browser network/abort and HTTP fallback messages use the error catalog too.
 assistant-ui projects SDK errors into plain `{ code, message }` objects; `parseChatError` decodes
 the wire JSON inside `message` before accepting the outer generic code, preserving the actual
 provider code, reference, and recovery actions for both early HTTP and streamed failures.

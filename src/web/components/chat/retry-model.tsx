@@ -77,7 +77,7 @@ export function RetryWithModel({ inline = false }: { inline?: boolean }) {
       aria-disabled={blocked || undefined}
       disabled={blocked}
       onClick={() => !blocked && setOpen((value) => !value)}
-      className="aria-expanded:bg-accent"
+      className="aria-expanded:bg-accent pointer-coarse:h-9"
     >
       <Repeat2Icon aria-hidden />
       {t("errors.switchModel")}

@@ -95,7 +95,7 @@ test("a network failure and an abort become safe ApiErrors", async () => {
     assert.ok(error instanceof ApiError);
     assert.equal(error.code, "network");
     assert.equal(error.retryable, true);
-    assert.equal(error.message, "The server could not be reached.");
+    assert.equal(error.message, "Could not reach the service.");
     return true;
   });
 
@@ -124,4 +124,9 @@ test("streamed errors parse from wire JSON, an Error wrapper, and nothing at all
   assert.equal(fallback.code, "unknown");
   assert.equal(fallback.message, "Something went wrong.");
   assert.ok(!JSON.stringify(fallback).includes("SECRET"));
+});
+
+test("API consumers see catalog text for coded provider failures", () => {
+  const error = apiErrorFromBody({ code: "provider_auth", message: "upstream text must not be shown", retryable: false }, 401);
+  assert.equal(error.message, "The provider rejected the credentials.");
 });

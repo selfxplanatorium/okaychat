@@ -1,5 +1,7 @@
 import { parseErrorWire, unknownWire, type ErrorCode, type ErrorWire } from "@shared/errors";
 import { redactSecrets } from "@shared/redact";
+import { t } from "@/i18n";
+import { presentError } from "@/lib/error-presentation";
 
 /** A request failure with the safe structured fields the server sends. Never a raw provider body. */
 export class ApiError extends Error {
@@ -26,7 +28,7 @@ export class ApiError extends Error {
   }
 }
 
-const httpFallback = (status: number) => `The request failed (HTTP ${status}).`;
+const httpFallback = (status: number) => t("errors.httpFailure", { status });
 
 /** A legacy `{ error }` body is trusted only as authored 4xx validation, never as upstream detail. */
 function legacyMessage(body: unknown, status: number): string | undefined {
@@ -45,7 +47,10 @@ function legacyMessage(body: unknown, status: number): string | undefined {
 /** Turns a JSON error body or a legacy `{ error }` body into an ApiError without echoing unknown shapes. */
 export function apiErrorFromBody(body: unknown, status: number, fallback = httpFallback(status)): ApiError {
   const wire = parseErrorWire(body);
-  if (wire) return new ApiError(wire.message, status, wire);
+  if (wire) {
+    const shown = presentError(wire, "settings");
+    return new ApiError(shown.detail ?? t(shown.messageKey), status, wire);
+  }
   return new ApiError(legacyMessage(body, status) || fallback, status);
 }
 
@@ -74,9 +79,9 @@ export async function api<T>(path: string, init?: RequestInit & { json?: unknown
     });
   } catch (error) {
     if (aborted(error) || rest.signal?.aborted) {
-      throw new ApiError("The request was stopped.", 499, { code: "aborted", message: "The request was stopped.", retryable: false });
+      throw new ApiError(t("errors.abortedMessage"), 499, { code: "aborted", retryable: false });
     }
-    throw new ApiError("The server could not be reached.", 0, { code: "network", message: "The server could not be reached.", retryable: true });
+    throw new ApiError(t("errors.networkMessage"), 0, { code: "network", retryable: true });
   }
   const body = res.headers.get("content-type")?.includes("json") ? await res.json().catch(() => undefined) : await res.text().catch(() => "");
   if (typeof window !== "undefined" && isSessionUnauthorized(res.status, path, body)) {

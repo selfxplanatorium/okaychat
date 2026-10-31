@@ -38,6 +38,7 @@ export default {
   unknownMessage: "Something went wrong.",
   unknownHint: "The server log has the details. Retry, or copy the details for support.",
 
+  httpFailure: "The request failed (HTTP {status}).",
   retry: "Retry",
   switchModel: "Switch model",
   openSetting: "Open setting",

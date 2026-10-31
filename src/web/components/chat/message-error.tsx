@@ -49,7 +49,7 @@ export function ChatErrorMessage() {
     try {
       aui.thread.startRun({ parentId });
     } catch (cause) {
-      setActionError(parseChatError(cause).message);
+      setActionError(t(presentError(parseChatError(cause), "chat").messageKey));
     }
   };
 
