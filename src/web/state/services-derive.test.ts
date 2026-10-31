@@ -1,0 +1,147 @@
+import assert from "node:assert/strict";
+import { afterEach, test } from "node:test";
+import type { ServiceStatus } from "@shared/services";
+import {
+  availabilityOf,
+  noticeServices,
+  orderedStatuses,
+  parseServices,
+  pruneDismissed,
+  usedServicesFromParts,
+  type ServiceView,
+} from "./services-derive.js";
+import { resetServices, useServices } from "./services.js";
+
+// The banner and the disabled controls depend on these rules, so they live in a pure module: no DOM, no fetch,
+// no timers. See docs/implementation/service-health.md.
+
+const status = (id: ServiceStatus["id"], state: ServiceStatus["state"], reasonKey: ServiceStatus["reasonKey"] = state === "up" ? "ok" : "unreachable"): ServiceStatus => ({
+  id,
+  state,
+  reasonKey,
+  checkedAt: 1_700_000_000_000,
+});
+
+const view = (statuses: ServiceStatus[] | null, used: Record<string, number> = {}, dismissed: Record<string, number> = {}): ServiceView => ({ statuses, used, dismissed });
+
+test("checking is a state of its own, never shown as down", () => {
+  assert.equal(availabilityOf(view(null), "browser"), "checking");
+  assert.equal(availabilityOf(view([]), "browser"), "unknown", "an empty answer is not an outage either");
+  assert.equal(availabilityOf(view([status("browser", "down")]), "browser"), "down");
+  assert.equal(availabilityOf(view([status("browser", "degraded")]), "browser"), "degraded");
+  assert.equal(availabilityOf(view([status("browser", "up")]), "browser"), "up");
+  assert.equal(availabilityOf(view([status("browser", "up")]), "speech"), "unknown", "a missing entry is not an outage");
+});
+
+test("the registry payload keeps known fields only", () => {
+  const parsed = parseServices({
+    services: [
+      { id: "browser", state: "down", reasonKey: "refuses", fixKey: "startBrowser", checkedAt: 12, latencyMs: 4.6, url: "http://internal:8080", token: "secret" },
+      { id: "not-a-service", state: "down", reasonKey: "refuses", checkedAt: 1 },
+      { id: "email:eml_1", state: "degraded", reasonKey: "emailUntested", fixKey: "email", checkedAt: 0 },
+      { id: "browser", state: "melted", reasonKey: "refuses", checkedAt: 1 },
+      "nonsense",
+    ],
+  });
+  assert.equal(parsed.length, 2);
+  assert.deepEqual(parsed[0], { id: "browser", state: "down", reasonKey: "refuses", fixKey: "startBrowser", checkedAt: 12, latencyMs: 5 });
+  assert.deepEqual(Object.keys(parsed[0]!).sort(), ["checkedAt", "fixKey", "id", "latencyMs", "reasonKey", "state"]);
+  assert.equal(parsed[1]!.id, "email:eml_1");
+  assert.deepEqual(parseServices(null), []);
+  assert.deepEqual(parseServices({ services: "nope" }), []);
+});
+
+test("loading the registry never raises a notice; a used, down service does", () => {
+  const statuses = [status("browser", "down"), status("sandbox", "up"), status("speech", "degraded"), status("searxng", "unconfigured")];
+  assert.deepEqual(noticeServices(view(statuses)), [], "boot alone is not use");
+  const used = { browser: 1, sandbox: 1, speech: 1, searxng: 1 };
+  assert.deepEqual(noticeServices(view(statuses, used)).map((entry) => entry.id), ["browser", "speech"]);
+  assert.deepEqual(noticeServices(view(statuses, used, { browser: 2 })).map((entry) => entry.id), ["speech"], "a dismissed service stays quiet");
+});
+
+test("a recovered service loses its dismissal, so the next outage is shown again", () => {
+  const dismissed = { browser: 5, speech: 6 };
+  assert.deepEqual(pruneDismissed(view(null, {}, dismissed), [status("browser", "up"), status("speech", "down")]), { speech: 6 });
+});
+
+test("tool parts name the service they exercised, including a failed call", () => {
+  assert.deepEqual(usedServicesFromParts([
+    { type: "tool-run_code", state: "output-available" },
+    { type: "tool-view_artifact", state: "output-available" },
+    { type: "tool-web_search", state: "output-available" },
+  ]), ["sandbox", "browser", "searxng"]);
+  assert.deepEqual(usedServicesFromParts([
+    { type: "tool-create_document", state: "output-available", output: { kind: "pdf" } },
+    { type: "tool-edit_document", state: "output-available", output: { kind: "docx" } },
+    { type: "dynamic-tool", toolName: "import_document", state: "output-available", output: { kind: "pdf" } },
+  ]), ["browser"], "only a PDF document needs the browser worker");
+  assert.deepEqual(usedServicesFromParts([
+    { type: "tool-run_code", state: "output-error", errorText: JSON.stringify({ code: "service_unavailable" }) },
+    { type: "tool-create_document", state: "output-error", errorText: JSON.stringify({ code: "service_unavailable" }) },
+  ]), ["sandbox", "browser"]);
+  assert.deepEqual(usedServicesFromParts([{ type: "text" }, { type: "tool-email_send", state: "output-available" }]), []);
+});
+
+test("notices follow registry order so the banner does not jump", () => {
+  const ordered = orderedStatuses([status("providers", "down"), status("email:eml_1", "down"), status("browser", "down"), status("sandbox", "down")]);
+  assert.deepEqual(ordered.map((entry) => entry.id), ["browser", "sandbox", "providers", "email:eml_1"]);
+});
+
+// --- the store: one request per account, late answers dropped, no polling ---
+
+const payload = (services: unknown[]) => Response.json({ services });
+
+afterEach(() => {
+  resetServices();
+});
+
+test("start loads once per account and ignores an answer for the previous account", async (t) => {
+  const pending: Array<(response: Response) => void> = [];
+  t.mock.method(globalThis, "fetch", () => new Promise<Response>((resolve) => pending.push(resolve)));
+  const store = useServices.getState();
+  store.start("alice");
+  store.start("alice");
+  assert.equal(pending.length, 1, "starting twice for the same account shares the request");
+  assert.equal(availabilityOf(useServices.getState(), "browser"), "checking");
+
+  store.start("bob");
+  assert.equal(pending.length, 2, "an account switch starts its own request");
+  pending[1]!(payload([status("browser", "down", "refuses")]));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(availabilityOf(useServices.getState(), "browser"), "down");
+
+  // Alice's answer arrives late and must not replace Bob's.
+  pending[0]!(payload([status("browser", "up")]));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(availabilityOf(useServices.getState(), "browser"), "down");
+  assert.equal(useServices.getState().accountId, "bob");
+});
+
+test("use, dismissal, and recovery flow through the store", async (t) => {
+  let respond = async () => payload([status("browser", "down", "refuses"), status("sandbox", "down")]);
+  t.mock.method(globalThis, "fetch", () => respond());
+  const store = useServices.getState();
+  store.start("alice");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  store.markUsed("browser");
+  assert.deepEqual(noticeServices(useServices.getState()).map((entry) => entry.id), ["browser"]);
+  store.dismiss(["browser"]);
+  assert.deepEqual(noticeServices(useServices.getState()), []);
+
+  // A later refresh that finds it up clears the dismissal for the next outage.
+  respond = async () => payload([status("browser", "up"), status("sandbox", "down")]);
+  await useServices.getState().refresh(true);
+  assert.deepEqual(useServices.getState().dismissed, {});
+  assert.deepEqual(noticeServices(useServices.getState()), []);
+});
+
+test("a failed health request keeps the last answer and never invents an outage", async (t) => {
+  let respond = async () => payload([status("browser", "down")]);
+  t.mock.method(globalThis, "fetch", () => respond());
+  useServices.getState().start("alice");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  respond = async () => new Response("nope", { status: 500 });
+  await useServices.getState().refresh(true);
+  assert.equal(availabilityOf(useServices.getState(), "browser"), "down", "the previous status is still shown");
+  assert.equal(useServices.getState().error, true);
+});

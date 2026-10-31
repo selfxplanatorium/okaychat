@@ -145,7 +145,10 @@ need host AppArmor changes. The per-user processes, firewall, and per-job slots 
 
 `src/server/browser.ts` (client, token), `documents/render.ts`, `documents/visual.ts`, `tools/scrapling.ts`.
 `browserConfigured()` checks `OKAYCHAT_BROWSER_URL`, falling back to `OKAYCHAT_DEV_BROWSER_URL` in development.
-Rendering helpers use that result; connection failures surface as tool errors.
+The service registry (`docs/implementation/service-health.md`) probes `/health` on demand, cached for 15 s, and
+splits `browser` from `scrapling`. A refused connection is reported into that cache, so the next render fails fast
+with `service_unavailable` instead of waiting for its timeout, and the chat withholds `view_artifact` for that turn.
+A job that runs out of time is not treated as an outage. Plain page reading never depends on this worker.
 
 ## Development
 

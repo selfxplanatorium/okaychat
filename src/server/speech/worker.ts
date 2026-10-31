@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { HTTPException } from "hono/http-exception";
 import { USER_AGENT } from "../env.js";
+import { reportServiceFailure, reportServiceSuccess, serviceDown, serviceUnavailable, speechWorkerDetail } from "../services.js";
 
 // Client for the speech worker (speech/, its own container in compose): faster-whisper and Piper, on the CPU
 // or an optional NVIDIA GPU. Audio and text only pass through it in memory. See docs/implementation/speech.md.
@@ -40,6 +41,8 @@ export const speechWorkerConfigured = () => !!workerUrl();
 
 async function call(pathAndQuery: string, init: { method?: string; body?: BodyInit; contentType?: string; timeoutMs: number; signal?: AbortSignal }): Promise<Response> {
   if (!speechWorkerConfigured()) throw new HTTPException(400, { message: "This server has no speech worker." });
+  // A worker that just refused a connection or failed its probe answers at once instead of after a timeout.
+  if (serviceDown("speech")) throw serviceUnavailable("speech");
   const signal = init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(init.timeoutMs)]) : AbortSignal.timeout(init.timeoutMs);
   let res: Response;
   try {
@@ -51,8 +54,11 @@ async function call(pathAndQuery: string, init: { method?: string; body?: BodyIn
     });
   } catch (error) {
     if (init.signal?.aborted) throw error;
-    throw new HTTPException(502, { message: (error as Error).name === "TimeoutError" ? "The speech worker timed out." : "The speech worker is not reachable." });
+    if ((error as Error).name === "TimeoutError") throw new HTTPException(502, { message: "The speech worker timed out." });
+    reportServiceFailure("speech");
+    throw serviceUnavailable("speech");
   }
+  reportServiceSuccess("speech");
   if (!res.ok) {
     const message = ((await res.json().catch(() => null)) as { error?: string } | null)?.error ?? `The speech worker answered ${res.status}.`;
     throw new HTTPException(res.status === 413 ? 413 : res.status === 503 ? 503 : 502, { message: message.slice(0, 300) });
@@ -108,12 +114,18 @@ export interface WorkerHealth {
   model?: string | null;
 }
 
-export async function workerHealth(): Promise<WorkerHealth | null> {
-  if (!speechWorkerConfigured()) return null;
-  try {
-    const res = await fetch(`${workerUrl()}/health`, { signal: AbortSignal.timeout(3000) });
-    return res.ok ? ((await res.json()) as WorkerHealth) : null;
-  } catch {
+/** The worker's /health report. It never loads a model. Null when it answers with an error; throws when unreachable. */
+export async function fetchWorkerHealth(signal: AbortSignal): Promise<WorkerHealth | null> {
+  const res = await fetch(`${workerUrl()}/health`, { signal });
+  if (!res.ok) {
+    await res.body?.cancel().catch(() => {});
     return null;
   }
+  return (await res.json()) as WorkerHealth;
+}
+
+/** The health report through the registry's probe (shared with /api/services); `fresh` skips its cache. */
+export async function workerHealth(fresh = false): Promise<WorkerHealth | null> {
+  if (!speechWorkerConfigured()) return null;
+  return speechWorkerDetail<WorkerHealth>(fresh);
 }

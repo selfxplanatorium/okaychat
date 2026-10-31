@@ -1,5 +1,7 @@
 import type { DictationAdapter } from "@assistant-ui/react";
 import { t } from "@/i18n";
+import { useData } from "@/state/data";
+import { useServices } from "@/state/services";
 import { speechFetch, useSpeech } from "./store";
 
 type Session = DictationAdapter.Session;
@@ -37,6 +39,8 @@ export const canRecord = () => typeof navigator !== "undefined" && !!navigator.m
 
 /** Uploads audio to /api/speech/transcribe and returns the text. */
 export async function transcribeBlob(blob: Blob, filename: string, language?: string, signal?: AbortSignal): Promise<string> {
+  // Only the server Whisper engine needs the speech worker; cloud engines do not.
+  if ((useData.getState().settings?.speech?.stt?.engine ?? "") === "local") useServices.getState().markUsed("speech");
   const form = new FormData();
   form.append("file", blob, filename);
   if (language) form.append("language", language);

@@ -40,6 +40,8 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "app.logout", labelKey: "keyboard.cmdAppLogout", group: "General", keys: [] },
   { id: "app.reload", labelKey: "keyboard.cmdAppReload", group: "General", keys: [] },
   { id: "error.copyDetails", labelKey: "keyboard.cmdErrorCopyDetails", group: "General", keys: [] },
+  { id: "services.checkAgain", labelKey: "keyboard.cmdServicesCheck", group: "General", keys: [] },
+  { id: "services.dismissNotice", labelKey: "keyboard.cmdServicesDismiss", group: "General", keys: [] },
 
   { id: "nav.newChat", labelKey: "keyboard.cmdNavNewChat", group: "Navigation", keys: ["Alt+Shift+N"] },
   { id: "nav.temporaryChat", labelKey: "keyboard.cmdNavTemporaryChat", group: "Navigation", keys: ["Alt+Shift+G"] },

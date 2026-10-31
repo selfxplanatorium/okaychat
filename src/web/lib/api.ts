@@ -88,7 +88,11 @@ export async function api<T>(path: string, init?: RequestInit & { json?: unknown
     window.dispatchEvent(new Event("okaychat:unauthorized"));
   }
   if (typeof window !== "undefined" && init?.method && init.method !== "GET" && !path.startsWith("/auth")) window.dispatchEvent(new Event("okaychat:storage-changed"));
-  if (!res.ok) throw apiErrorFromBody(body, res.status);
+  if (!res.ok) {
+    // A service outage is also a signal to re-check the registry; the store debounces and single-flights it.
+    if (typeof window !== "undefined" && parseErrorWire(body)?.code === "service_unavailable") window.dispatchEvent(new Event("okaychat:service-failed"));
+    throw apiErrorFromBody(body, res.status);
+  }
   return body as T;
 }
 

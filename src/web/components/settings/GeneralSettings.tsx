@@ -25,10 +25,10 @@ export function GeneralSettings() {
   const settings = useData((s) => s.settings);
   const update = useData((s) => s.updateSettings);
   const [prompt, setPrompt] = useState(settings?.systemPrompt ?? "");
-  const [sandbox, setSandbox] = useState<{ configured: boolean; reachable: boolean; error?: string } | null>(null);
+  const [sandbox, setSandbox] = useState<{ configured: boolean; reachable: boolean; refuses?: boolean } | null>(null);
   useEffect(() => setPrompt(settings?.systemPrompt ?? ""), [settings?.systemPrompt]);
   useEffect(() => {
-    api<{ configured: boolean; reachable: boolean; error?: string }>("/sandbox").then(setSandbox, () => setSandbox({ configured: false, reachable: false }));
+    api<{ configured: boolean; reachable: boolean; refuses?: boolean }>("/sandbox").then(setSandbox, () => setSandbox({ configured: false, reachable: false }));
   }, []);
   if (!settings) return null;
 
@@ -155,8 +155,8 @@ export function GeneralSettings() {
               : !sandbox.configured
               ? t("general.sandboxNotConfigured")
               : sandbox && !sandbox.reachable
-                ? sandbox.error
-                  ? t("general.sandboxRefuses", { error: sandbox.error })
+                ? sandbox.refuses
+                  ? t("general.sandboxIsolationFailed")
                   : t("general.sandboxUnreachable")
                 : t("general.sandboxDescription")}</span>
           }

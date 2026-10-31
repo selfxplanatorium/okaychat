@@ -1,6 +1,7 @@
 import type { SpeechSynthesisAdapter } from "@assistant-ui/react";
 import type { SpeechSettings, TtsEngineId, TtsSplit } from "@shared/speech";
 import { t } from "@/i18n";
+import { useServices } from "@/state/services";
 import { speechFetch, useSpeech } from "./store";
 import { splitForSpeech, spokenText } from "./text";
 
@@ -56,6 +57,8 @@ export class ServerSpeechAdapter implements SpeechSynthesisAdapter {
 
   speak(text: string): Utterance {
     const { engine, split, speed } = this.prefs();
+    // Server voices depend on the speech worker; a failure here is what the service notice explains.
+    if (engine === "local") useServices.getState().markUsed("speech");
     const pieces = splitForSpeech(spokenText(text), split);
     const controller = new AbortController();
     const audio = audioElement();

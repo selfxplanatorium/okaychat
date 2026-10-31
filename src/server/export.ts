@@ -5,8 +5,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AppEnv } from "./auth.js";
-import { htmlToPdf } from "./documents/render.js";
-import { redactSecrets } from "./errors.js";
+import { htmlToPdf, rendererAvailable } from "./documents/render.js";
+import { AppError, errorJson, redactSecrets } from "./errors.js";
+import { serviceUnavailable } from "./services.js";
 import { attachmentName, currentBranch, getThread, isTemporaryThread } from "./threads.js";
 
 /** Only what a reader of the conversation saw: text and attachment names. Reasoning, tools, and data parts stay out. */
@@ -68,12 +69,16 @@ export const exportRoutes = new Hono<AppEnv>().get("/threads/:id/export", async 
   if (format === "markdown") {
     return c.body(markdown, 200, { ...headers, "Content-Type": "text/markdown; charset=utf-8", "Content-Disposition": disposition(title, "md") });
   }
+  // PDF needs the browser worker. Markdown export never does, so this is the only affected format.
+  if (!rendererAvailable()) return errorJson(c, serviceUnavailable("browser"));
   try {
     // Copy into a plain ArrayBuffer view; Hono's body type rejects ArrayBufferLike.
     const pdf = new Uint8Array(await htmlToPdf(markdownHtml(markdown, title)));
     return c.body(pdf, 200, { ...headers, "Content-Type": "application/pdf", "Content-Disposition": disposition(title, "pdf") });
   } catch (error) {
+    if (error instanceof AppError) return errorJson(c, error);
     console.error("[export]", redactSecrets(String((error as Error)?.message ?? error)).slice(0, 500));
-    return c.json({ error: "PDF rendering is unavailable on this server" }, 503);
+    // A failed render is still this server's rendering service failing, never a raw worker message.
+    return errorJson(c, serviceUnavailable("browser"));
   }
 });

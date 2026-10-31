@@ -4,6 +4,7 @@ import { useLocation } from "wouter";
 import { useAui } from "@assistant-ui/react";
 import type { ArtifactVersion, LibraryItem, LibraryKind, LibraryPage, LibrarySort } from "@shared/types";
 import { DocxPreview, DocumentPreview } from "@/components/artifacts/DocumentPreview";
+import { ServiceAvailability } from "@/components/ServiceAvailability";
 import { FRAME_SANDBOX, artifactFilename, frameDocument } from "@/components/artifacts/frame";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -550,6 +551,9 @@ function LibraryFiles({ tabs }: { tabs: ReactNode }) {
         {tabs}
         <SelectModeToggle selecting={selection.selecting} onChange={setSelecting} disabled={!items?.length && !selection.selecting} />
       </div>
+
+      {/* Files stay downloadable without the sandbox; only new code output is affected. */}
+      <ServiceAvailability id="sandbox" messageKey="services.librarySandboxNote" />
 
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap gap-1.5">

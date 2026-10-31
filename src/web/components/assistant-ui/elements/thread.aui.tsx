@@ -91,6 +91,7 @@ import { useLongPaste } from "@/components/chat/long-paste";
 import { parseAttachmentText, splitUserMessage, typedText } from "@/runtime/message-attachments";
 import { mcpAppOf } from "@/components/chat/McpApp";
 import { ReplyFiles } from "@/components/chat/reply-files";
+import { TurnServiceNote } from "@/components/chat/ServiceNotice";
 import { RetryWithModel } from "@/components/chat/retry-model";
 import { ChatErrorMessage } from "@/components/chat/message-error";
 import { RetryStatus } from "@/components/chat/retry-status";
@@ -1431,6 +1432,7 @@ const AssistantMessage: FC = () => {
           }}
         </MessagePrimitive.GroupedParts>
         {finished && <ReplyFiles parts={parts} verify={!entering} />}
+        {finished && <TurnServiceNote />}
         <StreamingIndicator waiting={waitingForFirstToken} />
         <MessageError />
       </div>

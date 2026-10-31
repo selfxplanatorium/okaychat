@@ -208,7 +208,7 @@ export const speechRoutes = new Hono<AppEnv>()
   .use("/admin/speech/*", requireAdmin)
   .use("/admin/speech", requireAdmin)
   .get("/admin/speech", async (c) => {
-    const [health, models] = await Promise.all([workerHealth(), speechWorkerConfigured() ? workerModels().catch(() => null) : null]);
+    const [health, models] = await Promise.all([workerHealth(true), speechWorkerConfigured() ? workerModels().catch(() => null) : null]);
     const keys: Record<string, { connected: boolean; region?: string; baseURL?: string }> = {};
     for (const service of Object.keys(SPEECH_KEY_SERVICES) as SpeechKeyService[]) {
       // Read the shared row itself: the admin's own key for the same service would hide it in getConnection.

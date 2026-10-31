@@ -14,6 +14,7 @@ import { createInMemoryResumableStreamStore, createResumableStreamContext, RESUM
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import type { AssistantMetadata, ModelInfo, ReasoningEffort, TokenUsage, UserSettings } from "../shared/types.js";
+import { parseTurnUnavailable, type FixedServiceId, type ServiceStatus, type TurnUnavailable } from "../shared/services.js";
 import type { AppEnv } from "./auth.js";
 import { artifactsInCurrentTurn, artifactTools } from "./artifacts.js";
 import { promptText } from "./prompts.js";
@@ -43,6 +44,7 @@ import { getProject, projectContext } from "./projects.js";
 import { applyUntrustedEnvelopes, approvalRiskReason, messagesHaveUntrustedContent, riskOfTool, toolsHaveExternalMetadata, wrapUntrusted } from "./prompt-injection.js";
 import { turnSkills } from "./skills.js";
 import { getSettings, subagentModelRefs } from "./settings.js";
+import { noteProviderOutcome, serviceUnavailableFromText, turnServiceStates } from "./services.js";
 import { branchMessages, currentBranch, ensureThread, getThread, isTemporaryThread, setCompaction, updateThread, userText } from "./threads.js";
 import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "./usage.js";
 
@@ -56,7 +58,8 @@ type UiChunk = { type: string };
 /**
  * The model already received the original tool error in its tool result. This reshapes only the UI
  * chunk, so a raw string, object, or stack can never reach a tool card while the model keeps the
- * detail it needs to react to.
+ * detail it needs to react to. A tool that failed because its service is down keeps that code, so the
+ * card explains the outage instead of a generic failure.
  */
 function normalizeToolErrorChunks<T extends UiChunk>(stream: ReadableStream<T>): ReadableStream<T> {
   return stream.pipeThrough(new TransformStream<T, T>({
@@ -66,9 +69,27 @@ function normalizeToolErrorChunks<T extends UiChunk>(stream: ReadableStream<T>):
         return;
       }
       const errorText = (chunk as T & { errorText?: unknown }).errorText;
-      controller.enqueue({ ...chunk, errorText: toolErrorWireText(errorText) } as T);
+      const service = serviceUnavailableFromText(errorText);
+      controller.enqueue({ ...chunk, errorText: service ? wireErrorText(service) : toolErrorWireText(errorText) } as T);
     },
   }));
+}
+
+/** The reason list a reply carried at its start, wherever assistant-ui or the AI SDK put the metadata. */
+function turnUnavailableOf(message: UIMessage | undefined): TurnUnavailable[] {
+  if (!message || message.role !== "assistant") return [];
+  const metadata = message.metadata as { custom?: { unavailable?: unknown }; unavailable?: unknown } | undefined;
+  return parseTurnUnavailable(metadata?.custom?.unavailable ?? metadata?.unavailable);
+}
+
+/** One line on the reply: which tools this turn withheld and why. */
+function unavailableEntry(service: "browser" | "sandbox", status: ServiceStatus | undefined, tools: string[]): TurnUnavailable {
+  return {
+    service,
+    tools,
+    reasonKey: status?.reasonKey ?? "unreachable",
+    fixKey: status?.fixKey ?? (service === "browser" ? "startBrowser" : "startSandbox"),
+  };
 }
 
 const chatBody = z.object({
@@ -148,8 +169,12 @@ export async function turnStream(opts: TurnOptions) {
   const settings = getSettings(userId);
   const effort = (opts.effort ?? settings.reasoningEffort[modelRef]) as ReasoningEffort | undefined;
   const { model, conn } = await resolveModel(userId, modelRef);
-  const describeError = (error: unknown) =>
-    wireErrorText(describeProviderError(error, { log: !temporary, model: model.ref, provider: model.providerId }));
+  const describeError = (error: unknown) => {
+    const wire = describeProviderError(error, { log: !temporary, model: model.ref, provider: model.providerId });
+    // A rejected key or an exhausted quota is the only evidence this account's providers are unhealthy.
+    if (wire.code === "provider_auth" || wire.code === "provider_quota") noteProviderOutcome(userId, "rejected");
+    return wireErrorText(wire);
+  };
   if (!temporary) {
     ensureThread(user.id, threadId);
     if (!opts.keepThreadModel) updateThread(user.id, threadId, { modelRef });
@@ -194,9 +219,39 @@ export async function turnStream(opts: TurnOptions) {
       const toolImages = new Map<string, ToolImage[]>();
       const injectedToolImages = new Set<string>();
       const canViewImages = model.inputModalities.includes("image");
+      // A continuation keeps the tool list its turn started with, so a service that fails or recovers
+      // mid-turn cannot change the cached prefix. A new user message probes once, through the shared cache.
+      const continuation = uiMessages.at(-1)?.role !== "user";
+      const priorUnavailable = continuation ? turnUnavailableOf(uiMessages.at(-1)) : [];
+      const sidecars = continuation
+        ? Promise.resolve(new Map<FixedServiceId, ServiceStatus | undefined>())
+        : turnServiceStates(["browser", "sandbox"]);
       const mcp = model.toolCall && !temporary
         ? await toolsForUser(user.id, { threadId, images: canViewImages ? toolImages : undefined, interactive: opts.interactive === true })
         : { tools: {}, subTools: {}, instructions: [], servers: [] };
+      const sidecarStates = await sidecars;
+      const omitted = new Set<TurnUnavailable["service"]>(priorUnavailable.map((entry) => entry.service));
+      // Only a configured service that is down is withheld. An unconfigured optional service keeps its
+      // existing absence (no note on every reply); a call that needs it fails with the fix instead.
+      const browserDown = continuation ? omitted.has("browser") : sidecarStates.get("browser")?.state === "down";
+      const sandboxDown = continuation ? omitted.has("sandbox") : sidecarStates.get("sandbox")?.state === "down";
+      const unavailable: TurnUnavailable[] = [...priorUnavailable];
+      if (!continuation) {
+        if (browserDown) unavailable.push(unavailableEntry("browser", sidecarStates.get("browser"), ["view_artifact"]));
+        if (sandboxDown) unavailable.push(unavailableEntry("sandbox", sidecarStates.get("sandbox"), ["run_code"]));
+        // A server that could not connect is named, never silently missing. Its own error text stays server-side.
+        for (const server of mcp.servers) {
+          if (server.status !== "error" && server.status !== "needs-auth") continue;
+          unavailable.push({
+            service: "mcp",
+            name: server.name,
+            tools: [],
+            reasonKey: server.status === "needs-auth" ? "mcpNeedsAuth" : "mcpError",
+            fixKey: "mcp",
+          });
+        }
+      }
+      const unavailableMetadata = unavailable.length ? { unavailable } : {};
       const searchBudget = new SearchBudget(settings.maxSearches, searchesInCurrentTurn(uiMessages));
       // Research workers spend from this too; the reply's own loop gets what is left.
       const stepBudget = new StepBudget(settings.maxSteps, agentStepsInCurrentTurn(uiMessages));
@@ -257,9 +312,9 @@ export async function turnStream(opts: TurnOptions) {
         ...(skills.tools),
         ...email.tools,
         ...subagents,
-        ...(useArtifacts ? artifactTools(threadId, user.id, { shots, canViewImages: model.inputModalities.includes("image"), savedThisTurn: artifactsInCurrentTurn(uiMessages) }) : {}),
+        ...(useArtifacts ? artifactTools(threadId, user.id, { shots, canViewImages: model.inputModalities.includes("image"), savedThisTurn: artifactsInCurrentTurn(uiMessages), browserDown }) : {}),
         ...(imageServices.length ? imageTools(user.id, threadId, imageServices, signal) : {}),
-        ...(model.toolCall && !temporary && settings.codeExecution && sandboxConfigured() ? sandboxTools(user.id, threadId, signal, sandboxTurn) : {}),
+        ...(model.toolCall && !temporary && settings.codeExecution && sandboxConfigured() && !sandboxDown ? sandboxTools(user.id, threadId, signal, sandboxTurn) : {}),
         ...(useGenerativeUI ? frontendTools(opts.clientTools!) : {}),
         ...mcp.tools,
         // Only trimmed chats point the model at removed attachments, so others keep their tool list (and cache).
@@ -335,7 +390,7 @@ export async function turnStream(opts: TurnOptions) {
       const startedAt = Date.now();
       if (research) {
         // The research part opens the reply, so the message start (and its metadata) is written here.
-        writer.write({ type: "start", messageMetadata: { modelRef, contextWindow: model.context } satisfies AssistantMetadata });
+        writer.write({ type: "start", messageMetadata: { modelRef, contextWindow: model.context, ...unavailableMetadata } satisfies AssistantMetadata });
         const toolCallId = newId("research");
         const input = { request: researchInput(uiMessages).request.slice(0, 2000) };
         writer.write({ type: "tool-input-available", toolCallId, toolName: RESEARCH_TOOL, input });
@@ -453,6 +508,9 @@ export async function turnStream(opts: TurnOptions) {
           lastStep = step.usage;
         },
         onEnd: () => {
+          // A completed reply is evidence this account's provider works again; the registry's coarse
+          // provider status clears without contacting the vendor.
+          noteProviderOutcome(user.id, "ok");
           if (!temporary) recordUsage({ userId: user.id, threadId, providerId: model.providerId, modelId: model.id, kind: "chat", usage: total, cost });
         },
       });
@@ -464,7 +522,7 @@ export async function turnStream(opts: TurnOptions) {
           sendSources: true,
           onError: describeError,
           messageMetadata: ({ part }): AssistantMetadata | undefined => {
-            if (part.type === "start") return { modelRef, contextWindow: model.context };
+            if (part.type === "start") return { modelRef, contextWindow: model.context, ...unavailableMetadata };
             if (part.type === "finish") {
               return {
                 modelRef,
@@ -474,6 +532,7 @@ export async function turnStream(opts: TurnOptions) {
                 contextWindow: model.context,
                 durationMs: Date.now() - startedAt,
                 compacted: compaction !== thread.compaction,
+                ...unavailableMetadata,
               };
             }
             return undefined;

@@ -416,6 +416,19 @@ export async function listModels(userId: string): Promise<ModelInfo[]> {
   return lists.flat();
 }
 
+/**
+ * Enabled connections the user may chat through, from the database only: no model list is fetched and no
+ * vendor is contacted. A shared key whose policy grants this user no model does not count.
+ */
+export function usableConnectionCount(userId: string): number {
+  return [...readConnections(userId).values()].filter((conn) => {
+    if (!conn.enabled || !(conn.providerId === OLLAMA || conn.apiKey || conn.baseURL)) return false;
+    if (!conn.shared) return true;
+    const access = sharedModelAccess(userId, conn.providerId);
+    return access.all || access.ids.size > 0;
+  }).length;
+}
+
 export async function resolveModel(userId: string, ref: string): Promise<{ model: ModelInfo; conn: Connection }> {
   const slash = ref.indexOf("/");
   const providerId = ref.slice(0, slash);

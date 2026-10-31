@@ -53,6 +53,12 @@ Server-wide settings live in `server_settings` key `speech` (`AdminSpeechSetting
 
 `GET /api/speech` reports each engine as ready or not with a reason; `GET /api/speech/options` loads voice and model lists from the provider (cached one hour per key and address, built-in list on failure). Admin routes are under `/api/admin/speech`.
 
+The service registry (`docs/implementation/service-health.md`) probes the worker's `/health` on demand and reports
+`degraded` when CUDA failed and the worker serves on the CPU (still usable), `down` when it cannot be reached, and
+`unconfigured` when there is no worker. A refused connection marks it down and the next request fails fast with
+`service_unavailable`; the failure hint points at the compose service or another engine. Admin → Voice reads the same
+cached probe, so the page and `/api/services` never disagree.
+
 ## Recordings and retention
 
 With `retentionHours` 0, the default, no audio or transcript is written anywhere: the app holds the upload in memory for the request, and the worker decodes it from memory. Read-aloud audio is never stored on the server; the browser keeps each piece as a blob URL until it has played.

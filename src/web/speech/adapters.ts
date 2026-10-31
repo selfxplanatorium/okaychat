@@ -1,6 +1,8 @@
 import { WebSpeechDictationAdapter } from "@assistant-ui/react";
 import { useEffect, useMemo } from "react";
 import { useData } from "@/state/data";
+import { availabilityOf } from "@/state/services-derive";
+import { useServices } from "@/state/services";
 import { RecorderDictationAdapter } from "./recorder";
 import { sttEngineOf, ttsEngineOf, useSpeech } from "./store";
 import { BrowserSpeechAdapter, browserSpeechSupported, ServerSpeechAdapter, speechPrefs } from "./synthesis";
@@ -33,8 +35,11 @@ export function useVoiceAdapters() {
 
   const tts = ttsEngineOf(speech);
   const stt = sttEngineOf(speech);
-  const ttsReady = tts === "browser" ? browserSpeechSupported() : tts !== "off" && !!status?.tts.find((e) => e.id === tts)?.ready;
-  const sttReady = stt === "browser" ? browserDictationSupported() : stt !== "off" && !!status?.stt.find((e) => e.id === stt)?.ready;
+  // The speech worker's own readiness is configuration, not reachability. A registry `down` hides the local
+  // engine's button instead of offering a call that fails; cloud and browser engines are unaffected.
+  const speechDown = useServices((s) => availabilityOf(s, "speech") === "down");
+  const ttsReady = tts === "browser" ? browserSpeechSupported() : tts !== "off" && !(tts === "local" && speechDown) && !!status?.tts.find((e) => e.id === tts)?.ready;
+  const sttReady = stt === "browser" ? browserDictationSupported() : stt !== "off" && !(stt === "local" && speechDown) && !!status?.stt.find((e) => e.id === stt)?.ready;
   const language = speech?.stt?.language || navigator.language;
 
   return useMemo(

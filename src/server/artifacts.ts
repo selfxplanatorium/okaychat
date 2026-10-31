@@ -12,6 +12,7 @@ import { screenshotArtifact, type VisualShot } from "./documents/visual.js";
 import { docxOp, pdfOp, workbookSpec, xlsxOp } from "./documents/schemas.js";
 import { scanForInjection, wrapUntrusted } from "./prompt-injection.js";
 import { assertStorage } from "./quota.js";
+import { serviceUnavailable } from "./services.js";
 import { convertToPdf } from "./tools/sandbox.js";
 import { MAX_SHOTS_PER_TURN } from "./tools/screenshots.js";
 import { getThread } from "./threads.js";
@@ -150,11 +151,8 @@ function workbookFrom(source: string) {
 /** Builds the bytes for a document from its source text. */
 async function buildDocument(kind: DocumentArtifactKind, source: string, title: string): Promise<Uint8Array> {
   if (kind === "pdf") {
-    if (!rendererAvailable()) {
-      throw new Error(
-        "PDF rendering is unavailable because Chromium is not installed on this server. Create the document as docx or xlsx, or set OKAYCHAT_CHROMIUM_PATH.",
-      );
-    }
+    // The browser worker renders the PDF; Word and Excel are built in-process and keep working without it.
+    if (!rendererAvailable()) throw serviceUnavailable("browser");
     const { body, headerTemplate, footerTemplate } = pageFurniture(source);
     return htmlToPdf(printDocument(body), { headerTemplate, footerTemplate });
   }
@@ -217,6 +215,11 @@ export interface ArtifactToolOptions {
   canViewImages?: boolean;
   /** Artifact ids already saved in this turn by an earlier request (browser-tool continuations). */
   savedThisTurn?: Iterable<string>;
+  /**
+   * The browser worker is down, so the visual check cannot run in this turn. The tool is omitted (with the
+   * reason stored on the reply) instead of failing after the model calls it.
+   */
+  browserDown?: boolean;
 }
 
 const SAVING_TOOLS = new Set(["create_artifact", "update_artifact", "create_document", "edit_document", "import_document"]);
@@ -377,7 +380,7 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
         ).text,
       }),
     }),
-    ...(visual.canViewImages && shots && rendererAvailable()
+    ...(visual.canViewImages && shots && !visual.browserDown && rendererAvailable()
       ? {
           view_artifact: tool({
             description:

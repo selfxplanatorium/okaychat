@@ -43,7 +43,7 @@ export default {
   codeExecution: "Code execution",
   sandboxChecking: "Checking sandbox availability…",
   sandboxNotConfigured: "Not set up on this server. An admin can add the sandbox container (see docker-compose.yml).",
-  sandboxRefuses: "The sandbox refuses to run code: {error}",
+  sandboxIsolationFailed: "The sandbox is running but refuses to start runs: its isolation check failed. Check the container logs.",
   sandboxUnreachable: "The sandbox container is configured but not reachable right now.",
   sandboxDescription: "Lets models run Python and Bash in a private, offline sandbox for each chat, with files that persist between runs.",
   customInstructions: "Custom instructions",

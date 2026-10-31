@@ -128,8 +128,11 @@ firewall, and `--no-sandbox` are in `docs/implementation/browser-worker.md`. In 
   fflate opens them: at most 200 MB expanded and 10,000 entries, checked against both the central
   directory and a streaming count, so neither overlapping entries nor understated headers get through.
 
-Without a worker, PDF creation reports that rendering is unavailable while DOCX, XLSX, and all reading/editing
-keep working. In dev, `npm run dev` starts a local worker that uses Playwright's browser cache.
+Without a worker, PDF creation answers the `service_unavailable` error (fix hint included) while DOCX, XLSX, and
+all reading/editing keep working. `create_document` is never removed for the other formats, and a chat turn with the
+worker down withholds only `view_artifact`. PDF export from the chat menu is disabled with the reason and the compose
+fix. In dev, `npm run dev` starts a local worker that uses Playwright's browser cache. See
+`docs/implementation/service-health.md`.
 
 ## Web previews
 
