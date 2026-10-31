@@ -153,11 +153,14 @@ export function presentError(error: ErrorWire, context: ErrorContext): ErrorPres
  * The "Copy details" payload. It is an allowlist, not a serialization: a poisoned wire object with
  * apiKey, prompt, file, or stack fields contributes none of them.
  */
+const detailValue = (value: string) =>
+  value.replace(/\bsk-[A-Za-z0-9_-]{8,}/g, "sk-[redacted]").replace(/\b(api[-_]?key|token|authorization)\s*[:=]\s*\S+/gi, "$1=[redacted]").slice(0, 200);
+
 export function errorDetails(error: ErrorWire): string {
   const lines = [`code: ${error.code}`];
-  if (error.ref) lines.push(`ref: ${error.ref}`);
-  if (error.model) lines.push(`model: ${error.model}`);
-  if (error.provider) lines.push(`provider: ${error.provider}`);
-  if (error.requestId) lines.push(`requestId: ${error.requestId}`);
+  if (error.ref) lines.push(`ref: ${detailValue(error.ref)}`);
+  if (error.model) lines.push(`model: ${detailValue(error.model)}`);
+  if (error.provider) lines.push(`provider: ${detailValue(error.provider)}`);
+  if (error.requestId) lines.push(`requestId: ${detailValue(error.requestId)}`);
   return lines.join("\n");
 }
