@@ -77,6 +77,7 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "chat.compactNow", labelKey: "keyboard.cmdChatCompactNow", group: "Chat", keys: [] },
   { id: "chat.trimContext", labelKey: "keyboard.cmdChatTrimContext", group: "Chat", keys: [] },
   { id: "chat.loadImage", labelKey: "keyboard.cmdChatLoadImage", group: "Chat", keys: [] },
+  { id: "chat.voiceCall", labelKey: "keyboard.cmdChatVoiceCall", group: "Chat", keys: [] },
 
   { id: "composer.model", labelKey: "keyboard.cmdComposerModel", group: "Composer", keys: ["Alt+Shift+M"] },
   { id: "composer.effort", labelKey: "keyboard.cmdComposerEffort", group: "Composer", keys: ["Alt+Shift+T"] },
@@ -130,6 +131,11 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "email.removeAccount", labelKey: "keyboard.cmdEmailRemoveAccount", group: "Settings", keys: [] },
   { id: "email.setDefault", labelKey: "keyboard.cmdEmailSetDefault", group: "Settings", keys: [] },
   { id: "email.confirmRemove", labelKey: "keyboard.cmdEmailConfirmRemove", group: "Settings", keys: [] },
+  // Voice calls: reachable by name; Space/Escape act inside the call view.
+  { id: "call.start", labelKey: "keyboard.cmdCallStart", group: "Chat", keys: [] },
+  { id: "call.mute", labelKey: "keyboard.cmdCallMute", group: "Chat", keys: [] },
+  { id: "call.end", labelKey: "keyboard.cmdCallEnd", group: "Chat", keys: [] },
+  { id: "call.retry", labelKey: "keyboard.cmdCallRetry", group: "Chat", keys: [] },
 ];
 
 export const COMMAND_GROUPS: readonly CommandGroup[] = ["General", "Navigation", "Chat", "Composer", "Messages", "Settings"];

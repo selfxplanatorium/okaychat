@@ -38,6 +38,7 @@ export default defineConfig({
     port: 5173,
     // Dev servers are reached over the tailnet (see AGENTS.md); allow MagicDNS names.
     allowedHosts: [".ts.net"],
-    proxy: { "/api": { target: "http://localhost:8787", changeOrigin: false } },
+    // `ws` carries `/api/voice/call`; without it the dev server answers the upgrade itself.
+    proxy: { "/api": { target: "http://localhost:8787", changeOrigin: false, ws: true } },
   },
 });

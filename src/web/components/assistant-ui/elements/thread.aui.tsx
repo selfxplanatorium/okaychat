@@ -100,6 +100,7 @@ import { useSpeech } from "@/speech/store";
 import { useThreadSync, type ThreadSync } from "@/state/thread-sync";
 import { useChatResearch } from "@/state/chat-research";
 import { DictationWaveform } from "@/speech/Waveform";
+import { CallButton } from "@/speech/call/CallButton";
 
 export type ThreadGroupPart = MessagePrimitive.GroupedParts.GroupPart;
 
@@ -1038,6 +1039,7 @@ const ComposerAction: FC<{ blocked: boolean }> = ({ blocked }) => {
         {ComposerToolbar && <ComposerToolbar />}
       </div>
       <div className="flex items-center gap-1.5">
+        <CallButton />
         <AuiIf condition={(s) => s.thread.capabilities.dictation}>
           <AuiIf condition={(s) => s.composer.dictation == null}>
             <ComposerPrimitive.Dictate asChild>

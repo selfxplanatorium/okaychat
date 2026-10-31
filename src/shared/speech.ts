@@ -1,5 +1,7 @@
 /** Speech to text and read-aloud engines. See docs/implementation/speech.md. Keep free of runtime imports. */
 
+import type { CallSettings } from "./voice.js";
+
 export type SttEngineId = "browser" | "local" | "openai" | "groq" | "mistral" | "azure" | "deepgram" | "elevenlabs" | "openai-compatible";
 export type TtsEngineId = "local" | "browser" | "openai" | "openai-realtime" | "azure" | "elevenlabs" | "mistral" | "openai-compatible";
 
@@ -99,6 +101,8 @@ export interface SpeechSettings {
     /** Style instruction for engines that take one. */
     instructions?: string;
   };
+  /** Voice calls. See docs/implementation/voice-calls.md. */
+  call?: CallSettings;
 }
 
 export const DEFAULT_STT_ENGINE: SttEngineId | "off" = "browser";

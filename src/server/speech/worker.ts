@@ -72,6 +72,36 @@ export async function workerTranscribe(
   return (await res.json()) as { text: string; language?: string };
 }
 
+/**
+ * Voice calls: raw PCM16 mono at 16 kHz, no container to decode. A `partial` request never waits for the engine:
+ * the worker answers 409 when it is busy, and the caller simply skips that partial transcript.
+ */
+export async function workerTranscribePcm(
+  pcm: Uint8Array,
+  options: { model: string; language?: string; vad: boolean; partial: boolean },
+  signal?: AbortSignal,
+): Promise<{ text: string; language?: string } | null> {
+  const q = new URLSearchParams({ model: options.model, vad: options.vad ? "1" : "0", format: "pcm16", partial: options.partial ? "1" : "0" });
+  if (options.language) q.set("language", options.language);
+  try {
+    const res = await call(`/transcribe?${q}`, { method: "POST", body: pcm as Uint8Array<ArrayBuffer>, contentType: "application/octet-stream", timeoutMs: options.partial ? 20_000 : 15 * 60_000, signal });
+    return (await res.json()) as { text: string; language?: string };
+  } catch (error) {
+    if (options.partial && !signal?.aborted) return null;
+    throw error;
+  }
+}
+
+/** Loads a model into its engine process (downloading it first if needed), so a call's first sentence is fast. */
+export async function workerWarm(kind: "stt" | "tts", name: string, signal?: AbortSignal): Promise<void> {
+  await call(`/warm?${new URLSearchParams({ kind, name })}`, { method: "POST", timeoutMs: 15 * 60_000, signal });
+}
+
+/** Asks the worker to stop an engine process now if it is idle, which returns its memory (and VRAM). Never stops a running job. */
+export async function workerRelease(kind: "stt" | "tts"): Promise<void> {
+  await call(`/release?${new URLSearchParams({ kind })}`, { method: "POST", timeoutMs: 10_000 });
+}
+
 export async function workerSpeak(text: string, options: { voice: string; speed: number }, signal?: AbortSignal): Promise<Uint8Array> {
   const q = new URLSearchParams({ voice: options.voice, speed: String(options.speed) });
   const res = await call(`/speak?${q}`, { method: "POST", body: text, contentType: "text/plain; charset=utf-8", timeoutMs: 5 * 60_000, signal });

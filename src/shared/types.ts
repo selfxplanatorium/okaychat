@@ -559,6 +559,8 @@ export type PromptKey =
   | "title"
   | "imageRelay"
   | "speechRealtime"
+  | "voiceCall"
+  | "voiceRealtime"
   | "memory"
   | "memoryExtract"
   | "memorySummary";

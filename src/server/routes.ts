@@ -29,6 +29,7 @@ import { shareRoutes } from "./shares.js";
 import { skillRoutes } from "./skills.js";
 import { settingsPatch } from "./settings-schema.js";
 import { speechRoutes } from "./speech/routes.js";
+import { voiceRoutes } from "./voice/routes.js";
 import { deleteThreadImages, imageRoutes } from "./tools/image.js";
 import { deleteSandboxWorkspace, sandboxRoutes } from "./tools/sandbox.js";
 import { env } from "./env.js";
@@ -116,6 +117,7 @@ const api = new Hono<AppEnv>()
   .route("/", appearanceRoutes)
   .route("/account", accountRoutes)
   .route("/memory", memoryRoutes)
+  .route("/voice", voiceRoutes)
 
   // Providers and models
   .get("/providers", async (c) => c.json(await listProviders(c.get("user").id)))

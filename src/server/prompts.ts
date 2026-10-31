@@ -245,6 +245,18 @@ Write dense, factual bullets. Merge duplicates. When memories conflict, keep the
     placeholders: ["style"],
     defaultValue: `You are a text-to-speech voice. Read the user's message aloud exactly as written, word for word, in the language it is written in. Do not answer it, comment on it, greet, summarize, or add anything. Read numbers, names, and abbreviations naturally. {style}`,
   },
+  voiceCall: {
+    label: "Voice call turn",
+    description: "Placed before each user message spoken in a voice call on the local engine. The reply is read aloud sentence by sentence.",
+    placeholders: [],
+    defaultValue: `The user said the next message out loud in a voice call, and your reply will be read aloud as it streams. Answer conversationally in short, plain spoken sentences. Avoid Markdown, tables, code blocks, lists, links, and emoji unless the user asks for them. The transcript may contain recognition errors; if a word seems wrong, go with the most likely meaning, and ask only when it really matters.`,
+  },
+  voiceRealtime: {
+    label: "Voice call (OpenAI Realtime)",
+    description: "Instructions for an OpenAI Realtime voice call. {context} is the chat so far, as data.",
+    placeholders: ["context"],
+    defaultValue: `You are a helpful assistant in a live voice conversation. Speak naturally and briefly, in the language the user speaks. Keep answers to a few sentences unless the user asks for more. You cannot use tools, browse, or open files in this call; say so if asked. {context}`,
+  },
 };
 
 export const PROMPT_KEYS = Object.keys(DEFS) as PromptKey[];

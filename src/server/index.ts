@@ -18,6 +18,7 @@ import { api, mcpOAuthCallback } from "./routes.js";
 import { publicShareRoutes } from "./shares.js";
 import { startRecordingPurge } from "./speech/config.js";
 import { speechToken, speechWorkerConfigured } from "./speech/worker.js";
+import { voiceWebSocketServer } from "./voice/routes.js";
 
 const app = new Hono();
 app.use("/api/*", logger());
@@ -70,7 +71,8 @@ if (existsSync(webDir)) {
 // The first page load after a restart must not wait for the 6 MB catalog or the OpenCode Go model list.
 void warmCatalog().catch(() => {});
 
-serve({ fetch: app.fetch, port: env.port, hostname: env.host }, (info) => {
+// `/api/voice/call` upgrades through this server; the codec lives in voice/ws.ts so no `ws` dependency is needed.
+serve({ fetch: app.fetch, port: env.port, hostname: env.host, websocket: { server: voiceWebSocketServer } }, (info) => {
   console.log(`okaychat listening on http://${env.host}:${info.port}`);
   startMemoryWorker();
   startRecordingPurge();

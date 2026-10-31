@@ -38,6 +38,7 @@ import { describeBoundaryError, describeProviderError, toolErrorWireText, wireEr
 import { conversationMemory, factsContext, memoryPreferences, temporaryMemory } from "./memory.js";
 import { attachedCollectionIds, conversationKnowledge, type KnowledgeTurn } from "./knowledge/tools.js";
 import { contextText, insertTurnContexts, saveTurnContext, shownFactIds, storedTurnContexts } from "./turn-context.js";
+import { isVoiceTurn, withVoiceNotes } from "./voice/turn.js";
 import { adaptPdfParts } from "./pdf-parts.js";
 import { getProject, projectContext } from "./projects.js";
 import { applyUntrustedEnvelopes, approvalRiskReason, messagesHaveUntrustedContent, riskOfTool, toolsHaveExternalMetadata, wrapUntrusted } from "./prompt-injection.js";
@@ -295,7 +296,10 @@ export async function turnStream(opts: TurnOptions) {
       let converted = modelMessages;
       const date = promptText("date", { date: new Date().toISOString().slice(0, 10) });
       if (temporary) {
-        const currentContext = contextText({ date, memory: memory.context, skills: skills.context, knowledge: "", knowledgeIds: [] });
+        const currentContext = [
+          contextText({ date, memory: memory.context, skills: skills.context, knowledge: "", knowledgeIds: [] }),
+          lastUser && isVoiceTurn(lastUser) ? promptText("voiceCall") : "",
+        ].filter(Boolean).join("\n\n");
         if (currentContext) {
           const lastUserIndex = converted.findLastIndex((message) => message.role === "user");
           converted.splice(lastUserIndex < 0 ? converted.length : lastUserIndex, 0, { role: "user", content: currentContext });
@@ -329,7 +333,7 @@ export async function turnStream(opts: TurnOptions) {
           saveTurnContext(userId, threadId, lastUser.id, fresh, memoryRevision ?? 0);
           stored.set(lastUser.id, fresh);
         }
-        converted = insertTurnContexts(live, converted, new Map([...stored].map(([id, context]) => [id, contextText(context)])));
+        converted = insertTurnContexts(live, converted, withVoiceNotes(live, new Map([...stored].map(([id, context]) => [id, contextText(context)]))));
       }
       // Includes research, which is part of the reply's time.
       const startedAt = Date.now();
