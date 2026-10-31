@@ -9,6 +9,7 @@ import { t } from "@/i18n";
 import { formatBytes, formatCost, formatList, formatNumber } from "@/i18n/format";
 import { Trans } from "@/i18n/react";
 import { useData } from "@/state/data";
+import { useKnowledgeCitationStore } from "@/state/chat-knowledge";
 import { RunFiles, type RunFile } from "./reply-files";
 import { EmailFoldersCard, EmailListCard, EmailReadCard, EmailReplyCard, EmailSearchCard, EmailSendCard } from "./email-tools";
 import { cn } from "@/lib/utils";
@@ -222,6 +223,57 @@ export const toolkit = defineToolkit({
   email_read: { type: "backend", render: (props) => <EmailReadCard {...props} /> },
   email_send: { type: "backend", render: (props) => <EmailSendCard {...props} /> },
   email_reply: { type: "backend", render: (props) => <EmailReplyCard {...props} /> },
+  search_knowledge: {
+    type: "backend",
+    render: ({ args, result, status }) => {
+      const r = result as { hits?: Array<{ chunkId: string; title: string; text: string; offset: number }>; mode?: string; injection?: InjectionReport } | undefined;
+      const hits = r?.hits ?? [];
+      const running = status?.type === "running";
+      const query = (args as { query?: string })?.query ?? "";
+      return (
+        <ToolShell
+          icon={<BookOpenIcon className="size-4" />}
+          running={running}
+          error={status?.type === "incomplete" ? t("tools.knowledgeSearchFailed") : undefined}
+          injection={r?.injection}
+          label={running ? t("tools.knowledgeSearching", { query }) : t("tools.knowledgeSearched", { query, count: hits.length })}
+        >
+          {hits.length > 0 && (
+            <div className="grid gap-1.5 sm:grid-cols-2">
+              {hits.map((hit) => (
+                <button
+                  key={hit.chunkId}
+                  type="button"
+                  onClick={() => useKnowledgeCitationStore.getState().open(hit.chunkId)}
+                  className="hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-ring flex min-w-0 flex-col gap-0.5 rounded-lg border px-2.5 py-2 text-start pointer-coarse:min-h-11 focus-visible:outline-2 focus-visible:outline-offset-2"
+                >
+                  <span className="text-muted-foreground text-xs">{t("knowledge.citationOffset", { start: formatNumber(hit.offset), end: formatNumber(hit.offset + hit.text.length) })}</span>
+                  <span className="line-clamp-1 font-medium">{hit.title}</span>
+                  <span className="text-muted-foreground line-clamp-2 text-xs">{hit.text}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </ToolShell>
+      );
+    },
+  },
+  read_knowledge_chunk: {
+    type: "backend",
+    render: ({ result, status }) => {
+      const r = result as { chunkId?: string; title?: string; text?: string; injection?: InjectionReport } | undefined;
+      const running = status?.type === "running";
+      return (
+        <ToolShell icon={<BookOpenIcon className="size-4" />} running={running} injection={r?.injection} label={t("tools.knowledgeRead")}>
+          {r?.chunkId && r.text ? (
+            <button type="button" onClick={() => useKnowledgeCitationStore.getState().open(r.chunkId!)} className="text-primary hover:underline rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring pointer-coarse:min-h-6">
+              {t("knowledge.openPassage")}
+            </button>
+          ) : null}
+        </ToolShell>
+      );
+    },
+  },
 });
 
 // generative-frame renders its helper tools as nothing, which leaves an empty row in the reasoning group.

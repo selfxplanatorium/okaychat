@@ -26,7 +26,10 @@ import { MermaidDiagram } from "@/components/ui/mermaid-diagram";
 import { ProtectedMarkdownImage } from "@/components/ui/protected-markdown-image";
 import { keepLineBreaks, preprocessMarkdown } from "@/lib/markdown-math";
 import { cn } from "@/lib/utils";
+import { t } from "@/i18n";
+import { useKnowledgeCitationStore } from "@/state/chat-knowledge";
 import { useCurrentThreadId } from "@/state/thread-meta";
+import { isKnowledgeHref, parseKnowledgeCitation } from "@/lib/knowledge-citation";
 import { MarkdownTable } from "./markdown-table";
 
 type MarkdownTextProps = Partial<TextMessagePartProps> & {
@@ -59,7 +62,9 @@ const preprocessTyped = (text: string) => keepLineBreaks(preprocessMarkdown(text
 // Models trained on ChatGPT link run_code outputs as `sandbox:/mnt/data/<path>`, and the run_code tool
 // asks for that form. react-markdown would blank the unknown scheme, so it passes through to `useSandboxUrl`.
 const SANDBOX = /^sandbox:(?:\/mnt\/data\/|\/)?/i;
-const urlTransform = (url: string) => (SANDBOX.test(url) ? url : defaultUrlTransform(url));
+/** A knowledge citation produced by `search_knowledge`: `[1](oknowledge:<chunkId>)`. */
+const KNOWLEDGE = /^oknowledge:/i;
+const urlTransform = (url: string) => (SANDBOX.test(url) || KNOWLEDGE.test(url) ? url : defaultUrlTransform(url));
 
 /** The chat's stored copy of a `sandbox:` link target, or the URL unchanged. */
 const useSandboxUrl = (url: string | undefined) => {
@@ -125,6 +130,25 @@ const MarkdownImage: FC<ComponentProps<"img">> = ({ src: rawSrc, ...props }) => 
 
 const MarkdownLink: FC<ComponentProps<"a">> = ({ className, href, ...props }) => {
   const file = useSandboxUrl(href);
+  const openCitation = useKnowledgeCitationStore((s) => s.open);
+  if (isKnowledgeHref(href)) {
+    const chunkId = parseKnowledgeCitation(href);
+    // A malformed citation is model text, not a link: render it inert instead of failing the message.
+    if (!chunkId) return <span className={cn("aui-md-a text-muted-foreground", className)}>{props.children}</span>;
+    return (
+      <button
+        type="button"
+        title={t("knowledge.openInChat")}
+        onClick={() => openCitation(chunkId)}
+        className={cn(
+          "aui-md-a text-primary hover:text-primary/80 cursor-pointer rounded-sm underline underline-offset-2 pointer-coarse:min-h-6 pointer-coarse:px-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+          className,
+        )}
+      >
+        {props.children}
+      </button>
+    );
+  }
   return (
     <a
       className={cn(

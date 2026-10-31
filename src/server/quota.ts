@@ -51,6 +51,11 @@ export function storageUsedSql(user: string): string {
       FROM skills WHERE user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(length(CAST(f.name AS BLOB)) + length(CAST(f.content AS BLOB))), 0)
       FROM skill_files f JOIN skills s ON s.id = f.skill_id WHERE s.user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(length(CAST(text AS BLOB))), 0) FROM knowledge_sources WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(length(CAST(text AS BLOB)) + COALESCE(length(embedding), 0)), 0)
+      FROM knowledge_chunks WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(COALESCE(length(CAST(knowledge AS BLOB)), 0) + COALESCE(length(CAST(knowledge_ids AS BLOB)), 0)), 0)
+      FROM turn_context WHERE user_id = ${user}
   )), 0)`;
 }
 

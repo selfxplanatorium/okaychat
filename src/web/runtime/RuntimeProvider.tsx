@@ -24,6 +24,7 @@ import { chatPrivacyFor, isTemporaryChat, useChatPrivacy, useChatPrivacyStore } 
 import { useVoiceAdapters } from "@/speech/adapters";
 import { chatSearchFor, useChatSearch, useChatSearchStore } from "@/state/chat-search";
 import { chatResearchFor, useChatResearchStore } from "@/state/chat-research";
+import { persistKnowledgeAttachments, useChatKnowledgeStore } from "@/state/chat-knowledge";
 import { dropThread, readThread, sameRows, ServerRows, writeThread } from "./threadCache";
 import { setThreadSync, useThreadSyncStore } from "@/state/thread-sync";
 import { applyRetryNotice, clearRetryNotice, retryChunkData, retryOwnerId } from "@/state/retry-status";
@@ -111,6 +112,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
     const path = threadsPath(useData.getState().activeProject);
     const threads = await (takePrefetched<ThreadSummary[]>(path) ?? api<ThreadSummary[]>(path));
     useData.getState().rememberThreadModels(Object.fromEntries(threads.flatMap((t) => (t.modelRef ? [[t.id, t.modelRef]] : []))));
+    for (const t of threads) useChatKnowledgeStore.getState().hydrate(t.id, t.knowledgeIds);
     return {
       threads: threads.map((t) => ({
         remoteId: t.id,
@@ -139,6 +141,12 @@ const threadListAdapter: RemoteThreadListAdapter = {
     serverRows.created(thread.id);
     useChatSearchStore.getState().bind(localId, thread.id);
     useChatResearchStore.getState().bind(localId, thread.id);
+    const knowledgeIds = useChatKnowledgeStore.getState().byId[localId];
+    // Persist a choice made on the optimistic chat before the first message is sent, and only then mirror
+    // it into the stored chat. A failed PATCH clears the remote entry, so the selector never claims an
+    // attachment the next request does not have; the error reaches the thread-initialisation path.
+    if (knowledgeIds?.length) await persistKnowledgeAttachments(thread.id, knowledgeIds);
+    useChatKnowledgeStore.getState().bind(localId, thread.id);
     bindModel(thread.id);
     return { remoteId: thread.id, externalId: undefined };
   },
@@ -169,6 +177,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
     // Shares the request with the open chat's metadata refresh, which asks for the same response.
     const thread = await loadThreadDetail(remoteId, { reuse: true });
     if (thread.modelRef) useData.getState().rememberThreadModels({ [thread.id]: thread.modelRef });
+    useChatKnowledgeStore.getState().hydrate(thread.id, thread.knowledgeIds);
     return { remoteId: thread.id, status: thread.status, title: thread.title ?? undefined, lastMessageAt: new Date(thread.updatedAt), custom: threadCustom(thread) };
   },
   async generateTitle(remoteId, messages) {

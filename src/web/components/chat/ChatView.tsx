@@ -1,7 +1,9 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { Thread } from "@/components/assistant-ui/elements/thread.aui";
 import { CompactionMarker, ContextMeter, MessageMeta } from "./ContextMeter";
 import { McpPromptsButton, MobileComposerMenu, ResearchToggle, SearchToggle } from "./ComposerControls";
+import { KnowledgeControl } from "@/components/knowledge/KnowledgeSelector";
+import { KnowledgeCitationHost } from "@/components/knowledge/KnowledgeCitation";
 import { EffortPicker, ModelPicker } from "./ModelPicker";
 import { BranchedFromBanner, BranchMenu, PendingBranchRun } from "./branch";
 import { pickWelcomeLine } from "./welcome-lines";
@@ -9,6 +11,7 @@ import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 import { useChatPrivacy } from "@/state/chat-privacy";
+import { useKnowledgeCitationStore } from "@/state/chat-knowledge";
 import { ThreadMetaSync } from "@/state/thread-meta";
 
 function Welcome() {
@@ -59,6 +62,7 @@ function ComposerToolbar() {
       </div>
       <SearchToggle />
       <ResearchToggle />
+      <KnowledgeControl />
       <McpPromptsButton />
       <ContextMeter />
     </>
@@ -79,10 +83,12 @@ function BeforeMessages() {
 }
 
 export function ChatView() {
+  useEffect(() => () => useKnowledgeCitationStore.getState().close(), []);
   return (
     <>
       <ThreadMetaSync />
       <Thread components={{ Welcome, ComposerToolbar, MessageMeta, AfterMessage, BeforeMessages, BranchAction: BranchMenu }} />
+      <KnowledgeCitationHost />
     </>
   );
 }

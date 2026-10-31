@@ -36,6 +36,7 @@ import { hasResearch, RESEARCH_PARALLEL, RESEARCH_TOOL, researchedThisTurn, rese
 import { errorJson, AppError } from "./errors.js";
 import { describeBoundaryError, describeProviderError, toolErrorWireText, wireErrorText } from "./provider-errors.js";
 import { conversationMemory, factsContext, memoryPreferences, temporaryMemory } from "./memory.js";
+import { attachedCollectionIds, conversationKnowledge, type KnowledgeTurn } from "./knowledge/tools.js";
 import { contextText, insertTurnContexts, saveTurnContext, shownFactIds, storedTurnContexts } from "./turn-context.js";
 import { adaptPdfParts } from "./pdf-parts.js";
 import { getProject, projectContext } from "./projects.js";
@@ -212,6 +213,24 @@ export async function turnStream(opts: TurnOptions) {
       const email = model.toolCall && !temporary && hasAccounts(user.id)
         ? emailTools({ userId: user.id, signal })
         : { tools: {}, subTools: {} };
+      // Attached knowledge is read from the thread, never from the request body, so a forged list cannot
+      // widen scope. Retrieval runs only for a new user message; continuations replay the stored block.
+      const memoryRevision = temporary ? null : memory.instructions !== undefined ? memoryPreferences(userId).revision : null;
+      const knowledgeScope = temporary ? [] : attachedCollectionIds(userId, threadId);
+      const stored = temporary
+        ? new Map()
+        : storedTurnContexts(userId, threadId, { memoryRevision, skills: !!skills.context, knowledge: new Set(knowledgeScope) });
+      const knowledge: KnowledgeTurn = temporary || !knowledgeScope.length
+        ? { collections: [], context: "", names: "", passages: "", tools: {} }
+        : await conversationKnowledge(user.id, threadId, query, { retrieve: !!lastUser && !stored.has(lastUser.id) });
+      // Retrieval can await a provider while attachments change. Revoke earlier replay blocks too,
+      // not just the freshly retrieved passages checked by conversationKnowledge.
+      const currentKnowledgeScope = new Set(temporary ? [] : attachedCollectionIds(userId, threadId));
+      for (const [id, block] of stored) {
+        if (block.knowledgeIds.some((collectionId: string) => !currentKnowledgeScope.has(collectionId))) {
+          stored.set(id, { ...block, knowledge: "", knowledgeIds: [] });
+        }
+      }
       // Built-in tools first, then MCP tools in sorted order, so the tool block is identical across turns.
       const readOnlyTools = {
         ...builtInWeb,
@@ -234,6 +253,7 @@ export async function turnStream(opts: TurnOptions) {
       const tools: ToolSet = {
         ...builtInWeb,
         ...(model.toolCall ? memory.tools : {}),
+        ...(model.toolCall ? knowledge.tools : {}),
         ...(skills.tools),
         ...email.tools,
         ...subagents,
@@ -265,37 +285,46 @@ export async function turnStream(opts: TurnOptions) {
         || (thread.projectId ? (getProject(userId, thread.projectId)?.files.length ?? 0) > 0 : false)
         || mcp.instructions.length > 0
         || !!memory.summary
-        || !!summary;
+        || !!summary
+        // Replayed passages and this turn's new retrieval are third-party text even though they are not in
+        // the converted messages yet, so the approval gate must already see them as untrusted content.
+        || !!knowledge.passages
+        || [...stored.values()].some((block) => block.knowledge.includes("Retrieved passages"));
       // Retrieved facts change with the query, so they sit beside the user message they were retrieved for,
       // never in the system prefix. Stored chats replay each earlier block verbatim to keep the prefix cached.
       let converted = modelMessages;
       const date = promptText("date", { date: new Date().toISOString().slice(0, 10) });
       if (temporary) {
-        const currentContext = contextText({ date, memory: memory.context, skills: skills.context });
+        const currentContext = contextText({ date, memory: memory.context, skills: skills.context, knowledge: "", knowledgeIds: [] });
         if (currentContext) {
           const lastUserIndex = converted.findLastIndex((message) => message.role === "user");
           converted.splice(lastUserIndex < 0 ? converted.length : lastUserIndex, 0, { role: "user", content: currentContext });
         }
       } else {
-        const memoryRevision = memory.instructions !== undefined ? memoryPreferences(userId).revision : null;
-        const stored = storedTurnContexts(userId, threadId, { memoryRevision, skills: !!skills.context });
         // A continuation or retry of this turn reuses the block it started with. A new block carries only what
         // the replayed earlier blocks do not already show, so each turn adds as few uncached tokens as possible.
         if (lastUser && !stored.has(lastUser.id)) {
           const shown = new Set<string>();
           let lastDate = "";
           let lastSkills = "";
+          let lastKnowledge = "";
           for (const message of live) {
             const block = message.role === "user" && message.id !== lastUser.id ? stored.get(message.id) : undefined;
             if (!block) continue;
             for (const id of shownFactIds(block.memory)) shown.add(id);
             lastDate = block.date || lastDate;
             lastSkills = block.skills || lastSkills;
+            if (block.knowledgeIds.length) lastKnowledge = JSON.stringify(block.knowledgeIds);
           }
+          const knowledgeIds = knowledge.collections.map((collection) => collection.id);
           const fresh = {
             date: date === lastDate ? "" : date,
             memory: memory.facts ? factsContext(memory.facts.filter((fact) => !shown.has(fact.id))) : memory.context,
             skills: skills.context === lastSkills ? "" : skills.context,
+            // Repeating the collection names in every turn is cheap but still uncached text; an earlier
+            // block in this chat already named the same collections, so only new passages are added.
+            knowledge: lastKnowledge && lastKnowledge === JSON.stringify(knowledgeIds) ? knowledge.passages : knowledge.context,
+            knowledgeIds,
           };
           saveTurnContext(userId, threadId, lastUser.id, fresh, memoryRevision ?? 0);
           stored.set(lastUser.id, fresh);

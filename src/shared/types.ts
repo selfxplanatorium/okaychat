@@ -147,7 +147,7 @@ export interface OllamaPullProgress {
 
 export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
-export const SIDEBAR_ITEMS = ["newChat", "scheduled", "library", "plugins", "projects"] as const;
+export const SIDEBAR_ITEMS = ["newChat", "scheduled", "library", "knowledge", "plugins", "projects"] as const;
 export type SidebarItem = (typeof SIDEBAR_ITEMS)[number];
 
 /** Per-account keyboard preferences. Absent fields fall back to the defaults in `src/web/keyboard/commands.ts`. */
@@ -264,6 +264,8 @@ export interface ThreadSummary {
   projectId: string | null;
   memoryDisabled: boolean;
   pinned: boolean;
+  /** Knowledge collections attached in the composer; ids are re-validated on every use. */
+  knowledgeIds: string[];
   /** The chat this one was forked from, while that chat still exists. */
   branchedFrom: { id: string; title: string | null } | null;
   createdAt: number;

@@ -14,6 +14,7 @@ import format from "./format";
 import general from "./general";
 import genui from "./genui";
 import keyboard from "./keyboard";
+import knowledge from "./knowledge";
 import library from "./library";
 import mcp from "./mcp";
 import memory from "./memory";
@@ -49,6 +50,7 @@ export const en = {
   general,
   genui,
   keyboard,
+  knowledge,
   library,
   mcp,
   memory,

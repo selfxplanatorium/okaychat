@@ -17,6 +17,7 @@ export default {
   mainNavigation: "Main navigation",
   scheduled: "Scheduled",
   library: "Library",
+  knowledge: "Knowledge",
   plugins: "Plugins",
   projects: "Projects",
   account: "Account",

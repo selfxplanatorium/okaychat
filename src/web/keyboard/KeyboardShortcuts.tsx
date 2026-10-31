@@ -86,7 +86,7 @@ export function KeyboardShortcuts() {
   useCommand("nav.previousChat", () => stepChat(-1));
   useCommand("nav.nextChat", () => stepChat(1));
   // Hooks in loops: the lists are constant, so they run in the same order on every render.
-  for (const page of ["library", "projects", "scheduled", "plugins"] as const) {
+  for (const page of ["library", "knowledge", "projects", "scheduled", "plugins"] as const) {
     useCommand(`nav.${page}`, () => navigate(`/${page}`));
   }
   useCommand("nav.settings", () => navigate("/settings"));

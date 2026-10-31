@@ -8,6 +8,7 @@ import { preprocessMarkdown } from "@/lib/markdown-math";
 import { InlineMath, MathBlock } from "./math";
 import { MermaidDiagram } from "./mermaid-diagram";
 import { cn } from "@/lib/utils";
+import { isKnowledgeHref } from "@/lib/knowledge-citation";
 
 // Markdown outside a message part (artifact previews, sub-agent reports). Message text uses MarkdownText,
 // which needs the assistant-ui part context.
@@ -30,6 +31,10 @@ const components = {
   },
   // Public shares, artifact previews, and memory imports use the same remote-image consent policy.
   img: ProtectedMarkdownImage,
+  // Knowledge citations need the chat's private passage panel. Anywhere else (including a public share)
+  // they stay inert text, and a malformed `oknowledge:` value never becomes a real link.
+  a: ({ href, children, ...props }: React.ComponentProps<"a">) =>
+    isKnowledgeHref(href) ? <span className="text-muted-foreground">{children}</span> : <a href={href} {...props}>{children}</a>,
 };
 
 const remarkPlugins = [remarkGfm, remarkMath];

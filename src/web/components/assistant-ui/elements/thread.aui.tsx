@@ -161,6 +161,8 @@ const messageGroupBy = groupPartByType({
   "tool-call:email_read": [],
   "tool-call:email_send": [],
   "tool-call:email_reply": [],
+  // Citation cards stay visible: their sources are clickable.
+  "tool-call:search_knowledge": [],
 });
 
 type ThreadGroupKey =
@@ -224,6 +226,9 @@ const resultKey = (part: GroupablePart): string | undefined => {
     case "email_send":
     case "email_reply":
       return emailResultKey(part.toolName, part.toolCallId, part.args);
+    // Each knowledge search keeps its citation list, like an image or an app card.
+    case "search_knowledge":
+      return `knowledge:${part.toolCallId}`;
     default:
       // Each MCP App call is its own result, like a generated image.
       return mcpAppOf(part.result) ? `app:${part.toolCallId}` : undefined;

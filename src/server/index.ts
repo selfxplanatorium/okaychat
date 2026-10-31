@@ -12,6 +12,7 @@ import { warmCatalog } from "./catalog/providers.js";
 import { probeRenderer } from "./documents/render.js";
 import { handleAppError } from "./errors.js";
 import { env } from "./env.js";
+import { resumeKnowledgeIngestion } from "./knowledge/jobs.js";
 import { startMemoryWorker } from "./memory-learn.js";
 import { api, mcpOAuthCallback } from "./routes.js";
 import { publicShareRoutes } from "./shares.js";
@@ -73,6 +74,8 @@ serve({ fetch: app.fetch, port: env.port, hostname: env.host }, (info) => {
   console.log(`okaychat listening on http://${env.host}:${info.port}`);
   startMemoryWorker();
   startRecordingPurge();
+  // Rows keep queued/extracting/embedding state across a restart; resuming spends no idle timer.
+  resumeKnowledgeIngestion();
   // The worker reads this file; writing it at start lets the worker authenticate before the first request.
   if (speechWorkerConfigured()) speechToken();
   probeRenderer();

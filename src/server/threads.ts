@@ -17,6 +17,7 @@ interface ThreadRow {
   compaction_json: string | null;
   memory_disabled: number;
   pinned: number;
+  knowledge_ids: string | null;
   branched_from: string | null;
   /** Joined from the source thread; null once it is deleted. */
   branched_title: string | null;
@@ -28,6 +29,16 @@ interface ThreadRow {
 const SELECT_THREADS = `SELECT t.*, o.title AS branched_title, o.id IS NOT NULL AS branched_exists FROM threads t
   LEFT JOIN threads o ON o.id = t.branched_from AND o.user_id = t.user_id`;
 
+const parseIds = (value: string | null): string[] => {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string").slice(0, 20) : [];
+  } catch {
+    return [];
+  }
+};
+
 const toSummary = (r: ThreadRow): ThreadSummary => ({
   id: r.id,
   title: r.title,
@@ -36,6 +47,7 @@ const toSummary = (r: ThreadRow): ThreadSummary => ({
   projectId: r.project_id,
   memoryDisabled: !!r.memory_disabled,
   pinned: !!r.pinned,
+  knowledgeIds: parseIds(r.knowledge_ids),
   branchedFrom: r.branched_from && r.branched_exists ? { id: r.branched_from, title: r.branched_title } : null,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
@@ -76,7 +88,7 @@ export function ensureThread(userId: string, id: string, projectId: string | nul
 export function updateThread(
   userId: string,
   id: string,
-  patch: { title?: string; status?: "regular" | "archived"; modelRef?: string; memoryDisabled?: boolean; pinned?: boolean; projectId?: string | null },
+  patch: { title?: string; status?: "regular" | "archived"; modelRef?: string; memoryDisabled?: boolean; pinned?: boolean; projectId?: string | null; knowledgeIds?: string[] },
 ) {
   const sets: string[] = [];
   const values: Array<string | number | null> = [];
@@ -86,6 +98,7 @@ export function updateThread(
   if (patch.memoryDisabled !== undefined) sets.push("memory_disabled = ?"), values.push(Number(patch.memoryDisabled));
   if (patch.pinned !== undefined) sets.push("pinned = ?"), values.push(Number(patch.pinned));
   if (patch.projectId !== undefined) sets.push("project_id = ?"), values.push(patch.projectId);
+  if (patch.knowledgeIds !== undefined) sets.push("knowledge_ids = ?"), values.push(JSON.stringify(patch.knowledgeIds.slice(0, 20)));
   if (!sets.length) return;
   db.prepare(`UPDATE threads SET ${sets.join(", ")} WHERE user_id = ? AND id = ?`).run(...values, userId, id);
 }
@@ -120,10 +133,10 @@ export function branchThread(userId: string, sourceId: string, messageId: string
   const now = Date.now();
   tx(() => {
     db.prepare(
-      `INSERT INTO threads (id, user_id, title, model_ref, project_id, compaction_json, memory_disabled, branched_from, memory_cursor, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO threads (id, user_id, title, model_ref, project_id, compaction_json, memory_disabled, branched_from, memory_cursor, knowledge_ids, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       // The copied messages belong to the source chat's memory review; the fork only reviews what follows.
-    ).run(id, userId, source.title, modelRef ?? source.modelRef, source.projectId, compaction ? JSON.stringify(compaction) : null, Number(source.memoryDisabled), sourceId, messageId, now, now);
+    ).run(id, userId, source.title, modelRef ?? source.modelRef, source.projectId, compaction ? JSON.stringify(compaction) : null, Number(source.memoryDisabled), sourceId, messageId, JSON.stringify(source.knowledgeIds), now, now);
     const insert = db.prepare("INSERT INTO messages (id, thread_id, parent_id, format, content, bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)");
     const copies = chain.map((m) => ({ m, json: JSON.stringify(m.content) }));
     // A fork stores its own copy of the conversation.
