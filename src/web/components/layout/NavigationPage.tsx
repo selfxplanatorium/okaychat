@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { LibraryIcon } from "lucide-react";
+import { KnowledgePage } from "@/components/knowledge/KnowledgePage";
 import { LibraryPage } from "@/components/library/LibraryPage";
 import { McpSettings } from "@/components/settings/McpSettings";
 import { ProjectSettings } from "@/components/settings/ProjectSettings";
@@ -43,6 +44,7 @@ export function NavigationPage({ page }: { page: string }) {
   if (page === "projects") return <ProjectSettings />;
   if (page === "plugins") return <PluginsPage />;
   if (page === "library") return <LibraryPage />;
+  if (page === "knowledge") return <KnowledgePage />;
   return (
     <SettingsPage title={t("shell.navigation")}>
       <div className="flex flex-col items-center py-16 text-center">

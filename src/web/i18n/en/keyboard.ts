@@ -181,4 +181,10 @@ export default {
   cmdSettingsOllamaPull: "Focus the Ollama pull field",
   cmdSettingsOllamaCancelPull: "Cancel the Ollama pull",
   cmdSettingsOllamaDelete: "Delete the selected Ollama model",
+  cmdNavKnowledge: "Knowledge",
+  cmdComposerKnowledge: "Choose knowledge collections for this chat",
+  cmdKnowledgeNewCollection: "New knowledge collection",
+  cmdKnowledgeAddSource: "Add a knowledge source",
+  cmdKnowledgeSearch: "Test knowledge search",
+  cmdKnowledgeReindex: "Reindex the selected knowledge collection",
 } as const;

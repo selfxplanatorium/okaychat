@@ -18,6 +18,8 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       db.prepare("INSERT INTO messages (id,thread_id,format,content,created_at) VALUES ('m1','historical','ai-sdk/v6',?,1)").run(JSON.stringify({role:'user',parts:[{type:'file',filename:'legacy.png',mediaType:'image/png',url:'data:image/png;base64,bGVnYWN5LWZpbGU='},{type:'text',text:'<attachment file_id=\"upl_pdf\"></attachment>'}]}));
       // Rewind to just before the inline-file migration (15), undoing the later threads.pinned (16), images.mime (17), threads.branched_from (18), memory v2 (19), and messages.bytes changes.
       for (const table of ["share_groups", "share_users", "share_audiences", "user_group_members", "user_groups"]) db.exec("DROP TABLE " + table);
+      for (const table of ["knowledge_chunks_fts", "knowledge_chunks", "knowledge_sources", "knowledge_collections"]) db.exec("DROP TABLE " + table);
+      db.exec("ALTER TABLE threads DROP COLUMN knowledge_ids");
       db.exec("DROP TABLE turn_context");
       db.exec("DROP TABLE speech_recordings");
       db.exec("DROP TABLE mcp_server_users");

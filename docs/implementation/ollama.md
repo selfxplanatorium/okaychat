@@ -61,7 +61,7 @@ Mapping from the neutral prompt:
 - `GET /providers/ollama/models` returns the inventory: every installed model, metadata, and `/api/ps` loaded state. A model whose `/api/show` fails still appears with a `showError` badge.
 - `POST /providers/ollama/pull` streams `application/x-ndjson` progress lines. The parser handles split chunks, multiple lines per chunk, `\r\n`, and a final line without a newline. `{ "error": ... }` lines become a visible error. Only one pull per user and daemon runs at a time.
 - `DELETE /providers/ollama/models` removes a model. The UI asks for confirmation first.
-- `POST /api/embed` supports `input` as a string or array and returns the embedding vectors. This is the data layer for later knowledge/RAG work; there is no embeddings UI.
+- `POST /api/embed` supports `input` as a string or array and returns the embedding vectors. Knowledge collections use it through `src/server/knowledge/embeddings.ts`; the Ollama settings panel itself has no embeddings surface.
 
 Cancelling a pull aborts the app's HTTP request and closes the response body. The route also aborts an internal controller when the downstream reader cancels without a request abort, so the upstream pull socket closes even then. The per-user/per-daemon lock is released only after that upstream cleanup finishes; until then a second pull gets 409, which prevents overlapping downloads. Ollama may continue downloading in the daemon after the client disconnects; the UI says so. There is no separate daemon-side cancel endpoint.
 

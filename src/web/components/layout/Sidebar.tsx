@@ -5,7 +5,7 @@ import { useCommand, useKeyboardDialog, useShortcutProps } from "@/keyboard/regi
 import { SIDEBAR_ITEMS } from "@shared/types";
 import { useChatPrivacyStore } from "@/state/chat-privacy";
 import { ChatSearch } from "./ChatSearch";
-import { CalendarClockIcon, FolderIcon, LibraryIcon, LogOutIcon, PanelLeftIcon, PlusIcon, PuzzleIcon, SearchIcon, SettingsIcon, SquarePenIcon, UserRoundIcon } from "lucide-react";
+import { CalendarClockIcon, BookOpenIcon, FolderIcon, LibraryIcon, LogOutIcon, PanelLeftIcon, PlusIcon, PuzzleIcon, SearchIcon, SettingsIcon, SquarePenIcon, UserRoundIcon } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { ThreadList, ThreadSelectionBar } from "@/components/assistant-ui/elements/thread-list.aui";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
@@ -91,6 +91,7 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
               {([
                 { id: "scheduled", label: "sidebar.scheduled", href: "/scheduled", icon: CalendarClockIcon, create: { command: "nav.createSchedule", label: "ux.newScheduleQuick", href: "/scheduled?new=1" } },
                 { id: "library", label: "sidebar.library", href: "/library", icon: LibraryIcon },
+                { id: "knowledge", label: "sidebar.knowledge", href: "/knowledge", icon: BookOpenIcon },
                 { id: "plugins", label: "sidebar.plugins", href: "/plugins", icon: PuzzleIcon },
                 { id: "projects", label: "sidebar.projects", href: "/projects", icon: FolderIcon, create: { command: "nav.createProject", label: "ux.newProjectQuick", href: "/projects?new=1" } },
               ] as const).filter((item) => visibleItems.includes(item.id)).map((item) => (

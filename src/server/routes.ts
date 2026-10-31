@@ -17,6 +17,8 @@ import { chatRoutes } from "./chat.js";
 import { exportRoutes } from "./export.js";
 import { fileRoutes } from "./files.js";
 import { fontRoutes } from "./fonts.js";
+import { knowledgeRoutes } from "./knowledge/routes.js";
+import { collectionAccessible } from "./knowledge/store.js";
 import { libraryRoutes } from "./library.js";
 import { clearAudience, setAudience } from "./groups.js";
 import { getProject, projectRoutes } from "./projects.js";
@@ -160,14 +162,26 @@ const api = new Hono<AppEnv>()
       pinned: z.boolean().optional(),
       projectId: z.string().nullable().optional(),
       modelRef: z.string().min(1).max(300).optional(),
+      knowledgeIds: z.array(z.string().min(1).max(200)).max(20).optional(),
     }).safeParse(await c.req.json());
     if (!parsed.success) return c.json({ error: "Invalid chat settings" }, 400);
     const userId = c.get("user").id;
-    if (!getThread(userId, c.req.param("id"))) return c.json({ error: "Thread not found" }, 404);
+    const thread = getThread(userId, c.req.param("id"));
+    if (!thread) return c.json({ error: "Thread not found" }, 404);
     // A foreign project would expose its files and memories to this chat. Memory tools already offered
     // re-check the thread's project on every call, so a move needs no extra revocation here.
     if (parsed.data.projectId && !getProject(userId, parsed.data.projectId)) return c.json({ error: "Project not found" }, 404);
-    updateThread(userId, c.req.param("id"), parsed.data);
+    // Attachment ids are ownership-checked here and again on every tool call. A collection bound to
+    // another project cannot be attached through a forged request.
+    const projectId = parsed.data.projectId === undefined ? thread.projectId : parsed.data.projectId;
+    let knowledgeIds = parsed.data.knowledgeIds;
+    if (knowledgeIds) {
+      if (knowledgeIds.some((id) => !collectionAccessible(userId, id, projectId))) return c.json({ error: "Knowledge collection not found" }, 404);
+    } else if (parsed.data.projectId !== undefined && thread.knowledgeIds.length) {
+      // Moving a chat drops attachments that no longer apply to its project.
+      knowledgeIds = thread.knowledgeIds.filter((id) => collectionAccessible(userId, id, projectId));
+    }
+    updateThread(userId, c.req.param("id"), { ...parsed.data, ...(knowledgeIds ? { knowledgeIds } : {}) });
     return c.json({ ok: true });
   })
   .delete("/threads/:id", async (c) => {
@@ -350,6 +364,7 @@ const api = new Hono<AppEnv>()
   .route("/", chatRoutes)
   .route("/", fileRoutes)
   .route("/", fontRoutes)
+  .route("/knowledge", knowledgeRoutes)
   .route("/", libraryRoutes)
   .route("/", artifactRoutes)
   .route("/", imageRoutes)

@@ -458,6 +458,92 @@ const migrations: Array<string | (() => void)> = [
   CREATE INDEX speech_recordings_created ON speech_recordings(created_at);
   CREATE INDEX speech_recordings_user ON speech_recordings(user_id);
   `,
+  // Knowledge base (docs/implementation/knowledge.md): account collections, sources with original bytes
+  // in `uploads` plus extracted text here, deterministic chunks with normalized float32 embeddings, and
+  // an FTS5 index kept in sync by triggers. `generation` invalidates writes from a superseded job (retry,
+  // reindex, delete), and `vectors_revision` invalidates the bounded retrieval cache.
+  `
+  CREATE TABLE knowledge_collections (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+    embedding_provider TEXT NOT NULL DEFAULT 'none',
+    embedding_provider_id TEXT,
+    embedding_model TEXT,
+    embedding_dim INTEGER,
+    status TEXT NOT NULL DEFAULT 'empty',
+    vectors_revision INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE (user_id, name)
+  );
+  CREATE INDEX knowledge_collections_user ON knowledge_collections(user_id, updated_at DESC);
+
+  CREATE TABLE knowledge_sources (
+    id TEXT PRIMARY KEY,
+    collection_id TEXT NOT NULL REFERENCES knowledge_collections(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    upload_id TEXT REFERENCES uploads(id) ON DELETE SET NULL,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('file', 'paste', 'url')),
+    url TEXT,
+    mime TEXT NOT NULL DEFAULT 'text/plain',
+    bytes INTEGER NOT NULL DEFAULT 0,
+    text_bytes INTEGER NOT NULL DEFAULT 0,
+    text TEXT,
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'extracting', 'embedding', 'ready', 'failed', 'cancelled')),
+    progress REAL NOT NULL DEFAULT 0,
+    error TEXT,
+    chunk_count INTEGER NOT NULL DEFAULT 0,
+    generation INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX knowledge_sources_collection ON knowledge_sources(collection_id, created_at);
+  CREATE INDEX knowledge_sources_user ON knowledge_sources(user_id, status);
+
+  CREATE TABLE knowledge_chunks (
+    id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL REFERENCES knowledge_sources(id) ON DELETE CASCADE,
+    collection_id TEXT NOT NULL REFERENCES knowledge_collections(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    start INTEGER NOT NULL,
+    "end" INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    tokens INTEGER NOT NULL,
+    embedding BLOB,
+    embedding_dim INTEGER,
+    created_at INTEGER NOT NULL,
+    UNIQUE (source_id, ordinal)
+  );
+  CREATE INDEX knowledge_chunks_collection ON knowledge_chunks(collection_id, ordinal);
+  CREATE INDEX knowledge_chunks_user ON knowledge_chunks(user_id);
+
+  CREATE VIRTUAL TABLE knowledge_chunks_fts USING fts5(
+    text, chunk_id UNINDEXED, source_id UNINDEXED, collection_id UNINDEXED, user_id UNINDEXED,
+    tokenize = 'unicode61 remove_diacritics 2'
+  );
+  CREATE TRIGGER knowledge_chunks_fts_insert AFTER INSERT ON knowledge_chunks BEGIN
+    INSERT INTO knowledge_chunks_fts (rowid, text, chunk_id, source_id, collection_id, user_id)
+    VALUES (new.rowid, new.text, new.id, new.source_id, new.collection_id, new.user_id);
+  END;
+  CREATE TRIGGER knowledge_chunks_fts_update AFTER UPDATE OF text ON knowledge_chunks BEGIN
+    DELETE FROM knowledge_chunks_fts WHERE rowid = old.rowid;
+    INSERT INTO knowledge_chunks_fts (rowid, text, chunk_id, source_id, collection_id, user_id)
+    VALUES (new.rowid, new.text, new.id, new.source_id, new.collection_id, new.user_id);
+  END;
+  CREATE TRIGGER knowledge_chunks_fts_delete AFTER DELETE ON knowledge_chunks BEGIN
+    DELETE FROM knowledge_chunks_fts WHERE rowid = old.rowid;
+  END;
+
+  ALTER TABLE threads ADD COLUMN knowledge_ids TEXT;
+  ALTER TABLE turn_context ADD COLUMN knowledge TEXT;
+  ALTER TABLE turn_context ADD COLUMN knowledge_ids TEXT;
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

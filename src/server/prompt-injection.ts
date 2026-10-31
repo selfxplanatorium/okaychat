@@ -50,6 +50,8 @@ export const UNTRUSTED_TOOL_NAMES: ReadonlySet<string> = new Set([
   "read_document",
   "conversation_search",
   "conversation_read",
+  "search_knowledge",
+  "read_knowledge_chunk",
   "load_skill",
   "read_skill_file",
   "search_skill_sources",

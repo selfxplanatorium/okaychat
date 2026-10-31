@@ -1,5 +1,5 @@
 import { ComposerPrimitive, useAui } from "@assistant-ui/react";
-import { BrainIcon, CheckIcon, ChevronRightIcon, GlobeIcon, GlobeOffIcon, Loader2Icon, PaperclipIcon, PlusIcon, SettingsIcon, SquareSlashIcon, TelescopeIcon, TriangleAlertIcon, ZapIcon } from "lucide-react";
+import { BrainIcon, BookOpenIcon, CheckIcon, ChevronRightIcon, GlobeIcon, GlobeOffIcon, Loader2Icon, PaperclipIcon, PlusIcon, SettingsIcon, SquareSlashIcon, TelescopeIcon, TriangleAlertIcon, ZapIcon } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
 import type { McpPromptInfo } from "@shared/types";
@@ -20,6 +20,8 @@ import { ariaCombo } from "@/keyboard/keys";
 import { useCommand, useShortcut } from "@/keyboard/registry";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSubmenuRoot, MenuSubmenuTrigger, MenuTrigger } from "@/components/ui/menu";
 import { effortLabel, useEffortChoices } from "./ModelPicker";
+import { KnowledgeMenuItems } from "@/components/knowledge/KnowledgeSelector";
+import { useChatKnowledge } from "@/state/chat-knowledge";
 
 const triggerClass =
   "hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 shrink-0 pointer-coarse:h-9 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart";
@@ -246,6 +248,7 @@ export function MobileComposerMenu() {
   const webTools = useData((s) => s.settings?.webTools ?? true);
   const showSearch = !!active?.toolCall && webTools;
   const research = useChatResearch();
+  const knowledge = useChatKnowledge();
   const researchBlocked = !!research.unavailable && research.enabled;
   const hasPrompts = useData((s) => s.mcpPrompts.length > 0);
   const loadPrompts = useData((s) => s.refreshMcpPrompts);
@@ -322,6 +325,19 @@ export function MobileComposerMenu() {
               <SettingsIcon />
               {t("ux.openSearchLimitSettings")}
             </MenuItem>
+          )}
+          {active?.toolCall && !knowledge.temporary && (
+            <MenuSubmenuRoot>
+              <MenuSubmenuTrigger>
+                <BookOpenIcon />
+                <span className="flex-1">{t("knowledge.selector")}</span>
+                {knowledge.ids.length > 0 && <span className="text-muted-foreground text-xs tabular-nums">{knowledge.ids.length}</span>}
+                <ChevronRightIcon className="text-muted-foreground ml-auto" />
+              </MenuSubmenuTrigger>
+              <MenuContent side="right" align="start" alignOffset={-5} className="max-h-80 w-72">
+                <KnowledgeMenuItems />
+              </MenuContent>
+            </MenuSubmenuRoot>
           )}
           {hasPrompts && (
             <MenuSubmenuRoot>

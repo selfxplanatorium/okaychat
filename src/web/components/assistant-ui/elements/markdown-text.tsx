@@ -26,6 +26,8 @@ import { MermaidDiagram } from "@/components/ui/mermaid-diagram";
 import { ProtectedMarkdownImage } from "@/components/ui/protected-markdown-image";
 import { keepLineBreaks, preprocessMarkdown } from "@/lib/markdown-math";
 import { cn } from "@/lib/utils";
+import { t } from "@/i18n";
+import { useKnowledgeCitationStore } from "@/state/chat-knowledge";
 import { useCurrentThreadId } from "@/state/thread-meta";
 import { MarkdownTable } from "./markdown-table";
 
@@ -59,7 +61,9 @@ const preprocessTyped = (text: string) => keepLineBreaks(preprocessMarkdown(text
 // Models trained on ChatGPT link run_code outputs as `sandbox:/mnt/data/<path>`, and the run_code tool
 // asks for that form. react-markdown would blank the unknown scheme, so it passes through to `useSandboxUrl`.
 const SANDBOX = /^sandbox:(?:\/mnt\/data\/|\/)?/i;
-const urlTransform = (url: string) => (SANDBOX.test(url) ? url : defaultUrlTransform(url));
+/** A knowledge citation produced by `search_knowledge`: `[1](oknowledge:<chunkId>)`. */
+const KNOWLEDGE = /^oknowledge:/i;
+const urlTransform = (url: string) => (SANDBOX.test(url) || KNOWLEDGE.test(url) ? url : defaultUrlTransform(url));
 
 /** The chat's stored copy of a `sandbox:` link target, or the URL unchanged. */
 const useSandboxUrl = (url: string | undefined) => {
@@ -125,6 +129,23 @@ const MarkdownImage: FC<ComponentProps<"img">> = ({ src: rawSrc, ...props }) => 
 
 const MarkdownLink: FC<ComponentProps<"a">> = ({ className, href, ...props }) => {
   const file = useSandboxUrl(href);
+  const openCitation = useKnowledgeCitationStore((s) => s.open);
+  if (href && KNOWLEDGE.test(href)) {
+    const chunkId = decodeURIComponent(href.replace(KNOWLEDGE, "")).trim();
+    return (
+      <button
+        type="button"
+        title={t("knowledge.openInChat")}
+        onClick={() => chunkId && openCitation(chunkId)}
+        className={cn(
+          "aui-md-a text-primary hover:text-primary/80 cursor-pointer underline underline-offset-2",
+          className,
+        )}
+      >
+        {props.children}
+      </button>
+    );
+  }
   return (
     <a
       className={cn(

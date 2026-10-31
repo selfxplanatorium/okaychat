@@ -42,13 +42,14 @@ The common lesson is the lethal trifecta. A prompt-injected model is most danger
 | `read_artifact` / `read_document` | Artifact or document text | Envelope, scanner, card badge |
 | `conversation_search` / `conversation_read` | Past chat text | Envelope, scanner badge; taints the turn |
 | Memory | Saved facts, summaries, and `memory_search` results | Facts and summaries are enveloped at model delivery (stored JSON stays raw for ids/revocation); search results are enveloped; memory writes after outside content already require approval |
+| Knowledge | Retrieved passages from attached collections, `search_knowledge`/`read_knowledge_chunk` results | Per-turn retrieval is enveloped at delivery and stored raw in `turn_context`; tool results use the envelope and scanner; both tools are read-only, scoped to attached collections, and taint the turn for later actions |
 | `run_code` | stdout/stderr, paths, and copied input names | Whole result object spotlighted inside one JSON envelope; taints the turn; sandbox has no network and no app secrets |
 | `view_artifact` | Screenshot image | Vision input; no text envelope, but the tool name and the injected image both taint later steps (see residual risks) |
 | Deep research | Web-only worker findings | Envelope, scanner badge, taints the reply |
 | `delegate_task` | Sub-agent report | Envelope, scanner badge, taints the reply; delegates get no destructive or approval-needing tools |
 | Compaction summaries | Model-written recap of earlier content | Data envelope and conservative taint even when original tool results were compacted away |
 | Shared pages | Public read-only rendering | Same Markdown image consent policy as the app |
-| Email / knowledge tools | Not present | No model-callable email or knowledge-base ingestion exists. If one is added, it is an untrusted source and an outbound channel; wrap its output and mark its writes with a risk. |
+| Email tools | Not present | No model-callable email or outbound messaging exists. If one is added, it is an outbound channel; wrap its output and mark its writes with a risk. |
 
 ## Attack paths against this product
 
@@ -135,7 +136,7 @@ A model emits all tool calls of a step before any result exists, so a read in th
 - **Read tools are outbound channels too.** Web search queries, fetched URLs, and read-only MCP arguments can carry private data. They remain available without per-read approval to preserve normal research; this feature gates annotated high-impact actions, not every network request. A model that obeys an injection can still leak through these channels.
 - **Links and downloads still work.** A user click on an attacker link, or a download the user opens, can leak data outside the app's control. The app shows the destination host in Markdown images and approval prompts, not a full link inspector.
 - **Admin overrides can weaken policy.** The `dataSafety` prompt is admin-overridable like every other server prompt. An admin controls the server and can remove it.
-- **No email or knowledge-base tools exist today.** When added, they are both an untrusted source and an outbound channel. Use the same envelope, scanner, taint gate, and risk metadata; do not add a second approval flow.
+- **No email tools exist today.** When added, they are an outbound channel. Use the same envelope, scanner, taint gate, and risk metadata; do not add a second approval flow. Knowledge tools are read-only and covered by the same controls.
 
 ## Adding a new untrusted source or high-impact tool
 

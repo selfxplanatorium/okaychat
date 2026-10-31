@@ -110,4 +110,8 @@ export default {
   decline: "Decline",
   required: "(required)",
   appLoadFailed: "This app could not load: {error}",
+  knowledgeSearching: "Searching knowledge for “{query}”…",
+  knowledgeSearched: "Searched knowledge for “{query}” · {count} passages",
+  knowledgeSearchFailed: "Knowledge search failed.",
+  knowledgeRead: "Read a knowledge passage",
 } as const;

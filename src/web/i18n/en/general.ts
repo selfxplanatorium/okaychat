@@ -5,6 +5,7 @@ export default {
   sidebarNewChat: "New chat",
   sidebarScheduled: "Scheduled",
   sidebarLibrary: "Library",
+  sidebarKnowledge: "Knowledge",
   sidebarPlugins: "Plugins",
   sidebarProjects: "Projects",
   showInSidebar: "Show {item} in sidebar",

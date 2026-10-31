@@ -156,6 +156,8 @@ const messageGroupBy = groupPartByType({
   "tool-call:delegate_task": [],
   "tool-call:deep_research": [],
   "tool-call:run_code": [],
+  // Citation cards stay visible: their sources are clickable.
+  "tool-call:search_knowledge": [],
 });
 
 type ThreadGroupKey =
@@ -215,6 +217,9 @@ const resultKey = (part: GroupablePart): string | undefined => {
     // The research card stays above its report: it holds the questions and the pages read.
     case "deep_research":
       return `research:${part.toolCallId}`;
+    // Each knowledge search keeps its citation list, like an image or an app card.
+    case "search_knowledge":
+      return `knowledge:${part.toolCallId}`;
     default:
       // Each MCP App call is its own result, like a generated image.
       return mcpAppOf(part.result) ? `app:${part.toolCallId}` : undefined;

@@ -16,6 +16,7 @@ const SIDEBAR_LABELS = {
   newChat: "general.sidebarNewChat",
   scheduled: "general.sidebarScheduled",
   library: "general.sidebarLibrary",
+  knowledge: "general.sidebarKnowledge",
   plugins: "general.sidebarPlugins",
   projects: "general.sidebarProjects",
 } as const;

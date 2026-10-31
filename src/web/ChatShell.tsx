@@ -139,7 +139,7 @@ export function Shell({ userId }: { userId: string }) {
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
   const [location] = useLocation();
   const inSettings = location.startsWith("/settings");
-  const inNavigation = ["/scheduled", "/library", "/plugins", "/projects"].includes(location);
+  const inNavigation = ["/scheduled", "/library", "/knowledge", "/plugins", "/projects"].includes(location);
   const route = inSettings ? "settings" : inNavigation ? location : "chat";
   // The settings layer stays mounted in the sidebar, so it keeps its last section while the chat is shown.
   const lastSection = useRef<string | undefined>(undefined);
@@ -243,7 +243,7 @@ export function Shell({ userId }: { userId: string }) {
                   </Suspense>
                 )}
               </Route>
-              {["scheduled", "library", "plugins", "projects"].map((page) => (
+              {["scheduled", "library", "knowledge", "plugins", "projects"].map((page) => (
                 <Route key={page} path={`/${page}`}>
                   <div className={`flex h-12 shrink-0 items-center px-3 ${sidebarOpen ? "md:hidden" : ""}`}>
                     <button type="button" aria-label={t("shell.openSidebar")} onClick={() => setSidebarOpen(true)} className="text-muted-foreground hover:bg-accent rounded-lg p-2 pointer-coarse:p-3"><PanelLeftIcon className="size-4" /></button>
