@@ -124,6 +124,8 @@ export function createModel(info: ModelInfo, conn: Connection, opts: CreateModel
           thinkingOff: info.reasoningEfforts ? info.reasoningEfforts.includes("none") : info.reasoning,
           context,
           reasoning: effort,
+          // Same retry boundary as every other provider, injected before ollamaRequest maps errors.
+          fetch,
         }),
         providerOptions: {},
         markCache: passthrough,

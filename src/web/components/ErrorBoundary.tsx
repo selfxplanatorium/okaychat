@@ -49,7 +49,9 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
   }
 
   componentDidCatch(error: unknown) {
-    console.error("[ui] render failed", error);
+    // A render error can carry component props (a prompt, a provider payload) in its message or stack.
+    // The page already shows a reference; the console gets only the error's class of failure.
+    console.error("[ui] render failed:", error instanceof Error ? error.name : typeof error);
   }
 
   render() {

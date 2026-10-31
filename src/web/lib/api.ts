@@ -1,4 +1,5 @@
 import { parseErrorWire, unknownWire, type ErrorCode, type ErrorWire } from "@shared/errors";
+import { redactSecrets } from "@shared/redact";
 
 /** A request failure with the safe structured fields the server sends. Never a raw provider body. */
 export class ApiError extends Error {
@@ -27,17 +28,39 @@ export class ApiError extends Error {
 
 const httpFallback = (status: number) => `The request failed (HTTP ${status}).`;
 
+/** A legacy `{ error }` body is trusted only as authored 4xx validation, never as upstream detail. */
+function legacyMessage(body: unknown, status: number): string | undefined {
+  if (status < 400 || status >= 500) return undefined;
+  if (typeof body !== "object" || body === null) return undefined;
+  const value = (body as { error?: unknown }).error;
+  if (typeof value !== "string") return undefined;
+  const message = value.trim();
+  // Route authors send a sentence. JSON, HTML, stacks, and key-shaped text are upstream failures.
+  if (!message || message.length > 500) return undefined;
+  if (/^\s*[{[]/.test(message) || /<\/?[a-z][\s\S]*>/i.test(message) || /\bat\s+\S+.*?:\d+:\d+/.test(message)) return undefined;
+  if (/\b(?:api[-_]?key|authorization|token|secret)\b\s*[:=]/i.test(message)) return undefined;
+  return redactSecrets(message).slice(0, 300);
+}
+
 /** Turns a JSON error body or a legacy `{ error }` body into an ApiError without echoing unknown shapes. */
 export function apiErrorFromBody(body: unknown, status: number, fallback = httpFallback(status)): ApiError {
   const wire = parseErrorWire(body);
   if (wire) return new ApiError(wire.message, status, wire);
-  const legacy = typeof body === "object" && body !== null && typeof (body as { error?: unknown }).error === "string"
-    ? (body as { error: string }).error.slice(0, 2_000)
-    : undefined;
-  return new ApiError(legacy || fallback, status);
+  return new ApiError(legacyMessage(body, status) || fallback, status);
 }
 
 const aborted = (error: unknown) => (error as { name?: string })?.name === "AbortError";
+
+/**
+ * The session 401 is an untyped legacy `{ error: "unauthorized" }`. A provider 401 arrives as wire
+ * JSON (`provider_auth`) and must never sign the user out.
+ */
+export function isSessionUnauthorized(status: number, path: string, body: unknown): boolean {
+  if (status !== 401 || path.startsWith("/auth")) return false;
+  if (parseErrorWire(body)) return false;
+  if (typeof body === "object" && body !== null && "code" in body) return false;
+  return true;
+}
 
 export async function api<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
   const { json, ...rest } = init ?? {};
@@ -55,10 +78,10 @@ export async function api<T>(path: string, init?: RequestInit & { json?: unknown
     }
     throw new ApiError("The server could not be reached.", 0, { code: "network", message: "The server could not be reached.", retryable: true });
   }
-  if (res.status === 401 && !path.startsWith("/auth")) {
+  const body = res.headers.get("content-type")?.includes("json") ? await res.json().catch(() => undefined) : await res.text().catch(() => "");
+  if (typeof window !== "undefined" && isSessionUnauthorized(res.status, path, body)) {
     window.dispatchEvent(new Event("okaychat:unauthorized"));
   }
-  const body = res.headers.get("content-type")?.includes("json") ? await res.json().catch(() => undefined) : await res.text().catch(() => "");
   if (typeof window !== "undefined" && init?.method && init.method !== "GET" && !path.startsWith("/auth")) window.dispatchEvent(new Event("okaychat:storage-changed"));
   if (!res.ok) throw apiErrorFromBody(body, res.status);
   return body as T;

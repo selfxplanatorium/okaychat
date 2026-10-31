@@ -24,6 +24,7 @@ export function publicAddress(address: string): boolean {
 export class BlockedAddressError extends Error {
   constructor(message = "Only public internet addresses are allowed.") {
     super(message);
+    this.name = "BlockedAddressError";
   }
 }
 

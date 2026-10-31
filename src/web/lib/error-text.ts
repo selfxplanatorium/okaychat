@@ -17,12 +17,12 @@ const wireOf = (error: ApiError): ErrorWire => ({
 
 /**
  * Inline settings/upload text: a translated code message plus the server's safe, specific field
- * message when it has one. Any other thrown value keeps the area's own fallback sentence.
+ * message when it has one. An arbitrary thrown value keeps the area's own fallback sentence: its
+ * message is JS text that can carry a URL, a prompt, or a key.
  */
 export function errorText(cause: unknown, fallback: PlainMessageKey): string {
-  if (!(cause instanceof Error)) return t(fallback);
   const wire = cause instanceof ApiError ? wireOf(cause) : parseErrorWire(cause);
-  if (!wire) return cause.message || t(fallback);
+  if (!wire) return t(fallback);
   const presentation = presentError(wire, "settings");
   const message = t(presentation.messageKey);
   return presentation.detail && presentation.detail !== message ? `${message} ${presentation.detail}` : message;

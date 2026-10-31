@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { api, ApiError, apiErrorFromBody, parseChatError, structuredResponseError } from "./api.js";
+import { api, ApiError, apiErrorFromBody, isSessionUnauthorized, parseChatError, structuredResponseError } from "./api.js";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
@@ -36,6 +36,57 @@ test("non-JSON and unknown error bodies fall back to a safe HTTP message", () =>
   const object = apiErrorFromBody({ error: { message: "raw nested", apiKey: "sk-secret" } }, 400);
   assert.equal(object.message, "The request failed (HTTP 400).");
   assert.ok(!JSON.stringify(object).includes("sk-secret"));
+});
+
+test("a legacy string is kept only as authored 4xx validation, never as upstream 5xx text", () => {
+  const authored = apiErrorFromBody({ error: "Pick a model before sending." }, 400);
+  assert.equal(authored.message, "Pick a model before sending.");
+
+  const upstream = apiErrorFromBody({ error: '{"error":{"message":"stack at provider"}}' }, 400);
+  assert.equal(upstream.message, "The request failed (HTTP 400).");
+  const secret = apiErrorFromBody({ error: "apiKey=sk-live-SECRETVALUE" }, 422);
+  assert.equal(secret.message, "The request failed (HTTP 422).");
+  const stack = apiErrorFromBody({ error: "Error: boom\n    at run (file.ts:12:3)" }, 409);
+  assert.equal(stack.message, "The request failed (HTTP 409).");
+
+  const server = apiErrorFromBody({ error: "upstream exploded with PROMPT_SECRET" }, 502);
+  assert.equal(server.message, "The request failed (HTTP 502).");
+});
+
+test("a provider 401 is not a session expiry", () => {
+  const provider = {
+    error: "The provider rejected the credentials.",
+    code: "provider_auth",
+    message: "The provider rejected the credentials.",
+    retryable: false,
+  };
+  assert.equal(isSessionUnauthorized(401, "/threads/compact", provider), false);
+  assert.equal(isSessionUnauthorized(401, "/threads", { error: "unauthorized" }), true);
+  assert.equal(isSessionUnauthorized(401, "/auth/login", { error: "unauthorized" }), false);
+  assert.equal(isSessionUnauthorized(500, "/threads", { error: "unauthorized" }), false);
+});
+
+test("api does not sign the user out on a provider_auth 401", async () => {
+  const dispatched: string[] = [];
+  (globalThis as unknown as { window?: { dispatchEvent: (event: Event) => boolean } }).window = {
+    dispatchEvent: (event) => { dispatched.push(event.type); return true; },
+  };
+  try {
+    globalThis.fetch = (async () => Response.json({
+      error: "The provider rejected the credentials.",
+      code: "provider_auth",
+      message: "The provider rejected the credentials.",
+      retryable: false,
+    }, { status: 401 })) as typeof fetch;
+    await assert.rejects(api("/threads"), (error: unknown) => error instanceof ApiError && error.code === "provider_auth");
+    assert.deepEqual(dispatched, []);
+
+    globalThis.fetch = (async () => Response.json({ error: "unauthorized" }, { status: 401 })) as typeof fetch;
+    await assert.rejects(api("/threads"));
+    assert.deepEqual(dispatched, ["okaychat:unauthorized"]);
+  } finally {
+    delete (globalThis as unknown as { window?: unknown }).window;
+  }
 });
 
 test("a network failure and an abort become safe ApiErrors", async () => {

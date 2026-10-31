@@ -1,4 +1,5 @@
 import type { ErrorCode } from "../shared/errors.js";
+import { parseErrorWire } from "../shared/errors.js";
 import { AppError, ERROR_CATALOG, newErrorRef, redactSecrets, toWireError } from "./errors.js";
 
 /**
@@ -43,9 +44,18 @@ const QUOTA_CODE = /insufficient[_ -]?quota|billing|quota[_ -]?exceeded|credit b
 const STRICT_QUOTA = /insufficient[_ -]?quota|billing|credit balance|payment required|out of credit|hard limit/i;
 const RATE_CODE = /rate[_ -]?limit|too many requests|resource[_ -]?exhausted|throttl/i;
 const OVERLOAD_CODE = /overloaded|server[_ -]?error|internal[_ -]?error|service[_ -]?unavailable|api[_ -]?error|unavailable|capacity/i;
-const TIMEOUT_CODE = /timeout|timed out|deadline[_ -]?exceeded|etimedout/i;
-const NETWORK_MESSAGE = /fetch failed|econnrefused|econnreset|enotfound|eai_again|ehostunreach|enetunreach|epipe|getaddrinfo|socket hang up|network|other side closed|und_err|connection (?:closed|reset|refused)/i;
-const MEMORY_MESSAGE = /requires more (?:system )?memory|out of memory|not enough memory/i;
+const TIMEOUT_CODE = /timeout|timed out|deadline[_ -]?exceeded|etimedout|did not answer(?:\s+at\s+\S+)?\s+in time/i;
+const NETWORK_MESSAGE = /fetch failed|econnrefused|econnreset|enotfound|eai_again|ehostunreach|enetunreach|epipe|getaddrinfo|socket hang up|network|other side closed|und_err|connection (?:closed|reset|refused)|could not reach ollama|could not reach/i;
+const MEMORY_MESSAGE = /requires more (?:system )?memory|out of memory|not enough memory|memory pressure/i;
+
+/**
+ * Statuses where another attempt can plausibly succeed. Every 5xx still maps to `provider_overloaded`,
+ * but only these are marked retryable (507 is a storage refusal, 501 is unimplemented, ...).
+ */
+const TRANSIENT_5XX = new Set([500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 527, 529]);
+export function transientStatus(status: number): boolean {
+  return status === 408 || status === 429 || TRANSIENT_5XX.has(status);
+}
 
 /** Reads a provider error body without trusting its type or size. */
 function bodyOf(error: ErrorShape): unknown {
@@ -121,7 +131,8 @@ function isAbort(error: ErrorShape): boolean {
 }
 
 function isTimeout(error: ErrorShape): boolean {
-  return error.name === "TimeoutError" || error.code === "ETIMEDOUT" || TIMEOUT_CODE.test(error.message ?? "");
+  const causeCode = (error.cause as { code?: string } | undefined)?.code ?? "";
+  return error.name === "TimeoutError" || error.code === "ETIMEDOUT" || /timeout/i.test(causeCode) || TIMEOUT_CODE.test(error.message ?? "");
 }
 
 function statusOf(error: ErrorShape): number | undefined {
@@ -138,8 +149,8 @@ export function codeForProviderStatus(status: number | undefined, body: unknown,
   if (status === 404) return "model_not_found";
   if (status === 408) return "timeout";
   if (status === 429) return STRICT_QUOTA.test(combined) ? "provider_quota" : "provider_rate_limit";
-  if (status === 529) return "provider_overloaded";
-  if (status === 500 || status === 502 || status === 503 || status === 504) {
+  // Every 5xx is an upstream server failure; retryability is decided separately from its status.
+  if (status !== undefined && status >= 500 && status <= 599) {
     return TIMEOUT_CODE.test(combined) ? "timeout" : "provider_overloaded";
   }
   if (status === 413) return "context_length";
@@ -177,9 +188,10 @@ function summarize(error: ErrorShape, body: unknown, context: ProviderErrorConte
   let code = codeForProviderStatus(status, body, error.message);
   // A 403 from a blocked outbound address is a configuration refusal, not a rejected provider key.
   if (error.name === "BlockedAddressError") code = "forbidden";
-  if (status === undefined && error.name === "BlockedAddressError") code = "forbidden";
   let retryable: boolean | undefined;
-  if (code === "provider_overloaded" && MEMORY_MESSAGE.test(combined)) retryable = false;
+  if (code === "provider_overloaded" && (MEMORY_MESSAGE.test(combined) || STRICT_QUOTA.test(combined) || CONTEXT_MESSAGE.test(combined) || AUTH_CODE.test(combined))) retryable = false;
+  // A server status outside the transient set is a refusal, not a hiccup, even though it maps to overloaded.
+  if (status !== undefined && status >= 500 && status <= 599 && !transientStatus(status)) retryable = false;
   // Network failures arrive as TypeError("fetch failed") with a cause code and no status.
   if (status === undefined && code === "unknown") {
     if (isTimeout(error)) code = "timeout";
@@ -220,8 +232,8 @@ function logFailure(app: AppError, error: unknown, context: ProviderErrorContext
     model: app.model,
     requestId: app.requestId,
     name: current.name,
-    message: redactSecrets(String(current.message ?? "")).slice(0, 500),
-    body: redactSecrets(rawBody).slice(0, 500),
+    message: redactSecrets(String(current.message ?? "").slice(0, 2_000)).slice(0, 500),
+    body: redactSecrets(rawBody.slice(0, 4_000)).slice(0, 500),
   };
   console.error(`[provider] ref=${ref}`, line);
 }
@@ -232,6 +244,8 @@ export function describeProviderError(error: unknown, context: ProviderErrorCont
     logFailure(error, error, context);
     return error;
   }
+  // An abort names itself; a timeout does not outrank an HTTP status (a 401 whose message mentions
+  // "timeout" is still an authentication failure).
   const current = unwrap(error);
   if (isAbort(current)) {
     const app = new AppError({
@@ -243,7 +257,8 @@ export function describeProviderError(error: unknown, context: ProviderErrorCont
     });
     return app;
   }
-  if (isTimeout(current)) {
+  const status = statusOf(current);
+  if (status === undefined && isTimeout(current)) {
     const app = new AppError({
       code: "timeout",
       ...(context.model ? { model: context.model } : {}),
@@ -254,7 +269,6 @@ export function describeProviderError(error: unknown, context: ProviderErrorCont
     logFailure(app, error, context);
     return app;
   }
-  const status = statusOf(current);
   const body = bodyOf(current);
   const app = summarize(current, body, context, status);
   logFailure(app, error, context);
@@ -264,21 +278,33 @@ export function describeProviderError(error: unknown, context: ProviderErrorCont
 /** The JSON string the AI SDK stream error chunk carries; the client parses only these fields. */
 export const wireErrorText = (error: AppError) => JSON.stringify(toWireError(error));
 
+/**
+ * The UI text for one `tool-output-error` chunk. The model already saw the original tool error, so
+ * this only reshapes what the card renders: a known wire passes through, anything else becomes the
+ * generic tool failure. Raw tool/provider text never reaches the browser.
+ */
+export function toolErrorWireText(errorText: unknown): string {
+  const wire = parseErrorWire(errorText);
+  if (wire && wire.code !== "unknown") return JSON.stringify(wire);
+  return wireErrorText(new AppError({ code: "tool_failed" }));
+}
+
 /** A plain, non-provider failure at a user-visible boundary (titles, schedules, tool code). */
 export function describeBoundaryError(error: unknown, context: ProviderErrorContext = {}): AppError {
   if (error instanceof AppError) return error;
   const current = shape(error);
   const message = current.message ?? "";
   if (isAbort(current)) return new AppError({ code: "aborted", details: { message }, cause: error });
-  if (isTimeout(current)) {
+  const status = typeof current.status === "number" ? current.status : undefined;
+  if (status === undefined && isTimeout(current)) {
     const app = new AppError({ code: "timeout", details: { message }, cause: error });
     logFailure(app, error, context);
     return app;
   }
   // HTTPException from a route carries a message the author intended the user to read.
-  if (typeof current.status === "number") {
-    const code = current.status === 404 ? "not_found" : current.status === 403 ? "forbidden" : current.status === 409 ? "conflict" : current.status === 429 ? "conflict" : "validation";
-    return new AppError({ code, status: current.status, message, details: { message }, cause: error });
+  if (status !== undefined) {
+    const code = status === 404 ? "not_found" : status === 403 ? "forbidden" : status === 409 ? "conflict" : status === 429 ? "conflict" : "validation";
+    return new AppError({ code, status, message, details: { message }, cause: error });
   }
   const app = new AppError({
     code: context.kind === "background" ? "unknown" : "tool_failed",

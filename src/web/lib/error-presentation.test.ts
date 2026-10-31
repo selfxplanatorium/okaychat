@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ERROR_CODES, parseErrorWire, type ErrorWire } from "@shared/errors";
-import { errorDetails, presentError, settingsForError } from "./error-presentation.js";
+import { errorDetails, presentError, settingsForError, toolErrorPresentation } from "./error-presentation.js";
 
 const wire = (code: ErrorWire["code"], extra: Partial<ErrorWire> = {}): ErrorWire => ({
   code,
@@ -42,6 +42,21 @@ test("chat failures offer retry only when retrying can help", () => {
 test("tool cards stay a plain message and hint with no actions", () => {
   const tool = presentError(wire("tool_failed", { retryable: false }), "tool");
   assert.deepEqual(tool.actions, { retry: false, switchModel: false, copyDetails: false, reload: false });
+});
+
+test("a raw historical tool error becomes the generic translated tool failure", () => {
+  const raw = toolErrorPresentation("apiKey=sk-live-SECRETVALUE and prompt PROMPT_SECRET");
+  assert.equal(raw?.messageKey, "errors.toolFailedMessage");
+  assert.equal(raw?.hintKey, "errors.toolFailedHint");
+  assert.equal(raw?.code, "tool_failed");
+
+  assert.equal(toolErrorPresentation("Error: boom\n    at run (file.ts:12:3)")?.code, "tool_failed");
+  assert.equal(toolErrorPresentation({ message: "PROMPT_SECRET", apiKey: "sk-secret" })?.code, "tool_failed");
+  assert.equal(toolErrorPresentation(JSON.stringify({ code: "unknown", message: "raw body", retryable: false }))?.code, "tool_failed");
+  assert.equal(toolErrorPresentation(undefined), undefined);
+
+  const wireText = JSON.stringify({ code: "provider_rate_limit", message: "rate limited", retryable: true });
+  assert.equal(toolErrorPresentation(wireText)?.code, "provider_rate_limit");
 });
 
 test("settings and uploads are inline with a safe specific detail only where it helps", () => {

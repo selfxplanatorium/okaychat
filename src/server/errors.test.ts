@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { AppError, handleAppError, toWireError } from "./errors.js";
+import { AppError, handleAppError, redactSecrets, toWireError } from "./errors.js";
 
 test("an AppError becomes a safe wire response and keeps its status", async () => {
   const app = new Hono()
@@ -55,4 +55,24 @@ test("an unidentified failure gets a reference and no stack or raw message", asy
   assert.equal(wire.code, "unknown");
   assert.equal(wire.ref, "abcd1234");
   assert.ok(!JSON.stringify(wire).includes("stack"));
+});
+
+test("redaction catches quoted JSON keys, bearer headers, and metadata dumps", () => {
+  const cases = [
+    '{"apiKey":"sk-not-a-real-value-but-secret"}',
+    '{"api_key":"plain-value-123456"}',
+    '{"Authorization":"Bearer abcdefghijklmnop"}',
+    '"access_token":"token-value-abcdef"',
+    '{"metadata":{"authorization":"Basic dXNlcjpwYXNz"}}',
+    '{"headers":{"x-api-key":"header-secret-value"}}',
+    "token=raw-token-value&prompt=SECRET_PROMPT",
+  ];
+  for (const input of cases) {
+    const out = redactSecrets(input);
+    for (const secret of ["not-a-real-value", "plain-value", "abcdefghijklmnop", "token-value", "dXNlcjpwYXNz", "header-secret-value", "raw-token-value"]) {
+      assert.ok(!out.includes(secret), `${secret} leaked from ${input}: ${out}`);
+    }
+  }
+  // A prompt is not a key; redaction must not pretend it hides prompt text.
+  assert.match(redactSecrets("prompt=SECRET_PROMPT"), /SECRET_PROMPT/);
 });

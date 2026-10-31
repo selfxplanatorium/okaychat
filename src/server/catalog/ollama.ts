@@ -23,6 +23,11 @@ export interface OllamaConnection {
   baseURL?: string;
   /** True for a non-admin's own URL: every request must reach a public address. */
   guarded?: boolean;
+  /**
+   * A transport for this connection. `createModel` passes the retrying provider fetch for `/api/chat`
+   * only; management routes keep the plain transport, so a pull or delete never retries a mutation.
+   */
+  fetch?: typeof fetch;
 }
 
 export class OllamaError extends Error {
@@ -110,7 +115,7 @@ export async function ollamaRequest(
   let timedOut = false;
   timeout?.addEventListener("abort", () => (timedOut = true), { once: true });
   const merged = signal && timeout ? AbortSignal.any([signal, timeout]) : (signal ?? timeout);
-  const send = conn.guarded ? publicFetch : fetch;
+  const send = conn.fetch ?? (conn.guarded ? publicFetch : fetch);
   const headers = new Headers(rest.headers);
   if (!headers.has("Accept")) headers.set("Accept", "application/json");
   headers.set("User-Agent", USER_AGENT);

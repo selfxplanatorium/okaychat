@@ -1,4 +1,5 @@
-import type { ErrorCode, ErrorWire } from "@shared/errors";
+import { parseErrorWire, type ErrorCode, type ErrorWire } from "@shared/errors";
+import { redactSecrets } from "@shared/redact";
 import type { PlainMessageKey } from "@/i18n";
 import type { SettingsDestinationId } from "@/lib/settings-link";
 
@@ -150,11 +151,21 @@ export function presentError(error: ErrorWire, context: ErrorContext): ErrorPres
 }
 
 /**
+ * The one tool-card decision. A tool error is wire JSON from the server; a historical or local
+ * error may still be a raw string or object, which must never reach the card. Anything that is not
+ * a known wire code falls back to the generic tool failure message and hint.
+ */
+export function toolErrorPresentation(error: unknown): ErrorPresentation | undefined {
+  if (error === undefined || error === null || error === "") return undefined;
+  const wire = parseErrorWire(error);
+  return presentError(wire && wire.code !== "unknown" ? wire : { code: "tool_failed", message: "", retryable: false }, "tool");
+}
+
+/**
  * The "Copy details" payload. It is an allowlist, not a serialization: a poisoned wire object with
  * apiKey, prompt, file, or stack fields contributes none of them.
  */
-const detailValue = (value: string) =>
-  value.replace(/\bsk-[A-Za-z0-9_-]{8,}/g, "sk-[redacted]").replace(/\b(api[-_]?key|token|authorization)\s*[:=]\s*\S+/gi, "$1=[redacted]").slice(0, 200);
+const detailValue = (value: string) => redactSecrets(value).slice(0, 200);
 
 export function errorDetails(error: ErrorWire): string {
   const lines = [`code: ${error.code}`];

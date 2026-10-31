@@ -6,7 +6,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { Input } from "@/components/ui/input";
 import { t, type PlainMessageKey } from "@/i18n";
 import { formatBytes, formatPercent, formatTokens } from "@/i18n/format";
-import { api } from "@/lib/api";
+import { api, isSessionUnauthorized } from "@/lib/api";
 import { useCommand } from "@/keyboard/registry";
 
 type Scope = "/providers" | "/admin/providers";
@@ -278,9 +278,9 @@ export function OllamaSettings({ provider, base, onChanged }: { provider: Provid
         body: JSON.stringify({ model }),
         signal: controller.signal,
       });
-      if (res.status === 401) window.dispatchEvent(new Event("okaychat:unauthorized"));
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
+        if (isSessionUnauthorized(res.status, "/providers/ollama/pull", body)) window.dispatchEvent(new Event("okaychat:unauthorized"));
         throw new Error(body.error ?? t("providers.ollamaPullFailed"));
       }
       if (!res.body) throw new Error(t("providers.ollamaPullFailed"));

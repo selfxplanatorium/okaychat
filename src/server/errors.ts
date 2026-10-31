@@ -3,6 +3,9 @@ import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { ErrorCode, ErrorWire } from "../shared/errors.js";
+import { redactSecrets } from "../shared/redact.js";
+
+export { redactSecrets } from "../shared/redact.js";
 
 /** Safe English text per code. The web app shows its own translated `errors.*` text for the same code. */
 interface CatalogEntry {
@@ -212,18 +215,6 @@ export const isAppError = (error: unknown): error is AppError => AppError.isInst
 
 /** A short reference support can match to one server log line. */
 export const newErrorRef = () => randomBytes(4).toString("hex");
-
-const SECRET_PATTERNS: Array<[RegExp, string]> = [
-  [/\bsk-[A-Za-z0-9_-]{8,}/g, "sk-[redacted]"],
-  [/((?:api[-_]?key|authorization|bearer|token)\s*[:=]\s*['"]?)[^\s'",}]{6,}/gi, "$1[redacted]"],
-];
-
-/** Defense in depth for text that reaches a log or the wire from an unexpected place. */
-export function redactSecrets(value: string): string {
-  let out = value;
-  for (const [pattern, replacement] of SECRET_PATTERNS) out = out.replace(pattern, replacement);
-  return out;
-}
 
 const safeText = (value: string, max: number) => redactSecrets(value).slice(0, max);
 

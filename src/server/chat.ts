@@ -32,7 +32,7 @@ import { webTools } from "./tools/web.js";
 import { SearchBudget, StepBudget, searchesInCurrentTurn, agentStepsInCurrentTurn } from "./tools/search-budget.js";
 import { hasResearch, RESEARCH_PARALLEL, RESEARCH_TOOL, researchedThisTurn, researchInput, researchTool, runResearch } from "./research.js";
 import { errorJson, AppError } from "./errors.js";
-import { describeBoundaryError, describeProviderError, wireErrorText } from "./provider-errors.js";
+import { describeBoundaryError, describeProviderError, toolErrorWireText, wireErrorText } from "./provider-errors.js";
 import { conversationMemory, factsContext, memoryPreferences, temporaryMemory } from "./memory.js";
 import { contextText, insertTurnContexts, saveTurnContext, shownFactIds, storedTurnContexts } from "./turn-context.js";
 import { adaptPdfParts } from "./pdf-parts.js";
@@ -46,6 +46,27 @@ import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "./usa
 // AssistantChatTransport sends the thread's remote id as `id` and model context as `config`, `system`, and `tools`.
 // After an automatic trim the context must fall below this share of the threshold, or it is summarized too.
 const TRIM_HEADROOM = 0.75;
+
+/** Kept as a type alias so the transform stays independent of the inferred UI message type. */
+type UiChunk = { type: string };
+
+/**
+ * The model already received the original tool error in its tool result. This reshapes only the UI
+ * chunk, so a raw string, object, or stack can never reach a tool card while the model keeps the
+ * detail it needs to react to.
+ */
+function normalizeToolErrorChunks<T extends UiChunk>(stream: ReadableStream<T>): ReadableStream<T> {
+  return stream.pipeThrough(new TransformStream<T, T>({
+    transform(chunk, controller) {
+      if (chunk.type !== "tool-output-error") {
+        controller.enqueue(chunk);
+        return;
+      }
+      const errorText = (chunk as T & { errorText?: unknown }).errorText;
+      controller.enqueue({ ...chunk, errorText: toolErrorWireText(errorText) } as T);
+    },
+  }));
+}
 
 const chatBody = z.object({
   messages: z.array(z.any()),
@@ -399,7 +420,7 @@ export async function turnStream(opts: TurnOptions) {
       });
 
       writer.merge(
-        result.toUIMessageStream({
+        normalizeToolErrorChunks(result.toUIMessageStream({
           sendStart: !research,
           sendReasoning: true,
           sendSources: true,
@@ -419,7 +440,7 @@ export async function turnStream(opts: TurnOptions) {
             }
             return undefined;
           },
-        }),
+        })),
       );
     },
   });

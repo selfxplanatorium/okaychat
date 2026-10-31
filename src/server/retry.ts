@@ -1,5 +1,5 @@
 import type { ErrorCode, RetryNotice } from "../shared/errors.js";
-import { retryAfterFromHeaders } from "./provider-errors.js";
+import { retryAfterFromHeaders, transientStatus } from "./provider-errors.js";
 
 /**
  * Provider retries live at the fetch boundary: before a response body is consumed, so a failed
@@ -74,20 +74,82 @@ const isAbort = (error: unknown) => {
   return current?.name === "AbortError" || current?.code === "ABORT_ERR";
 };
 
-const retryableStatus = (status: number) => status === 429 || status === 500 || status === 502 || status === 503 || status === 504 || status === 529;
+const TIMEOUT_MESSAGE = /timeout|timed out|etimedout|deadline[_ -]?exceeded|did not answer(?:\s+at\s+\S+)?\s+in time/i;
+const timeoutFailure = (error: unknown) => {
+  const current = error as { name?: string; code?: string; message?: string; cause?: { code?: string } } | undefined;
+  return current?.name === "TimeoutError"
+    || current?.code === "ETIMEDOUT"
+    || current?.cause?.code === "ETIMEDOUT"
+    || /timeout/i.test(current?.cause?.code ?? "")
+    || TIMEOUT_MESSAGE.test(current?.message ?? "");
+};
 
 // Google's 429 says RESOURCE_EXHAUSTED and may call it a project quota; only billing/credit is permanent.
 const QUOTA_BODY = /insufficient[_ -]?quota|billing|credit balance|payment required|out of credit|hard limit/i;
-const NETWORK_ERROR = /fetch failed|econnrefused|econnreset|enotfound|eai_again|ehostunreach|enetunreach|epipe|getaddrinfo|socket hang up|other side closed|und_err|connection (?:closed|reset|refused)/i;
+const NETWORK_ERROR = /fetch failed|econnrefused|econnreset|enotfound|eai_again|ehostunreach|enetunreach|epipe|getaddrinfo|socket hang up|other side closed|und_err|connection (?:closed|reset|refused)|could not reach/i;
 
 const networkFailure = (error: unknown) => {
   const current = error as { message?: string; cause?: { code?: string } } | undefined;
   return NETWORK_ERROR.test(current?.message ?? "") || NETWORK_ERROR.test(current?.cause?.code ?? "");
 };
 
+/**
+ * A provider response body that names a refusal rather than a hiccup. A 5xx that says it is out of
+ * memory, out of quota, over the context window, or rejected the credentials is permanent.
+ */
+const PERMANENT_BODY = new RegExp(
+  [
+    /requires more (?:system )?memory|out of memory|not enough memory|memory pressure/i.source,
+    QUOTA_BODY.source,
+    /context[ _-]?length|maximum context|too many tokens|token limit|prompt is too long|input is too long|request too large|request_too_large|reduce the length/i.source,
+    /invalid[_ -]?api[_ -]?key|authentication|unauthenticated|unauthorized|permission[_ -]?denied|invalid[_ -]?token/i.source,
+    /model.{0,40}(?:not found|not exist|unknown|unsupported|does not exist|invalid|no access)|no such model|model_not_found/i.source,
+  ].join("|"),
+  "i",
+);
+
 function replayable(input: RequestInfo | URL, init?: RequestInit): boolean {
+  // Sending a Request consumes its body, even when it is a string or FormData. Only a bodyless
+  // Request can be sent twice; init bodies are replayed by re-sending the same value.
+  if (input instanceof Request && input.body !== null) return false;
   if (init?.body && typeof (init.body as ReadableStream<unknown>).getReader === "function") return false;
-  return !(input instanceof Request && input.bodyUsed);
+  return true;
+}
+
+/** Reads at most this much of a failed response before deciding to retry, then keeps the body intact. */
+const MAX_PEEK_BODY = 16 * 1024;
+
+/**
+ * Reads a bounded prefix of a response body without consuming it for the caller. `tee()` lets the
+ * untouched branch become the response returned on a terminal failure, so the SDK still sees the
+ * provider's body (the AI SDK needs it to map a status when the retry gives up).
+ */
+async function peek(response: Response): Promise<{ text: string; response: Response }> {
+  if (!response.body) return { text: "", response };
+  const [prefix, kept] = response.body.tee();
+  const reader = prefix.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let read = 0;
+  try {
+    while (read < MAX_PEEK_BODY) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const room = MAX_PEEK_BODY - read;
+      const slice = value.byteLength > room ? value.subarray(0, room) : value;
+      text += decoder.decode(slice, { stream: true });
+      read += slice.byteLength;
+      if (slice.byteLength < value.byteLength) break;
+    }
+    text += decoder.decode();
+  } catch {
+    // Keep whatever arrived; the status still decides.
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+  const copy = new Response(kept, { status: response.status, statusText: response.statusText, headers: response.headers });
+  return { text, response: copy };
 }
 
 export interface RetryingFetchOptions {
@@ -124,16 +186,22 @@ export function createRetryingFetch(options: RetryingFetchOptions = {}): typeof 
       try {
         response = await send(input, init);
       } catch (error) {
+        // A caller's abort, including an AbortSignal.timeout() that already fired, is final.
         if (isAbort(error) || signal?.aborted) {
           notice({ status: "done" });
           throw error;
         }
-        const delay = canRetry && networkFailure(error) ? computeRetryDelay(attempt, undefined, random, policy) : null;
+        const code: ErrorCode | undefined = timeoutFailure(error) ? "timeout" : networkFailure(error) ? "network" : undefined;
+        if (!canRetry || !code) {
+          notice({ status: "done" });
+          throw error;
+        }
+        const delay = computeRetryDelay(attempt, undefined, random, policy);
         if (delay === null) {
           notice({ status: "done" });
           throw error;
         }
-        notice({ attempt, delayMs: delay, code: "network" });
+        notice({ attempt, delayMs: delay, code });
         try {
           await wait(delay, signal);
         } catch (error) {
@@ -146,14 +214,17 @@ export function createRetryingFetch(options: RetryingFetchOptions = {}): typeof 
         notice({ status: "done" });
         return response;
       }
-      if (!canRetry || !retryableStatus(response.status)) {
+      if (!canRetry || !transientStatus(response.status)) {
         notice({ status: "done" });
         return response;
       }
-      if (response.status === 429) {
-        // A quota refusal is permanent; do not burn attempts or make the user wait for the same answer.
-        const body = await response.clone().text().catch(() => "");
-        if (QUOTA_BODY.test(body.slice(0, 4_000))) {
+      // A 429 or 5xx body can say the failure is permanent (quota, OOM, context, credentials). The
+      // status alone would retry it three times and keep the user waiting for the same answer.
+      let inspected: { text: string; response: Response } | undefined;
+      if (response.status >= 500 || response.status === 429) {
+        inspected = await peek(response);
+        response = inspected.response;
+        if (PERMANENT_BODY.test(inspected.text.slice(0, 4_000))) {
           notice({ status: "done" });
           return response;
         }
@@ -164,9 +235,9 @@ export function createRetryingFetch(options: RetryingFetchOptions = {}): typeof 
         notice({ status: "done" });
         return response;
       }
-      const code: ErrorCode = response.status === 429 ? "provider_rate_limit" : "provider_overloaded";
+      const code: ErrorCode = response.status === 429 ? "provider_rate_limit" : response.status === 408 ? "timeout" : "provider_overloaded";
       notice({ attempt, delayMs: delay, code });
-      // The failed response is never read; release its body before trying again.
+      // The failed response is never read; release its untouched body before trying again.
       await response.body?.cancel().catch(() => {});
       try {
         await wait(delay, signal);

@@ -30,6 +30,7 @@ import { deleteThreadImages, imageRoutes } from "./tools/image.js";
 import { deleteSandboxWorkspace, sandboxRoutes } from "./tools/sandbox.js";
 import { env } from "./env.js";
 import { AppError, errorJson, handleAppError } from "./errors.js";
+import { describeBoundaryError } from "./provider-errors.js";
 import {
   AppCallNeedsConfirmation,
   callbackUrl,
@@ -293,7 +294,9 @@ const api = new Hono<AppEnv>()
       if (body.data.shared && body.data.audience) setAudience("mcp", id, body.data.audience);
       return c.json(await testServer(user.id, id));
     } catch (error) {
-      return c.json({ error: String((error as Error).message).includes("UNIQUE") ? "A server with that name exists." : (error as Error).message }, 400);
+      if (String((error as Error).message).includes("UNIQUE")) return c.json({ error: "A server with that name exists." }, 400);
+      // A failed test connection can carry the remote server's own text. Keep it in the log; send the taxonomy.
+      return errorJson(c, describeBoundaryError(error, { kind: "background" }));
     }
   })
   .put("/mcp/:id", async (c) => {

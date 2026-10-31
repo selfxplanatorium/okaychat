@@ -30,6 +30,29 @@ export const useRetryStatusStore = create<RetryStatusStore>((set) => ({
   }),
 }));
 
+/** The chat a live retry notice belongs to: the remote id, never the local assistant-ui id. */
+export interface RetryOwner {
+  id: string;
+  remoteId?: string | null;
+}
+
+/**
+ * Resolves the store key for a runtime's own thread. Each runtime is scoped to its own
+ * `threadListItem`, so reading this lazily in a stream callback follows the chat that started the
+ * run even after the user switches chats. A brand-new chat is still optimistic (`remote-` unset)
+ * until `initialize()` resolves; its notice is applied once that id exists.
+ */
+export function retryOwnerId(item: RetryOwner | null | undefined): string | undefined {
+  return item?.remoteId || undefined;
+}
+
+/** The payload of a transient `data-retry` chunk; every other data chunk is ignored. */
+export function retryChunkData(chunk: unknown): unknown {
+  if (typeof chunk !== "object" || chunk === null) return undefined;
+  const part = chunk as { type?: unknown; data?: unknown };
+  return part.type === "data-retry" ? part.data : undefined;
+}
+
 /** Applies one `data-retry` chunk. Unknown shapes are ignored, so a server change cannot break the chat. */
 export function applyRetryNotice(threadId: string, data: unknown, now = Date.now()): void {
   if (!threadId || typeof data !== "object" || data === null) return;

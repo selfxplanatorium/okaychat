@@ -15,6 +15,7 @@ const calls: Array<{ model: string; stream: boolean; body: Record<string, unknow
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 let hangClosed: Promise<void> | null = null;
 let errorClosed: Promise<void> | null = null;
+let flakyCalls = 0;
 
 function waitForClose(res: { once: (event: string, listener: () => void) => unknown }): Promise<void> {
   return new Promise((resolve) => res.once("close", () => resolve()));
@@ -47,6 +48,11 @@ const server = createServer(async (req, res) => {
     errorClosed = waitForClose(res);
     res.write(JSON.stringify({ error: "x".repeat(40_000) }));
     await errorClosed;
+    return;
+  }
+  if (model === "flaky" && flakyCalls++ === 0) {
+    res.statusCode = 503;
+    res.end(JSON.stringify({ error: "temporarily overloaded" }));
     return;
   }
   res.setHeader("Content-Type", body.stream === true ? "application/x-ndjson" : "application/json");
@@ -135,6 +141,7 @@ after(() => {
 });
 beforeEach(() => {
   calls.length = 0;
+  flakyCalls = 0;
   forgetOllamaModels();
 });
 
@@ -306,8 +313,23 @@ test("abort closes the stream without a spurious error", { timeout: 5_000 }, asy
   assert.equal(finished.done, true);
 });
 
-test("factory effort reaches native think and num_ctx through chat streaming and generation", async () => {
-  const info = { ...modelInfo("thinker"), reasoningEfforts: ["none", "high"] };
+test("native chat retries a transient daemon response before the stream opens", async () => {
+  const handle = createModel(modelInfo("flaky"), connection, { userId: "alice", retry: { sleep: async () => {}, random: () => 0.5 } });
+  const result = streamText({ model: handle.model, messages: [{ role: "user", content: "Hi" }], maxRetries: 0 });
+  assert.equal(await result.text, "Hello world");
+  assert.equal(flakyCalls, 2, "the daemon was asked twice");
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1]!.body.stream, true);
+});
+
+test("native generation retries a transient daemon response too", async () => {
+  const handle = createModel({ ...modelInfo("flaky"), id: "flaky" }, connection, { userId: "alice", retry: { sleep: async () => {}, random: () => 0.5 } });
+  const result = await handle.model.doGenerate({ prompt: [{ role: "user", content: [{ type: "text", text: "Hi" }] }] });
+  assert.equal(result.content.some((part) => part.type === "text" && part.text === "Plain answer"), true);
+  assert.equal(flakyCalls, 2);
+});
+
+test("factory effort reaches native think and num_ctx through chat streaming and generation", async () => {  const info = { ...modelInfo("thinker"), reasoningEfforts: ["none", "high"] };
   const prompt = [{ role: "user" as const, content: [{ type: "text" as const, text: "Hi" }] }];
   for (const effort of ["none", "high"] as const) {
     calls.length = 0;

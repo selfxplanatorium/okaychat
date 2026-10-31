@@ -401,7 +401,7 @@ test("non-admins cannot connect, test, or use local addresses", async () => {
   assert.equal(getConnection("alice", "ollama")?.guarded, true);
   const status = await as("alice", "/providers/ollama/status");
   assert.equal(status.status, 502);
-  assert.match((await json(status)).error as string, /public/i);
+  assert.equal((await json(status)).code, "forbidden");
 });
 
 test("a legacy non-admin Ollama row without a URL is still treated as loopback and guarded", async () => {
@@ -409,7 +409,7 @@ test("a legacy non-admin Ollama row without a URL is still treated as loopback a
   assert.equal(getConnection("alice", "ollama")?.guarded, true);
   const status = await as("alice", "/providers/ollama/status");
   assert.equal(status.status, 502);
-  assert.match((await json(status)).error as string, /public/i);
+  assert.equal((await json(status)).code, "forbidden");
   // An admin saving without an address gets the documented default stored.
   saveConnection("admin", "ollama", { enabled: true });
   assert.equal(getConnection("admin", "ollama")?.baseURL, "http://127.0.0.1:11434");
@@ -446,15 +446,16 @@ test("management errors are surfaced instead of swallowed", async () => {
   await as("admin", "/providers/ollama", { method: "PUT", body: JSON.stringify({ baseURL, enabled: true }) });
   const missing = await as("admin", "/providers/ollama/models", { method: "DELETE", body: JSON.stringify({ model: "missing:latest" }) });
   assert.equal(missing.status, 404);
-  assert.match((await json(missing)).error as string, /not installed/);
+  // The raw daemon sentence ("not installed") stays in the log; the wire carries the taxonomy.
+  assert.equal((await json(missing)).code, "model_not_found");
   const invalid = await as("admin", "/providers/ollama/pull", { method: "POST", body: JSON.stringify({ model: "bad model" }) });
   assert.equal(invalid.status, 400);
-  // A daemon that is no longer running explains where it looked.
+  // A daemon that is no longer running still gets a taxonomy code, without echoing the attempted URL.
   db.exec("DELETE FROM provider_connections");
   saveConnection("admin", "ollama", { baseURL: "http://127.0.0.1:1", enabled: true });
   const down = await as("admin", "/providers/ollama/status");
   assert.equal(down.status, 502);
-  assert.match((await json(down)).error as string, /Could not reach Ollama/);
+  assert.equal((await json(down)).code, "network");
 });
 
 test("the native error type is used for actionable failures", () => {

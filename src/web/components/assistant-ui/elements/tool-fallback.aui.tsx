@@ -30,9 +30,8 @@ import {
   type ToolCallMessagePartStatus,
   type ToolCallMessagePartComponent,
 } from "@assistant-ui/react";
-import { parseErrorWire } from "@shared/errors";
 import { t, type MessageKey, type PlainMessageKey } from "@/i18n";
-import { presentError } from "@/lib/error-presentation";
+import { presentError, toolErrorPresentation } from "@/lib/error-presentation";
 import { formatDuration, formatList, formatNumber } from "@/i18n/format";
 import { Trans } from "@/i18n/react";
 import { cn } from "@/lib/utils";
@@ -378,14 +377,9 @@ function ToolFallbackError({
 
   const isCancelled = status.reason === "cancelled";
   const headerText = isCancelled ? t("tools.cancelledReason") : t("tools.errorLabel");
-  const wire = isCancelled ? undefined : parseErrorWire(status.error);
-  const presentation = wire ? presentError(wire, "tool") : undefined;
-  // A tool's own short sentence ("Storage quota exceeded…") is already plain text; JSON, stacks, and
-  // objects never reach the card.
-  const plain = !isCancelled && typeof status.error === "string" && status.error.length <= 300
-    && !/^\s*[{[]/.test(status.error) && !/\bat\s+\S+:\d+/.test(status.error)
-    ? status.error
-    : undefined;
+  // Tool errors are wire JSON from the server. A historical raw string or object is not printed:
+  // the card falls back to the translated generic tool failure, which is never silent.
+  const presentation = isCancelled ? undefined : toolErrorPresentation(status.error) ?? presentError({ code: "tool_failed", message: "", retryable: false }, "tool");
 
   return (
     <div
@@ -404,14 +398,7 @@ function ToolFallbackError({
           <p className="aui-tool-fallback-error-reason break-words">{t(presentation.messageKey)}</p>
           <p className="aui-tool-fallback-error-hint text-muted-foreground text-xs break-words">{t(presentation.hintKey)}</p>
         </>
-      ) : plain ? (
-        <>
-          <p className="aui-tool-fallback-error-reason break-words">{plain}</p>
-          <p className="aui-tool-fallback-error-hint text-muted-foreground text-xs break-words">{t("errors.toolFailedHint")}</p>
-        </>
-      ) : isCancelled ? null : (
-        <p className="aui-tool-fallback-error-reason text-muted-foreground break-words">{t("errors.toolFailedMessage")}</p>
-      )}
+      ) : null}
     </div>
   );
 }

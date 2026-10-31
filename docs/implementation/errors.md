@@ -30,7 +30,7 @@ extends `AppError` so every write path answers `storage_quota` (413) without a s
 | `provider_quota` | 402 | no | 402, `insufficient_quota`, billing/credit balance, hard limit |
 | `model_not_found` | 404 | no | 404, `model_not_found`, unknown model/deployment messages |
 | `context_length` | 400 | no | 400/413 with context/token/too-large text, `context_length_exceeded`, `request_too_large` |
-| `provider_overloaded` | 503 | yes | 5xx, 529, `overloaded_error`, `server_error`, `UNAVAILABLE`; an out-of-memory body is non-retryable |
+| `provider_overloaded` | 503 | yes (transient 5xx only) | every 5xx, 529, `overloaded_error`, `server_error`, `UNAVAILABLE`; 501/507 and an out-of-memory, quota, context, or credentials body are non-retryable |
 | `network` | 502 | yes | `fetch failed`, DNS, refused/reset connections, no HTTP status |
 | `timeout` | 504 | yes | `TimeoutError`, `ETIMEDOUT`, deadline messages |
 | `aborted` | 499 | no | `AbortError`, `ABORT_ERR`, a cancelled wait |
@@ -51,16 +51,23 @@ follow the rule at the end of this file.
 `describeProviderError(error, { log, model, provider, kind })` is the provider boundary:
 
 1. An existing `AppError` passes through.
-2. Abort and timeout are checked by `name`, `code`, and message before HTTP status.
+2. Abort is checked first by `name`, `code`, and `reason`. A timeout is checked only when no HTTP status
+   is present: a 401 whose message mentions "timeout" is still `provider_auth`.
 3. The SDK's `RetryError` is unwrapped to its `lastError`.
-4. `statusCode` (or `status` from native Ollama) selects the status table above.
+4. `statusCode` (or `status` from native Ollama) selects the status table above. Every 5xx maps to
+   `provider_overloaded` (or `timeout` for `408`/`504` and timeout text); only transient 5xx statuses are
+   marked retryable. A non-transient 5xx (501, 507, ...) stays `provider_overloaded` with `retryable: false`.
 5. For 400/413/422, the concatenated body type/code/status/message is matched for context length,
    model gone, auth, billing/quota, and overload, in that order. A 400 with no marker is `validation`.
 6. With no status, `fetch failed`/DNS/connection errors become `network`; `TimeoutError` is `timeout`;
-   a tool context uses `tool_failed`.
+   native Ollama messages are recognized too ("Could not reach Ollama…" → `network`,
+   "did not answer … in time" → `timeout`); a tool context uses `tool_failed`.
 7. `retry-after` or `retry-after-ms` becomes `retryAfterMs` (seconds or HTTP date). Headers are read
    case-insensitively. A safe provider request id (`x-request-id`, OpenAI/Anthropic/Google variants)
    travels in the wire.
+
+An out-of-memory body, an explicit quota/billing refusal, a context-window refusal, and rejected
+credentials make a 5xx permanent even though its status is 5xx. They are never retried.
 
 The wire is only `{ code, message, hint, retryable, retryAfterMs, ref, model, provider, requestId }`.
 `details` holds the raw shape server-side only. `toWireError` truncates and redacts key-shaped strings as
@@ -83,35 +90,45 @@ defense in depth; `errorJson` always also sets `error` to the same safe message 
 ## Retries
 
 `createRetryingFetch` wraps every provider call in `llm.ts` (OpenAI, OpenAI-compatible, Anthropic,
-Google, ChatGPT/Codex). Every `generateText`/`streamText` caller passes `maxRetries: 0`, so the SDK never
-adds a second compounding policy.
+Google, ChatGPT/Codex, and native Ollama `/api/chat`). Every `generateText`/`streamText` caller passes
+`maxRetries: 0`, so the SDK never adds a second compounding policy. Native Ollama keeps its own
+transport, abort, `num_ctx`, thinking, and capability behavior; the retrying fetch is injected into
+that connection for `/api/chat` only. Management calls (pull, delete, status, inventory) use the plain
+transport, so a mutation is never retried.
 
 - Three attempts total (two retries).
 - Delay: 1 s, then 2 s, capped at 15 s, with ±20% jitter from `random()`.
 - A provider `Retry-After` is used exactly. If it asks for more than 30 s, the request is **not** retried:
-  the safe error with `retryAfterMs` is surfaced instead of retrying early. The same applies when the
-  header is the only way to respect it.
-- Only `provider_rate_limit`, `provider_overloaded`, `network`, and `timeout` are retried. A 429 whose
-  body names quota/billing/credit is returned at once. Auth, validation, context length, model-not-found,
-  aborted, storage, and permanent 4xx never retry.
-- Abort cancels the wait immediately (`sleep` listens to the caller's signal). A request whose body is a
-  stream, or whose `Request` body was already used, is never retried.
-- A failed attempt's response body is discarded before the next attempt. Once response streaming has
-  started, nothing retries, so emitted text and tool side effects cannot be duplicated.
+  the safe error with `retryAfterMs` is surfaced instead of retrying early.
+- Only `provider_rate_limit`, `provider_overloaded`, `network`, and `timeout` are retried. Timeouts
+  (`TimeoutError`, `ETIMEDOUT`, "timed out" messages, HTTP 408) retry with a `timeout` notice unless
+  the **caller's** signal is already aborted, including an expired `AbortSignal.timeout()`. A 429
+  whose body names quota/billing/credit is returned at once. Auth, validation, context length,
+  model-not-found, aborted, storage, and permanent 4xx never retry. A 5xx whose body names OOM,
+  quota, context, or credentials is permanent too.
+- Abort cancels the wait immediately (`sleep` listens to the caller's signal). A request whose body is
+  a stream is never retried. A `Request` carrying **any** body (even a string) is never retried,
+  because sending it consumes the body; a plain URL plus a string `init.body` is replayable.
+- A failed attempt's body is read through a bounded (16 KiB) tee only to decide whether the failure is
+  permanent. The untouched branch becomes the returned `Response` on a terminal failure, so the SDK
+  still sees the provider's own body and status. Once response streaming has started, nothing retries,
+  so emitted text and tool side effects cannot be duplicated.
 - While a chat waits, the server writes a transient `data-retry` chunk with `attempt`, `delayMs`, and
-  `code`. The client stores it per chat (`state/retry-status.ts`), the thread footer shows
-  "Retrying in Ns…", and a `done` chunk, stream error, finish, or Stop clears it. The chunk is transient:
-  it is not stored, not replayed, and not part of the prompt prefix.
+  `code`. The client stores it per chat (`state/retry-status.ts`) and the thread footer shows
+  "Retrying in Ns…". A `done` chunk, stream error, finish, or Stop clears it. The chunk is marked
+  `transient`, so it is not stored with the message and never part of the prompt prefix. It **is**
+  replayed by the 15-minute resumable stream (that is how an attached tab keeps the countdown); it is
+  not in message history after the run.
 
 ### Limits
 
-- Native Ollama chat requests are not wrapped by `createRetryingFetch`; its adapter keeps its own
-  transport, abort, `num_ctx`, thinking, and capability behavior. A daemon 5xx or network failure is
-  mapped by the same taxonomy at the chat boundary but is not retried a second time.
 - Resumable stream replay is unchanged: 15 minutes after the last update. A server restart still loses
   an in-flight generation; reload recovery, not durable background storage.
-- A non-JSON legacy server error still reaches the UI through its safe `{ error }` string. Unknown shapes
-  become "The request failed (HTTP n)." and never echo the body.
+- A non-JSON legacy server error still reaches the UI through its safe `{ error }` string only when the
+  response is a 4xx authored message; 5xx and JSON/HTML/stack-shaped legacy bodies become
+  "The request failed (HTTP n)." and never echo the body.
+- A provider 401 is wire `provider_auth`; it never dispatches the client's `okaychat:unauthorized`
+  event, which is reserved for the app's own untyped session 401.
 
 ## Boundaries and presentation
 
@@ -119,15 +136,17 @@ adds a second compounding policy.
 | --- | --- | --- |
 | Top-level HTTP | `handleAppError` → `errorJson` | `ApiError` reads the structured fields; settings/upload rows show translated message + safe specific detail inline |
 | Chat turn | `createUIMessageStream`/`toUIMessageStream` `onError` returns the wire JSON string | `ChatErrorMessage` parses it and shows Retry, Switch model, Open setting, Copy details |
-| Tool result | `tool-output-error` carries the same wire JSON; tool errors that never had a code fall back to `tool_failed` | `ToolFallbackError` and `ToolShell` show message + hint, never a raw object |
+| Tool result | `tool-output-error` carries the same wire JSON; a stream transform replaces raw strings, objects, and stacks with `tool_failed` (the model keeps the original tool error) | `ToolFallbackError` and `ToolShell` show the translated code message + hint, never a raw string or object |
 | Background schedule | `last_error` stores the safe message | The Scheduled row shows it; raw details stay in the log |
 | Render failure | none | `ErrorBoundary` shows Reload and Copy details on a full page |
 
 `presentError(error, context)` is the only surface decision:
 
-- `chat` → inline; Retry only when `retryable`; Switch model for provider/network/timeout/unknown
-  failures; Open setting for provider/auth/quota/model (`providers`), context (`compaction`), and
-  storage (`account`); Copy details always.
+- `chat` → inline; Retry for every code except `aborted` (an automatic retry is limited to transient
+  codes, but a manual retry is a valid next step for auth, validation, context length, and permanent
+  failures too); Switch model for provider/network/timeout/unknown failures; Open setting for
+  provider/auth/quota/model (`providers`), context (`compaction`), and storage (`account`); Copy
+  details always.
 - `tool` → inline message + hint, no actions.
 - `settings`, `upload`, `background` → inline; a safe specific server detail is added only for
   validation/not-found/forbidden/conflict/storage/unknown.
@@ -141,10 +160,15 @@ The reference is also shown in the chat error block so support can match the ser
 
 - Every provider failure that is logged gets an 8-character reference (`ref`) generated at the boundary.
   The browser shows it; the log line starts `[provider] ref=…`.
-- The log records code, status, provider, model, request id, error name, and truncated/redacted message
-  and response body. It never records `requestBodyValues`, an API key, or a prompt. Temporary chats set
-  `log: false`, as before.
+- The log records code, status, provider, model, request id, error name, and a truncated, redacted
+  message and response body. It never records `requestBodyValues` or an API key. Temporary chats set
+  `log: false`, as before. A provider's raw error body **can** quote the prompt or request fields, so the
+  log is defense in depth, not a guarantee: `redactSecrets` removes `sk-` keys, Bearer/Basic tokens, and
+  quoted or unquoted JSON/header keys (`apiKey`, `api_key`, `authorization`, `token`, `secret`,
+  `password`, `x-api-key`, ...). Prompt text itself is not redacted, so treat the server log as sensitive.
 - `handleAppError` generates the same reference for an unidentified 500 and logs only the redacted stack.
+- The render boundary logs only the error's name, never its message or stack: a React error can carry
+  prompt text or provider payloads.
 - User-facing text never includes SQL, file paths, upstream JSON, or stacks.
 
 ## Adding a new error
