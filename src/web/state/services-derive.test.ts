@@ -138,6 +138,7 @@ test("the tool signature changes when a result or an error arrives, not for text
 
 test("a panel note is used for down, never for degraded", () => {
   assert.equal(customServiceMessageKey("down", "services.voiceLocalNote"), "services.voiceLocalNote");
+  assert.equal(customServiceMessageKey("unconfigured", "services.exportPdfNote"), "services.exportPdfNote");
   assert.equal(customServiceMessageKey("degraded", "services.voiceLocalNote"), undefined);
   assert.equal(customServiceMessageKey("up", "services.voiceLocalNote"), undefined);
 });

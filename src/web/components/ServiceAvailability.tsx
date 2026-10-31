@@ -11,17 +11,18 @@ import { cn } from "@/lib/utils";
 
 // An explanatory block for a panel that depends on one service. It replaces a raw request error: the panel says
 // what is unavailable, why, and how to fix it, and offers a check without polling. Nothing renders while the
-// service is up, unknown, or not configured, and "checking" is never shown as "down".
+// service is up or unknown, and "checking" is never shown as "down".
 export function ServiceAvailability({ id, className, describeId, messageKey }: { id: ServiceId; className?: string; describeId?: string; messageKey?: PlainMessageKey }) {
   const services = useServices();
   const state = availabilityOf(services, id);
   const check = () => void services.refresh(true);
-  useCommand("services.checkAgain", check, state === "down" || state === "degraded");
-  if (state === "up" || state === "unknown" || state === "unconfigured") return null;
+  useCommand("services.checkAgain", check, state === "down" || state === "degraded" || state === "unconfigured");
+  if (state === "up" || state === "unknown") return null;
   const status = statusOf(services, id);
   // A speech outage has a compose fix and a "pick another engine" link; a CPU fallback still offers the
   // latter because a user may prefer a cloud voice.
-  const fix = status?.fixKey ? FIX_SETTINGS[status.fixKey] : id === "speech" ? FIX_SETTINGS.voice : undefined;
+  const fixKey = status?.fixKey ?? (id === "browser" || id === "scrapling" ? "startBrowser" : id === "speech" ? "startSpeech" : id === "sandbox" ? "startSandbox" : id === "searxng" ? "startSearxng" : undefined);
+  const fix = fixKey ? FIX_SETTINGS[fixKey] : undefined;
   if (state === "checking") {
     return (
       <p id={describeId} role="status" className={cn("text-muted-foreground text-xs", className)}>
@@ -49,7 +50,7 @@ export function ServiceAvailability({ id, className, describeId, messageKey }: {
               : t("services.unavailable", { service: name, reason: t(REASON_KEYS[status?.reasonKey ?? "unreachable"]) })}
         </span>
       </p>
-      {status?.fixKey && <p className="ps-[1.375rem]">{t(FIX_KEYS[status.fixKey])}</p>}
+      {fixKey && <p className="ps-[1.375rem]">{t(FIX_KEYS[fixKey])}</p>}
       <div className="flex flex-wrap items-center gap-2 ps-[1.375rem]">
         <button
           type="button"

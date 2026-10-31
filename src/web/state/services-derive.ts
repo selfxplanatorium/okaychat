@@ -264,7 +264,7 @@ export function hasServiceFailure(parts: readonly ToolPartLike[]): boolean {
 
 /** A custom panel note describes a down service; a degraded one explains its own limitation instead. */
 export function customServiceMessageKey(state: ServiceAvailability, messageKey?: PlainMessageKey): PlainMessageKey | undefined {
-  return state === "down" ? messageKey : undefined;
+  return state === "down" || state === "unconfigured" ? messageKey : undefined;
 }
 
 /** The status of a service, for an inline panel that must explain why it is unavailable. */

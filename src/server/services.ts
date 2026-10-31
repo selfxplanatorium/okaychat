@@ -175,7 +175,7 @@ function sourceStatus(source: ServiceSource, force = false): Promise<Cached> {
     if (now - (lastForced.get(source) ?? 0) >= forceCooldownMs) lastForced.set(source, now);
     else force = false;
   }
-  if (!force && fresh(cached)) return Promise.resolve(cached!);
+  if (!force && fresh(cached) && SOURCE_IDS[source].every((id) => cached!.statuses.some((status) => status.id === id && Date.now() - status.checkedAt < ttlMs))) return Promise.resolve(cached!);
   let pending = inflight.get(source);
   if (!pending) {
     // Snapshot before starting: a report that lands while this probe runs is newer than its answer.
@@ -221,7 +221,8 @@ export function serviceDown(id: FixedServiceId): boolean {
   const source = SOURCE_OF[id];
   if (!source) return false;
   const entry = cache.get(source);
-  return fresh(entry) && entry!.statuses.find((status) => status.id === id)?.state === "down";
+  const status = entry?.statuses.find((status) => status.id === id);
+  return !!status && Date.now() - status.checkedAt < ttlMs && status.state === "down";
 }
 
 /**
@@ -235,7 +236,8 @@ export async function turnServiceStates(ids: FixedServiceId[], waitMs = PROBE_TI
   for (const id of ids) {
     const source = SOURCE_OF[id];
     const entry = source ? cache.get(source) : undefined;
-    out.set(id, fresh(entry) ? entry!.statuses.find((status) => status.id === id) : undefined);
+    const status = entry?.statuses.find((status) => status.id === id);
+    out.set(id, status && Date.now() - status.checkedAt < ttlMs ? status : undefined);
   }
   return out;
 }

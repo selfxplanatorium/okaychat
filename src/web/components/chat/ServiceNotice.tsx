@@ -177,7 +177,10 @@ export function TurnServiceNote() {
   );
 }
 
-/** True when a control's service is known to be down. Never true while checking. */
+/** True when a control's service is known to be down or missing. Never true while checking. */
 export function useServiceDown(id: ServiceId): boolean {
-  return useServices((state) => availabilityOf(state, id) === "down");
+  return useServices((state) => {
+    const availability = availabilityOf(state, id);
+    return availability === "down" || availability === "unconfigured";
+  });
 }

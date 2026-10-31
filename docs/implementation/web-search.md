@@ -10,6 +10,8 @@ Compose supplies a private SearXNG sidecar configured by `docker/searxng/`. `OKA
 SearXNG is optional: the service registry (`docs/implementation/service-health.md`) reports it `down` when its
 `/healthz` fails, but `web_search` stays offered because the public engines remain. The web notice says results come
 from the fallback engines.
+While the registry has a fresh SearXNG outage, search skips that engine immediately rather than waiting
+for its request timeout; Brave and DuckDuckGo remain available.
 
 Each engine request also ends when the reply is stopped: the tools pass their `abortSignal` into `webSearch`/`webFetch`, which combine it with the timeout and pass it to Scrapling.
 

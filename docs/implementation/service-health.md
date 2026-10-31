@@ -18,7 +18,7 @@ types and parsers), `src/web/state/services.ts` and `services-derive.ts` (store 
 - `degraded`: usable with a known limitation (server speech on the CPU after a GPU failure, a provider
   whose last request was rejected).
 - `down`: configured, but cannot be reached or refuses work.
-- `unconfigured`: this server does not have it (no URL, no worker). Not an outage, no notice.
+- `unconfigured`: this server does not have it (no URL, no worker). Not an outage, no banner; affected panels still show setup guidance.
 
 `reasonKey` and `fixKey` are short codes; the web app translates them (`i18n/en/services.ts`). The wire
 never carries a URL, token, host, worker message, or any other raw text, and `parseServiceStatus` drops
@@ -150,7 +150,7 @@ be cleaned up.
   showing a request error, with "Check again" and, when a settings page owns the fix, a deep link.
   Used in Settings → Voice, the Library, the PDF export menus, and the composer's local voice hint.
   `checking` is its own state; a control is never disabled while the answer is unknown. A caller's
-  custom note describes a **down** service only: `degraded` always explains its own limitation (a CPU
+  custom note describes a **down** or **unconfigured** service only: `degraded` always explains its own limitation (a CPU
   fallback is slower, not unavailable).
 - **Speech controls** stay visible while their engine is configured. When the selected engine is the
   local worker and the registry knows it is down, the composer microphone and the message's read-aloud
@@ -182,6 +182,11 @@ be cleaned up.
    `src/server/chat-services.test.ts`.
 
 ## Limits
+
+Capability freshness is checked per id: successful renders cannot extend a stale Scrapling failure, and
+partial request evidence still requires a complete health probe. General settings uses the live registry,
+so its sandbox explanation recovers on focus or Check again. PDF export is also disabled with setup
+guidance when the browser worker is unconfigured.
 
 - Probes are shallow: a health endpoint proves the process answers, not that a job will succeed. A
   service can be reported `up` and still fail; the call then fails fast and marks it down.

@@ -274,6 +274,28 @@ test("speech-only and image-only keys do not count as chat providers", async () 
   assert.equal(byId(await services.servicesFor("alice", true)).get("providers")?.state, "up");
 });
 
+test("request evidence for one capability cannot hide or refresh its sibling", async (t) => {
+  let now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  let calls = 0;
+  services.setServiceProbeForTests("browser", async () => {
+    calls++;
+    return { results: {
+      browser: { state: "up", reasonKey: "ok" },
+      scrapling: { state: "down", reasonKey: "refuses" },
+    } };
+  });
+  services.reportServiceSuccess("browser");
+  const initial = byId(await services.servicesFor("alice"));
+  assert.equal(initial.get("scrapling")?.state, "down", "partial request evidence still needs a complete probe");
+  assert.equal(calls, 1);
+  now += services.SERVICE_TTL_MS + 1;
+  services.reportServiceSuccess("browser");
+  assert.equal(services.serviceDown("scrapling"), false, "a stale sibling failure is no longer a guard");
+  await services.servicesFor("alice");
+  assert.equal(calls, 2, "a render request cannot extend the fetch health TTL");
+});
+
 test("a shared key the user is not entitled to does not count as a provider", async () => {
   saveConnection(null, "openai", { apiKey: "sk-shared-not-real" });
   const { setAudience } = await import("./groups.js");
