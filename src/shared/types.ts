@@ -29,6 +29,8 @@ export interface ModelInfo {
   maxOutput: number;
   reasoning: boolean;
   reasoningEfforts?: string[];
+  /** Native named thinking levels for providers that take them (Ollama gpt-oss). */
+  thinkingLevels?: string[];
   toolCall: boolean;
   attachments: boolean;
   inputModalities: string[];

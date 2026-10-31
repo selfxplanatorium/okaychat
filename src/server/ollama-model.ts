@@ -11,6 +11,7 @@ import type {
   LanguageModelV4Usage,
   SharedV4Warning,
 } from "@ai-sdk/provider";
+import type { ReasoningEffort } from "../shared/types.js";
 import { ollamaChat, OllamaError, type OllamaConnection } from "./catalog/ollama.js";
 import { newId } from "./crypto.js";
 
@@ -57,10 +58,23 @@ export interface OllamaModelOptions {
   guarded?: boolean;
   /** `/api/show` reports the `thinking` capability. */
   thinking?: boolean;
+  /** Named native thinking levels from `/api/show` (gpt-oss: low, medium, high). */
+  thinkingLevels?: string[];
+  /** Native `think: false` is accepted, so "none" can turn thinking off. */
+  thinkingOff?: boolean;
+  /** Context window requested with `num_ctx`; the same number the app advertises and meters. */
+  context?: number;
+  /** Default effort from the chat composer; a per-call `reasoning` option wins. */
+  reasoning?: ReasoningEffort;
 }
+
+/** One NDJSON line of chat output. Tool arguments can be large, so the cap is generous. */
+const MAX_CHAT_LINE = 8 * 1024 * 1024;
 
 const finite = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
 const textOf = (value: unknown) => (typeof value === "string" ? value : "");
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** Ollama wants tool arguments as a JSON object, while AI SDK prompts carry an object or a JSON string. */
 function argumentsObject(input: unknown): Record<string, unknown> {
@@ -197,10 +211,53 @@ function nativeTools(options: LanguageModelV4CallOptions, warnings: SharedV4Warn
   return chosen.length ? chosen : undefined;
 }
 
-function nativeBody(options: LanguageModelV4CallOptions, stream: boolean, warnings: SharedV4Warning[]) {
+const THINK_RANK: Record<string, number> = { minimal: 1, low: 1, medium: 2, high: 3, xhigh: 4, max: 5 };
+
+/** Picks the closest named level a daemon reported, so a broader app effort still maps to a valid value. */
+function closestThinkLevel(levels: string[], effort: ReasoningEffort): string {
+  const wanted = THINK_RANK[effort] ?? THINK_RANK.medium!;
+  let best = levels[0]!;
+  let distance = Infinity;
+  for (const level of levels) {
+    const gap = Math.abs((THINK_RANK[level] ?? wanted) - wanted);
+    if (gap < distance) {
+      best = level;
+      distance = gap;
+    }
+  }
+  return best;
+}
+
+/**
+ * Maps the app's effort to Ollama's native `think`. Boolean-only models take true/false; models with
+ * named levels (gpt-oss) take the level itself, never an invalid boolean. "none" becomes false only
+ * when the daemon reported that it accepts false.
+ */
+function nativeThink(
+  requested: ReasoningEffort | "provider-default" | undefined,
+  options: OllamaModelOptions,
+): boolean | string | undefined {
+  const levels = options.thinkingLevels ?? [];
+  // A model with named levels is never sent a bare boolean just because it also reports the
+  // capability; only an explicit `thinkingOff` makes `false` valid there.
+  const booleanThinking = options.thinkingOff === true || (options.thinking === true && levels.length === 0);
+  if ((!booleanThinking && !levels.length) || requested === undefined || requested === "provider-default") return undefined;
+  if (requested === "none") return booleanThinking && options.thinkingOff !== false ? false : undefined;
+  const wanted = requested === "minimal" ? "low" : requested;
+  if (levels.includes(wanted)) return wanted;
+  if (levels.includes(requested)) return requested;
+  if (levels.length) return closestThinkLevel(levels, requested);
+  return true;
+}
+
+function nativeBody(options: LanguageModelV4CallOptions, stream: boolean, warnings: SharedV4Warning[], context?: number) {
   const messages = ollamaMessages(options.prompt);
   const tools = nativeTools(options, warnings);
   const nativeOptions: Record<string, number | string | string[]> = {};
+  // The published context and the daemon's runtime context are the same number. Without this the
+  // daemon can load a much smaller window while the meter, compaction, and the picker claim the
+  // architecture maximum. See docs/implementation/ollama.md.
+  if (context !== undefined && Number.isInteger(context) && context > 0) nativeOptions.num_ctx = context;
   if (options.temperature !== undefined) nativeOptions.temperature = options.temperature;
   if (options.topP !== undefined) nativeOptions.top_p = options.topP;
   if (options.topK !== undefined) nativeOptions.top_k = options.topK;
@@ -249,12 +306,38 @@ function nativeUsage(chunk: NativeChatChunk): LanguageModelV4Usage {
   };
 }
 
+/**
+ * Validates the little the adapter relies on before casting. A daemon that answers `null` or puts a
+ * non-string in `message.content` must produce an OllamaError, not a TypeError from property access.
+ */
+function chatChunk(value: unknown, where: string): NativeChatChunk {
+  if (!isRecord(value)) throw new OllamaError(`Ollama sent an unexpected ${where}.`);
+  const message = value.message;
+  if (message !== undefined) {
+    if (!isRecord(message)) throw new OllamaError(`Ollama sent an invalid message in its ${where}.`);
+    for (const key of ["content", "thinking"] as const) {
+      if (message[key] !== undefined && typeof message[key] !== "string") {
+        throw new OllamaError(`Ollama sent a non-text ${key} in its ${where}.`);
+      }
+    }
+    if (message.tool_calls !== undefined && !Array.isArray(message.tool_calls)) {
+      throw new OllamaError(`Ollama sent invalid tool calls in its ${where}.`);
+    }
+  }
+  if (value.error !== undefined && typeof value.error !== "string") {
+    throw new OllamaError(`Ollama sent an unreadable error in its ${where}.`);
+  }
+  return value as NativeChatChunk;
+}
+
 function parseChunk(line: string): NativeChatChunk {
+  let parsed: unknown;
   try {
-    return JSON.parse(line) as NativeChatChunk;
+    parsed = JSON.parse(line);
   } catch {
     throw new OllamaError("Ollama sent an unreadable chat line.");
   }
+  return chatChunk(parsed, "chat line");
 }
 
 /** Yields complete NDJSON lines, including a final line without a newline. */
@@ -271,12 +354,23 @@ async function* ndjson(body: ReadableStream<Uint8Array>, signal?: AbortSignal): 
       while (newline >= 0) {
         const line = buffer.slice(0, newline).replace(/\r$/, "");
         buffer = buffer.slice(newline + 1);
+        if (line.length > MAX_CHAT_LINE) {
+          throw new OllamaError("Ollama sent an overlong chat line (over 8 MiB). Check the model or daemon before retrying.");
+        }
         if (line.trim()) yield line;
         newline = buffer.indexOf("\n");
       }
+      if (buffer.length > MAX_CHAT_LINE) {
+        throw new OllamaError("Ollama sent an overlong chat line (over 8 MiB) without a newline. Check the model or daemon before retrying.");
+      }
     }
     buffer += decoder.decode();
-    if (buffer.trim()) yield buffer.trim();
+    if (buffer.trim()) {
+      if (buffer.length > MAX_CHAT_LINE) {
+        throw new OllamaError("Ollama sent an overlong chat line (over 8 MiB). Check the model or daemon before retrying.");
+      }
+      yield buffer.trim();
+    }
   } catch (error) {
     if (signal?.aborted) return;
     throw error;
@@ -309,13 +403,16 @@ class OllamaLanguageModel implements LanguageModelV4 {
 
   async doGenerate(options: LanguageModelV4CallOptions): Promise<LanguageModelV4GenerateResult> {
     const warnings: SharedV4Warning[] = [];
-    const partial = nativeBody(options, false, warnings);
-    const body = { model: this.modelId, ...partial, ...(options.reasoning !== undefined && this.options.thinking && options.reasoning !== "provider-default" ? { think: options.reasoning !== "none" } : {}) };
+    const partial = nativeBody(options, false, warnings, this.options.context);
+    const reasoning = options.reasoning !== undefined ? options.reasoning : this.options.reasoning;
+    const think = nativeThink(reasoning, this.options);
+    const body = { model: this.modelId, ...partial, ...(think !== undefined ? { think } : {}) };
     const res = await ollamaChat(this.connection(), body, options.abortSignal);
     let chunk: NativeChatChunk;
     try {
-      chunk = (await res.json()) as NativeChatChunk;
-    } catch {
+      chunk = chatChunk(await res.json(), "chat response");
+    } catch (error) {
+      if (error instanceof OllamaError) throw error;
       throw new OllamaError("Ollama returned an unreadable chat response.");
     }
     if (chunk.error) throw new OllamaError(`Ollama could not chat with ${this.modelId}: ${chunk.error}`);
@@ -348,38 +445,56 @@ class OllamaLanguageModel implements LanguageModelV4 {
 
   async doStream(options: LanguageModelV4CallOptions) {
     const warnings: SharedV4Warning[] = [];
-    const partial = nativeBody(options, true, warnings);
-    const body = { model: this.modelId, ...partial, ...(options.reasoning !== undefined && this.options.thinking && options.reasoning !== "provider-default" ? { think: options.reasoning !== "none" } : {}) };
-    const res = await ollamaChat(this.connection(), body, options.abortSignal);
+    const partial = nativeBody(options, true, warnings, this.options.context);
+    const reasoning = options.reasoning !== undefined ? options.reasoning : this.options.reasoning;
+    const think = nativeThink(reasoning, this.options);
+    const body = { model: this.modelId, ...partial, ...(think !== undefined ? { think } : {}) };
+    // The consumer can cancel the returned stream without an external signal, for example when the
+    // chat UI stops rendering. Abort the request ourselves, or the daemon keeps streaming into a body
+    // nobody reads. See docs/implementation/ollama.md.
+    const cancelRequest = new AbortController();
+    const signal = options.abortSignal ? AbortSignal.any([options.abortSignal, cancelRequest.signal]) : cancelRequest.signal;
+    const res = await ollamaChat(this.connection(), body, signal);
     if (!res.body) throw new OllamaError("Ollama returned no chat stream.");
-    const signal = options.abortSignal;
     const headers = Object.fromEntries(res.headers);
     const modelId = this.modelId;
+    let cancelled = false;
 
     const stream = new ReadableStream<LanguageModelV4StreamPart>({
       async start(controller) {
         let textOpen = false;
         let reasoningOpen = false;
+        let textSections = 0;
+        let reasoningSections = 0;
+        let textId = "";
+        let reasoningId = "";
         let toolCount = 0;
         let finished = false;
         let metadata = false;
-        const send = (part: LanguageModelV4StreamPart) => controller.enqueue(part);
+        const send = (part: LanguageModelV4StreamPart) => {
+          if (cancelled || signal.aborted) return;
+          try {
+            controller.enqueue(part);
+          } catch {
+            cancelled = true;
+          }
+        };
 
         const closeText = () => {
           if (!textOpen) return;
           textOpen = false;
-          send({ type: "text-end", id: "text-0" });
+          send({ type: "text-end", id: textId });
         };
         const closeReasoning = () => {
           if (!reasoningOpen) return;
           reasoningOpen = false;
-          send({ type: "reasoning-end", id: "reasoning-0" });
+          send({ type: "reasoning-end", id: reasoningId });
         };
 
         send({ type: "stream-start", warnings });
         try {
           for await (const line of ndjson(res.body!, signal)) {
-            if (signal?.aborted) break;
+            if (signal.aborted) break;
             const chunk = parseChunk(line);
             if (chunk.error) throw new OllamaError(`Ollama could not chat with ${modelId}: ${chunk.error}`);
             if (!metadata) {
@@ -394,18 +509,21 @@ class OllamaLanguageModel implements LanguageModelV4 {
               closeText();
               if (!reasoningOpen) {
                 reasoningOpen = true;
-                send({ type: "reasoning-start", id: "reasoning-0" });
+                // A reopened section needs a new id; reusing an ended id breaks the UI's part keys.
+                reasoningId = `reasoning-${reasoningSections++}`;
+                send({ type: "reasoning-start", id: reasoningId });
               }
-              send({ type: "reasoning-delta", id: "reasoning-0", delta: thinking });
+              send({ type: "reasoning-delta", id: reasoningId, delta: thinking });
             }
             const text = textOf(chunk.message?.content);
             if (text) {
               closeReasoning();
               if (!textOpen) {
                 textOpen = true;
-                send({ type: "text-start", id: "text-0" });
+                textId = `text-${textSections++}`;
+                send({ type: "text-start", id: textId });
               }
-              send({ type: "text-delta", id: "text-0", delta: text });
+              send({ type: "text-delta", id: textId, delta: text });
             }
             const calls = Array.isArray(chunk.message?.tool_calls) ? chunk.message.tool_calls : [];
             if (calls.length) {
@@ -431,18 +549,24 @@ class OllamaLanguageModel implements LanguageModelV4 {
               break;
             }
           }
-          if (!finished && !signal?.aborted) {
+          if (!finished && !cancelled && !signal.aborted) {
             send({ type: "error", error: new OllamaError("Ollama ended the chat stream without finishing.") });
           }
         } catch (error) {
-          if (!signal?.aborted) send({ type: "error", error });
+          if (!cancelled && !signal.aborted) send({ type: "error", error });
         } finally {
-          try {
-            controller.close();
-          } catch {
-            // Already closed by a cancelled stream.
+          if (!cancelled) {
+            try {
+              controller.close();
+            } catch {
+              // Already closed by a cancelled stream.
+            }
           }
         }
+      },
+      cancel() {
+        cancelled = true;
+        cancelRequest.abort();
       },
     });
     return { stream, request: { body }, response: { headers } };

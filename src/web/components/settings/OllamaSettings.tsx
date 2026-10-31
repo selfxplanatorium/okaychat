@@ -452,7 +452,9 @@ export function OllamaSettings({ provider, base, onChanged }: { provider: Provid
             </div>
           )}
           {!loading && !loadError && inventory?.models.length === 0 && (
-            <p className="text-muted-foreground px-1 py-3 text-xs">{t("providers.ollamaEmpty")}</p>
+            <p className="text-muted-foreground px-1 py-3 text-xs">
+              {manage ? t("providers.ollamaEmpty") : t("providers.ollamaEmptyShared")}
+            </p>
           )}
           {inventory && inventory.models.length > 0 && (
             <ul aria-label={t("providers.ollamaModelsAria")} className="divide-border flex flex-col divide-y rounded-lg border">

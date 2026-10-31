@@ -94,18 +94,26 @@ export function createModel(info: ModelInfo, conn: Connection, opts: { userId: s
       }
       return { model: provider(info.id), providerOptions: { google }, markCache: passthrough };
     }
-    case "ollama":
+    case "ollama": {
       // Native /api/chat: no OpenAI JSON, no cache fields. The daemon manages its own prompt cache.
+      // Effort reaches native `think` here because /api/chat has no provider options object; the
+      // context window is sent as num_ctx so runtime and advertised context agree.
+      const context = Number.isInteger(info.context) && info.context > 0 ? info.context : undefined;
       return {
         model: createOllamaModel({
           id: info.id,
           baseURL: baseURL ?? OLLAMA_DEFAULT_URL,
           guarded: conn.guarded,
           thinking: info.reasoning,
+          thinkingLevels: info.thinkingLevels,
+          thinkingOff: info.reasoningEfforts ? info.reasoningEfforts.includes("none") : info.reasoning,
+          context,
+          reasoning: effort,
         }),
         providerOptions: {},
         markCache: passthrough,
       };
+    }
     case "openai-chat": {
       const name = info.providerId.replace(/[^a-zA-Z0-9]/g, "");
       const provider = createOpenAICompatible({

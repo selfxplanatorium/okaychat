@@ -68,6 +68,7 @@ export default {
   ollamaLoading: "Loading installed models…",
   ollamaRetry: "Try again",
   ollamaEmpty: "No models are installed on this Ollama daemon yet. Pull one below.",
+  ollamaEmptyShared: "No models are installed on this Ollama daemon yet. Ask your admin to pull one.",
   ollamaLoaded: "Loaded",
   ollamaMetadataUnavailable: "Metadata unavailable",
   ollamaParameters: "{size} parameters",

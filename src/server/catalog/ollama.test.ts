@@ -10,8 +10,9 @@ import { Hono } from "hono";
 // A real HTTP server on an ephemeral loopback port stands in for the Ollama daemon. These tests cover
 // the native protocol and the app's authorization around it, not the daemon itself.
 const calls: Array<{ method: string; url: string; body: unknown }> = [];
-let pullMode: "normal" | "error" | "slow" = "normal";
+let pullMode: "normal" | "error" | "slow" | "hang" | "huge" | "null" = "normal";
 let embedMode: "normal" | "malformed" = "normal";
+let pullClosed: Promise<void> | null = null;
 
 const tags = {
   models: [
@@ -83,6 +84,15 @@ const server = createServer(async (req, res) => {
   if (req.method === "POST" && req.url === "/api/pull") {
     res.setHeader("Content-Type", "application/x-ndjson");
     if (pullMode === "error") return res.end(`${JSON.stringify({ status: "pulling manifest" })}\n${JSON.stringify({ error: "not enough disk space" })}\n`);
+    if (pullMode === "null") return res.end("null\n");
+    if (pullMode === "huge") return res.end("x".repeat(2 * 1024 * 1024));
+    if (pullMode === "hang") {
+      // Never finishes on its own; only an upstream abort closes this socket.
+      res.write(`${JSON.stringify({ status: "pulling manifest" })}\n`);
+      pullClosed = new Promise<void>((resolve) => res.once("close", () => resolve()));
+      await pullClosed;
+      return;
+    }
     res.write(`${JSON.stringify({ status: "pulling manifest" })}\n{"status":"downloading","digest":"sha256:layer1","total":1000,`);
     if (pullMode === "slow") {
       // The client aborts after the first event; the socket closing ends this response.
@@ -167,6 +177,52 @@ test("lists installed chat models from tags and show, keeping native metadata au
   assert.equal(calls.filter((c) => c.url === "/api/show").length, showCalls);
 });
 
+test("native thinking controls drive honest efforts, and unusable context metadata falls back", async () => {
+  tags.models.push({
+    name: "gpt-oss:20b",
+    size: 1,
+    digest: "sha256:eee",
+    details: { family: "gptoss", families: ["gptoss"], parameter_size: "20B", quantization_level: "MXFP4" },
+  });
+  tags.models.push({
+    name: "zeroctx:latest",
+    size: 1,
+    digest: "sha256:fff",
+    details: { family: "llama", families: ["llama"], parameter_size: "1B", quantization_level: "Q4" },
+  });
+  shows["gpt-oss:20b"] = {
+    details: { family: "gptoss", families: ["gptoss"], parameter_size: "20B", quantization_level: "MXFP4" },
+    capabilities: ["completion", "tools", "thinking"],
+    model_info: { "general.architecture": "gptoss", "gptoss.context_length": 32768 },
+    thinking: { values: ["low", "medium", "high"], default: "medium" },
+  };
+  shows["zeroctx:latest"] = {
+    details: { family: "llama", families: ["llama"], parameter_size: "1B", quantization_level: "Q4" },
+    capabilities: ["completion"],
+    model_info: { "general.architecture": "llama", "llama.context_length": 0 },
+  };
+  try {
+    forgetOllamaModels();
+    const models = await ollamaModels(conn);
+    const oss = models.find((model) => model.id === "gpt-oss:20b")!;
+    assert.equal(oss.reasoning, true);
+    assert.deepEqual(oss.reasoningEfforts, ["low", "medium", "high"]);
+    assert.deepEqual(oss.thinkingLevels, ["low", "medium", "high"]);
+    assert.equal(oss.context, 32768);
+    // Older daemons without thinking metadata still get an on/off choice, not fake granularity.
+    const llama = models.find((model) => model.id === "llama3.2:latest")!;
+    assert.deepEqual(llama.reasoningEfforts, ["none", "high"]);
+    assert.equal(llama.thinkingLevels, undefined);
+    // Zero or negative context is not usable metadata and must not be advertised.
+    assert.equal(models.find((model) => model.id === "zeroctx:latest")!.context, 4096);
+  } finally {
+    tags.models.splice(-2);
+    delete shows["gpt-oss:20b"];
+    delete shows["zeroctx:latest"];
+    forgetOllamaModels();
+  }
+});
+
 test("lists loaded models and metadata for the management panel", async () => {
   const inventory = await ollamaInventory(conn);
   assert.equal(inventory.status.version, "0.12.3");
@@ -223,6 +279,62 @@ test("pull cancellation stops the generator without hanging", { timeout: 5_000 }
   controller.abort();
   const second = await iterator.next();
   assert.equal(second.done, true);
+});
+
+test("malformed and overlong pull progress lines become actionable errors", async () => {
+  pullMode = "null";
+  await assert.rejects(async () => {
+    for await (const _event of ollamaPull(conn, "llama3.2:latest")) {
+      // consume
+    }
+  }, /unexpected progress line/);
+  pullMode = "huge";
+  await assert.rejects(async () => {
+    for await (const _event of ollamaPull(conn, "llama3.2:latest")) {
+      // consume
+    }
+  }, /overlong progress line/);
+});
+
+test("consumer cancellation of the pull route aborts upstream and only then releases the lock", { timeout: 10_000 }, async () => {
+  await as("admin", "/providers/ollama", { method: "PUT", body: JSON.stringify({ baseURL, enabled: true }) });
+  pullMode = "hang";
+  pullClosed = null;
+  const res = await as("admin", "/providers/ollama/pull", { method: "POST", body: JSON.stringify({ model: "qwen3:8b" }) });
+  assert.equal(res.status, 200);
+  const reader = res.body!.getReader();
+  const first = await reader.read();
+  assert.match(new TextDecoder().decode(first.value), /pulling manifest/);
+  // Still running: a second pull must not start an overlapping download.
+  const duplicate = await as("admin", "/providers/ollama/pull", { method: "POST", body: JSON.stringify({ model: "qwen3:8b" }) });
+  assert.equal(duplicate.status, 409);
+
+  await reader.cancel();
+  const closed = pullClosed;
+  assert.ok(closed, "the mock daemon never started the hanging pull");
+  await Promise.race([
+    closed,
+    new Promise<never>((_, reject) => {
+      const timeout = setTimeout(() => reject(new Error("upstream pull socket stayed open after consumer cancel")), 2_000);
+      timeout.unref();
+    }),
+  ]);
+
+  // The lock is released once cleanup finishes, so a later pull can start again.
+  pullMode = "normal";
+  let restarted = false;
+  for (let attempt = 0; attempt < 40 && !restarted; attempt++) {
+    const again = await as("admin", "/providers/ollama/pull", { method: "POST", body: JSON.stringify({ model: "qwen3:8b" }) });
+    if (again.status === 200) {
+      assert.match(await again.text(), /"success"/);
+      restarted = true;
+    } else {
+      assert.equal(again.status, 409);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+  assert.equal(restarted, true);
+  pullClosed = null;
 });
 
 test("delete and embed use the native endpoints and report failures", async () => {

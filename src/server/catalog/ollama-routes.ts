@@ -147,34 +147,43 @@ export function ollamaManagementRoutes(scope: OllamaScope) {
       if (pulls.has(key)) return c.json({ error: "A pull is already running for this Ollama connection." }, 409);
       pulls.add(key);
       const encoder = new TextEncoder();
-      const signal = c.req.raw.signal;
+      // A downstream cancel (closed settings panel, client that stops reading) is not always reported
+      // as a request abort. Abort the upstream pull ourselves, and only release the lock after the
+      // generator has cleaned up, so a second download cannot overlap the first.
+      const cancelPull = new AbortController();
+      const signal = AbortSignal.any([c.req.raw.signal, cancelPull.signal]);
+      let cancelled = false;
       const stream = new ReadableStream<Uint8Array>({
         async start(controller) {
           const send = (event: unknown) => {
+            if (cancelled) return;
             try {
               controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
             } catch {
-              // The client went away; the finally below releases the upstream stream.
+              cancelled = true;
             }
           };
           try {
             for await (const progress of ollamaPull(conn, body.data.model, signal)) {
-              if (signal.aborted) break;
+              if (cancelled || signal.aborted) break;
               send(progress);
             }
           } catch (error) {
-            if (!signal.aborted) send({ error: (error as Error).message });
+            if (!cancelled && !signal.aborted) send({ error: (error as Error).message });
           } finally {
             pulls.delete(key);
-            try {
-              controller.close();
-            } catch {
-              // Closed by an aborted request.
+            if (!cancelled) {
+              try {
+                controller.close();
+              } catch {
+                // Closed by an aborted request.
+              }
             }
           }
         },
         cancel() {
-          pulls.delete(key);
+          cancelled = true;
+          cancelPull.abort();
         },
       });
       return c.body(stream, 200, {

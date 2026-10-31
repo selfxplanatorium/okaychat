@@ -28,7 +28,8 @@ Saving an address uses the same encrypted connection flow as every provider. Cha
 `/api/show` is authoritative. The adapter uses it instead of models.dev:
 
 - `capabilities` selects tools (`tools`), images (`vision`), and thinking (`thinking`).
-- `model_info[<architecture>.context_length]` fills the context window. A daemon that omits it falls back to 4096; that is a fallback, not a fabricated catalog value.
+- The top-level `thinking` object (`values`, `default`) is authoritative when present: boolean values mean an on/off model, named values are the native levels (gpt-oss: low, medium, high), and `values: [false]` means thinking is unavailable. Older daemons that only report the capability are treated as the on/off model. The picker's effort choices are derived from these values, so it never offers granularity the daemon does not support; a boolean model offers Instant and one enabled choice.
+- `model_info[<architecture>.context_length]` fills the context window. Zero, negative, or fractional values are rejected like a missing one; the fallback is 4096, not a fabricated catalog value.
 - Only models with the `completion` capability reach the chat picker. Embedding-only models stay in the management inventory so they can be pulled or deleted.
 - Tag details fill family, parameter size, and quantization. `/api/ps` marks loaded models and adds VRAM/expiry.
 - Refs are `ollama/<name>`, and `<name>` keeps tags, namespaces, and registry prefixes (`ollama/hf.co/user/model:Q4_K_M`). `resolveModel` splits the ref at the first slash, so slashes inside the native name stay in the id and remain unique.
@@ -48,9 +49,11 @@ Mapping from the neutral prompt:
 - Assistant text and tool calls map to `message.content` and `tool_calls`. Prior thinking is intentionally not replayed.
 - Tool results become `role: "tool"` messages with `tool_name` and the result text. JSON results are stringified; images in tool results are called out as text-only.
 - Native tools use the `{ type: "function", function: { name, description, parameters } }` shape. `toolChoice: "none"` omits `tools` so the final answer step can run; `required` is passed through with a warning because Ollama decides for itself, and `tool` narrows the list to that one function.
-- `temperature`, `top_p`, `top_k`, `num_predict`, `stop`, `seed`, `presence_penalty`, and `frequency_penalty` go in the native `options` object. `responseFormat` JSON becomes `format` (a JSON schema when one is supplied). Reasoning maps to `think` only for models whose `/api/show` capabilities include `thinking`.
-- Streaming parses NDJSON: `message.content` becomes text deltas, `message.thinking` becomes reasoning deltas, and `message.tool_calls` becomes tool-input plus tool-call parts. Ollama does not send tool-call ids, so the adapter generates unique ids. `done_reason` maps to the AI SDK finish reason; data-bearing tool calls map to `tool-calls`. `prompt_eval_count` and `eval_count` fill input/output token usage. `doGenerate` uses the same mapping with `stream: false`.
-- `abortSignal` reaches the HTTP request and closes the response body. A user Stop, a cancelled pull, or a closed tab does not leave a retry loop running.
+- `temperature`, `top_p`, `top_k`, `num_predict`, `stop`, `seed`, `presence_penalty`, and `frequency_penalty` go in the native `options` object. `responseFormat` JSON becomes `format` (a JSON schema when one is supplied).
+- Every request also sends `options.num_ctx` equal to the published context window. The daemon otherwise loads its own default (often much smaller), which would silently truncate a conversation while the meter and compaction assumed the architecture maximum. Requesting the full window makes the advertised, metered, and actual context agree, at the cost of the KV cache memory the daemon allocates for that window; the daemon can still cap it from its own configuration. A missing or invalid context falls back to 4096 before it reaches the adapter, so `num_ctx` is still sent and the app never claims more than it requests.
+- Reasoning maps to native `think`. The composer's effort reaches the model through `createModel` (not provider options), and an explicit per-call `reasoning` option wins over that default. `none` sends `false` only where the daemon reported `false` is accepted; otherwise it is omitted rather than sending an invalid value. Boolean thinking models send `true` for any enabled effort. Models with named levels send the level itself, and an app effort without an exact native match picks the closest reported level. Non-thinking models receive no `think` field.
+- Streaming parses NDJSON: `message.content` becomes text deltas, `message.thinking` becomes reasoning deltas, and `message.tool_calls` becomes tool-input plus tool-call parts. Ollama does not send tool-call ids, so the adapter generates unique ids. Interleaved thinking and text reopen a section with a fresh id (`text-0`, then `reasoning-1`, ...), never a reused ended id. `done_reason` maps to the AI SDK finish reason; data-bearing tool calls map to `tool-calls`. `prompt_eval_count` and `eval_count` fill input/output token usage. `doGenerate` uses the same mapping with `stream: false`.
+- `abortSignal` reaches the HTTP request and closes the response body. Cancelling the returned stream itself (the UI stops reading without a separate signal) aborts an internal controller merged with the caller's signal, so the daemon's socket closes instead of streaming into an unread body. A user Stop, a cancelled pull, or a closed tab does not leave a retry loop running.
 
 ## Model management
 
@@ -60,7 +63,9 @@ Mapping from the neutral prompt:
 - `DELETE /providers/ollama/models` removes a model. The UI asks for confirmation first.
 - `POST /api/embed` supports `input` as a string or array and returns the embedding vectors. This is the data layer for later knowledge/RAG work; there is no embeddings UI.
 
-Cancelling a pull aborts the app's HTTP request and closes the response body. Ollama may continue downloading in the daemon after the client disconnects; the UI says so. There is no separate daemon-side cancel endpoint.
+Cancelling a pull aborts the app's HTTP request and closes the response body. The route also aborts an internal controller when the downstream reader cancels without a request abort, so the upstream pull socket closes even then. The per-user/per-daemon lock is released only after that upstream cleanup finishes; until then a second pull gets 409, which prevents overlapping downloads. Ollama may continue downloading in the daemon after the client disconnects; the UI says so. There is no separate daemon-side cancel endpoint.
+
+Native parsing is bounded and total: an error body is read up to 16 KiB, a chat NDJSON line up to 8 MiB (tool arguments can be large), and a pull progress line up to 1 MiB. Exceeding a line cap, or receiving a non-object line (including `null`), fails with an Ollama-specific error instead of buffering without limit or throwing a `TypeError`. A stream that ends without `done` becomes a visible error, never a successful finish.
 
 ## Security and permissions
 
@@ -77,7 +82,8 @@ Native requests use the same transport rule as every other user-chosen URL:
 - Ollama has no cache breakpoints or cache keys. The adapter sends none; the daemon manages its own KV/prefix reuse. Context compactions and model switches start cold.
 - `toolChoice: "required"` is not enforceable natively and only produces a warning. Tool-call ids are generated because the daemon does not provide them. Prior assistant thinking is not replayed.
 - Assistant messages can carry only text and tool calls; file content there is rejected. Tool result images are not sent, only a text marker.
-- When `/api/show` omits `context_length`, the adapter uses 4096. Metadata is not merged from models.dev, so a conflicting catalog value can never override the daemon.
+- Effort granularity follows the daemon: boolean thinking models only switch on/off, so the picker exposes Instant and one enabled choice rather than pretending low/medium/high differ. A model that does not accept `false` cannot turn thinking off, and `none` is omitted. `num_ctx` asks for the full published window on every request, which can increase the daemon's memory use; the daemon may still clamp it.
+- When `/api/show` omits `context_length` (or reports zero, negative, or fractional), the adapter uses 4096. Metadata is not merged from models.dev, so a conflicting catalog value can never override the daemon.
 - A cancelled pull can keep running in Ollama. A daemon restart or model change also invalidates the app's caches only on the next refresh.
 - The model picker uses the existing context and capability rendering; parameter size, quantization, VRAM, and loaded state appear in the management panel, not the picker.
 - The inventory is fetched when the Ollama panel opens or a pull/delete completes; another tab or an external `ollama pull` appears after Refresh.

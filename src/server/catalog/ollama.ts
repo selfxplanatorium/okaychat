@@ -41,16 +41,43 @@ const keyOf = (conn: OllamaConnection) => `${ollamaBaseURL(conn)}|${conn.guarded
 
 const isAbort = (error: unknown): error is Error => error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError");
 
-/** Reads an error body without letting a broken daemon return an unbounded amount of text. */
+/** Reads at most this much of an error body. A broken daemon must not stream unbounded text into memory. */
+const MAX_ERROR_BODY = 16 * 1024;
+/** One NDJSON progress line; layer progress is tiny, so this only catches garbage. */
+const MAX_PULL_LINE = 1024 * 1024;
+
 async function errorText(res: Response): Promise<string> {
-  const text = (await res.text().catch(() => "")).trim().slice(0, 2000);
-  if (!text) return "";
+  let text = "";
+  if (res.body) {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let read = 0;
+    try {
+      while (read < MAX_ERROR_BODY) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const room = MAX_ERROR_BODY - read;
+        const slice = value.byteLength > room ? value.subarray(0, room) : value;
+        text += decoder.decode(slice, { stream: true });
+        read += slice.byteLength;
+        if (slice.byteLength < value.byteLength) break;
+      }
+      text += decoder.decode();
+    } catch {
+      // Keep whatever arrived; the HTTP status still explains the failure.
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+  }
+  const trimmed = text.trim();
+  if (!trimmed) return "";
   try {
-    const body = JSON.parse(text) as { error?: unknown; message?: unknown };
-    const message = typeof body.error === "string" ? body.error : typeof body.message === "string" ? body.message : text;
+    const body = JSON.parse(trimmed) as { error?: unknown; message?: unknown };
+    const message = typeof body.error === "string" ? body.error : typeof body.message === "string" ? body.message : trimmed;
     return message.trim().slice(0, 500);
   } catch {
-    return text.slice(0, 500);
+    return trimmed.slice(0, 500);
   }
 }
 
@@ -112,6 +139,9 @@ async function json<T>(conn: OllamaConnection, path: string, init: RequestInit &
 }
 
 const finite = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
+/** Context windows are token counts: a zero, negative, or fractional value is not usable metadata. */
+const positive = (value: unknown) =>
+  typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 
 interface RawTag {
   name: string;
@@ -130,6 +160,8 @@ interface RawShow {
   details?: RawTag["details"];
   capabilities?: string[];
   model_info?: Record<string, unknown>;
+  /** Native thinking controls: booleans for on/off models, named levels for gpt-oss. */
+  thinking?: { values?: unknown; default?: unknown };
 }
 
 interface RawPsModel {
@@ -206,12 +238,17 @@ export async function* ollamaPull(
         if (signal?.aborted) return;
         const line = buffer.slice(0, newline).replace(/\r$/, "");
         buffer = buffer.slice(newline + 1);
+        if (line.length > MAX_PULL_LINE) throw new OllamaError(`Ollama sent an overlong progress line while pulling ${model}.`);
         if (line.trim()) yield parsePullLine(line, model, conn);
         newline = buffer.indexOf("\n");
       }
+      if (buffer.length > MAX_PULL_LINE) throw new OllamaError(`Ollama sent an overlong progress line while pulling ${model}.`);
     }
     buffer += decoder.decode();
-    if (buffer.trim() && !signal?.aborted) yield parsePullLine(buffer.trim(), model, conn);
+    if (buffer.trim() && !signal?.aborted) {
+      if (buffer.length > MAX_PULL_LINE) throw new OllamaError(`Ollama sent an overlong progress line while pulling ${model}.`);
+      yield parsePullLine(buffer.trim(), model, conn);
+    }
   } catch (error) {
     if (signal?.aborted) return;
     throw error;
@@ -222,12 +259,16 @@ export async function* ollamaPull(
 }
 
 function parsePullLine(line: string, model: string, conn: OllamaConnection): OllamaPullProgress {
-  let body: { error?: unknown; status?: unknown; digest?: unknown; total?: unknown; completed?: unknown };
+  let parsed: unknown;
   try {
-    body = JSON.parse(line) as typeof body;
+    parsed = JSON.parse(line);
   } catch {
     throw new OllamaError(`Ollama sent an unreadable progress line while pulling ${model}.`);
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new OllamaError(`Ollama sent an unexpected progress line while pulling ${model}.`);
+  }
+  const body = parsed as { error?: unknown; status?: unknown; digest?: unknown; total?: unknown; completed?: unknown };
   if (typeof body.error === "string" && body.error) throw new OllamaError(`Ollama could not pull ${model}: ${body.error}`);
   if (typeof body.status !== "string" || !body.status) throw new OllamaError(`Ollama sent no status while pulling ${model}.`);
   const progress: OllamaPullProgress = { status: body.status };
@@ -306,6 +347,34 @@ function remember<T>(cache: Map<string, T>, key: string, value: T) {
   }
 }
 
+interface ThinkingControls {
+  reasoning: boolean;
+  /** UI effort choices that map to a valid native `think` value, or undefined when the UI should fall back. */
+  efforts?: string[];
+  /** Named native levels (gpt-oss). Boolean-only models leave this empty and take true/false. */
+  levels: string[];
+  /** The daemon accepts `think: false`. */
+  off: boolean;
+}
+
+function thinkingControls(show: RawShow, caps: string[]): ThinkingControls {
+  const raw = show.thinking?.values;
+  // Older daemons only expose the capability; treat that as the documented on/off controls.
+  const values: Array<boolean | string> = Array.isArray(raw)
+    ? raw.filter((value): value is boolean | string => typeof value === "boolean" || (typeof value === "string" && value.length > 0))
+    : caps.includes("thinking")
+      ? [true, false]
+      : [];
+  const levels = values.filter((value): value is string => typeof value === "string");
+  const off = values.includes(false);
+  const reasoning = values.some((value) => value === true || typeof value === "string");
+  if (!reasoning) return { reasoning: false, levels, off };
+  // Every enabled effort is honest: named levels are passed through; a boolean model only has on/off,
+  // so it offers Instant and one "on" choice instead of pretending low/medium/high differ.
+  const efforts = levels.length ? [...(off ? ["none"] : []), ...levels] : [...(off ? ["none"] : []), "high"];
+  return { reasoning: true, efforts, levels, off };
+}
+
 function candidate(conn: OllamaConnection, tag: RawTag, show: RawShow): ModelInfo | null {
   const caps = Array.isArray(show.capabilities) ? show.capabilities : [];
   const architecture = typeof show.model_info?.["general.architecture"] === "string" ? show.model_info["general.architecture"] : undefined;
@@ -314,10 +383,11 @@ function candidate(conn: OllamaConnection, tag: RawTag, show: RawShow): ModelInf
   const legacyEmbedding = /bert|embed/i.test(`${architecture ?? ""} ${tag.details?.family ?? ""}`);
   if (caps.length ? !caps.includes("completion") : (!isChatModelId(tag.name, tag.details?.family) || legacyEmbedding)) return null;
   const context =
-    finite(show.model_info?.[`${architecture}.context_length`]) ??
-    finite(show.model_info?.["general.context_length"]) ??
+    positive(show.model_info?.[`${architecture}.context_length`]) ??
+    positive(show.model_info?.["general.context_length"]) ??
     4096;
   const vision = caps.includes("vision");
+  const thinking = thinkingControls(show, caps);
   const details = show.details ?? tag.details;
   return {
     ref: `${OLLAMA}/${tag.name}`,
@@ -329,7 +399,9 @@ function candidate(conn: OllamaConnection, tag: RawTag, show: RawShow): ModelInf
     baseURL: ollamaBaseURL(conn),
     context,
     maxOutput: Math.min(8192, context),
-    reasoning: caps.includes("thinking"),
+    reasoning: thinking.reasoning,
+    ...(thinking.efforts?.length ? { reasoningEfforts: thinking.efforts } : {}),
+    ...(thinking.levels.length ? { thinkingLevels: thinking.levels } : {}),
     toolCall: caps.includes("tools"),
     attachments: vision,
     inputModalities: vision ? ["text", "image"] : ["text"],
@@ -341,8 +413,8 @@ function candidate(conn: OllamaConnection, tag: RawTag, show: RawShow): ModelInf
 function installed(tag: RawTag, show: RawShow | undefined, loaded: Map<string, RawPsModel>): OllamaInstalledModel {
   const architecture = typeof show?.model_info?.["general.architecture"] === "string" ? show.model_info["general.architecture"] : undefined;
   const context =
-    finite(show?.model_info?.[`${architecture}.context_length`]) ??
-    finite(show?.model_info?.["general.context_length"]) ??
+    positive(show?.model_info?.[`${architecture}.context_length`]) ??
+    positive(show?.model_info?.["general.context_length"]) ??
     4096;
   const embeddingLength =
     finite(show?.model_info?.[`${architecture}.embedding_length`]) ??
