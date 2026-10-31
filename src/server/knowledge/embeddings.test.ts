@@ -163,3 +163,20 @@ test("an aborted request stops before any retry", async () => {
   );
   assert.equal(calls, 0);
 });
+
+test("embedding failures never store provider bodies containing credentials or document text", async () => {
+  const privateText = "CONFIDENTIAL document excerpt";
+  for (const status of [401, 500]) {
+    const embedder = createEmbedder("alice", { provider: "compatible", providerId: "custom-mock", model: "embed" }, {
+      fetchImpl: (async () => Response.json({ error: { message: `apiKey=sk-private-value ${privateText}` } }, { status })) as typeof fetch,
+      sleep: async () => {},
+    })!;
+    await assert.rejects(embedder.embed([privateText]), (error: unknown) => {
+      assert.ok(error instanceof EmbeddingError);
+      assert.equal(error.status, status);
+      assert.doesNotMatch(error.message, /sk-private-value|CONFIDENTIAL/);
+      assert.match(error.message, /credentials|overloaded/);
+      return true;
+    });
+  }
+});

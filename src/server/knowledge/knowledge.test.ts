@@ -4,7 +4,6 @@ import os from "node:os";
 import path from "node:path";
 import { after, beforeEach, test } from "node:test";
 import { Hono } from "hono";
-import { HTTPException } from "hono/http-exception";
 import { PDFDocument } from "@cantoo/pdf-lib";
 import type { ToolSet } from "ai";
 
@@ -15,7 +14,7 @@ const { db } = await import("../db.js");
 const { requireUser } = await import("../auth.js");
 const { sha256 } = await import("../crypto.js");
 const { storageUsed } = await import("../quota.js");
-const { AppError } = await import("../errors.js");
+const { handleAppError } = await import("../errors.js");
 const { ensureThread, updateThread } = await import("../threads.js");
 const { knowledgeRoutes } = await import("./routes.js");
 const { attachedCollectionIds, conversationKnowledge, knowledgeTools } = await import("./tools.js");
@@ -27,7 +26,7 @@ const { normalizeVector } = await import("./embeddings.js");
 const { storeUpload } = await import("../files.js");
 const { MAX_URL_BYTES, setKnowledgeUrlFetchForTests } = await import("./url.js");
 
-const app = new Hono().use(requireUser).onError((error, c) => error instanceof AppError ? c.json({ error: error.message, code: error.code }, error.status as 413) : error instanceof HTTPException ? c.json({ error: error.message }, error.status) : c.json({ error: "failed" }, 500)).route("/knowledge", knowledgeRoutes);
+const app = new Hono().use(requireUser).onError(handleAppError).route("/knowledge", knowledgeRoutes);
 for (const [id, role] of [["alice", "user"], ["bob", "user"]] as const) {
   db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, `${id}@example.test`, id, "unused", role, Date.now());
   db.prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)").run(sha256(`${id}-session`), id, Date.now() + 600_000);
@@ -68,6 +67,24 @@ async function paste(collectionId: string, text: string, name = "note.md", user 
 const waitFor = async () => {
   await drainKnowledgeJobs();
 };
+
+test("unexpected source writes keep database details private and roll back their upload", async (t) => {
+  const id = await create();
+  const before = storageUsed("alice");
+  t.mock.method(console, "error", () => {});
+  db.exec("CREATE TRIGGER reject_test_source BEFORE INSERT ON knowledge_sources BEGIN SELECT RAISE(ABORT, 'private database details /data/okaychat.sqlite'); END");
+  try {
+    const res = await request("POST", `/collections/${id}/sources/paste`, { name: "note.md", text: "Sample note." });
+    assert.equal(res.status, 500);
+    const body = await res.json();
+    assert.equal(body.code, "unknown");
+    assert.ok(body.ref);
+    assert.doesNotMatch(JSON.stringify(body), /private database|sqlite/);
+    assert.equal(storageUsed("alice"), before);
+  } finally {
+    db.exec("DROP TRIGGER reject_test_source");
+  }
+});
 
 /** Waits for a job to reach an observable point without depending on a fixed delay. */
 async function waitUntil(check: () => boolean, label: string, ms = 2000) {

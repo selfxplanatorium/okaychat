@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { EmailAccount, EmailAccountInput, EmailAuthMethod, EmailSecurity, EmailServerConfig } from "../../shared/email.js";
 import { decrypt, encrypt, newId } from "../crypto.js";
 import { db, tx } from "../db.js";
+import { AppError } from "../errors.js";
 import { BlockedAddressError, publicAddress } from "../public-fetch.js";
 import { isEmailAddress } from "./mime.js";
 
@@ -121,7 +122,12 @@ function checkServer(server: z.infer<typeof serverInput>): StoredEmailServer {
  * saved while the user was an admin stops reaching a LAN host after a demotion.
  */
 export async function assertEmailHost(userId: string, host: string): Promise<void> {
-  await emailConnectTarget(userId, host);
+  try {
+    await emailConnectTarget(userId, host);
+  } catch (error) {
+    if (error instanceof BlockedAddressError) throw new AppError({ code: "forbidden", message: error.message, hint: "Choose a public mail server, or ask an administrator to connect this host." });
+    throw new AppError({ code: "validation", message: "Could not resolve the mail server hostname.", hint: "Check the hostname in Settings → Email and try again.", cause: error });
+  }
 }
 
 export interface EmailConnectTarget {

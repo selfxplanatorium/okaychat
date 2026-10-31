@@ -57,6 +57,7 @@ const {
   saveConnection,
 } = await import("./catalog/providers.js");
 const { createModel } = await import("./llm.js");
+const { describeProviderError } = await import("./provider-errors.js");
 const { adminRoutes } = await import("./admin.js");
 const { requireUser } = await import("./auth.js");
 
@@ -238,6 +239,14 @@ test("the model factory rejects revoked and fabricated shared connections before
   createModel(model("gpt-c"), own, { userId: "bob" });
   setModelAccessPolicies("openai", [{ target: { kind: "user", id: "alice" }, mode: "selected", modelIds: [] }]);
   assert.throws(() => createModel(model("gpt-a"), connection, { userId: "alice" }), /administrator/, "an earlier connection cannot bypass a live revoke");
+  try {
+    createModel(model("gpt-a"), connection, { userId: "alice" });
+    assert.fail("the revoked model must be refused");
+  } catch (error) {
+    const wire = describeProviderError(error, { log: false });
+    assert.equal(wire.code, "forbidden", "a revoke inside a stream is a policy refusal, not a rejected API key");
+    assert.match(wire.message, /administrator/);
+  }
 });
 
 test("admin policy routes enforce permission, audience targets, and catalog ids", async () => {

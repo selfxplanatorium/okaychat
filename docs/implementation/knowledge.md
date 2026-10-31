@@ -83,6 +83,13 @@ exponential backoff up to four attempts; a provider `Retry-After` is honored up 
 rather than being shortened to the 8 s backoff cap, and the request's abort signal cancels the wait. A
 provider outage fails the source visibly instead of storing unusable vectors.
 
+Provider HTTP errors and native Ollama failures go through the shared provider error taxonomy before
+their safe message and fix are stored in source status. Raw response bodies can echo credentials or
+document passages and must never appear in ingestion status or its management UI.
+Unexpected management writes reach the central error handler unchanged, so database details stay in
+the log behind a reference; they must not be promoted to user-visible validation text. A failed source
+insert still removes its just-created upload and releases the quota.
+
 ## Retrieval
 
 `searchKnowledge()` only sees the attached, accessible collections:

@@ -3,9 +3,11 @@ import { HTTPException } from "hono/http-exception";
 import { ttsEngineDef } from "../../shared/speech.js";
 import type { CallAvailability, CallEngine, CallErrorCode } from "../../shared/voice.js";
 import { modelAccessMessage, sharedModelAccess } from "../entitlements.js";
+import { AppError } from "../errors.js";
 import { promptText } from "../prompts.js";
 import { wrapUntrusted } from "../prompt-injection.js";
 import { getSettings } from "../settings.js";
+import { reportServiceSuccess } from "../services.js";
 import { adminSpeech } from "../speech/config.js";
 import { credentialFor, upstream, type ResolvedCredential } from "../speech/engines.js";
 import { speechWorkerConfigured, fetchWorkerHealth, workerRelease, workerSpeak, workerTranscribePcm, workerWarm } from "../speech/worker.js";
@@ -115,7 +117,7 @@ function workerLocal(userId: string): Availability<LocalSpeech> {
         const fail = (code: CallErrorCode) => (error: unknown) => {
           if (signal.aborted) throw error;
           // A worker that went away between /health and /warm is not a missing model.
-          const workerDown = error instanceof HTTPException && error.status === 502;
+          const workerDown = (error instanceof AppError && error.code === "service_unavailable") || (error instanceof HTTPException && error.status === 502);
           throw new CallFailure(workerDown ? "worker" : code, error instanceof Error ? error.message : String(error));
         };
         await Promise.all([
@@ -132,7 +134,7 @@ function workerLocal(userId: string): Availability<LocalSpeech> {
           return wavPcm(await workerSpeak(text, { voice, speed }, signal));
         } catch (error) {
           if (signal.aborted) throw error;
-          const workerDown = error instanceof HTTPException && error.status === 502;
+          const workerDown = (error instanceof AppError && error.code === "service_unavailable") || (error instanceof HTTPException && error.status === 502);
           throw new CallFailure(workerDown ? "worker" : "voice", error instanceof Error ? error.message : "The voice failed.");
         }
       },
@@ -190,13 +192,18 @@ export function realtimeTarget(userId: string): Availability<RealtimeTarget> {
 export function openaiRealtime(userId: string, threadId: string): Availability<RealtimeSignal> {
   const target = realtimeTarget(userId);
   if (!target.ok) return target;
-  const { cred, model, voice, language } = target.value;
+  const { model, voice, language } = target.value;
   return {
     ok: true,
     value: {
       model,
       voice,
       async answer(sdp, signal) {
+        // Microphone/WebRTC setup may outlive a key removal or model revoke; check at the request boundary.
+        const live = realtimeTarget(userId);
+        if (!live.ok) throw new CallFailure(live.code, live.detail);
+        if (live.value.model !== model) throw new CallFailure("realtime", "The Realtime model changed. Start the call again.");
+        const { cred } = live.value;
         // The chat may have moved on since the socket opened; read it when the session is created.
         const thread = threadId.startsWith("tmp_") ? null : getThread(userId, threadId);
         const history = thread ? realtimeContext(currentBranch(userId, threadId)) : "";
@@ -246,17 +253,17 @@ export const workerBackends: CallBackends = {
 };
 
 /**
- * What the account can start right now. Probes worker health without loading or downloading a model.
- * An unreachable configured worker reports a recoverable `worker` reason so the call view can offer Retry.
- */
-/**
  * A direct `/health` check with a short deadline. Used at call start and for availability so a stale registry
  * entry cannot block a call after the worker returns; it loads no model and starts no engine.
  */
 async function workerReachable(): Promise<boolean> {
   if (!speechWorkerConfigured()) return false;
   try {
-    return (await fetchWorkerHealth(AbortSignal.timeout(2_000))) !== null;
+    const health = await fetchWorkerHealth(AbortSignal.timeout(2_000));
+    if (!health?.ok) return false;
+    // The subsequent /warm uses the registry's fail-fast guard; fresh recovery must clear its old outage.
+    reportServiceSuccess("speech");
+    return true;
   } catch {
     return false;
   }

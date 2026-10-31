@@ -19,7 +19,7 @@ Saving an address uses the same encrypted connection flow as every provider. Cha
 | `POST /api/show` | `capabilities` and `model_info` (architecture, context length, embedding length) |
 | `GET /api/ps` | Loaded models, VRAM size, expiry |
 | `POST /api/chat` | Chat streaming (NDJSON) |
-| `POST /api/embed` | Embeddings (data layer only; no UI yet) |
+| `POST /api/embed` | Embeddings for knowledge collections (chosen on the Knowledge page) |
 | `POST /api/pull` | Pull with streamed layer progress |
 | `DELETE /api/delete` | Remove an installed model |
 

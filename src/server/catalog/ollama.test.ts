@@ -471,6 +471,15 @@ test("shared Ollama inventory follows model policies while admin and own invento
   assert.deepEqual((inventory.models as Array<{ name: string }>).map((model) => model.name), ["qwen3:8b"]);
   assert.equal((inventory.status as { modelCount: number }).modelCount, 1);
   assert.equal((inventory.status as { loadedCount: number }).loadedCount, 0);
+  const status = await json(await as("alice", "/providers/ollama/status"));
+  assert.equal(status.modelCount, 1);
+  assert.equal(status.loadedCount, 0);
+  const tested = await json(await as("alice", "/providers/ollama/test", { method: "POST", body: JSON.stringify({ baseURL }) }));
+  assert.equal(tested.modelCount, 1);
+  assert.equal(tested.loadedCount, 0);
+  const storedTest = await as("alice", "/providers/ollama/test", { method: "POST", body: "{}" });
+  assert.equal(storedTest.status, 200);
+  assert.equal((await json(storedTest)).modelCount, 1);
   const adminApp = new Hono().use(requireUser).route("/", adminRoutes);
   const adminInventory = await json(await adminApp.request("/admin/providers/ollama/models", { headers: { Cookie: "okaychat_session=admin" } }));
   assert.equal((adminInventory.models as unknown[]).length, 4);
@@ -478,4 +487,5 @@ test("shared Ollama inventory follows model policies while admin and own invento
   assert.equal(((await json(await as("admin", "/providers/ollama/models"))).models as unknown[]).length, 4);
   setModelAccessPolicies("ollama", [{ target: { kind: "everyone", id: "" }, mode: "selected", modelIds: [] }]);
   assert.deepEqual((await json(await as("alice", "/providers/ollama/models"))).models, []);
+  assert.equal((await json(await as("alice", "/providers/ollama/status"))).modelCount, 0);
 });

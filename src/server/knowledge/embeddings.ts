@@ -2,6 +2,7 @@ import type { KnowledgeEmbeddingOption, KnowledgeEmbeddingProvider, KnowledgeEmb
 import { ollamaEmbed } from "../catalog/ollama.js";
 import { getConnection, listProviders, type Connection } from "../catalog/providers.js";
 import { USER_AGENT } from "../env.js";
+import { describeProviderError } from "../provider-errors.js";
 import { publicFetch, readCapped } from "../public-fetch.js";
 
 // Embedding backends for knowledge collections. Every provider is called over plain fetch; Ollama uses
@@ -174,14 +175,13 @@ async function errorFrom(res: Response, provider: string): Promise<EmbeddingErro
   let detail = "";
   try {
     const bytes = await readCapped(res, 16 * 1024, "response too large");
-    detail = new TextDecoder().decode(bytes).slice(0, 300);
-    const parsed = JSON.parse(detail) as { error?: { message?: string } | string };
-    if (typeof parsed.error === "string") detail = parsed.error;
-    else if (parsed.error?.message) detail = parsed.error.message;
+    detail = new TextDecoder().decode(bytes);
   } catch {
-    // Keep the raw (bounded) body.
+    // Status alone still maps safely when the provider sends an oversized body.
   }
-  return new EmbeddingError(`${provider} embeddings failed (HTTP ${res.status})${detail ? `: ${detail}` : ""}`, res.status, retryAfter(res.headers.get("retry-after")));
+  // Ingestion stores this message and returns it to the UI; an upstream body can echo keys or document text.
+  const safe = describeProviderError({ status: res.status, responseBody: detail }, { provider, log: false });
+  return new EmbeddingError(`${safe.message} ${safe.hint}`, res.status, retryAfter(res.headers.get("retry-after")));
 }
 
 interface RequestOptions {
@@ -297,7 +297,8 @@ export function createEmbedder(userId: string, setting: KnowledgeEmbeddingSettin
                   return await ollamaEmbed(conn, model, batch, requestSignal(signal, opts.timeoutMs));
                 } catch (error) {
                   if (signal?.aborted) throw error;
-                  throw new EmbeddingError((error as Error).message, (error as { status?: number }).status);
+                  const safe = describeProviderError(error, { provider: "ollama", log: false });
+                  throw new EmbeddingError(`${safe.message} ${safe.hint}`, (error as { status?: number }).status);
                 }
               },
               { signal, sleep: opts.sleep },

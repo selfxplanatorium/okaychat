@@ -16,7 +16,8 @@ delete process.env.OKAYCHAT_SPEECH_URL;
 const { db } = await import("../db.js");
 const { saveConnection } = await import("../catalog/providers.js");
 const { sha256 } = await import("../crypto.js");
-const { voiceAvailability, openaiRealtime, selectEngine, wavPcm } = await import("./backend.js");
+const { voiceAvailability, openaiRealtime, selectEngine, wavPcm, workerBackends, CallFailure } = await import("./backend.js");
+const { reportServiceFailure, serviceDown, resetServicesForTests } = await import("../services.js");
 const { voiceOriginAllowed, voiceRoutes } = await import("./routes.js");
 const { requireUser } = await import("../auth.js");
 
@@ -119,6 +120,35 @@ test("the voice routes require the session and a same-origin upgrade", async () 
   assert.notEqual((await app.request("http://app/voice/call", { headers: { ...cookie("alice"), origin: "http://app" } })).status, 401);
 });
 
+test("a recovered worker clears the fail-fast guard before warming, and a new outage is a worker error", async () => {
+  let refuseWarm = false;
+  let warms = 0;
+  const server = createServer((req, res) => {
+    const health = req.url === "/health";
+    if (!health) warms++;
+    res.writeHead(!health && refuseWarm ? 503 : 200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(health ? { ok: true, stt: false, tts: false } : { ok: !refuseWarm }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  process.env.OKAYCHAT_SPEECH_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    reportServiceFailure("speech");
+    assert.equal(serviceDown("speech"), true);
+    const local = workerBackends.local("alice");
+    assert.equal(local.ok, true);
+    if (!local.ok) return;
+    await local.value.warm(new AbortController().signal);
+    assert.equal(serviceDown("speech"), false);
+    assert.equal(warms, 2, "both engines reach the recovered worker");
+    refuseWarm = true;
+    await assert.rejects(local.value.warm(new AbortController().signal), (error) => error instanceof CallFailure && error.code === "worker");
+  } finally {
+    delete process.env.OKAYCHAT_SPEECH_URL;
+    resetServicesForTests();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
 test("a Realtime call without an OpenAI key is unavailable, never half-started", () => {
   assert.deepEqual(openaiRealtime("bob", "tmp_test"), { ok: false, code: "unavailable", detail: "No OpenAI connection with a key." });
 });
@@ -155,6 +185,22 @@ test("the Realtime signalling exchange posts the offer and the session to OpenAI
     assert.equal((seen?.session.instructions as string).includes("voice conversation"), true);
   } finally {
     globalThis.fetch = realFetch;
+  }
+});
+
+test("Realtime rechecks a shared model grant when the delayed SDP offer arrives", async (t) => {
+  const { setModelAccessPolicies } = await import("../entitlements.js");
+  saveConnection(null, "openai", { apiKey: "sk-shared-test", enabled: true });
+  try {
+    const target = openaiRealtime("bob", "tmp_test");
+    assert.equal(target.ok, true);
+    if (!target.ok) return;
+    setModelAccessPolicies("openai", [{ target: { kind: "everyone", id: "" }, mode: "selected", modelIds: [] }]);
+    const upstream = t.mock.method(globalThis, "fetch", async () => { throw new Error("a revoked key must not be used"); });
+    await assert.rejects(target.value.answer("v=0\r\n", new AbortController().signal), (error) => error instanceof CallFailure && /administrator/.test(error.message));
+    assert.equal(upstream.mock.callCount(), 0);
+  } finally {
+    db.exec("DELETE FROM shared_connections WHERE provider_id = 'openai'");
   }
 });
 

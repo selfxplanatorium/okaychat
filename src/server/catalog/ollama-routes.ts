@@ -91,12 +91,31 @@ function failure(c: Context<AppEnv>, error: unknown) {
   return errorJson(c, describeProviderError(error, { provider: "ollama" }), status);
 }
 
+async function visibleInventory(scope: OllamaScope, userId: string, conn: Connection) {
+  const inventory = await ollamaInventory(conn);
+  if (scope === "user" && conn.shared) {
+    const access = sharedModelAccess(userId, "ollama");
+    if (!access.all) {
+      inventory.models = inventory.models.filter((model) => access.ids.has(model.name));
+      inventory.status.modelCount = inventory.models.length;
+      inventory.status.loadedCount = inventory.models.filter((model) => model.loaded).length;
+    }
+  }
+  return inventory;
+}
+
+async function visibleStatus(scope: OllamaScope, userId: string, conn: Connection) {
+  return scope === "user" && conn.shared && !sharedModelAccess(userId, "ollama").all
+    ? (await visibleInventory(scope, userId, conn)).status
+    : ollamaStatus(conn);
+}
+
 export function ollamaManagementRoutes(scope: OllamaScope) {
   return new Hono<AppEnv>()
     .get("/status", async (c) => {
       const conn = storedConnection(scope, c.get("user").id);
       try {
-        return c.json({ ok: true, ...(await ollamaStatus(conn)) });
+        return c.json({ ok: true, ...(await visibleStatus(scope, c.get("user").id, conn)) });
       } catch (error) {
         return failure(c, error);
       }
@@ -106,7 +125,7 @@ export function ollamaManagementRoutes(scope: OllamaScope) {
       if (!body.success) return c.json({ error: body.error.issues[0]?.message ?? "Invalid address" }, 400);
       const userId = c.get("user").id;
       const stored = lookupConnection(scope, userId);
-      const sameAsStored = !!stored?.baseURL && normalized(stored.baseURL) === normalized(body.data.baseURL);
+      const sameAsStored = !!stored && (!body.data.baseURL || normalized(stored.baseURL) === normalized(body.data.baseURL));
       const candidate: OllamaConnection | undefined = body.data.baseURL
         ? sameAsStored
           // A viewer testing a server-wide connection inherits the admin's private-host trust.
@@ -123,7 +142,8 @@ export function ollamaManagementRoutes(scope: OllamaScope) {
         if (blocked) return c.json({ error: blocked }, 400);
       }
       try {
-        return c.json({ ok: true, ...(await ollamaStatus(candidate)) });
+        const status = sameAsStored && stored ? await visibleStatus(scope, userId, stored) : await ollamaStatus(candidate);
+        return c.json({ ok: true, ...status });
       } catch (error) {
         return failure(c, error);
       }
@@ -131,16 +151,7 @@ export function ollamaManagementRoutes(scope: OllamaScope) {
     .get("/models", async (c) => {
       const conn = storedConnection(scope, c.get("user").id);
       try {
-        const inventory = await ollamaInventory(conn);
-        if (scope === "user" && conn.shared) {
-          const access = sharedModelAccess(c.get("user").id, "ollama");
-          if (!access.all) {
-            inventory.models = inventory.models.filter((model) => access.ids.has(model.name));
-            inventory.status.modelCount = inventory.models.length;
-            inventory.status.loadedCount = inventory.models.filter((model) => model.loaded).length;
-          }
-        }
-        return c.json(inventory);
+        return c.json(await visibleInventory(scope, c.get("user").id, conn));
       } catch (error) {
         return failure(c, error);
       }

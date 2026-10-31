@@ -60,6 +60,7 @@ test("browserConflict separates blocked from overridable shortcuts", () => {
 });
 
 test("no default binding clashes with a browser shortcut or another default", () => {
+  assert.equal(new Set(COMMANDS.map((command) => command.id)).size, COMMANDS.length, "command ids must be unique");
   const defaults = resolveBindings(undefined);
   const seen = new Map<string, string>();
   for (const command of COMMANDS) {

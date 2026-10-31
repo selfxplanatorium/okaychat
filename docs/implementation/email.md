@@ -242,6 +242,8 @@ downloaded attachment, 50 MB per message, 25 recipients, and two simultaneous IM
 account. Errors are mapped to auth failed, host unreachable, certificate, too many connections,
 too large, rate limited, not found, or protocol, each with a plain-language fix hint. The last-check
 result is stored per account and shown in Settings; a failed test cannot be shown as connected.
+Settings saves return `forbidden` (403) for a blocked mail host and `validation` (400) for an
+unresolvable hostname, with a fix hint, rather than a generic server error.
 
 ## Providers
 

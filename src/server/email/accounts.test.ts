@@ -4,12 +4,16 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, beforeEach, test } from "node:test";
+import { Hono } from "hono";
 
 const dataDir = mkdtempSync(path.join(os.tmpdir(), "okaychat-email-accounts-"));
 process.env.OKAYCHAT_DATA_DIR = dataDir;
 process.env.OKAYCHAT_SECRET = "email-accounts-test-secret-only-not-for-production";
 const { db } = await import("../db.js");
 const { decrypt, sha256 } = await import("../crypto.js");
+const { requireUser } = await import("../auth.js");
+const { handleAppError } = await import("../errors.js");
+const { emailRoutes } = await import("./routes.js");
 const { emailConnectTarget, assertEmailHost, accountSecrets, createAccount, deleteAccount, getAccount, listAccounts, setDefaultAccount, updateAccount } = await import("./accounts.js");
 
 for (const [id, role] of [["alice", "admin"], ["bob", "user"]] as const) {
@@ -101,6 +105,28 @@ test("host guard allows an admin a LAN server but refuses a non-admin", async ()
   await assert.rejects(assertEmailHost("bob", "127.0.0.1"), /Only admins/i);
   await assert.rejects(assertEmailHost("bob", "10.0.0.5"), /Only admins/i);
   assert.ok(sha256("x").length === 64);
+});
+
+test("saving a blocked or unresolved mail host returns an actionable error instead of a 500", async (t) => {
+  db.prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, 'bob', ?)").run(sha256("bob-mail"), Date.now() + 60_000);
+  const app = new Hono().use(requireUser).route("/", emailRoutes).onError(handleAppError);
+  const save = () => app.request("/accounts", {
+    method: "POST",
+    headers: { Cookie: "okaychat_session=bob-mail", "Content-Type": "application/json" },
+    body: JSON.stringify(input({ imap: { host, port: 993, security: "tls", username: "bob@example.test" } })),
+  });
+  let host = "127.0.0.1";
+  const blocked = await save();
+  assert.equal(blocked.status, 403);
+  assert.equal((await blocked.json()).code, "forbidden");
+  host = "missing.example.test";
+  t.mock.method(dns, "lookup", async () => { throw new Error("getaddrinfo ENOTFOUND"); });
+  const missing = await save();
+  assert.equal(missing.status, 400);
+  const body = await missing.json();
+  assert.equal(body.code, "validation");
+  assert.match(body.message, /hostname|resolve/i);
+  assert.doesNotMatch(body.message, /ENOTFOUND/);
 });
 
 test("non-admin connections pin a public DNS answer and keep the TLS name, rejecting mixed answers", async (t) => {

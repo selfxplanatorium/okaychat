@@ -54,8 +54,8 @@ All access checks are server-side.
 | `catalog/providers.ts` `listModels()` | Filters a shared connection's models to the union of its matching policies. The same list feeds the composer, settings default/utility model pickers, sub-agents, schedules, and compaction/title fallbacks. |
 | `catalog/providers.ts` `listProviders()` | A restricted shared connection whose effective selection has no *current* chat model is not listed at all, exactly like one outside the audience. `modelCount` shows the entitled count. Empty grants and allowlists made only of stale ids both disappear. |
 | `catalog/providers.ts` `resolveModel()` | Rejects an unentitled model with a 403 naming the administrator before any upstream request. This is what a saved chat hits on its next turn after a revoke; the history itself is untouched. |
-| `catalog/ollama-routes.ts` user inventory | Filters a shared daemon's inventory and its counts to the viewer's granted ids; admin management and own connections retain the full inventory. |
-| `llm.ts` `createModel()` | Rechecks synchronously before building any provider: the model and connection must have the same provider, and a `shared` connection needs a visible policy that allows the id. A stale model/connection pair, a fabricated shared connection, or a schedule/title/compaction call cannot bypass listing. |
+| `catalog/ollama-routes.ts` user inventory/status/test | Filters a shared daemon's inventory and every installed/loaded count to the viewer's granted ids; admin management and own connections retain the full inventory. |
+| `llm.ts` `createModel()` | Rechecks synchronously before building any provider: the model and connection must have the same provider, and a `shared` connection needs a visible policy that allows the id. A stale model/connection pair, a fabricated shared connection, or a schedule/title/compaction call cannot bypass listing. Refusals use `AppError` code `forbidden`, including inside a stream, rather than looking like rejected provider credentials. |
 
 Deliberate limits:
 
@@ -101,7 +101,8 @@ Admin → Server-wide providers → a connected key's **Models…** button opens
 selector when the key has several audiences, an all/selected switch, a searchable multi-select with the same
 capability icons, context size, and price as the chat model picker, All / None / selected-count controls, and
 a clearly labelled missing-id section. It is keyboard reachable through `Models…` and the
-`settings.providerModels` command (Alt+Shift+K by default; opens the expanded key or the first connected one).
+`settings.providerModels` command (unbound by default; opens the expanded key or the first connected one).
+Alt+Shift+K opens Knowledge; a user may assign a different binding to provider model policies.
 The dialog follows the shared dialog, select, scroll-area, and touch conventions and uses semantic tokens in
 light and dark themes.
 

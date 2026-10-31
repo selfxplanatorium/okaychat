@@ -5,7 +5,6 @@ import { z } from "zod";
 import type { AppEnv } from "../auth.js";
 import { db } from "../db.js";
 import { MAX_BYTES, storeUpload } from "../files.js";
-import { QuotaError } from "../quota.js";
 import { excerpt } from "./chunker.js";
 import { embeddingOptions } from "./embeddings.js";
 import {
@@ -13,7 +12,6 @@ import {
   cancelSourceIngestion,
   enqueueSource,
   enqueueSources,
-  resumeKnowledgeIngestion,
 } from "./jobs.js";
 import { searchKnowledge } from "./retrieval.js";
 import { fetchKnowledgeUrl } from "./url.js";
@@ -56,12 +54,6 @@ const collectionPatch = z.object({
   projectId: z.string().max(200).nullable().optional(),
   embedding: embeddingInput.optional(),
 });
-
-const failure = (error: unknown) => {
-  if (error instanceof QuotaError) throw error;
-  if (error instanceof HTTPException) throw error;
-  throw new HTTPException(422, { message: (error as Error).message || "Could not add this source." });
-};
 
 /** Stores original bytes and creates the queued source. Rolls back the upload if the row fails. */
 function addSource(userId: string, collectionId: string, input: { name: string; kind: "file" | "paste" | "url"; mime: string; data: Uint8Array; text?: string; url?: string }) {
@@ -108,12 +100,7 @@ export const knowledgeRoutes = new Hono<AppEnv>()
   .post("/collections", async (c) => {
     const parsed = collectionInput.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? "Invalid collection" }, 400);
-    try {
-      return c.json(createCollection(c.get("user").id, parsed.data));
-    } catch (error) {
-      if (error instanceof HTTPException) throw error;
-      failure(error);
-    }
+    return c.json(createCollection(c.get("user").id, parsed.data));
   })
   .get("/collections/:id", (c) => {
     const userId = c.get("user").id;
@@ -151,36 +138,28 @@ export const knowledgeRoutes = new Hono<AppEnv>()
     if (/^image\//.test(file.type) || /\.(png|jpe?g|gif|webp|avif|bmp|tiff?)$/i.test(file.name)) {
       return c.json({ error: "Images are not supported yet: this build has no OCR for them. Add a text, PDF, DOCX, or spreadsheet file instead." }, 415);
     }
-    try {
-      const source = addSource(userId, collectionId, {
-        name: file.name.slice(0, 200),
-        kind: "file",
-        mime: file.type || "application/octet-stream",
-        data: new Uint8Array(await file.arrayBuffer()),
-      });
-      enqueueSource(userId, source.id);
-      return c.json(source, 201);
-    } catch (error) {
-      failure(error);
-    }
+    const source = addSource(userId, collectionId, {
+      name: file.name.slice(0, 200),
+      kind: "file",
+      mime: file.type || "application/octet-stream",
+      data: new Uint8Array(await file.arrayBuffer()),
+    });
+    enqueueSource(userId, source.id);
+    return c.json(source, 201);
   })
   .post("/collections/:id/sources/paste", async (c) => {
     const parsed = z.object({ name: z.string().trim().min(1).max(200), text: z.string().min(1).max(MAX_TEXT) }).safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: `Pasted text must be 1–${MAX_TEXT} characters with a name.` }, 400);
     const userId = c.get("user").id;
-    try {
-      const source = addSource(userId, c.req.param("id"), {
-        name: parsed.data.name,
-        kind: "paste",
-        mime: "text/markdown",
-        data: Buffer.from(parsed.data.text),
-        text: parsed.data.text,
-      });
-      enqueueSource(userId, source.id);
-      return c.json(source, 201);
-    } catch (error) {
-      failure(error);
-    }
+    const source = addSource(userId, c.req.param("id"), {
+      name: parsed.data.name,
+      kind: "paste",
+      mime: "text/markdown",
+      data: Buffer.from(parsed.data.text),
+      text: parsed.data.text,
+    });
+    enqueueSource(userId, source.id);
+    return c.json(source, 201);
   })
   .post("/collections/:id/sources/url", async (c) => {
     const parsed = z.object({ url: z.string().url().max(2000) }).safeParse(await c.req.json().catch(() => null));
@@ -194,21 +173,17 @@ export const knowledgeRoutes = new Hono<AppEnv>()
     } catch (error) {
       return c.json({ error: (error as Error).message }, 422);
     }
-    try {
-      // The original response body is the upload; `page.text` is only the extraction used for chunking.
-      const source = addSource(userId, collection.id, {
-        name: page.title.slice(0, 200),
-        kind: "url",
-        mime: page.mime,
-        data: page.bytes,
-        text: page.text,
-        url: parsed.data.url,
-      });
-      enqueueSource(userId, source.id);
-      return c.json(source, 201);
-    } catch (error) {
-      failure(error);
-    }
+    // The original response body is the upload; `page.text` is only the extraction used for chunking.
+    const source = addSource(userId, collection.id, {
+      name: page.title.slice(0, 200),
+      kind: "url",
+      mime: page.mime,
+      data: page.bytes,
+      text: page.text,
+      url: parsed.data.url,
+    });
+    enqueueSource(userId, source.id);
+    return c.json(source, 201);
   })
   .post("/collections/:id/reindex", (c) => {
     const userId = c.get("user").id;
@@ -293,6 +268,3 @@ export const knowledgeRoutes = new Hono<AppEnv>()
     if (!deleteSource(userId, c.req.param("id"))) return c.json({ error: "Source not found" }, 404);
     return c.json({ ok: true });
   });
-
-/** Called from `index.ts` after the server is listening. */
-export const resumeKnowledgeQueue = resumeKnowledgeIngestion;

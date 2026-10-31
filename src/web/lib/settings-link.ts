@@ -9,7 +9,6 @@ export type SettingsSection =
   | "memory"
   | "email"
   | "providers"
-  | "email"
   | "mcp"
   | "projects"
   | "schedules"
