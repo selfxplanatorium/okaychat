@@ -9,6 +9,7 @@ import { formatBytes, formatCost, formatList, formatNumber } from "@/i18n/format
 import { Trans } from "@/i18n/react";
 import { useData } from "@/state/data";
 import { RunFiles, type RunFile } from "./reply-files";
+import { EmailFoldersCard, EmailListCard, EmailReadCard, EmailReplyCard, EmailSearchCard, EmailSendCard } from "./email-tools";
 import { cn } from "@/lib/utils";
 
 type SearchResult = { title: string; url: string; snippet: string };
@@ -41,7 +42,7 @@ export function InjectionBadge({ report, className }: { report?: InjectionReport
   );
 }
 
-function ToolShell({ icon, label, running, error, injection, children }: { icon: ReactNode; label: ReactNode; running: boolean; error?: string; injection?: InjectionReport; children?: ReactNode }) {
+export function ToolShell({ icon, label, running, error, injection, children }: { icon: ReactNode; label: ReactNode; running: boolean; error?: string; injection?: InjectionReport; children?: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="my-2 text-sm">
@@ -202,6 +203,12 @@ export const toolkit = defineToolkit({
     type: "backend",
     render: ({ args, result, status }) => <RunCodeCard args={args} result={result} running={status?.type === "running"} />,
   },
+  email_folders: { type: "backend", render: (props) => <EmailFoldersCard {...props} /> },
+  email_list: { type: "backend", render: (props) => <EmailListCard {...props} /> },
+  email_search: { type: "backend", render: (props) => <EmailSearchCard {...props} /> },
+  email_read: { type: "backend", render: (props) => <EmailReadCard {...props} /> },
+  email_send: { type: "backend", render: (props) => <EmailSendCard {...props} /> },
+  email_reply: { type: "backend", render: (props) => <EmailReplyCard {...props} /> },
 });
 
 // generative-frame renders its helper tools as nothing, which leaves an empty row in the reasoning group.

@@ -458,6 +458,33 @@ const migrations: Array<string | (() => void)> = [
   CREATE INDEX speech_recordings_created ON speech_recordings(created_at);
   CREATE INDEX speech_recordings_user ON speech_recordings(user_id);
   `,
+  // Email accounts (IMAP read, SMTP send). Server endpoints and the password are AES-256-GCM
+  // encrypted. The password is separate so a host/username change can be refused unless the user
+  // re-enters it, rather than sending a stored secret to a new destination.
+  `
+  CREATE TABLE email_accounts (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    label TEXT NOT NULL,
+    address TEXT NOT NULL,
+    imap_enc TEXT NOT NULL,
+    smtp_enc TEXT NOT NULL,
+    password_enc TEXT NOT NULL,
+    security_json TEXT NOT NULL DEFAULT '{}',
+    read_enabled INTEGER NOT NULL DEFAULT 1,
+    send_enabled INTEGER NOT NULL DEFAULT 1,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    signature TEXT NOT NULL DEFAULT '',
+    last_check_at INTEGER,
+    last_check_status TEXT CHECK (last_check_status IN ('ok', 'failed')),
+    last_check_error TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE (user_id, address)
+  );
+  CREATE INDEX email_accounts_user ON email_accounts(user_id, is_default DESC, created_at);
+  CREATE UNIQUE INDEX email_accounts_one_default ON email_accounts(user_id) WHERE is_default = 1;
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, AudioLinesIcon, BarChart3Icon, BlocksIcon, BrainIcon, CalendarClockIcon, FolderIcon, KeyboardIcon, KeyRoundIcon, ShieldIcon, PaletteIcon, SlidersHorizontalIcon, UserRoundIcon } from "lucide-react";
+import { ArrowLeftIcon, AudioLinesIcon, BarChart3Icon, BlocksIcon, BrainIcon, CalendarClockIcon, FolderIcon, KeyboardIcon, KeyRoundIcon, MailIcon, ShieldIcon, PaletteIcon, SlidersHorizontalIcon, UserRoundIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType } from "react";
 import { Link } from "wouter";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -11,6 +11,7 @@ const SETTINGS_SECTIONS: Array<{ id: string; labelKey: PlainMessageKey; icon: Co
   { id: "general", labelKey: "settings.sectionGeneral", icon: SlidersHorizontalIcon },
   { id: "account", labelKey: "settings.sectionAccount", icon: UserRoundIcon },
   { id: "memory", labelKey: "settings.sectionMemory", icon: BrainIcon },
+  { id: "email", labelKey: "settings.sectionEmail", icon: MailIcon },
   { id: "providers", labelKey: "settings.sectionProviders", icon: KeyRoundIcon },
   { id: "mcp", labelKey: "settings.sectionMcp", icon: BlocksIcon },
   { id: "projects", labelKey: "settings.sectionProjects", icon: FolderIcon },

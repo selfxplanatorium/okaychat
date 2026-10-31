@@ -4,6 +4,7 @@ export default {
   sectionGeneral: "General",
   sectionAccount: "Account",
   sectionMemory: "Memory",
+  sectionEmail: "Email",
   sectionProviders: "Providers",
   sectionMcp: "MCP servers",
   sectionProjects: "Projects",

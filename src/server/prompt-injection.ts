@@ -20,7 +20,8 @@ export type UntrustedKind =
   | "past_chat"
   | "research"
   | "delegate"
-  | "code_output";
+  | "code_output"
+  | "email";
 
 export interface UntrustedSource {
   kind: UntrustedKind;
@@ -57,6 +58,10 @@ export const UNTRUSTED_TOOL_NAMES: ReadonlySet<string> = new Set([
   "delegate_task",
   "run_code",
   "view_artifact",
+  "email_folders",
+  "email_list",
+  "email_search",
+  "email_read",
 ]);
 
 export type ToolRisk = "destructive" | "outbound" | "persistent";

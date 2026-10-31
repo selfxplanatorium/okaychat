@@ -48,7 +48,7 @@ The common lesson is the lethal trifecta. A prompt-injected model is most danger
 | `delegate_task` | Sub-agent report | Envelope, scanner badge, taints the reply; delegates get no destructive or approval-needing tools |
 | Compaction summaries | Model-written recap of earlier content | Data envelope and conservative taint even when original tool results were compacted away |
 | Shared pages | Public read-only rendering | Same Markdown image consent policy as the app |
-| Email / knowledge tools | Not present | No model-callable email or knowledge-base ingestion exists. If one is added, it is an untrusted source and an outbound channel; wrap its output and mark its writes with a risk. |
+| Email tools | Folder names, headers, subjects, senders, bodies, attachment names | Read tools wrap their model text as `kind="email"`, scan the whole result for the badge, and are listed in `UNTRUSTED_TOOL_NAMES` for replay. `email_send`/`email_reply` are outbound risk and always ask for approval. HTML is converted to text, never rendered. There is still no knowledge-base ingestion tool. |
 
 ## Attack paths against this product
 
@@ -107,6 +107,8 @@ Search and research cards show a local `GlobeIcon` instead of fetching `icons.du
 
 ### MCP and skills hardening
 
+Email read results (folders, list/search headers, body, attachment names) are enveloped as `kind="email"` and scanned as a whole. The four read tools are in `UNTRUSTED_TOOL_NAMES`, so a stored result from an older reply still taints the turn. `email_send` and `email_reply` are marked outbound and always need approval; a reply re-reads the original message and only allows recipients that appeared in it. Attachments are downloaded only when the model names part ids, never as a side effect of reading. Mail HTML is reduced to text before it reaches either the model or the UI.
+
 MCP text results are enveloped; text-only results use `{ text, images: [] }` so cards can carry the badge. MCP tool descriptions are enveloped with their server and carry `okaychatExternalMetadata`; input-schema descriptions remain raw. Destructive or non-read-only annotations also set tool metadata used by the gate, and keep the tool out of delegate sets. Skill indices, bodies, file names, and reference files are enveloped as one quoted object, so a remote filename cannot add lines. Install and create remain approval-gated and are marked `persistent`. MCP prompts are enveloped by `getPromptText()` before they reach the composer.
 
 ### Model output contracts
@@ -135,7 +137,7 @@ A model emits all tool calls of a step before any result exists, so a read in th
 - **Read tools are outbound channels too.** Web search queries, fetched URLs, and read-only MCP arguments can carry private data. They remain available without per-read approval to preserve normal research; this feature gates annotated high-impact actions, not every network request. A model that obeys an injection can still leak through these channels.
 - **Links and downloads still work.** A user click on an attacker link, or a download the user opens, can leak data outside the app's control. The app shows the destination host in Markdown images and approval prompts, not a full link inspector.
 - **Admin overrides can weaken policy.** The `dataSafety` prompt is admin-overridable like every other server prompt. An admin controls the server and can remove it.
-- **No email or knowledge-base tools exist today.** When added, they are both an untrusted source and an outbound channel. Use the same envelope, scanner, taint gate, and risk metadata; do not add a second approval flow.
+- **Email is both an untrusted source and an outbound channel.** A message body can instruct the model, and a reply can leak private data. The envelope, badge, taint gate, outbound risk metadata, mandatory approval, recipient validation, and the delegate/schedule exclusions contain this; they do not make a poisoned message safe. The user must read the approval payload. There is still no knowledge-base ingestion tool.
 
 ## Adding a new untrusted source or high-impact tool
 

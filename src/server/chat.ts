@@ -29,6 +29,8 @@ import { subagentTools } from "./tools/subagent.js";
 import { attachmentTools } from "./tools/attachments.js";
 import { injectScreenshots, injectToolImages, type ToolImage } from "./tools/screenshots.js";
 import type { VisualShot } from "./documents/visual.js";
+import { emailTools } from "./email/tools.js";
+import { hasAccounts } from "./email/accounts.js";
 import { webTools } from "./tools/web.js";
 import { SearchBudget, StepBudget, searchesInCurrentTurn, agentStepsInCurrentTurn } from "./tools/search-budget.js";
 import { hasResearch, RESEARCH_PARALLEL, RESEARCH_TOOL, researchedThisTurn, researchInput, researchTool, runResearch } from "./research.js";
@@ -182,10 +184,16 @@ export async function turnStream(opts: TurnOptions) {
         : conversationMemory(userId, threadId, query);
       // Sub-agents get the read-only pair (load/read) but never source search, install, or create.
       const skills = turnSkills(user.id, { temporary, canCallTools: model.toolCall });
+      // Email tools exist only for stored chats with at least one account. Read/send toggles are
+      // re-checked inside each call, so a switch flipped mid-turn takes effect immediately.
+      const email = model.toolCall && !temporary && hasAccounts(user.id)
+        ? emailTools({ userId: user.id, signal })
+        : { tools: {}, subTools: {} };
       // Built-in tools first, then MCP tools in sorted order, so the tool block is identical across turns.
       const readOnlyTools = {
         ...builtInWeb,
         ...skills.subTools,
+        ...email.subTools,
         // Sub-agents run unattended, so they get no tool that waits for approval.
         ...mcp.subTools,
       };
@@ -204,6 +212,7 @@ export async function turnStream(opts: TurnOptions) {
         ...builtInWeb,
         ...(model.toolCall ? memory.tools : {}),
         ...(skills.tools),
+        ...email.tools,
         ...subagents,
         ...(useArtifacts ? artifactTools(threadId, user.id, { shots, canViewImages: model.inputModalities.includes("image"), savedThisTurn: artifactsInCurrentTurn(uiMessages) }) : {}),
         ...(imageServices.length ? imageTools(user.id, threadId, imageServices, signal) : {}),

@@ -6,6 +6,7 @@ import { focusSettingAnchor, SETTINGS_FOCUS_PARAM } from "@/lib/settings-link";
 import { cn } from "@/lib/utils";
 import { AdminSettings } from "./AdminSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
+import { EmailSettings } from "./EmailSettings";
 import { GeneralSettings } from "./GeneralSettings";
 import { McpSettings } from "./McpSettings";
 import { ProjectSettings } from "./ProjectSettings";
@@ -22,6 +23,7 @@ const PAGES: Record<string, ComponentType> = {
   general: GeneralSettings,
   account: AccountSettings,
   memory: MemorySettings,
+  email: EmailSettings,
   providers: ProvidersSettings,
   mcp: McpSettings,
   projects: ProjectSettings,

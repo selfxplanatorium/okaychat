@@ -156,6 +156,9 @@ const messageGroupBy = groupPartByType({
   "tool-call:delegate_task": [],
   "tool-call:deep_research": [],
   "tool-call:run_code": [],
+  "tool-call:email_read": [],
+  "tool-call:email_send": [],
+  "tool-call:email_reply": [],
 });
 
 type ThreadGroupKey =

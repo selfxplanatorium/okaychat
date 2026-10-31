@@ -24,10 +24,10 @@ export interface CommandDef {
   palette?: boolean;
 }
 
-const SETTINGS_SECTIONS = ["general", "account", "memory", "providers", "mcp", "projects", "schedules", "usage", "appearance", "keyboard", "admin"] as const;
+const SETTINGS_SECTIONS = ["general", "account", "memory", "email", "providers", "mcp", "projects", "schedules", "usage", "appearance", "keyboard", "admin"] as const;
 
 const SETTINGS_LABELS = {
-  general: "keyboard.settingsGeneral", account: "keyboard.settingsAccount", memory: "keyboard.settingsMemory", providers: "keyboard.settingsProviders",
+  general: "keyboard.settingsGeneral", account: "keyboard.settingsAccount", memory: "keyboard.settingsMemory", email: "keyboard.settingsEmail", providers: "keyboard.settingsProviders",
   mcp: "keyboard.settingsMcp", projects: "keyboard.settingsProjects", schedules: "keyboard.settingsSchedules", usage: "keyboard.settingsUsage",
   appearance: "keyboard.settingsAppearance", keyboard: "keyboard.settingsKeyboard", admin: "keyboard.settingsAdmin",
 } as const satisfies Record<(typeof SETTINGS_SECTIONS)[number], PlainMessageKey>;
@@ -108,6 +108,14 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "settings.ollamaPull", labelKey: "keyboard.cmdSettingsOllamaPull", group: "Settings", keys: [] },
   { id: "settings.ollamaCancelPull", labelKey: "keyboard.cmdSettingsOllamaCancelPull", group: "Settings", keys: [] },
   { id: "settings.ollamaDelete", labelKey: "keyboard.cmdSettingsOllamaDelete", group: "Settings", keys: [] },
+  { id: "email.addAccount", labelKey: "keyboard.cmdEmailAdd", group: "Settings", keys: [] },
+  { id: "email.discover", labelKey: "keyboard.cmdEmailDiscover", group: "Settings", keys: [] },
+  { id: "email.test", labelKey: "keyboard.cmdEmailTest", group: "Settings", keys: [] },
+  { id: "email.save", labelKey: "keyboard.cmdEmailSave", group: "Settings", keys: [] },
+  { id: "email.editAccount", labelKey: "keyboard.cmdEmailEditAccount", group: "Settings", keys: [] },
+  { id: "email.removeAccount", labelKey: "keyboard.cmdEmailRemoveAccount", group: "Settings", keys: [] },
+  { id: "email.setDefault", labelKey: "keyboard.cmdEmailSetDefault", group: "Settings", keys: [] },
+  { id: "email.confirmRemove", labelKey: "keyboard.cmdEmailConfirmRemove", group: "Settings", keys: [] },
 ];
 
 export const COMMAND_GROUPS: readonly CommandGroup[] = ["General", "Navigation", "Chat", "Composer", "Messages", "Settings"];
