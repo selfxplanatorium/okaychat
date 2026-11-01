@@ -4,6 +4,7 @@ import { toolErrorPresentation } from "@/lib/error-presentation";
 import { BookOpenIcon, BotIcon, CheckIcon, ChevronDownIcon, CircleDashedIcon, CircleMinusIcon, DownloadIcon, EyeIcon, FileTextIcon, GlobeIcon, ImageIcon, Loader2Icon, SearchIcon, SquareTerminalIcon, TelescopeIcon, TriangleAlertIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { ArtifactCard } from "@/components/artifacts/ArtifactCard";
+import { OwnedImage } from "@/components/ui/owned-image";
 import { SimpleMarkdown } from "@/components/ui/simple-markdown";
 import { t } from "@/i18n";
 import { formatBytes, formatCost, formatList, formatNumber } from "@/i18n/format";
@@ -355,15 +356,17 @@ function GeneratedImage({ args, result, running }: { args: unknown; result: unkn
   }
   return (
     <figure className="group/img animate-blur-in relative my-2 w-fit max-w-full">
-      <a href={image.url} target="_blank" rel="noreferrer">
-        <img
-          src={image.url}
-          alt={prompt}
-          width={image.width}
-          height={image.height}
-          className="h-auto max-h-[32rem] w-auto max-w-full rounded-xl border"
-        />
-      </a>
+      {/* The card shows a bounded preview; opening or downloading fetches the original. */}
+      <OwnedImage
+        src={image.url}
+        href={image.url}
+        alt={prompt}
+        variant="large"
+        width={image.width}
+        height={image.height}
+        sizes="(min-width: 768px) 42rem, 100vw"
+        className="h-auto max-h-[32rem] w-auto max-w-full rounded-xl border"
+      />
       <a
         href={image.url}
         download={`${image.id}.${image.mime?.split("/")[1]?.replace("jpeg", "jpg") ?? "png"}`}

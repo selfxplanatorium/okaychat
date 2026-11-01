@@ -12,6 +12,7 @@ import { db, tx } from "../db.js";
 import type { RawChunk } from "./chunker.js";
 import { encodeVector } from "./embeddings.js";
 import { assertStorage } from "../quota.js";
+import { deleteUpload } from "../files.js";
 
 // Account-owned collections, sources, and chunks. Every query carries `user_id`; a chat may only use a
 // collection that is global or bound to the chat's own project (docs/implementation/knowledge.md).
@@ -282,7 +283,7 @@ export function deleteCollection(userId: string, id: string): boolean {
     if (!row) return false;
     const uploads = db.prepare("SELECT upload_id FROM knowledge_sources WHERE user_id = ? AND collection_id = ? AND upload_id IS NOT NULL").all(userId, id) as Array<{ upload_id: string }>;
     db.prepare("DELETE FROM knowledge_collections WHERE user_id = ? AND id = ?").run(userId, id);
-    for (const { upload_id } of uploads) db.prepare("DELETE FROM uploads WHERE user_id = ? AND id = ?").run(userId, upload_id);
+    for (const { upload_id } of uploads) deleteUpload(userId, upload_id);
     return true;
   });
 }
@@ -399,7 +400,7 @@ export function deleteSource(userId: string, sourceId: string): boolean {
     if (!row) return false;
     const bytes = db.prepare("SELECT COALESCE(SUM(length(CAST(text AS BLOB)) + COALESCE(length(embedding), 0)), 0) AS bytes FROM knowledge_chunks WHERE user_id = ? AND source_id = ?").get(userId, sourceId) as { bytes: number };
     db.prepare("DELETE FROM knowledge_sources WHERE user_id = ? AND id = ?").run(userId, sourceId);
-    if (row.upload_id) db.prepare("DELETE FROM uploads WHERE user_id = ? AND id = ?").run(userId, row.upload_id);
+    if (row.upload_id) deleteUpload(userId, row.upload_id);
     assertStorage(userId, -bytes.bytes);
     db.prepare("UPDATE knowledge_collections SET vectors_revision = vectors_revision + 1, updated_at = ? WHERE user_id = ? AND id = ?").run(Date.now(), userId, row.collection_id);
     return true;

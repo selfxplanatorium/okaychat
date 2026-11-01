@@ -4,7 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { AppEnv } from "../auth.js";
 import { db } from "../db.js";
-import { MAX_BYTES, storeUpload } from "../files.js";
+import { deleteUpload, MAX_BYTES, storeUpload } from "../files.js";
 import { excerpt } from "./chunker.js";
 import { embeddingOptions } from "./embeddings.js";
 import {
@@ -71,7 +71,7 @@ function addSource(userId: string, collectionId: string, input: { name: string; 
       url: input.url,
     });
   } catch (error) {
-    db.prepare("DELETE FROM uploads WHERE user_id = ? AND id = ?").run(userId, uploadId);
+    deleteUpload(userId, uploadId);
     throw error;
   }
 }

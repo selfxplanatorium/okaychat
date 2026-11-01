@@ -638,6 +638,37 @@ const migrations: Array<string | (() => void)> = [
   `,
   // Writing drafts reuse the owned, revision-checked draft lifecycle without mail actions.
   `ALTER TABLE email_drafts ADD COLUMN kind TEXT NOT NULL DEFAULT 'email' CHECK (kind IN ('email', 'text'));`,
+  // Raster originals move out of SQLite into files (docs/implementation/media.md). `media` holds metadata and
+  // the digest; uploads, sandbox outputs, and avatars point at it. Their old BLOBs are moved by a resumable
+  // background job (media/maintenance.ts), which leaves `data` as an empty BLOB. `media_id` has no foreign key so
+  // the column stays droppable; lifetime is managed by releaseMedia and GC. `image_threads` lets a fork keep
+  // a generated image alive after its source chat is deleted.
+  `
+  CREATE TABLE media (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    sha256 TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    width INTEGER,
+    height INTEGER,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX media_user_digest ON media(user_id, sha256);
+  ALTER TABLE uploads ADD COLUMN media_id TEXT;
+  ALTER TABLE sandbox_files ADD COLUMN media_id TEXT;
+  ALTER TABLE user_avatars ADD COLUMN media_id TEXT;
+  CREATE INDEX uploads_media ON uploads(media_id) WHERE media_id IS NOT NULL;
+  CREATE INDEX sandbox_files_media ON sandbox_files(media_id) WHERE media_id IS NOT NULL;
+  CREATE TABLE image_threads (
+    image_id TEXT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    PRIMARY KEY (image_id, thread_id)
+  );
+  CREATE INDEX image_threads_thread ON image_threads(thread_id);
+  INSERT OR IGNORE INTO image_threads (image_id, thread_id)
+    SELECT i.id, i.thread_id FROM images i JOIN threads t ON t.id = i.thread_id AND t.user_id = i.user_id;
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
@@ -667,13 +698,41 @@ let transactionId = 0;
 export function tx<T>(fn: () => T): T {
   const name = `tx_${++transactionId}`;
   db.exec(`SAVEPOINT ${name}`);
+  commitHooks.push([]);
   try {
     const result = fn();
     db.exec(`RELEASE ${name}`);
+    const hooks = commitHooks.pop()!;
+    // An inner savepoint's hooks wait for the outermost commit; a rollback above drops them with it.
+    if (commitHooks.length) commitHooks.at(-1)!.push(...hooks);
+    else runHooks(hooks);
     return result;
   } catch (error) {
+    commitHooks.pop();
     db.exec(`ROLLBACK TO ${name}`);
     db.exec(`RELEASE ${name}`);
     throw error;
   }
+}
+
+const commitHooks: Array<Array<() => void>> = [];
+
+function runHooks(hooks: Array<() => void>): void {
+  for (const hook of hooks) {
+    try {
+      hook();
+    } catch (error) {
+      // The write is committed; a failed clean-up is left to garbage collection.
+      console.error("[db] after-commit step failed:", (error as Error).message);
+    }
+  }
+}
+
+/**
+ * Runs `hook` once the enclosing `tx()` commits, or now outside one. For side effects outside SQLite
+ * (deleting files) that a rollback could not undo.
+ */
+export function afterCommit(hook: () => void): void {
+  if (commitHooks.length) commitHooks.at(-1)!.push(hook);
+  else hook();
 }

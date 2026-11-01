@@ -5,19 +5,28 @@ import { BinaryAttachmentAdapter, CodeAttachmentAdapter, DocumentAttachmentAdapt
 
 const pending = async (adapter: StoredImageAttachmentAdapter | CodeAttachmentAdapter | BinaryAttachmentAdapter, name: string, type: string) => adapter.add({ file: new File(["bytes"], name, { type }) });
 
-test("images retain their data URL and also store an owned copy with a file_id", async (t) => {
+test("stored images send an owned reference, never the base64 original", async (t) => {
   const calls: Array<{ url: string; body: FormData }> = [];
   t.mock.method(globalThis, "fetch", async (url: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ url: String(url), body: init?.body as FormData });
-    return Response.json({ fileId: "upl_image" });
+    return Response.json({ fileId: "upl_image", mime: "image/png" });
   });
   const adapter = new StoredImageAttachmentAdapter(() => false);
   const sent = await adapter.send(await pending(adapter, "photo.png", "image/png"));
-  assert.deepEqual(sent.content[0], { type: "image", image: "data:image/png;base64,Ynl0ZXM=" });
+  assert.deepEqual(sent.content[0], { type: "image", image: "okaychat-upload:upl_image", filename: "photo.png" });
+  assert.doesNotMatch(JSON.stringify(sent.content), /base64/);
   assert.match(JSON.stringify(sent.content[1]), /file_id=\\"upl_image\\"/);
+  assert.equal(sent.contentType, "image/png");
   assert.equal(calls.length, 1);
   assert.equal(calls[0]!.url, "/api/files/store");
   assert.equal((calls[0]!.body.get("file") as File).name, "photo.png");
+});
+
+test("a file the server does not recognize as a raster image is refused as an image", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => Response.json({ fileId: "upl_heic", mime: "application/octet-stream" }));
+  const adapter = new StoredImageAttachmentAdapter(() => false);
+  const attachment = await pending(adapter, "photo.heic", "image/heic");
+  await assert.rejects(() => adapter.send(attachment), /not a PNG/);
 });
 
 test("quota failures block image, native PDF, text, and binary sends instead of silently losing files", async (t) => {

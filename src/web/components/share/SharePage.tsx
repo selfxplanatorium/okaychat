@@ -1,4 +1,6 @@
 import { AppWindowIcon, CodeIcon, FileSpreadsheetIcon, FileTextIcon, ImageIcon, WrenchIcon } from "lucide-react";
+import { OwnedImage } from "@/components/ui/owned-image";
+import { originalImageUrl } from "@/lib/media";
 import { useAssistantUiThemeTokens } from "generative-frame/assistant-ui";
 import { Widget } from "generative-frame/react";
 import { SpecRenderer } from "generative-frame/spec/react";
@@ -112,7 +114,9 @@ export function SharePage({ token }: { token: string }) {
                     className="stagger animate-rise-in bg-muted ms-auto max-w-[85%] rounded-2xl px-4 py-2.5 whitespace-pre-wrap"
                   >
                     {m.parts.map((p, i) =>
-                      p.type === "text" ? <span key={i}>{p.text}</span> : p.type === "image" ? <img key={i} src={p.url} alt="" className="my-1 max-h-64 rounded-lg" /> : null,
+                      p.type === "text" ? <span key={i}>{p.text}</span> : p.type === "image" ? (
+                        <OwnedImage key={i} src={p.url} href={originalImageUrl(p.url)} linkClassName="block w-fit max-w-full" alt="" variant="medium" width={p.width} height={p.height} className="my-1 h-auto max-h-64 w-auto max-w-full rounded-lg" />
+                      ) : null,
                     )}
                   </div>
                 ) : (
@@ -127,7 +131,7 @@ export function SharePage({ token }: { token: string }) {
                           {p.text}
                         </SimpleMarkdown>
                       ) : p.type === "image" ? (
-                        <img key={i} src={p.url} alt="" className="my-3 max-h-[32rem] rounded-xl border" />
+                        <OwnedImage key={i} src={p.url} href={originalImageUrl(p.url)} linkClassName="block w-fit max-w-full" alt="" variant="large" width={p.width} height={p.height} sizes="(min-width: 768px) 42rem, 100vw" className="my-3 h-auto max-h-[32rem] w-auto max-w-full rounded-xl border" />
                       ) : p.type === "artifact" ? (
                         <SharedArtifact key={i} token={token} part={p} />
                       ) : p.type === "widget" ? (

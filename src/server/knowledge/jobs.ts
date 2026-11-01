@@ -1,5 +1,6 @@
 import { HTTPException } from "hono/http-exception";
 import { redactSecrets } from "../errors.js";
+import { readUpload } from "../media/store.js";
 import { db } from "../db.js";
 import { extract } from "../files.js";
 import { chunkDocument } from "./chunker.js";
@@ -224,9 +225,7 @@ function readable(text: string): string {
 async function extractSource(row: SourceRow): Promise<string> {
   if (row.text) return readable(row.text);
   if (!row.upload_id) throw new KnowledgeInputError("The original file is gone. Add it again.");
-  const upload = db.prepare("SELECT name, mime, data FROM uploads WHERE id = ? AND user_id = ?").get(row.upload_id, row.user_id) as
-    | { name: string; mime: string; data: Uint8Array }
-    | undefined;
+  const upload = readUpload(row.user_id, row.upload_id);
   if (!upload) throw new KnowledgeInputError("The original file is gone. Add it again.");
   if (/^image\//.test(upload.mime)) throw new KnowledgeInputError("Images are not supported yet: this build has no OCR for them. Add a text, PDF, DOCX, or spreadsheet file instead.");
   const { text } = await extract(upload.name, upload.mime, upload.data);

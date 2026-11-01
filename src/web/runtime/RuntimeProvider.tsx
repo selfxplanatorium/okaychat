@@ -13,6 +13,7 @@ import { generateId, lastAssistantMessageIsCompleteWithApprovalResponses, lastAs
 import { createAssistantStream } from "assistant-stream";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { resolveReasoningEffort } from "@shared/reasoning";
+import { applyImagePartUpdates, type ImagePartUpdate } from "@shared/media";
 import type { MessageEditResult, ThreadSummary } from "@shared/types";
 import { t } from "@/i18n";
 import { api, structuredResponseError, takePrefetched } from "@/lib/api";
@@ -98,17 +99,19 @@ function cacheRows(remoteId: string, rows: MessageRow[] | null | undefined, acti
 
 /** Stores one message. Only a write the server acknowledged reaches the cache. */
 async function saveRow(remoteId: string, row: MessageRow): Promise<void> {
-  // Serialized once, and parsed back for the cache, so the cached content is exactly what the server stored.
+  // Normalization can replace inline images; only the server's canonical row belongs in the cache.
   const body = JSON.stringify(row);
   serverRows.beginWrite(remoteId);
+  let stored: MessageRow;
   try {
-    await tracked(remoteId, api(`/threads/${remoteId}/messages`, { method: "POST", body, headers: { "Content-Type": "application/json" } }));
+    const result = await tracked(remoteId, api<{ images: ImagePartUpdate[] }>(`/threads/${remoteId}/messages`, { method: "POST", body, headers: { "Content-Type": "application/json" } }));
+    stored = JSON.parse(body) as MessageRow;
+    stored.content = applyImagePartUpdates(stored.content, result.images ?? []);
   } catch (error) {
     cacheRows(remoteId, serverRows.failed(remoteId), undefined);
     throw error;
   }
   // The body of a re-sent message never carries `edited_at`; the server keeps the row's edit, so the cache must too.
-  const stored = JSON.parse(body) as MessageRow;
   const editedAt = editedAtOf(remoteId, stored.id);
   cacheRows(remoteId, serverRows.acknowledged(remoteId, editedAt === undefined ? stored : { ...stored, edited_at: editedAt }), Date.now());
 }

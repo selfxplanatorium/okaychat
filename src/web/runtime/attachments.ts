@@ -3,6 +3,7 @@ import { generateId } from "ai";
 import { t } from "@/i18n";
 import { formatBytes } from "@/i18n/format";
 import { api } from "../lib/api";
+import { UPLOAD_REF } from "../lib/media";
 import { BINARY_NOTE } from "./message-attachments";
 
 const MAX_ATTACHMENT = 25 * 1024 * 1024;
@@ -21,20 +22,31 @@ const readDataUrl = (file: File) =>
     reader.readAsDataURL(file);
   });
 
-/** Keep the existing data URL parts byte-for-byte; storage is a separate owned copy. */
+/**
+ * Stored chats send an owned reference (`okaychat-upload:<id>`), never the base64 original: the server keeps
+ * the lossless original and swaps in its bytes for the model. Temporary chats store nothing, so their images
+ * stay inline in memory. The text part carries the file_id the model uses for read_attachment and image edits.
+ */
 export class StoredImageAttachmentAdapter extends SimpleImageAttachmentAdapter {
   constructor(private readonly temporary: () => boolean) { super(); }
 
   override async send(attachment: Parameters<AttachmentAdapter["send"]>[0], options?: { signal?: AbortSignal }) {
     if (attachment.file.size > MAX_ATTACHMENT) throw new Error(t("composer.fileTooLarge", { size: formatBytes(MAX_ATTACHMENT) }));
-    const sent = await super.send(attachment, options);
-    if (this.temporary()) return sent;
+    if (this.temporary()) return super.send(attachment, options);
     const form = new FormData();
     form.append("file", attachment.file);
-    const { fileId } = await api<{ fileId: string }>("/files/store", { method: "POST", body: form, signal: options?.signal });
+    const { fileId, mime } = await api<{ fileId: string; mime: string }>("/files/store", { method: "POST", body: form, signal: options?.signal });
+    // The server decides by the bytes: a HEIC, BMP, or mislabeled file is stored but cannot be shown as an image.
+    if (!/^image\/(png|jpeg|webp|gif|avif)$/.test(mime)) throw new Error(t("composer.imageUnsupported", { name: attachment.name }));
+    const name = attachment.name.replaceAll('"', "'");
     return {
-      ...sent,
-      content: [...sent.content, { type: "text" as const, text: `<attachment name="${attachment.name.replaceAll('"', "'")}" file_id="${fileId}"></attachment>` }],
+      ...attachment,
+      contentType: mime,
+      status: { type: "complete" as const },
+      content: [
+        { type: "image" as const, image: `${UPLOAD_REF}${fileId}`, filename: attachment.name },
+        { type: "text" as const, text: `<attachment name="${name}" file_id="${fileId}"></attachment>` },
+      ],
     };
   }
 }

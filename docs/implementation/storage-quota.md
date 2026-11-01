@@ -13,20 +13,27 @@ Each account has one limit: `OKAYCHAT_STORAGE_LIMIT` bytes (default 1 GiB), over
 - Durable `sandbox_files.data`; scratch workspaces are outside account storage.
 - Uploaded fonts, account avatar, encrypted memory bytes (facts and summaries), and extracted project-file text.
 - Skill names, descriptions, instructions, reference paths and reference contents, counted as UTF-8 bytes across `skills` and `skill_files`.
+- Raster image originals in the file-backed media store (`media.size`), once per account however many uploads, run outputs, forks, or the avatar point at them. Their previews in `media-cache/` are a regenerable cache and do not count (see `media.md`).
 - Message JSON (`messages.bytes`), without inline `data:` URLs, which are charged once as uploads, plus the encrypted first original of an edited assistant reply (`messages.original_enc`). The original is retained after Undo. Branching charges the copied message and original. Existing rows are backfilled by a migration.
 
 Settings, provider/MCP credentials, skill-source credentials, editable email drafts (`email_drafts`,
 bounded by 100 per chat and 2,000 per account) and other small configuration rows do not count. Retained speech recordings (`speech_recordings`, only when an admin sets a retention period) do not
 count either: the admin chose to keep them, and the purge bounds them (see `speech.md`). Message JSON is charged after stripping inline file data URLs; the owned original attachment
-is charged once rather than counting those bytes again in the message. Existing inline attachments are materialized by a one-time
-migration without rewriting messages. Existing files are grandfathered even if migration puts an
+is charged once rather than counting those bytes again in the message. Stored chats now hold `okaychat-upload:` references
+instead of inline images (user attachments and provider image output in assistant replies); legacy inline images are moved to the media store and referenced by a resumable background
+migration (`media.md`). Existing files are grandfathered even if migration puts an
 account over quota; subsequent growth is refused.
 
 ## Enforcement and deletion
 
 `assertStorage(userId, incoming)` throws `QuotaError`, an HTTP 413 exception, for positive net growth
 that would exceed the limit. Replacement avatars, sandbox outputs and skills subtract their old
-stored bytes; shrinking or equal-size replacements remain possible after an admin lowers a limit.
+stored bytes; shrinking or equal-size replacements remain possible after an admin lowers a limit. For
+avatars and sandbox outputs `chargeReplacement()` (`media/store.ts`) computes what the replaced row frees:
+its BLOB, plus its media original only when no other upload, output, or avatar still points at it. New
+bytes that deduplicate to media the account already holds are never refused. The old original is released
+only after the transaction commits (`afterCommit()` in `db.ts`), so a rollback never leaves a reference to a
+deleted file.
 New artifact versions retain their predecessors and therefore charge the entire new version. Repeated
 writes during the same turn overwrite that turn's version and charge only net growth.
 Checks and SQLite writes have no intervening asynchronous work. Multi-skill imports and message
@@ -51,7 +58,8 @@ copy when an attempted replacement cannot fit.
 
 Temporary attachment extraction/storage (`temporary=1`) bypasses persistence and quota. `tmp_` chats
 cannot create stored files or run persistent tools. Explicitly saving a temporary chat to normal
-history materializes its inline attachments, enforces quota, and keeps the original message parts.
+history stores its inline images once in the media store (enforcing quota) and rewrites those parts to
+references; other inline files are materialized as uploads with their message parts unchanged.
 
 ## UI and checks
 

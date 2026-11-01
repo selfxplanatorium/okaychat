@@ -18,8 +18,9 @@ const { saveConnection, deleteConnection } = await import("../catalog/providers.
 const { getSettings, updateSettings } = await import("../settings.js");
 const { enabledImageServices, imagePath, imageRoutes, imageTools } = await import("./image.js");
 
-// A 2×3 baseline JPEG header is enough for the format and size checks.
-const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x00, 0x00, 0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x03, 0x00, 0x02, 0x01, 0x01, 0x11, 0x00, 0xff, 0xd9]);
+// A real 2×3 JPEG: stored images are fully decoded, so a header alone is refused.
+const { default: sharp } = await import("sharp");
+const JPEG = await sharp({ create: { width: 2, height: 3, channels: 3, background: "#c03020" } }).jpeg().toBuffer();
 
 const requests: Array<{ url: string; auth: string | undefined; body: string }> = [];
 let server: Server;

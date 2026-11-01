@@ -6,7 +6,10 @@ import { accountProfile, limited, passwordSchema, forgiveFailure, recordFailure 
 import { hashPassword, verifyPassword } from "./crypto.js";
 import { db } from "./db.js";
 import { errorJson } from "./errors.js";
-import { assertStorage, QuotaError } from "./quota.js";
+import { QuotaError } from "./quota.js";
+import { chargeReplacement, getMedia, mediaPath, putMedia, releaseMedia } from "./media/store.js";
+import { MediaProcessingError, normalizeAvatar, serveImage } from "./media/variants.js";
+import { tx } from "./db.js";
 
 export const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 const MAX_IMAGE_PIXELS = 16_777_216;
@@ -101,30 +104,50 @@ export const accountRoutes = new Hono<AppEnv>()
     const file = form?.get("file");
     if (!(file instanceof File)) return c.json({ error: "Choose a PNG, JPEG, or WebP image." }, 400);
     if (file.size > MAX_AVATAR_BYTES) return c.json({ error: "Choose a profile picture smaller than 5 MB." }, 413);
-    const data = new Uint8Array(await file.arrayBuffer());
-    const image = avatarImage(data);
+    const image = avatarImage(new Uint8Array(await file.arrayBuffer()));
     if (!image) return c.json({ error: "Choose a valid PNG, JPEG, or WebP image up to 16 megapixels." }, 422);
     const userId = c.get("user").id;
+    // Direct API clients skip the browser's resize, so the server reproduces it: a full decode within the
+    // pixel bound, orientation applied, metadata stripped, at most 512 px, WebP.
+    let data: Buffer;
     try {
-      const previousBytes = (db.prepare("SELECT length(data) AS n FROM user_avatars WHERE user_id = ?").get(userId) as { n: number } | undefined)?.n ?? 0;
-      assertStorage(userId, data.byteLength - previousBytes);
+      data = await normalizeAvatar(Buffer.from(await file.arrayBuffer()));
+    } catch (error) {
+      if (error instanceof MediaProcessingError) return c.json({ error: "Choose a valid PNG, JPEG, or WebP image up to 16 megapixels." }, 422);
+      throw error;
+    }
+    const previous = db.prepare("SELECT updated_at, media_id, length(data) AS bytes FROM user_avatars WHERE user_id = ?").get(userId) as { updated_at: number; media_id: string | null; bytes: number } | undefined;
+    const version = Math.max(Date.now(), (previous?.updated_at ?? 0) + 1);
+    try {
+      tx(() => {
+        // Net growth: the old picture frees its bytes only when nothing else (an upload of the same file) holds them.
+        const { media } = putMedia(userId, data, chargeReplacement(userId, previous && { mediaId: previous.media_id, blobBytes: previous.bytes }));
+        db.prepare(`INSERT INTO user_avatars (user_id, mime, data, media_id, updated_at) VALUES (?, ?, x'', ?, ?)
+          ON CONFLICT(user_id) DO UPDATE SET mime = excluded.mime, data = excluded.data, media_id = excluded.media_id, updated_at = excluded.updated_at`).run(userId, media.mime, media.id, version);
+      });
     } catch (error) {
       if (error instanceof QuotaError) return errorJson(c, error);
       throw error;
     }
-    const previous = db.prepare("SELECT updated_at FROM user_avatars WHERE user_id = ?").get(userId) as { updated_at: number } | undefined;
-    const version = Math.max(Date.now(), (previous?.updated_at ?? 0) + 1);
-    db.prepare(`INSERT INTO user_avatars (user_id, mime, data, updated_at) VALUES (?, ?, ?, ?)
-      ON CONFLICT(user_id) DO UPDATE SET mime = excluded.mime, data = excluded.data, updated_at = excluded.updated_at`).run(userId, image.mime, data, version);
+    // After the commit, so a rollback can never point back at a deleted file.
+    releaseMedia(previous?.media_id);
     return c.json(accountProfile(userId)!);
   })
-  .get("/avatar", (c) => {
-    const row = db.prepare("SELECT mime, data FROM user_avatars WHERE user_id = ?").get(c.get("user").id) as { mime: string; data: Uint8Array } | undefined;
+  .get("/avatar", async (c) => {
+    const userId = c.get("user").id;
+    const row = db.prepare("SELECT mime, data, media_id FROM user_avatars WHERE user_id = ?").get(userId) as { mime: string; data: Uint8Array; media_id: string | null } | undefined;
     if (!row) return c.json({ error: "No profile picture." }, 404);
-    // Never reuse a previous account's image when a device switches accounts.
+    const media = row.media_id ? getMedia(row.media_id) : undefined;
+    // The URL is the same for every account; the digest validator and the per-request owner lookup make sure
+    // a device that switches accounts never reuses the previous account's image.
+    if (media && media.user_id === userId) {
+      return serveImage(c, { userId, key: media.id, file: mediaPath(media), mime: media.mime, size: media.size, etag: media.sha256.slice(0, 32) });
+    }
     return c.body(new Uint8Array(row.data), 200, { "Content-Type": row.mime, "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" });
   })
   .delete("/avatar", (c) => {
+    const previous = db.prepare("SELECT media_id FROM user_avatars WHERE user_id = ?").get(c.get("user").id) as { media_id: string | null } | undefined;
     db.prepare("DELETE FROM user_avatars WHERE user_id = ?").run(c.get("user").id);
+    releaseMedia(previous?.media_id);
     return c.json(accountProfile(c.get("user").id)!);
   });

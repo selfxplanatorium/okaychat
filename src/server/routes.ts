@@ -3,6 +3,7 @@ import { accountRoutes } from "./account.js";
 import { memoryRoutes } from "./memory.js";
 import { auth as mcpAuth } from "@ai-sdk/mcp";
 import { Hono } from "hono";
+import { imagePartUpdates } from "../shared/media.js";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { McpServerConfig, UserSettings } from "../shared/types.js";
@@ -215,8 +216,8 @@ const api = new Hono<AppEnv>()
       content: z.record(z.string(), z.unknown()),
     }).safeParse(await c.req.json());
     if (!parsed.success) return c.json({ error: "Invalid message" }, 400);
-    appendMessage(c.get("user").id, c.req.param("id"), { ...parsed.data, parent_id: parsed.data.parent_id ?? null });
-    return c.json({ ok: true });
+    const row = appendMessage(c.get("user").id, c.req.param("id"), { ...parsed.data, parent_id: parsed.data.parent_id ?? null });
+    return c.json({ ok: true, images: imagePartUpdates(row.content) });
   })
   .route("/", messageEditRoutes)
 

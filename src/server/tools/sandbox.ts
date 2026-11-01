@@ -5,9 +5,12 @@ import { z } from "zod";
 import type { InjectionReport } from "../../shared/types.js";
 import type { AppEnv } from "../auth.js";
 import { newId, sha256 } from "../crypto.js";
-import { db } from "../db.js";
+import { db, tx } from "../db.js";
 import { env } from "../env.js";
-import { assertStorage, QuotaError } from "../quota.js";
+import { QuotaError } from "../quota.js";
+import { chargeReplacement, getMedia, mediaPath, putMedia, readSandboxFile, readUpload, releaseMedia, sandboxBytes } from "../media/store.js";
+import { sniffRaster } from "../media/sniff.js";
+import { serveImage } from "../media/variants.js";
 import { scanForInjection, wrapUntrusted } from "../prompt-injection.js";
 import { getThread } from "../threads.js";
 import { resultPaths } from "../sandbox-paths.js";
@@ -119,8 +122,7 @@ async function copyInputs(userId: string, ws: string, fileIds: string[], signal?
   for (const id of fileIds) {
     // Stop ends the copy too; later files must not keep overwriting the workspace.
     signal?.throwIfAborted();
-    const row = (db.prepare("SELECT name, data FROM uploads WHERE id = ? AND user_id = ?").get(id, userId) ??
-      db.prepare("SELECT path AS name, data FROM sandbox_files WHERE id = ? AND user_id = ?").get(id, userId)) as { name: string; data: Uint8Array } | undefined;
+    const row = readUpload(userId, id) ?? readSandboxFile(userId, id);
     if (!row) throw new Error(`Unknown file_id \`${id}\`. Use the file_id from an <attachment> header.`);
     const name = path.basename(row.name).replace(/[^\w.() -]+/g, "_").replace(/^[.\s]+/, "") || id;
     await call(`/workspaces/${ws}/files?path=${encodeURIComponent(name)}`, { method: "PUT", body: Buffer.from(row.data) }, 60_000, signal);
@@ -141,8 +143,11 @@ export class SandboxTurn {
   forget(userId: string, threadId: string, paths: readonly string[]): void {
     const remove = db.prepare("DELETE FROM sandbox_files WHERE user_id = ? AND thread_id = ? AND path = ?");
     for (const p of paths) {
-      const id = (db.prepare("SELECT id FROM sandbox_files WHERE user_id = ? AND thread_id = ? AND path = ?").get(userId, threadId, p) as { id: string } | undefined)?.id;
-      if (id && this.created.delete(id)) remove.run(userId, threadId, p);
+      const row = db.prepare("SELECT id, media_id FROM sandbox_files WHERE user_id = ? AND thread_id = ? AND path = ?").get(userId, threadId, p) as { id: string; media_id: string | null } | undefined;
+      if (row && this.created.delete(row.id)) {
+        remove.run(userId, threadId, p);
+        releaseMedia(row.media_id);
+      }
     }
   }
 }
@@ -181,14 +186,26 @@ async function storeOutputs(userId: string, threadId: string, ws: string, files:
       }
       if (file.tooLarge) continue;
       const data = Buffer.concat(chunks, size);
-      const previous = db.prepare("SELECT length(data) AS size FROM sandbox_files WHERE user_id = ? AND thread_id = ? AND path = ?")
-        .get(userId, threadId, file.path) as { size: number } | undefined;
-      assertStorage(userId, data.byteLength - (previous?.size ?? 0));
+      const previous = db.prepare("SELECT length(data) AS size, media_id FROM sandbox_files WHERE user_id = ? AND thread_id = ? AND path = ?")
+        .get(userId, threadId, file.path) as { size: number; media_id: string | null } | undefined;
       const ext = path.extname(file.path).toLowerCase();
-      const stored = db.prepare(
-        `INSERT INTO sandbox_files (id, user_id, thread_id, path, mime, data, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (user_id, thread_id, path) DO UPDATE SET mime = excluded.mime, data = excluded.data, size = excluded.size, created_at = excluded.created_at RETURNING id`,
-      ).get(newId("sbf"), userId, threadId, file.path, TYPES[ext] ?? "application/octet-stream", data, data.byteLength, Date.now()) as { id: string };
+      // Raster images (by their bytes, not the extension) go to the media store; other outputs stay BLOBs, and
+      // a raster extension on bytes that are not one is never labelled as an image.
+      const raster = /^\.(png|jpe?g|gif|webp|avif)$/.test(ext) && sniffRaster(data);
+      const stored = tx(() => {
+        let mediaId: string | null = null;
+        // An overwrite is charged by net growth: the old copy's BLOB, or its original when no other row holds it.
+        const charge = chargeReplacement(userId, previous && { mediaId: previous.media_id, blobBytes: previous.size });
+        if (raster) mediaId = putMedia(userId, data, charge).media.id;
+        else charge(data.byteLength);
+        const row = db.prepare(
+          `INSERT INTO sandbox_files (id, user_id, thread_id, path, mime, data, size, created_at, media_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (user_id, thread_id, path) DO UPDATE SET mime = excluded.mime, data = excluded.data, size = excluded.size, created_at = excluded.created_at, media_id = excluded.media_id RETURNING id`,
+        ).get(newId("sbf"), userId, threadId, file.path, raster || (/^\.(png|jpe?g|gif|webp|avif)$/.test(ext) ? "application/octet-stream" : (TYPES[ext] ?? "application/octet-stream")), raster ? Buffer.alloc(0) : data, data.byteLength, Date.now(), mediaId) as { id: string };
+        return row;
+      });
+      // After the commit, so a rollback can never point back at a deleted file.
+      releaseMedia(previous?.media_id);
       file.fileId = stored.id;
       if (!previous) turn?.created.add(stored.id);
       file.size = data.byteLength;
@@ -373,14 +390,22 @@ export const sandboxRoutes = new Hono<AppEnv>()
   })
   // The durable copy of a produced file, stored in SQLite right after the run. The sandbox wipes idle
   // workspaces, so this route, not the proxy above, backs the download URLs the model hands out.
-  .get("/sandbox/:threadId/stored", (c) => {
+  .get("/sandbox/:threadId/stored", async (c) => {
     const user = c.get("user");
     const threadId = c.req.param("threadId");
     const file = c.req.query("path");
     if (!file || !getThread(user.id, threadId)) return c.json({ error: "Not found" }, 404);
-    const row = db
-      .prepare("SELECT path, mime, data FROM sandbox_files WHERE user_id = ? AND thread_id = ? AND path = ?")
-      .get(user.id, threadId, file) as { path: string; mime: string; data: Uint8Array } | undefined;
+    const stored = db
+      .prepare("SELECT path, mime, data, media_id FROM sandbox_files WHERE user_id = ? AND thread_id = ? AND path = ?")
+      .get(user.id, threadId, file) as { path: string; mime: string; data: Uint8Array; media_id: string | null } | undefined;
+    if (stored?.media_id) {
+      const media = getMedia(stored.media_id);
+      if (!media || media.user_id !== user.id) return c.json({ error: "Not found" }, 404);
+      // A rerun that overwrites the path points at a new media row, so the validator changes with it.
+      const { "Cache-Control": _, "Content-Type": __, ...headers } = downloadHeaders(path.basename(stored.path), media.mime, c.req.query("preview") === "1");
+      return serveImage(c, { userId: user.id, key: media.id, file: mediaPath(media), mime: media.mime, size: media.size, etag: media.sha256.slice(0, 32) }, { headers });
+    }
+    const row = stored && sandboxBytes(user.id, stored);
     if (!row) return c.json({ error: "Not found" }, 404);
     // Rows saved before a type was known carry octet-stream, which some browsers refuse to play.
     const mime = row.mime === "application/octet-stream" ? (TYPES[path.extname(row.path).toLowerCase()] ?? row.mime) : row.mime;

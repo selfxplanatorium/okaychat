@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { ArtifactKind, ArtifactToolResult, ArtifactVersion, DocumentArtifactKind, SheetPreview, TextArtifactKind } from "../shared/types.js";
 import { DOCUMENT_KINDS } from "../shared/types.js";
 import type { AppEnv } from "./auth.js";
+import { readSandboxFile, readUpload } from "./media/store.js";
 import { db } from "./db.js";
 import { createDocx, createXlsx, editDocx, editPdf, editXlsx, previewXlsx, readDocxText, readPdf, readXlsx } from "./documents/lazy.js";
 import { htmlToPdf, pageFurniture, printDocument, rendererAvailable } from "./documents/render.js";
@@ -185,12 +186,9 @@ function createDocument(threadId: string, turn: Set<string>, input: { id: string
  * the caller's own, the same rule run_code's input_files applies. A name only ever matches attachments.
  */
 function sourceBytes(userId: string, ref: { fileId?: string; name?: string }): { name: string; data: Uint8Array } {
-  const row = (
-    ref.fileId
-      ? (db.prepare("SELECT name, data FROM uploads WHERE id = ? AND user_id = ?").get(ref.fileId, userId) ??
-        db.prepare("SELECT path AS name, data FROM sandbox_files WHERE id = ? AND user_id = ?").get(ref.fileId, userId))
-      : db.prepare("SELECT name, data FROM uploads WHERE user_id = ? AND name = ? ORDER BY created_at DESC LIMIT 1").get(userId, ref.name ?? "")
-  ) as { name: string; data: Uint8Array } | undefined;
+  const byName = ref.fileId ? undefined : (db.prepare("SELECT id FROM uploads WHERE user_id = ? AND name = ? ORDER BY created_at DESC LIMIT 1").get(userId, ref.name ?? "") as { id: string } | undefined)?.id;
+  const id = ref.fileId ?? byName;
+  const row = id ? (readUpload(userId, id) ?? readSandboxFile(userId, id)) : undefined;
   if (!row) {
     throw new Error(
       ref.fileId?.startsWith("sbf_")

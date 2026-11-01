@@ -12,7 +12,7 @@ export type MarkdownImageSource =
 // Exact app routes. A path such as `/api/images/../mcp` does not match after URL normalization, and
 // `//evil.example/api/images/x` is protocol-relative, so it is treated as remote.
 const APP_IMAGE =
-  /^\/api\/(?:images\/[A-Za-z0-9_-]+|uploads\/[A-Za-z0-9_.-]+\/file|sandbox\/[A-Za-z0-9_-]+\/stored|account\/avatar|public\/shares\/[A-Za-z0-9_-]+\/(?:images\/[A-Za-z0-9_-]+|artifacts\/[A-Za-z0-9_-]+\/file))(?:\?[^#]*)?$/;
+  /^\/api\/(?:images\/[A-Za-z0-9_-]+|uploads\/[A-Za-z0-9_.-]+\/file|sandbox\/[A-Za-z0-9_-]+\/stored|account\/avatar|public\/shares\/[A-Za-z0-9_-]+\/(?:(?:images|uploads)\/[A-Za-z0-9_.-]+|artifacts\/[A-Za-z0-9_-]+\/file))(?:\?[^#]*)?$/;
 
 const INLINE_RASTER = /^data:image\/(?:png|jpe?g|webp|gif|avif);base64,[a-z0-9+/=\s]+$/i;
 

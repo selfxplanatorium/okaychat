@@ -22,6 +22,11 @@ async function received(suffix: string) {
 // What the fake /run reports, and how it behaves; reset before each test.
 let runFiles: Array<{ path: string; size: number }> = [];
 let runMode: "answer" | "hang" | "drop" = "answer";
+const { default: sharp } = await import("sharp");
+const chart = (color: string) => sharp({ create: { width: 900, height: 600, channels: 3, background: color } }).png().toBuffer();
+let chartBytes = await chart("#ff0000");
+// Per-path bodies that override the defaults below.
+let bodies: Record<string, Buffer> = {};
 const runner = createServer(async (req: IncomingMessage, res) => {
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(chunk as Buffer);
@@ -34,6 +39,9 @@ const runner = createServer(async (req: IncomingMessage, res) => {
     if (runMode === "hang") return void setTimeout(answer, 300);
     return answer();
   }
+  const named = Object.entries(bodies).find(([name]) => req.url!.includes(`/files?path=${encodeURIComponent(name)}`));
+  if (req.method === "GET" && named) return res.end(named[1]);
+  if (req.method === "GET" && req.url!.includes("/files?path=chart.png")) return res.end(chartBytes);
   if (req.method === "GET" && req.url!.includes("/files?path=")) return res.end("<svg onload=alert(1)>");
   res.end(JSON.stringify({ ok: true }));
 });
@@ -64,6 +72,7 @@ beforeEach(() => {
   calls.length = 0;
   runFiles = [{ path: "out/plot.png", size: 10 }];
   runMode = "answer";
+  bodies = {};
   db.exec("DELETE FROM uploads; DELETE FROM sandbox_files; DELETE FROM threads;");
   ensureThread("alice", "thr_alice");
 });
@@ -229,4 +238,67 @@ test("a run whose answer never arrives is cancelled too", async () => {
   const run = await received("/run");
   const cancel = await received("/cancel");
   assert.equal(JSON.parse(cancel.body.toString()).job, JSON.parse(run.body.toString()).job);
+});
+
+test("raster outputs go to the media store; a rerun replaces the original and its validator", async () => {
+  runFiles = [{ path: "chart.png", size: 10 }];
+  const tool = sandboxTools("alice", "thr_alice").run_code!;
+  await tool.execute!({ language: "python", code: "plot()" }, { toolCallId: "1", messages: [] });
+  const row = db.prepare("SELECT media_id, mime, length(data) AS n FROM sandbox_files WHERE path = 'chart.png'").get() as { media_id: string; mime: string; n: number };
+  assert.deepEqual([row.mime, row.n], ["image/png", 0]);
+  const first = await as("alice", "/sandbox/thr_alice/stored?path=chart.png&variant=thumb");
+  assert.equal(first.headers.get("Content-Type"), "image/webp");
+  const etag = first.headers.get("ETag");
+  chartBytes = await chart("#0000ff");
+  await tool.execute!({ language: "python", code: "plot()" }, { toolCallId: "2", messages: [] });
+  const next = db.prepare("SELECT media_id FROM sandbox_files WHERE path = 'chart.png'").get() as { media_id: string };
+  assert.notEqual(next.media_id, row.media_id);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM media WHERE id = ?").get(row.media_id)!.n, 0, "the replaced original is released");
+  const again = await app.request("/sandbox/thr_alice/stored?path=chart.png&variant=thumb", { headers: { Cookie: "okaychat_session=alice", "If-None-Match": etag! } });
+  assert.equal(again.status, 200, "a stale validator gets the new image");
+  // Bytes named .png that are not a raster are never labelled as an image.
+  runFiles = [{ path: "fake.png", size: 10 }];
+  await tool.execute!({ language: "python", code: "x" }, { toolCallId: "3", messages: [] });
+  assert.equal((db.prepare("SELECT mime FROM sandbox_files WHERE path = 'fake.png'").get() as { mime: string }).mime, "application/octet-stream");
+});
+
+test("output replacements are charged by net growth, whatever the old and new kinds", async () => {
+  const { storageUsed } = await import("../quota.js");
+  const { getMedia } = await import("../media/store.js");
+  const noisy = await sharp({ create: { width: 600, height: 400, channels: 3, noise: { type: "gaussian", mean: 128, sigma: 60 } } }).png().toBuffer();
+  const plain = await chart("#00ff00");
+  const text = Buffer.alloc(plain.byteLength * 2, "x");
+  const tool = sandboxTools("alice", "thr_alice").run_code!;
+  const run = async (body: Buffer) => {
+    bodies = { "out.png": body };
+    runFiles = [{ path: "out.png", size: body.byteLength }];
+    return tool.execute!({ language: "python", code: "x" }, { toolCallId: String(Math.random()), messages: [] });
+  };
+  const row = () => db.prepare("SELECT media_id, length(data) AS blob FROM sandbox_files WHERE path = 'out.png'").get() as { media_id: string | null; blob: number };
+  const full = () => db.prepare("UPDATE users SET storage_limit = ? WHERE id = 'alice'").run(storageUsed("alice"));
+  try {
+    await run(noisy);
+    const big = row().media_id!;
+    full();
+    // A smaller unique image replacing a bigger one fits at a full quota.
+    assert.equal((await run(plain)).storageWarning, undefined);
+    assert.notEqual(row().media_id, big);
+    assert.equal(getMedia(big), undefined, "the replaced original is released after the commit");
+    // Image to non-image: the freed original pays for the BLOB.
+    db.prepare("UPDATE users SET storage_limit = NULL WHERE id = 'alice'").run();
+    await run(noisy);
+    full();
+    assert.equal((await run(text)).storageWarning, undefined);
+    assert.deepEqual({ ...row() }, { media_id: null, blob: text.byteLength });
+    // Non-image to a smaller image: the freed BLOB pays for the original.
+    full();
+    assert.equal((await run(plain)).storageWarning, undefined);
+    assert.equal(row().blob, 0);
+    assert.ok(row().media_id);
+    // Growth past the limit is still refused.
+    full();
+    assert.match((await run(noisy)).storageWarning ?? "", /quota/i);
+  } finally {
+    db.prepare("UPDATE users SET storage_limit = NULL WHERE id = 'alice'").run();
+  }
 });

@@ -1,4 +1,3 @@
-import { rm } from "node:fs/promises";
 import { zipSync, strToU8 } from "fflate";
 import { Hono } from "hono";
 import type { ArtifactKind, LibraryItem, LibraryKind, LibraryPage, LibrarySort } from "../shared/types.js";
@@ -6,7 +5,9 @@ import type { AppEnv } from "./auth.js";
 import { db } from "./db.js";
 import { previewXlsx } from "./documents/lazy.js";
 import { getSkill, deleteSkill } from "./skills.js";
-import { imagePath } from "./tools/image.js";
+import { deleteImage } from "./tools/image.js";
+import { deleteUpload } from "./files.js";
+import { readSandboxFile, readUpload, releaseMedia } from "./media/store.js";
 
 // Stored attachments and outputs belong to the account. Sandbox workspaces are disposable.
 // Artifact ownership is always resolved through the owning thread.
@@ -49,40 +50,51 @@ interface RawRow {
   threadTitle: string | null;
   projectId: string | null;
   artifactKind: ArtifactKind | null;
+  width: number | null;
+  height: number | null;
+  /** 1 when server-made variants exist for this row (file-backed raster). */
+  variants: number;
 }
 
 const SOURCES = `
   SELECT 'image:' || i.id AS key, i.prompt AS name, 'image' AS kind, i.mime AS mime, i.size AS size, i.created_at,
-         'generated' AS source, i.thread_id AS threadId, t.title AS threadTitle, t.project_id AS projectId, NULL AS artifactKind
+         'generated' AS source, i.thread_id AS threadId, t.title AS threadTitle, t.project_id AS projectId, NULL AS artifactKind,
+         i.width AS width, i.height AS height, 1 AS variants
   FROM images i LEFT JOIN threads t ON t.id = i.thread_id AND t.user_id = i.user_id
   WHERE i.user_id = @userId
   UNION ALL
-  SELECT 'upload:' || u.id AS key, u.name AS name, ${UPLOAD_KIND} AS kind, u.mime AS mime, length(u.data) AS size, u.created_at,
+  SELECT 'upload:' || u.id AS key, u.name AS name, ${UPLOAD_KIND} AS kind, u.mime AS mime, coalesce(um.size, length(u.data)) AS size, u.created_at,
          'uploaded' AS source, ut.id AS threadId, ut.title AS threadTitle, coalesce(ut.project_id, (SELECT pf.project_id FROM project_files pf JOIN projects p ON p.id = pf.project_id
-           WHERE pf.upload_id = u.id AND p.user_id = u.user_id LIMIT 1)) AS projectId, NULL AS artifactKind
+           WHERE pf.upload_id = u.id AND p.user_id = u.user_id LIMIT 1)) AS projectId, NULL AS artifactKind,
+         um.width AS width, um.height AS height, um.id IS NOT NULL AS variants
   FROM uploads u LEFT JOIN threads ut ON ut.id = coalesce(u.thread_id, ${UPLOAD_THREAD}) AND ut.user_id = u.user_id
+    LEFT JOIN media um ON um.id = u.media_id AND um.user_id = u.user_id
   WHERE u.user_id = @userId
   UNION ALL
   -- Select by version explicitly; bare columns in GROUP BY pick arbitrary versions.
   SELECT 'artifact:' || a.thread_id || '/' || a.id AS key, a.title AS name, ${ARTIFACT_KIND} AS kind, ${ARTIFACT_MIME} AS mime,
          length(CAST(a.content AS BLOB)) + a.size AS size, a.created_at,
-         'generated' AS source, t.id AS threadId, t.title AS threadTitle, t.project_id AS projectId, a.kind AS artifactKind
+         'generated' AS source, t.id AS threadId, t.title AS threadTitle, t.project_id AS projectId, a.kind AS artifactKind,
+         NULL AS width, NULL AS height, 0 AS variants
   FROM artifacts a JOIN threads t ON t.id = a.thread_id
   WHERE t.user_id = @userId
     AND a.version = (SELECT max(v.version) FROM artifacts v WHERE v.thread_id = a.thread_id AND v.id = a.id)
   UNION ALL
   SELECT 'sandbox:' || s.id AS key, s.path AS name,
          ${UPLOAD_KIND.replaceAll("u.mime", "s.mime").replaceAll("u.name", "s.path")} AS kind, s.mime AS mime,
-         length(s.data) AS size, s.created_at, 'generated' AS source,
-         t.id AS threadId, t.title AS threadTitle, t.project_id AS projectId, NULL AS artifactKind
+         s.size AS size, s.created_at, 'generated' AS source,
+         t.id AS threadId, t.title AS threadTitle, t.project_id AS projectId, NULL AS artifactKind,
+         sm.width AS width, sm.height AS height, sm.id IS NOT NULL AS variants
   FROM sandbox_files s JOIN threads t ON t.id = s.thread_id AND t.user_id = s.user_id
+    LEFT JOIN media sm ON sm.id = s.media_id AND sm.user_id = s.user_id
   WHERE s.user_id = @userId
   UNION ALL
   SELECT 'skill:' || sk.id AS key, sk.name || '.zip' AS name, 'other' AS kind, 'application/zip' AS mime,
          length(CAST(sk.name || sk.description || sk.body AS BLOB)) +
            coalesce((SELECT sum(length(CAST(f.name || f.content AS BLOB))) FROM skill_files f WHERE f.skill_id = sk.id), 0) AS size,
          sk.updated_at AS created_at, CASE sk.origin WHEN 'conversation' THEN 'generated' ELSE 'uploaded' END AS source,
-         NULL AS threadId, NULL AS threadTitle, NULL AS projectId, NULL AS artifactKind
+         NULL AS threadId, NULL AS threadTitle, NULL AS projectId, NULL AS artifactKind,
+         NULL AS width, NULL AS height, 0 AS variants
   FROM skills sk WHERE sk.user_id = @userId`;
 
 interface Cursor {
@@ -129,19 +141,28 @@ async function toItems(userId: string, rows: RawRow[]): Promise<LibraryItem[]> {
       threadTitle: r.threadTitle,
       projectId: r.projectId,
       deletable: false,
+      ...(r.width && r.height ? { width: r.width, height: r.height } : {}),
     };
+    const sized = (url: string, variant: "thumb" | "large") => `${url}${url.includes("?") ? "&" : "?"}variant=${variant}`;
     if (prefix === "skill") {
       const url = `/api/library/skill/${encodeURIComponent(id)}`;
       items.push({ ...base, previewUrl: `${url}/preview`, downloadUrl: `${url}/file`, deletable: true });
     } else if (prefix === "image") {
-      items.push({ ...base, previewUrl: `/api/images/${id}`, downloadUrl: `/api/images/${id}`, deletable: true });
+      const url = `/api/images/${id}`;
+      items.push({ ...base, previewUrl: sized(url, "large"), thumbUrl: sized(url, "thumb"), downloadUrl: url, deletable: true });
     } else if (prefix === "upload" || prefix === "sandbox") {
       const fileUrl = prefix === "upload" ? `/api/uploads/${encodeURIComponent(id)}/file` :
         `/api/sandbox/${encodeURIComponent(r.threadId!)}/stored?path=${encodeURIComponent(r.name)}`;
       // Only images and PDFs render in the browser's own viewers; docx/xlsx preview client-side anyway.
       const inline = base.mime.startsWith("image/") || base.mime === "application/pdf";
       const text = base.mime.startsWith("text/") || /\.(txt|md|csv|json|py|sh|js|ts|html|svg)$/i.test(r.name);
-      const previewUrl = inline ? `${fileUrl}${fileUrl.includes("?") ? "&" : "?"}preview=1` :
+      const inlineUrl = `${fileUrl}${fileUrl.includes("?") ? "&" : "?"}preview=1`;
+      // File-backed rasters get bounded previews; legacy BLOB images and SVG keep the original.
+      if (r.variants) {
+        items.push({ ...base, previewUrl: sized(inlineUrl, "large"), thumbUrl: sized(inlineUrl, "thumb"), downloadUrl: fileUrl, deletable: true });
+        continue;
+      }
+      const previewUrl = inline ? inlineUrl :
         r.kind === "spreadsheet" || text ? `/api/library/${prefix}/${encodeURIComponent(id)}/preview` : null;
       items.push({ ...base, previewUrl, downloadUrl: fileUrl, deletable: true });
     } else {
@@ -210,7 +231,7 @@ function listRows(userId: string, opts: ListOptions): { rows: RawRow[]; nextCurs
 
   const rows = db
     .prepare(
-      `SELECT key, name, kind, mime, size, created_at, source, threadId, threadTitle, projectId, artifactKind FROM (${SOURCES})
+      `SELECT key, name, kind, mime, size, created_at, source, threadId, threadTitle, projectId, artifactKind, width, height, variants FROM (${SOURCES})
        WHERE ${where.join(" AND ")} ORDER BY ${ORDER_BY[sort]} LIMIT ${limit + 1}`,
     )
     .all(named) as unknown as RawRow[];
@@ -226,22 +247,20 @@ export async function listLibrary(userId: string, opts: ListOptions): Promise<Li
   return { items: await toItems(userId, rows), nextCursor };
 }
 
+/**
+ * Deleting from the Library removes the file for good: originals and previews go, and quota is released.
+ * Chats that showed it keep their text and show the image as unavailable; nothing recreates it.
+ */
 export async function deleteLibraryItem(userId: string, prefix: "image" | "upload" | "sandbox" | "skill", id: string): Promise<boolean> {
-  if (prefix === "image") {
-    const row = db.prepare("SELECT id FROM images WHERE id = ? AND user_id = ?").get(id, userId) as { id: string } | undefined;
-    if (!row) return false;
-    db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(id, userId);
-    await rm(imagePath(userId, id), { force: true });
-    return true;
-  }
+  if (prefix === "image") return deleteImage(userId, id);
   if (prefix === "skill") { deleteSkill(userId, id); return true; }
   if (prefix === "sandbox") {
-    return !!db.prepare("DELETE FROM sandbox_files WHERE id = ? AND user_id = ?").run(id, userId).changes;
+    const row = db.prepare("SELECT media_id FROM sandbox_files WHERE id = ? AND user_id = ?").get(id, userId) as { media_id: string | null } | undefined;
+    if (!row || !db.prepare("DELETE FROM sandbox_files WHERE id = ? AND user_id = ?").run(id, userId).changes) return false;
+    releaseMedia(row.media_id);
+    return true;
   }
-  const row = db.prepare("SELECT id FROM uploads WHERE id = ? AND user_id = ?").get(id, userId) as { id: string } | undefined;
-  if (!row) return false;
-  db.prepare("DELETE FROM uploads WHERE id = ? AND user_id = ?").run(id, userId);
-  return true;
+  return deleteUpload(userId, id);
 }
 
 const skillMarkdown = (s: { name: string; description: string; body: string }) =>
@@ -283,8 +302,7 @@ export const libraryRoutes = new Hono<AppEnv>()
     }
     const table = c.req.param("source") === "upload" ? "uploads" : c.req.param("source") === "sandbox" ? "sandbox_files" : null;
     if (!table) return c.json({ error: "Not found" }, 404);
-    const row = db.prepare(`SELECT ${table === "uploads" ? "name" : "path"} AS name, mime, data FROM ${table} WHERE id = ? AND user_id = ?`)
-      .get(c.req.param("id"), c.get("user").id) as { name: string; mime: string; data: Uint8Array } | undefined;
+    const row = table === "uploads" ? readUpload(c.get("user").id, c.req.param("id")) : readSandboxFile(c.get("user").id, c.req.param("id"));
     if (!row) return c.json({ error: "Not found" }, 404);
     c.header("Cache-Control", "private, no-store");
     if (/\.(xlsx|xlsm)$/i.test(row.name) || row.mime.includes("officedocument.spreadsheetml")) return c.json(await previewXlsx(row.data));

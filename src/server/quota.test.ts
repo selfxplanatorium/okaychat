@@ -104,7 +104,10 @@ test("fonts and profile pictures are rejected with 413 too", async () => {
   const fontRes = await as("alice", "/fonts", { method: "POST", body: form(ttf, "F.ttf", "font/ttf") });
   assert.equal(fontRes.status, 413);
   assert.match(((await fontRes.json()) as { error: string }).error, /Storage quota exceeded/);
-  const avatarRes = await as("alice", "/account/avatar", { method: "PUT", body: form(png, "photo.png", "image/png") });
+  // A valid picture: it is decoded and re-encoded before the quota check, so a corrupt one would be 422.
+  const { default: sharp } = await import("sharp");
+  const photo = await sharp({ create: { width: 8, height: 8, channels: 3, background: "#336699" } }).png().toBuffer();
+  const avatarRes = await as("alice", "/account/avatar", { method: "PUT", body: form(photo, "photo.png", "image/png") });
   assert.equal(avatarRes.status, 413);
 });
 

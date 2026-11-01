@@ -42,6 +42,7 @@ export default {
   cmdChatCompactNow: "Compact this chat now",
   cmdChatTrimContext: "Trim earlier messages",
   cmdChatLoadImage: "Load a remote image in the chat",
+  cmdChatRetryImage: "Retry an image that failed to load",
   cmdSettingsProviderModels: "Choose which models a server key shares",
   cmdComposerModel: "Choose model",
   cmdComposerEffort: "Reasoning effort",

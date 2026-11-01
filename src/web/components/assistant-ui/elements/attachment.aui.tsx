@@ -3,7 +3,6 @@
 import {
   type PropsWithChildren,
   useMemo,
-  useState,
   type FC,
   isValidElement,
 } from "react";
@@ -37,6 +36,8 @@ import {
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
 import { useAttachmentSrc } from "@/hooks/use-attachment-src";
+import { OwnedImage } from "@/components/ui/owned-image";
+import { hasVariants, imageVariantUrl, originalImageUrl } from "@/lib/media";
 import { cn } from "@/lib/utils";
 import { attachmentPreview, textAttachments } from "@/runtime/message-attachments";
 import { t } from "@/i18n";
@@ -49,22 +50,17 @@ type AttachmentPreviewProps = {
 const attachmentLabel = (label: string, state: "failed" | "uploading" | undefined) =>
   state === "failed" ? t("thread.attachmentFailed", { label }) : state === "uploading" ? t("thread.attachmentUploading", { label }) : label;
 
-const AttachmentPreview: FC<AttachmentPreviewProps> = ({ src, name }) => {
-  const [isLoaded, setIsLoaded] = useState(false);
-  return (
-    <img
-      src={src}
-      alt={t("thread.previewOf", { name })}
-      className={cn(
-        "block h-auto max-h-[80vh] w-auto max-w-full rounded-sm object-contain transition-[opacity] duration-(--motion-slow) ease-out-quart motion-reduce:transition-none",
-        isLoaded
-          ? "aui-attachment-preview-image-loaded opacity-100"
-          : "aui-attachment-preview-image-loading opacity-0",
-      )}
-      onLoad={() => setIsLoaded(true)}
-    />
-  );
-};
+// A bounded preview; the original opens only on request. A failed load shows the shared fallback with Retry
+// instead of an invisible image.
+const AttachmentPreview: FC<AttachmentPreviewProps> = ({ src, name }) => (
+  <OwnedImage
+    src={src}
+    alt={t("thread.previewOf", { name })}
+    variant="large"
+    eager
+    className="aui-attachment-preview-image block h-auto max-h-[80vh] w-auto max-w-full rounded-sm object-contain"
+  />
+);
 
 type AttachmentPreviewDialogProps = PropsWithChildren<{
   src: string | undefined;
@@ -98,6 +94,11 @@ const AttachmentPreviewDialog: FC<AttachmentPreviewDialogProps> = ({
         <div className="aui-attachment-preview bg-background relative mx-auto flex max-h-[80dvh] w-full items-center justify-center overflow-hidden rounded-sm">
           <AttachmentPreview src={src} name={name} />
         </div>
+        {hasVariants(src) ? (
+          <a href={originalImageUrl(src)} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground self-end px-1 text-xs underline-offset-4 hover:underline">
+            {t("thread.openOriginal")}
+          </a>
+        ) : null}
       </DialogContent>
     </Dialog>
   );
@@ -107,8 +108,10 @@ const AttachmentThumb: FC<{ src: string | undefined }> = ({ src }) => {
   return (
     <Avatar className="aui-attachment-tile-avatar h-full w-full rounded-none after:hidden">
       <AvatarImage
-        src={src}
+        src={src && imageVariantUrl(src, "thumb")}
         alt=""
+        loading="lazy"
+        decoding="async"
         className="aui-attachment-tile-image rounded-none object-cover"
       />
       <AvatarFallback>

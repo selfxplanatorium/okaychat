@@ -1,6 +1,7 @@
 import { DownloadIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { AudioPlayer } from "@/components/assistant-ui/elements/media-player";
+import { OwnedImage } from "@/components/ui/owned-image";
 import { t } from "@/i18n";
 import { formatBytes } from "@/i18n/format";
 import { api } from "@/lib/api";
@@ -14,15 +15,27 @@ const AUDIO = /\.(mp3|wav|ogg|oga|opus|flac|m4a)$/i;
 const FILES_SHOWN = 12;
 
 /** Images inline, a player per audio file, and a download chip per file. */
-export function RunFiles({ files, className }: { files: readonly RunFile[]; className?: string }) {
+/**
+ * A fork copies the stored run images of the messages it copies, so their links resolve in the chat being
+ * shown; a reply copied from another chat still names the source chat in its stored URL.
+ */
+export function storedFileUrl(url: string, threadId: string | null): string {
+  if (!threadId) return url;
+  return url.replace(/^\/api\/sandbox\/[A-Za-z0-9_-]+\/stored\?/, `/api/sandbox/${encodeURIComponent(threadId)}/stored?`);
+}
+
+export function RunFiles({ files: given, className }: { files: readonly RunFile[]; className?: string }) {
   const [all, setAll] = useState(false);
+  const threadId = useCurrentThreadId();
+  const files = useMemo(() => given.map((f) => (f.image ? { ...f, url: storedFileUrl(f.url, threadId) } : f)), [given, threadId]);
   if (!files.length) return null;
   const images = files.filter((f) => f.image);
   const audio = files.filter((f) => AUDIO.test(f.path));
   return (
     <div className={className}>
       {images.map((f) => (
-        <img key={f.path} src={f.url} alt={f.path} className="animate-blur-in my-2 h-auto max-h-[28rem] w-auto max-w-full rounded-xl border bg-white" />
+        // The stored copy of the run's image, at a preview size; the link opens the original.
+        <OwnedImage key={f.path} src={f.url} href={f.url} linkClassName="block w-fit max-w-full" alt={f.path} variant="large" className="animate-blur-in my-2 h-auto max-h-[28rem] w-auto max-w-full rounded-xl border bg-white" />
       ))}
       {audio.map((f) => (
         <div key={f.path} className="my-2 max-w-md">

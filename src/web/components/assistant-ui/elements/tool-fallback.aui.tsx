@@ -1,5 +1,6 @@
 "use client";
 
+import { OwnedImage } from "@/components/ui/owned-image";
 import {
   forwardRef,
   memo,
@@ -338,15 +339,17 @@ function ToolFallbackResult({
       {withImages && withImages.images.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-2">
           {withImages.images.map((image) => (
-            <a key={image.id} href={image.url} target="_blank" rel="noreferrer">
-              <img
-                src={image.url}
-                alt=""
-                width={image.width ?? undefined}
-                height={image.height ?? undefined}
-                className="h-auto max-h-80 w-auto max-w-full rounded-lg border"
-              />
-            </a>
+            <OwnedImage
+              key={image.id}
+              src={image.url}
+              href={image.url}
+              alt=""
+              variant="medium"
+              width={image.width}
+              height={image.height}
+              sizes="(min-width: 768px) 32rem, 100vw"
+              className="h-auto max-h-80 w-auto max-w-full rounded-lg border"
+            />
           ))}
         </div>
       )}

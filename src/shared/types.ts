@@ -492,7 +492,8 @@ export interface Project {
 /** A message as a public share shows it: text and results, no reasoning, usage, or tool inputs. */
 export type SharedPart =
   | { type: "text"; text: string }
-  | { type: "image"; url: string }
+  /** `variants` is true when the URL accepts `?variant=thumb|medium|large` (server-made previews). */
+  | { type: "image"; url: string; width?: number; height?: number; variants?: boolean }
   | { type: "artifact"; id: string; title: string; kind: ArtifactKind; version: number }
   | { type: "widget"; title: string; code: string }
   | { type: "spec"; title: string; spec: Spec }
@@ -523,8 +524,13 @@ export interface LibraryItem {
   threadId: string | null;
   threadTitle: string | null;
   projectId: string | null;
-  /** Inline preview URL (images, PDFs, spreadsheets); null for text-only artifacts. */
+  /** Inline preview URL (images, PDFs, spreadsheets); null for text-only artifacts. For images a bounded display size, not the original. */
   previewUrl: string | null;
+  /** Small grid thumbnail for raster images (server-made, bounded); absent when none can be made. */
+  thumbUrl?: string;
+  /** Pixel size of raster images, when known, so the grid and preview can reserve space. */
+  width?: number;
+  height?: number;
   /** Bytes URL, when the item is a file. */
   downloadUrl: string | null;
   /** Set for artifacts so the web page can fetch their versions for the preview. */

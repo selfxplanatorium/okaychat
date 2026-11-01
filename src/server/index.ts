@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { startMediaMaintenance } from "./media/maintenance.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
@@ -76,6 +77,8 @@ serve({ fetch: app.fetch, port: env.port, hostname: env.host, websocket: { serve
   console.log(`okaychat listening on http://${env.host}:${info.port}`);
   startMemoryWorker();
   startRecordingPurge();
+  // Moves legacy image BLOBs/inline chat images to files in small steps, then collects orphaned media.
+  startMediaMaintenance();
   // Rows keep queued/extracting/embedding state across a restart; resuming spends no idle timer.
   resumeKnowledgeIngestion();
   // The worker reads this file; writing it at start lets the worker authenticate before the first request.

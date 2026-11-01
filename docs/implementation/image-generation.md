@@ -44,8 +44,8 @@ With one service on, the tool has no `service` argument. With several, `service`
 
 ## Generation
 
-API services go through AI SDK `generateImage` with `maxRetries: 1` (each retry bills another image) and a 5-minute timeout joined with the chat abort signal. Reference ids become `prompt.images`, which the providers send as an edit. Provider errors are collapsed to 300 characters behind the service name.
+API services go through AI SDK `generateImage` with `maxRetries: 1` (each retry bills another image) and a 5-minute timeout joined with the chat abort signal. Reference ids become `prompt.images`, which the providers send as an edit. A reference is an earlier generated image id or the `file_id` of one of the account's own image attachments; both resolve to the original file, never a preview (`referencePaths`). Provider errors are collapsed to 300 characters behind the service name.
 
-The format is detected from magic bytes (PNG, JPEG, WebP, GIF). Anything else is rejected, so a provider cannot make the server serve HTML or SVG. `images.mime` holds the detected type. Files keep the `<id>.png` name for every format so older paths stay valid. Width and height come from the image header.
+The format is detected from magic bytes (PNG, JPEG, WebP, GIF, AVIF) and the image is then fully decoded by sharp within the 100-megapixel bound. Anything else is rejected, so a provider cannot make the server serve HTML or SVG. `images.mime` holds the detected type. Files keep the `<id>.png` name for every format so older paths stay valid. Width and height come from the decode (after orientation). The file is written via temp + rename, and the `images` row plus its `image_threads` reference are inserted in one transaction; a failure removes the file. Cards and the Library load previews (`?variant=`, see `media.md`); a fork keeps a generated image alive after its source chat is deleted.
 
 The prompt-fidelity rules in `codex-images.md` apply to every service.

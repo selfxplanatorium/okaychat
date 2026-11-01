@@ -4,9 +4,11 @@ import { HTTPException } from "hono/http-exception";
 import type { CompactionState, ThreadSummary } from "../shared/types.js";
 import { assertStorage, messageBytes } from "./quota.js";
 import { storeInlineAttachments } from "./attachment-storage.js";
+import { normalizeImages } from "./media/refs.js";
 import { db, tx } from "./db.js";
 import { copyDraftsForBranch } from "./email/drafts.js";
 import { AppError } from "./errors.js";
+import { newId } from "./crypto.js";
 
 /** Temporary conversations exist only in browser memory; their ids must never become stored threads. */
 export const isTemporaryThread = (id: string): boolean => id.startsWith("tmp_");
@@ -188,6 +190,7 @@ export function branchThread(userId: string, sourceId: string, messageId: string
     // Draft cards in the copied messages keep working in the fork.
     copyDraftsForBranch(userId, sourceId, id, copies.map(({ json }) => json));
     copyArtifactsForBranch(userId, sourceId, id, chain.map((m) => m.content));
+    copyImagesForBranch(userId, sourceId, id, chain.map((m) => m.content));
   });
   return getThread(userId, id)!;
 }
@@ -220,6 +223,45 @@ function copyArtifactsForBranch(userId: string, sourceId: string, targetId: stri
   for (const [artifactId, version] of newest) copy.run(targetId, sourceId, artifactId, version);
 }
 
+/** Generated/MCP image ids and stored run_code output paths shown by tool results in `contents`. */
+export function toolMedia(contents: unknown[]): { images: Set<string>; sandboxPaths: Set<string> } {
+  const images = new Set<string>();
+  const sandboxPaths = new Set<string>();
+  for (const content of contents) {
+    for (const part of (content as { parts?: unknown[] }).parts ?? []) {
+      const p = part as { type?: string; toolName?: string; state?: string; output?: unknown };
+      if (p.state !== "output-available" || !p.output || typeof p.output !== "object") continue;
+      const output = p.output as { id?: unknown; url?: unknown; images?: unknown; files?: unknown };
+      if (typeof output.id === "string" && typeof output.url === "string" && output.url === `/api/images/${output.id}`) images.add(output.id);
+      if (Array.isArray(output.images)) {
+        for (const image of output.images as Array<{ id?: unknown }>) if (typeof image?.id === "string") images.add(image.id);
+      }
+      if (Array.isArray(output.files)) {
+        for (const file of output.files as Array<{ path?: unknown; url?: unknown }>) {
+          if (typeof file?.path === "string" && typeof file.url === "string" && file.url.includes("/stored?")) sandboxPaths.add(file.path);
+        }
+      }
+    }
+  }
+  return { images, sandboxPaths };
+}
+
+/**
+ * A fork references the generated images its copied messages show, so deleting the source chat does not
+ * delete them (image_threads), and shares the stored run_code images by media id (no new bytes, no new
+ * charge). Non-image run outputs stay with the source chat.
+ */
+function copyImagesForBranch(userId: string, sourceId: string, targetId: string, contents: unknown[]): void {
+  const { images, sandboxPaths } = toolMedia(contents);
+  const ref = db.prepare(`INSERT OR IGNORE INTO image_threads (image_id, thread_id)
+    SELECT id, ? FROM images WHERE id = ? AND user_id = ?`);
+  for (const image of images) ref.run(targetId, image, userId);
+  const copy = db.prepare(`INSERT OR IGNORE INTO sandbox_files (id, user_id, thread_id, path, mime, data, size, created_at, media_id)
+    SELECT ?, user_id, ?, path, mime, x'', size, created_at, media_id FROM sandbox_files
+    WHERE user_id = ? AND thread_id = ? AND path = ? AND media_id IS NOT NULL`);
+  for (const file of sandboxPaths) copy.run(newId("sbf"), targetId, userId, sourceId, file);
+}
+
 export interface MessageRow {
   id: string;
   parent_id: string | null;
@@ -250,18 +292,27 @@ export function listMessagesJson(userId: string, threadId: string): string {
 }
 
 export function appendMessage(userId: string, threadId: string, row: MessageRow) {
-  tx(() => {
+  return tx(() => {
     ensureThread(userId, threadId);
     const previous = db.prepare("SELECT content, bytes, edited_at, original_enc FROM messages WHERE thread_id = ? AND id = ?").get(threadId, row.id) as { content: string; bytes: number; edited_at: number | null; original_enc: string | null } | undefined;
     if (row.parent_id !== null && createsCycle(threadId, row.id, row.parent_id)) {
       throw new HTTPException(400, { message: "A message cannot be its own ancestor." });
     }
-    const json = JSON.stringify(row.content);
+    // Inline images (user attachments, provider image output) become owned references before anything is
+    // compared or charged, so history and later requests never carry the original bytes again. An edited reply
+    // only maps resent bytes back to its own references: new bytes there are a stale tab's, refused below.
+    const edited = !!previous && (previous.edited_at !== null || previous.original_enc !== null);
+    const content = normalizeImages(userId, threadId, row.content, {
+      charge: (size) => { assertStorage(userId, size); },
+      previous: previous ? JSON.parse(previous.content) : undefined,
+      store: !edited,
+    });
+    const json = JSON.stringify(content);
     const bytes = messageBytes(json);
     // A user edit changes a reply only through the edit route. A tab still holding text from before it (or from
     // before an Undo, when only `original_enc` remains) re-sends old content, which must not silently rewrite it.
     // Compare parsed values too: a client re-encoding the same reply may order keys differently.
-    if (previous && (previous.edited_at !== null || previous.original_enc !== null)) {
+    if (previous && edited) {
       let same = previous.content === json;
       if (!same) {
         try {
@@ -272,10 +323,10 @@ export function appendMessage(userId: string, threadId: string, row: MessageRow)
       }
       if (!same) throw new AppError({ code: "conflict", message: "This reply was edited. Reload the chat to see the current text." });
       // A re-sent identical edited row is not news: keep its stored bytes and do not bump the chat's activity.
-      return;
+      return { ...row, content: JSON.parse(previous.content) as unknown };
     }
     if (previous?.content !== json) {
-      storeInlineAttachments(db, userId, threadId, row.content, (size) => { assertStorage(userId, size); });
+      storeInlineAttachments(db, userId, threadId, content, (size) => { assertStorage(userId, size); });
       assertStorage(userId, bytes - (previous?.bytes ?? 0));
     }
     // Upsert: assistant messages are re-sent when a stream finishes or a tool result lands.
@@ -284,6 +335,7 @@ export function appendMessage(userId: string, threadId: string, row: MessageRow)
        ON CONFLICT (thread_id, id) DO UPDATE SET parent_id = excluded.parent_id, format = excluded.format, content = excluded.content, bytes = excluded.bytes`,
     ).run(row.id, threadId, row.parent_id, row.format, json, bytes, Date.now());
     db.prepare("UPDATE threads SET updated_at = ? WHERE id = ?").run(Date.now(), threadId);
+    return { ...row, content };
   });
 }
 

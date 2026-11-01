@@ -6,6 +6,7 @@ import { safeHref } from "@/components/assistant-ui/utils/href";
 import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { imageReveal, markdownImageSource, remoteImageHost } from "@/lib/markdown-image-policy";
+import { imageVariantUrl } from "@/lib/media";
 
 /**
  * Markdown images from a model or external page. App-owned image routes load normally. Any remote URL
@@ -102,7 +103,10 @@ export function ProtectedMarkdownImage({
   return (
     <img
       {...props}
-      src={url}
+      // App-owned routes get a bounded preview from our own server; remote and inline URLs are left as they are.
+      src={source.kind === "app" ? imageVariantUrl(url, "large") : url}
+      loading="lazy"
+      decoding="async"
       alt={alt}
       referrerPolicy="no-referrer"
       className={cn(className)}

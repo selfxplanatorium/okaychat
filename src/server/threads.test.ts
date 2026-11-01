@@ -112,7 +112,7 @@ test("markdown export contains the current branch's visible text only", async ()
   assert.equal(response.headers.get("content-type"), "text/markdown; charset=utf-8");
   assert.equal(response.headers.get("cache-control"), "private, no-store");
   assert.match(response.headers.get("content-disposition")!, /^attachment; filename="Trip plans Unicode\.md"; filename\*=UTF-8''Trip%20plans%20%C3%9C/);
-  assert.equal(await response.text(), "# Trip / plans: Ünïcode\n\n## You\n\n_Attachment: photo.png_\n\nWhat is this?\n\n## Assistant\n\nA **cat**.\n");
+  assert.equal(await response.text(), "# Trip / plans: Ünïcode\n\n## You\n\n_Image: photo.png_\n\nWhat is this?\n\n## Assistant\n\nA **cat**.\n");
 });
 
 test("export checks ownership, temporary ids, and the format", async () => {

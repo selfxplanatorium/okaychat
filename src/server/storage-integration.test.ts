@@ -14,6 +14,7 @@ const { db } = await import("./db.js");
 const { sha256 } = await import("./crypto.js");
 const { api } = await import("./routes.js");
 const { storageUsed } = await import("./quota.js");
+const { applyImagePartUpdates } = await import("../shared/media.js");
 const app = new Hono().route("/api", api);
 for (const id of ["alice", "bob"]) {
   db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES (?, ?, ?, 'unused', 'user', 1)").run(id, `${id}@test.example`, id);
@@ -23,7 +24,7 @@ after(() => { db.close(); rmSync(directory, { recursive: true, force: true }); }
 beforeEach(() => {
   db.prepare("INSERT OR IGNORE INTO users (id,email,name,password_hash,role,created_at) VALUES ('bob','bob@test.example','bob','unused','user',1)").run();
   db.prepare("INSERT OR IGNORE INTO sessions (token_hash,user_id,expires_at) VALUES (?, 'bob', ?)").run(sha256("bob"), Date.now() + 600_000);
-  db.exec("UPDATE users SET role = 'user'; DELETE FROM skills; DELETE FROM skill_sources; DELETE FROM skill_preferences; DELETE FROM uploads; DELETE FROM threads; DELETE FROM projects; DELETE FROM memories; DELETE FROM user_avatars; UPDATE users SET storage_limit = NULL;");
+  db.exec("UPDATE users SET role = 'user'; DELETE FROM skills; DELETE FROM skill_sources; DELETE FROM skill_preferences; DELETE FROM uploads; DELETE FROM threads; DELETE FROM projects; DELETE FROM memories; DELETE FROM user_avatars; DELETE FROM media; UPDATE users SET storage_limit = NULL;");
 });
 const request = (url: string, init?: RequestInit, user = "alice") => app.request(`http://app/api${url}`, { ...init, headers: { cookie: `okaychat_session=${user}`, ...init?.headers } });
 const json = (body: unknown, method = "POST") => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -33,6 +34,25 @@ const file = (name: string, mime: string, content = "bytes") => {
   return { method: "POST", body: form };
 };
 const library = async (query = "") => await (await request(`/library${query}`)).json() as LibraryPage;
+
+test("message acknowledgements return compact canonical image parts for the browser cache", async () => {
+  const { default: sharp } = await import("sharp");
+  const image = await sharp({ create: { width: 20, height: 20, channels: 3, background: "#42814c" } }).png().toBuffer();
+  const content = { role: "assistant", parts: [
+    { type: "text", text: "A picture." },
+    { type: "file", mediaType: "image/png", url: `data:image/png;base64,${image.toString("base64")}` },
+    { type: "file", mediaType: "application/pdf", url: `data:application/pdf;base64,${Buffer.alloc(100_000).toString("base64")}` },
+  ] };
+  const response = await request("/threads/canonical/messages", json({ id: "reply", format: "ai-sdk/v6", content }));
+  assert.equal(response.status, 200);
+  const acknowledgement = await response.json();
+  assert.doesNotMatch(JSON.stringify(acknowledgement), /base64/);
+  assert.equal(acknowledgement.images.length, 1);
+  const cached = applyImagePartUpdates(content, acknowledgement.images);
+  const rows = await (await request("/threads/canonical/messages")).json();
+  assert.deepEqual(cached, rows[0].content, "IndexedDB caches the canonical image reference without another history request");
+  assert.equal((await request("/threads/canonical/messages")).status, 200);
+});
 
 test("all attachments persist without a sandbox, count against quota, and delete frees space", async () => {
   db.prepare("UPDATE users SET storage_limit = 15 WHERE id = 'alice'").run();
@@ -124,12 +144,20 @@ test("memory writes enforce account quota and replacement avatars charge only ne
   db.prepare("UPDATE users SET storage_limit = 1 WHERE id = 'alice'").run();
   assert.equal((await request("/memory", json({ content: "Remember this." }))).status, 413);
   assert.equal(storageUsed("alice"), 0);
-  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=", "base64");
-  db.prepare("UPDATE users SET storage_limit = ? WHERE id = 'alice'").run(png.length);
-  const upload = () => { const body = new FormData(); body.set("file", new File([png], "avatar.png", { type: "image/png" })); return request("/account/avatar", { method: "PUT", body }); };
-  assert.equal((await upload()).status, 200);
-  assert.equal((await upload()).status, 200);
-  assert.equal(storageUsed("alice"), png.length);
+  const { default: sharp } = await import("sharp");
+  const picture = (r: number) => sharp({ create: { width: 64, height: 64, channels: 3, background: { r, g: 40, b: 60 } } }).png().toBuffer();
+  const upload = async (r: number) => { const body = new FormData(); body.set("file", new File([await picture(r)], "avatar.png", { type: "image/png" })); return request("/account/avatar", { method: "PUT", body }); };
+  db.prepare("UPDATE users SET storage_limit = NULL WHERE id = 'alice'").run();
+  assert.equal((await upload(10)).status, 200);
+  // The server stores its own re-encoded copy, so that is what the account is charged.
+  const stored = storageUsed("alice");
+  assert.ok(stored > 0);
+  const limit = stored + Math.ceil(stored / 2);
+  db.prepare("UPDATE users SET storage_limit = ? WHERE id = 'alice'").run(limit);
+  // A replacement of about the same size fits, because the old picture's bytes are freed by it.
+  assert.equal((await upload(200)).status, 200);
+  assert.ok(storageUsed("alice") <= limit);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM media WHERE user_id = 'alice'").get()!.n, 1, "the replaced original is released");
 });
 
 test("account deletion cascades persistent attachments and skill files", async () => {

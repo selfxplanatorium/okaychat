@@ -20,7 +20,9 @@ for (const id of ["alice", "bob"]) {
 after(() => { db.close(); rmSync(dataDir, { recursive: true, force: true }); });
 beforeEach(() => db.exec("DELETE FROM user_avatars; UPDATE users SET name = id"));
 
-const image = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=", "base64");
+const { default: sharp } = await import("sharp");
+// A valid PNG: the server fully decodes and re-encodes pictures, so a corrupt fixture would be refused.
+const image = await sharp({ create: { width: 1, height: 1, channels: 4, background: { r: 10, g: 20, b: 30, alpha: 1 } } }).png().toBuffer();
 const request = (url: string, method = "GET", body?: BodyInit, user = "alice", headers: Record<string, string> = {}) => app.request(`http://app/account${url}`, {
   method, headers: { cookie: `okaychat_session=${user}`, ...headers }, ...(body === undefined ? {} : { body }),
 });
@@ -52,10 +54,16 @@ test("pictures persist, replace with a fresh URL, and remain isolated between ac
   const first = await response.json();
   assert.match(first.avatarUrl, /^\/api\/account\/avatar\?v=\d+$/);
   const picture = await request("/avatar");
-  assert.equal(picture.headers.get("Content-Type"), "image/png");
-  assert.equal(picture.headers.get("Cache-Control"), "private, no-store");
+  // Re-encoded on the server (metadata stripped, bounded size), served with a validator that is only
+  // answered after the owner lookup.
+  assert.equal(picture.headers.get("Content-Type"), "image/webp");
+  assert.equal(picture.headers.get("Cache-Control"), "private, no-cache");
   assert.equal(picture.headers.get("X-Content-Type-Options"), "nosniff");
-  assert.deepEqual(Buffer.from(await picture.arrayBuffer()), image);
+  const etag = picture.headers.get("ETag")!;
+  assert.equal((await sharp(Buffer.from(await picture.arrayBuffer())).metadata()).format, "webp");
+  assert.equal((await request("/avatar", "GET", undefined, "alice", { "If-None-Match": etag })).status, 304);
+  // Another account with the cached validator gets no 304 and no bytes.
+  assert.equal((await request("/avatar", "GET", undefined, "bob", { "If-None-Match": etag })).status, 404);
   assert.equal((await request("/avatar", "GET", undefined, "bob")).status, 404);
   assert.equal((await (await request("", "GET", undefined, "bob")).json()).avatarUrl, undefined);
   const replacement = await (await upload()).json();
@@ -77,4 +85,26 @@ test("upload uses file bytes instead of trusting MIME and rejects unsafe or over
   huge.writeUInt32BE(100_000, 16);
   assert.equal((await upload(huge)).status, 422);
   assert.deepEqual(avatarImage(image), { mime: "image/png", width: 1, height: 1 });
+});
+
+test("replacing a picture frees the old bytes only when nothing else holds them", async () => {
+  const { storeUpload } = await import("./files.js");
+  const { getMedia, readMedia } = await import("./media/store.js");
+  const { storageUsed } = await import("./quota.js");
+  const noisy = await sharp({ create: { width: 512, height: 512, channels: 3, noise: { type: "gaussian", mean: 128, sigma: 60 } } }).png().toBuffer();
+  const plain = await sharp({ create: { width: 64, height: 64, channels: 3, background: "#336699" } }).png().toBuffer();
+  assert.equal((await upload(noisy)).status, 200);
+  const first = db.prepare("SELECT media_id FROM user_avatars WHERE user_id = 'alice'").get() as { media_id: string };
+  const old = getMedia(first.media_id)!;
+  // The same bytes uploaded as a file: one media row, two references.
+  const held = storeUpload("alice", "kept.webp", "image/webp", readMedia(old));
+  db.prepare("UPDATE users SET storage_limit = ? WHERE id = 'alice'").run(storageUsed("alice"));
+  // A smaller picture would fit only if the old one were freed, but the upload still holds it.
+  assert.equal((await upload(plain)).status, 413);
+  assert.equal((db.prepare("SELECT media_id FROM user_avatars WHERE user_id = 'alice'").get() as { media_id: string }).media_id, old.id);
+  // Without the other reference the replacement is net shrinkage and fits at a full quota.
+  db.prepare("DELETE FROM uploads WHERE id = ?").run(held);
+  assert.equal((await upload(plain)).status, 200);
+  assert.equal(getMedia(old.id), undefined, "the replaced original is released after the commit");
+  db.prepare("UPDATE users SET storage_limit = NULL WHERE id = 'alice'").run();
 });

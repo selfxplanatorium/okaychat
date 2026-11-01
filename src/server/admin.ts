@@ -9,6 +9,7 @@ import { deleteConnection, getSharedConnection, listProviders, listSharedModels,
 import { ollamaManagementRoutes } from "./catalog/ollama-routes.js";
 import { hashPassword, newId } from "./crypto.js";
 import { disconnect as disconnectCodex } from "./codex.js";
+import { removeUserMedia } from "./media/store.js";
 import { db } from "./db.js";
 import {
   clearModelAccessPoliciesForUser,
@@ -115,6 +116,8 @@ export const adminRoutes = new Hono<AppEnv>()
     disconnectCodex(id);
     db.prepare("DELETE FROM users WHERE id = ?").run(id);
     await rm(path.join(env.dataDir, "images", id), { recursive: true, force: true });
+    // Media originals and their previews (the rows went with the user by cascade).
+    removeUserMedia(id);
     return c.json({ ok: true });
   })
   .get("/admin/settings", (c) => c.json({ allowSignup: signupAllowed() }))

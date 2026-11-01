@@ -4,6 +4,8 @@ import { AppError } from "./errors.js";
 
 // Per-user storage quota. Every byte a user owns — uploads, artifact versions (source + built file),
 // generated images, run_code outputs, fonts, the profile picture, memories, project files — counts
+// (raster originals once per account in `media`, however many uploads/outputs point at them; their
+// regenerable previews in media-cache are not charged)
 // against one limit, so the database volume cannot fill up invisibly. Enforced on every write path:
 // HTTP routes answer 413, tools throw and the model sees the message.
 
@@ -62,6 +64,7 @@ export function storageUsedSql(user: string): string {
     UNION ALL SELECT COALESCE(SUM(length(data)), 0) FROM user_fonts WHERE user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(length(data)), 0) FROM user_avatars WHERE user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(size), 0) FROM images WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(size), 0) FROM media WHERE user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(length(data)), 0) FROM sandbox_files WHERE user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(m.bytes + COALESCE(length(CAST(m.original_enc AS BLOB)), 0)), 0) FROM messages m JOIN threads t ON t.id = m.thread_id WHERE t.user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(length(CAST(content_enc AS BLOB))), 0) FROM memories WHERE user_id = ${user}

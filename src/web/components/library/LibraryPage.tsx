@@ -1,4 +1,5 @@
 import { DownloadIcon, FileCodeIcon, FileSpreadsheetIcon, FileTextIcon, ImageIcon, LayoutGridIcon, ListIcon, Loader2Icon, MessageCircleIcon, PaperclipIcon, SearchIcon, TrashIcon } from "lucide-react";
+import { OwnedImage } from "@/components/ui/owned-image";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { useLocation } from "wouter";
 import { useAui } from "@assistant-ui/react";
@@ -187,7 +188,16 @@ function ItemPreviewBody({ item }: { item: LibraryItem }) {
   if (item.kind === "image" && item.previewUrl) {
     return (
       <div className="flex h-full items-center justify-center bg-muted/30 p-2 sm:p-4">
-        <img src={item.previewUrl} alt={item.name} className="max-h-full max-w-full rounded-lg object-contain shadow-[var(--depth-highlight),var(--shadow-raised)]" />
+        {/* A bounded preview (previewUrl is the `large` variant for file-backed images); Download gets the original. */}
+        <OwnedImage
+          src={item.previewUrl}
+          alt={item.name}
+          variant="large"
+          width={item.width}
+          height={item.height}
+          eager
+          className="h-auto max-h-full w-auto max-w-full rounded-lg object-contain shadow-[var(--depth-highlight),var(--shadow-raised)]"
+        />
       </div>
     );
   }
@@ -284,7 +294,7 @@ function GridCard({ item, onOpen, selection }: { item: LibraryItem; onOpen: () =
       {selection && <SelectionCheck checked={selection.selected} className="absolute top-2 left-2 z-10 size-5 shadow-[var(--shadow-raised)]" />}
       <div className="bg-muted/30 grid aspect-[4/3] place-items-center overflow-hidden">
         {item.kind === "image" && item.previewUrl ? (
-          <img src={item.previewUrl} alt="" loading="lazy" className="size-full object-cover" />
+          <OwnedImage src={item.thumbUrl ?? item.previewUrl} alt="" variant="thumb" controls={false} className="size-full rounded-none border-0 object-cover" />
         ) : (
           <Icon className="text-muted-foreground size-8 transition-transform duration-(--motion-base) ease-spring group-hover:scale-110" />
         )}

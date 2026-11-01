@@ -1,6 +1,6 @@
 import { tool, type ToolSet } from "ai";
 import { z } from "zod";
-import { db } from "../db.js";
+import { readUpload } from "../media/store.js";
 import { extract, MAX_CHARS } from "../files.js";
 import { scanForInjection, wrapUntrusted } from "../prompt-injection.js";
 import { MAX_TOOL_IMAGES_PER_TURN, type ToolImage } from "./screenshots.js";
@@ -16,9 +16,7 @@ export function attachmentTools(userId: string, images?: Map<string, ToolImage[]
         "Read a file the user attached earlier whose content was removed from the conversation to save context. Pass the file_id from its <attachment> header.",
       inputSchema: z.object({ file_id: z.string().min(1).max(200).describe("The attachment's file_id") }),
       execute: async ({ file_id }, { toolCallId }) => {
-        const row = db.prepare("SELECT name, mime, data FROM uploads WHERE id = ? AND user_id = ?").get(file_id, userId) as
-          | { name: string; mime: string; data: Uint8Array }
-          | undefined;
+        const row = readUpload(userId, file_id);
         if (!row) throw new Error("That file is no longer available. Ask the user to attach it again.");
         const header = `<attachment name="${row.name.replaceAll('"', "'")}" file_id="${file_id}">`;
         if (row.mime.startsWith("image/")) {

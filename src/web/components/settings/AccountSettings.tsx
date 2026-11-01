@@ -102,24 +102,31 @@ function SecuritySection() {
   );
 }
 
-/** Decode before upload, reduce oversized photos, and discard embedded photo metadata. */
+/**
+ * Reduce the photo before upload and discard embedded metadata. The pixel count is checked from the loaded
+ * header before drawing forces a full decode; the server re-checks and re-encodes anyway.
+ */
 async function profilePhoto(file: File): Promise<Blob> {
   if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) throw new Error(t("account.photoType"));
   if (file.size > MAX_PHOTO_BYTES) throw new Error(t("account.photoTooBig"));
   const url = URL.createObjectURL(file);
   try {
     const image = new Image();
-    image.src = url;
-    await image.decode();
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new DOMException("decode"));
+      image.src = url;
+    });
     if (!image.naturalWidth || !image.naturalHeight || image.naturalWidth * image.naturalHeight > 16_777_216) throw new Error(t("account.photoMegapixels"));
-    const ratio = Math.min(1, 1024 / Math.max(image.naturalWidth, image.naturalHeight));
+    // Avatars show at most 80 px; 512 covers dense screens with room to spare.
+    const ratio = Math.min(1, 512 / Math.max(image.naturalWidth, image.naturalHeight));
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(image.naturalWidth * ratio));
     canvas.height = Math.max(1, Math.round(image.naturalHeight * ratio));
     const context = canvas.getContext("2d");
     if (!context) throw new Error(t("account.photoBrowser"));
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    return await new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error(t("account.photoPrepare"))), "image/png"));
+    return await new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error(t("account.photoPrepare"))), "image/webp", 0.85));
   } catch (error) {
     if (error instanceof DOMException) throw new Error(t("account.photoOpen"));
     throw error;
@@ -190,7 +197,9 @@ export function AccountSettings() {
                 if (!file) return;
                 void saveProfile("photo", async () => {
                   const body = new FormData();
-                  body.set("file", await profilePhoto(file), "profile.png");
+                  const photo = await profilePhoto(file);
+                  // Browsers without WebP encoding fall back to PNG; the name only labels the part.
+                  body.set("file", photo, photo.type === "image/webp" ? "profile.webp" : "profile.png");
                   return api<Me>("/account/avatar", { method: "PUT", body });
                 }, t("account.pictureUpdated"));
               }}

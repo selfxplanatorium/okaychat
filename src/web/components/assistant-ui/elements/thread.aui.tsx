@@ -25,7 +25,9 @@ import {
 } from "@/components/assistant-ui/elements/tool-group.aui";
 import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
 import { Button } from "@/components/ui/button";
+import { OwnedImage } from "@/components/ui/owned-image";
 import { Skeleton } from "@/components/ui/skeleton";
+import { originalImageUrl, UPLOAD_REF } from "@/lib/media";
 import { useSmoothHeight } from "@/components/ui/smooth-height";
 import { cn } from "@/lib/utils";
 import { toolInjection } from "@/lib/tool-injection";
@@ -1530,6 +1532,19 @@ const AssistantActionBar: FC = () => {
 };
 
 const MessageFile: FileMessagePartComponent = (part) => {
+  // A stored image (provider output or an attachment) is an owned reference: show a preview, open the original.
+  if (part.mimeType.toLowerCase().startsWith("image/") && part.data.startsWith(UPLOAD_REF)) {
+    return (
+      <OwnedImage
+        src={part.data}
+        href={originalImageUrl(part.data)}
+        linkClassName="block w-fit max-w-full"
+        alt={part.filename || t("thread.imageContent")}
+        variant="large"
+        className="my-1 h-auto max-h-[32rem] w-auto max-w-full rounded-xl border"
+      />
+    );
+  }
   const image = part.mimeType.toLowerCase().startsWith("image/")
     ? getFileHref(part.data, part.mimeType, part.sourceType)
     : null;

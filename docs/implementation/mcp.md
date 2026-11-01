@@ -32,7 +32,7 @@ tools are held stable across a continuation. See `docs/implementation/service-he
 
 ### Image results
 
-`presentResult()` decodes `image` content parts (max 8 per result, 10 MB each), sniffs the bytes, and saves PNG/JPEG/WebP/GIF through `storeImage()` (`tools/image.ts`): same `images` table as generated images, so quota, Library, and chat deletion apply. Other formats (SVG) are dropped with a note. The tool output becomes `{ text, images }`; the card renders the saved copies. The model only sees text; vision models get the images once through `injectToolImages()` (the `view_artifact` path), capped at 8 per reply. Embedded binary resources become a size note, never base64 text.
+`presentResult()` decodes `image` content parts (max 8 per result, 10 MB each), sniffs the bytes, and saves PNG/JPEG/WebP/GIF/AVIF that fully decode through `storeImage()` (`tools/image.ts`): same `images` table as generated images, so quota, Library, and chat deletion apply. Other formats (SVG) are dropped with a note. The tool output becomes `{ text, images }`; the card renders the saved copies. The model only sees text; vision models get the images once through `injectToolImages()` (the `view_artifact` path), capped at 8 per reply. Embedded binary resources become a size note, never base64 text.
 
 ### Resources
 

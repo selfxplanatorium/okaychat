@@ -100,7 +100,10 @@ test("it lists uploads, generated images, and the latest artifact version, for t
   assert.match(pdf.downloadUrl!, /^\/api\/uploads\/upl_a\/file/);
   const cube = page.items[1]!;
   assert.equal(cube.size, 42);
-  assert.equal(cube.previewUrl, "/api/images/img_a");
+  // Previews are bounded server-made sizes; the download stays the original.
+  assert.equal(cube.previewUrl, "/api/images/img_a?variant=large");
+  assert.equal(cube.thumbUrl, "/api/images/img_a?variant=thumb");
+  assert.equal(cube.downloadUrl, "/api/images/img_a");
 });
 
 test("upload threads are recovered from the attachment headers in messages", async () => {

@@ -19,6 +19,10 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       // Rewind to just before the inline-file migration (15), undoing the later threads.pinned (16), images.mime (17), threads.branched_from (18), memory v2 (19), and messages.bytes changes.
       for (const table of ["provider_model_grants", "provider_model_policies", "knowledge_chunks_fts", "knowledge_chunks", "knowledge_sources", "knowledge_collections", "share_groups", "share_users", "share_audiences", "user_group_members", "user_groups"]) db.exec("DROP TABLE " + table);
       db.exec("ALTER TABLE threads DROP COLUMN knowledge_ids");
+      db.exec("DROP TABLE image_threads");
+      db.exec("DROP TABLE media");
+      for (const index of ["uploads_media", "sandbox_files_media"]) db.exec("DROP INDEX " + index);
+      for (const table of ["uploads", "sandbox_files", "user_avatars"]) db.exec("ALTER TABLE " + table + " DROP COLUMN media_id");
       db.exec("DROP TABLE turn_context");
       db.exec("DROP TABLE speech_recordings");
       db.exec("DROP TABLE email_drafts");
@@ -50,11 +54,11 @@ test("integrated migrations are repeatable and backfill legacy generated image s
           oldPromptCount: db.prepare("SELECT count(*) AS n FROM server_settings WHERE key='prompt:anonymous'").get().n,
           original: JSON.parse(db.prepare("SELECT content FROM messages WHERE id='m1'").get().content).parts[0].url,
           users: db.prepare("SELECT count(*) AS n FROM users").get().n,
-          integratedTables: ["provider_model_policies", "provider_model_grants", "email_accounts", "knowledge_collections", "knowledge_sources", "knowledge_chunks", "knowledge_chunks_fts", "email_drafts"].map(table => db.prepare("SELECT count(*) AS n FROM " + table).get().n),
+          integratedTables: ["provider_model_policies", "provider_model_grants", "email_accounts", "knowledge_collections", "knowledge_sources", "knowledge_chunks", "knowledge_chunks_fts", "email_drafts", "media", "image_threads"].map(table => db.prepare("SELECT count(*) AS n FROM " + table).get().n),
           edits: db.prepare("SELECT edited_at, original_enc FROM messages WHERE id = 'm1'").get(),
           foreignKeys: db.prepare("PRAGMA foreign_key_check").all()
         })); db.exec("DELETE FROM uploads"); db.close();`));
-      assert.deepEqual(result, { image: 42, skills: 0, sandbox: 0, users: 1, uploads: i === 0 ? 1 : 0, temporaryPrompt: "Keep this temporary chat out of history.", oldPromptCount: 0, original: "data:image/png;base64,bGVnYWN5LWZpbGU=", integratedTables: Array(8).fill(0), edits: { edited_at: null, original_enc: null }, foreignKeys: [] });
+      assert.deepEqual(result, { image: 42, skills: 0, sandbox: 0, users: 1, uploads: i === 0 ? 1 : 0, temporaryPrompt: "Keep this temporary chat out of history.", oldPromptCount: 0, original: "data:image/png;base64,bGVnYWN5LWZpbGU=", integratedTables: Array(10).fill(0), edits: { edited_at: null, original_enc: null }, foreignKeys: [] });
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

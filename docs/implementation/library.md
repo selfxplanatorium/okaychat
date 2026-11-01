@@ -5,10 +5,10 @@ existing stores; there is no duplicate catalog table.
 
 | Source | Store | Size | Association |
 | --- | --- | --- | --- |
-| Attachments (images, documents, text/code and arbitrary binary files) | `uploads.data` | Original bytes | Explicit thread for materialized inline attachments; otherwise the latest owning chat mentioning `file_id`; pinned originals also link through `project_files.upload_id` |
+| Attachments (images, documents, text/code and arbitrary binary files) | `uploads.data`; raster images in the media store (`uploads.media_id`, see `media.md`) | Original bytes | Explicit thread for materialized inline attachments; otherwise the latest owning chat mentioning `file_id`; pinned originals also link through `project_files.upload_id` |
 | Generated images | PNGs on disk + `images` | Stored `images.size` (legacy sizes backfilled at startup) | Owning thread and project |
 | Artifact/document | Latest `artifacts` version, selected explicitly by maximum version | UTF-8 source + built bytes | Owning thread and project |
-| `run_code` outputs | `sandbox_files.data` | Durable copied bytes | Owning thread and project |
+| `run_code` outputs | `sandbox_files.data`; raster images in the media store | Durable copied bytes | Owning thread and project |
 | Skills | `skills` + `skill_files` | Stored UTF-8 instructions, metadata and references | Account; conversation-created skills are generated, manual/source skills are uploaded |
 
 All queries restrict ownership, including thread joins and file routes. Temporary chats produce no
@@ -16,17 +16,19 @@ Library entries. Explicitly saving one into normal history stores its inline att
 
 ## Attachment lifetime
 
-Every accepted non-temporary attachment is stored independently of sandbox configuration. Images keep
-their existing data URL parts, with an additional attachment header carrying the stored `file_id`.
+Every accepted non-temporary attachment is stored independently of sandbox configuration. Images are
+sent and stored as `okaychat-upload:<file_id>` references plus an attachment header carrying the `file_id`;
+the server resolves them to the original bytes for the model (`media.md`).
 Native PDFs, extracted documents, text/code and the binary fallback also retain original bytes;
 storage failures block sending instead of being swallowed. Unsupported binary formats are made
 available to tools by `file_id` rather than decoded as text.
 
 Uploads are persistent until Library or account deletion. There is no seven-day pruning, and deleting
 a chat or project does not remove its uploaded originals. Temporary extraction remains non-persistent.
-A transactional migration materializes existing base64 inline attachments up to the 25 MiB upload
-limit without rewriting chat content, preserving provider prompt prefixes. It runs once, so deleted
-files cannot reappear at restart. Identical message replays likewise cannot restore deleted copies.
+A transactional migration materialized existing base64 inline attachments up to the 25 MiB upload
+limit. The media migration then moves raster images to files and rewrites inline image parts to
+references (the model still receives the same bytes, so prompt prefixes stay identical). Deleted files
+cannot reappear at restart, and a stale resend of an already-referenced message keeps its reference.
 
 ## Filtering and pagination
 
@@ -50,7 +52,12 @@ with `hidden`, so switching sections never refetches behind a skeleton.
 ## Downloads, previews and deletion
 
 - `GET /api/uploads/:id/file` serves owned originals. Raster images and PDFs can be inline; SVG and
-  other active content download. Every upload receives `nosniff`, a sandbox CSP, and `private, no-store`.
+  other active content download. Every upload receives `nosniff` and a sandbox CSP. File-backed images
+  accept `?variant=thumb|medium|large` and use `private, no-cache` with an ETag checked after the owner
+  lookup; BLOB rows keep `private, no-store`.
+- Image items carry `thumbUrl` (grid), `previewUrl` (the `large` variant, for the preview), `width`/`height`
+  when known, and `downloadUrl` (the original). Deleting an image upload or sandbox image releases the
+  original and its previews once nothing else references them.
 - Durable sandbox outputs use `/api/sandbox/:threadId/stored?path=...`. Downloads remain attachments;
   `preview=1` permits only PDF/raster inline viewing with the same security headers. Scratch proxy URLs
   are only a fallback when copying failed or exceeded the 50 MiB cap/quota.

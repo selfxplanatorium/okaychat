@@ -1,6 +1,3 @@
-import { createReadStream } from "node:fs";
-import path from "node:path";
-import { Readable } from "node:stream";
 import type { UIMessage } from "ai";
 import { applyWidgetEdits, type WidgetEdit } from "generative-frame/tools";
 import { parseSpecStream, type Spec } from "generative-frame/spec";
@@ -11,7 +8,10 @@ import { previewXlsx } from "./documents/lazy.js";
 import type { AppEnv } from "./auth.js";
 import { randomToken } from "./crypto.js";
 import { db } from "./db.js";
-import { env } from "./env.js";
+import { refUploadId } from "./media/refs.js";
+import { getMedia, mediaPath } from "./media/store.js";
+import { serveImage } from "./media/variants.js";
+import { imagePath } from "./tools/image.js";
 import { currentBranch, getThread } from "./threads.js";
 
 // Read-only public links. A link is live: it shows the thread's current branch, and revoking deletes it.
@@ -77,6 +77,9 @@ function sharedParts(message: UIMessage, token: string, resolveUI: ReturnType<ty
     const part = raw as { type: string; text?: string; mediaType?: string; url?: string; state?: string; input?: unknown; output?: unknown; toolName?: string };
     if (part.type === "text" && part.text?.trim()) out.push({ type: "text", text: part.text });
     else if (part.type === "file" && part.mediaType?.startsWith("image/") && part.url?.startsWith("data:")) out.push({ type: "image", url: part.url });
+    else if (part.type === "file" && part.mediaType?.startsWith("image/") && refUploadId(part.url)) {
+      out.push({ type: "image", url: `/api/public/shares/${token}/uploads/${refUploadId(part.url)}`, variants: true });
+    }
     else if (part.type.startsWith("tool-") || part.type === "dynamic-tool") {
       const name = toolName(part);
       const output = part.state === "output-available" ? part.output : undefined;
@@ -88,7 +91,8 @@ function sharedParts(message: UIMessage, token: string, resolveUI: ReturnType<ty
         out.push(ui);
       } else if (GENERATIVE_TOOLS.has(name)) continue;
       else if (name === "generate_image" && (output as { id?: string })?.id) {
-        out.push({ type: "image", url: `/api/public/shares/${token}/images/${(output as { id: string }).id}` });
+        const image = output as { id: string; width?: number | null; height?: number | null };
+        out.push({ type: "image", url: `/api/public/shares/${token}/images/${image.id}`, variants: true, ...(image.width && image.height ? { width: image.width, height: image.height } : {}) });
       } else if (ARTIFACT_TOOLS.has(name) && (output as ArtifactToolResult)?.id) {
         const a = output as ArtifactToolResult;
         out.push({ type: "artifact", id: a.id, title: a.title, kind: a.kind, version: a.version });
@@ -113,14 +117,17 @@ function sharedMessages(share: { user_id: string; thread_id: string; token: stri
 function sharedAssets(share: { user_id: string; thread_id: string; token: string }) {
   const artifacts = new Map<string, number>();
   const images = new Set<string>();
+  const uploads = new Set<string>();
   const imagePrefix = `/api/public/shares/${share.token}/images/`;
+  const uploadPrefix = `/api/public/shares/${share.token}/uploads/`;
   for (const message of sharedMessages(share)) {
     for (const part of message.parts) {
       if (part.type === "artifact") artifacts.set(part.id, Math.max(artifacts.get(part.id) ?? 0, part.version));
       else if (part.type === "image" && part.url.startsWith(imagePrefix)) images.add(part.url.slice(imagePrefix.length));
+      else if (part.type === "image" && part.url.startsWith(uploadPrefix)) uploads.add(part.url.slice(uploadPrefix.length));
     }
   }
-  return { artifacts, images };
+  return { artifacts, images, uploads };
 }
 
 /** Versions of a shared artifact up to the newest one the shared branch shows. */
@@ -195,11 +202,23 @@ export const publicShareRoutes = new Hono()
     if (artifact.kind !== "xlsx") return c.json({ error: "Preview is only available for spreadsheets" }, 400);
     return c.json(await previewXlsx(data));
   })
-  .get("/:token/images/:id", (c) => {
+  // Every response and revalidation re-checks the live share and that the shared branch shows the image,
+  // so revoking a link or editing the branch away ends access; `no-cache` keeps caches from bypassing that.
+  .get("/:token/images/:id", async (c) => {
     const share = byToken(c.req.param("token"));
-    // The image must have been generated in the shared thread, not just by the same user.
-    const image = share && sharedAssets(share).images.has(c.req.param("id")) && (db.prepare("SELECT id, mime FROM images WHERE id = ? AND user_id = ? AND thread_id = ?").get(c.req.param("id"), share.user_id, share.thread_id) as { id: string; mime: string } | undefined);
+    const id = c.req.param("id");
+    // The image must belong to the shared thread (generated there, or referenced by this fork), not just to the same user.
+    const image = share && sharedAssets(share).images.has(id) && (db.prepare(`SELECT i.id, i.mime, i.size FROM images i
+      WHERE i.id = ? AND i.user_id = ? AND (i.thread_id = ? OR EXISTS (SELECT 1 FROM image_threads r WHERE r.image_id = i.id AND r.thread_id = ?))`)
+      .get(id, share.user_id, share.thread_id, share.thread_id) as { id: string; mime: string; size: number } | undefined);
     if (!share || !image) return c.json({ error: "Not found" }, 404);
-    const stream = Readable.toWeb(createReadStream(path.join(env.dataDir, "images", share.user_id, `${image.id}.png`))) as ReadableStream;
-    return new Response(stream, { headers: { "Content-Type": image.mime, "Cache-Control": "public, max-age=3600" } });
+    return serveImage(c, { userId: share.user_id, key: image.id, file: imagePath(share.user_id, image.id), mime: image.mime, size: image.size, etag: image.id });
+  })
+  .get("/:token/uploads/:id", async (c) => {
+    const share = byToken(c.req.param("token"));
+    const id = c.req.param("id");
+    const upload = share && sharedAssets(share).uploads.has(id) && (db.prepare("SELECT media_id FROM uploads WHERE id = ? AND user_id = ?").get(id, share.user_id) as { media_id: string | null } | undefined);
+    const media = upload && upload.media_id ? getMedia(upload.media_id) : undefined;
+    if (!share || !media || media.user_id !== share.user_id) return c.json({ error: "Not found" }, 404);
+    return serveImage(c, { userId: share.user_id, key: media.id, file: mediaPath(media), mime: media.mime, size: media.size, etag: media.sha256.slice(0, 32) });
   });

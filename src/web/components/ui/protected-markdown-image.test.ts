@@ -16,7 +16,8 @@ test("a loaded image drops srcSet and sizes and never sends a referrer", () => {
     }),
   );
   assert.match(html, /<img /);
-  assert.match(html, /src="\/api\/images\/img_1"/);
+  // An app-owned image loads a bounded server-made preview of itself, nothing else.
+  assert.match(html, /src="\/api\/images\/img_1\?variant=large"/);
   assert.doesNotMatch(html, /srcset|tracker\.test/i, "a secondary remote source cannot start a request");
   assert.doesNotMatch(html, /sizes=/);
   assert.match(html, /referrerPolicy="no-referrer"/i);

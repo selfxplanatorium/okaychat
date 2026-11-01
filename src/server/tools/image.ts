@@ -1,8 +1,7 @@
 import { spawn } from "node:child_process";
-import { createReadStream, mkdirSync } from "node:fs";
-import { readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdirSync } from "node:fs";
+import { readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { Readable } from "node:stream";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { generateImage as generateWithModel, tool, type ImageModel, type ToolSet } from "ai";
@@ -21,6 +20,10 @@ import { promptText } from "../prompts.js";
 import { listImageModels } from "./image-models.js";
 import { publicFetch } from "../public-fetch.js";
 import { getSettings } from "../settings.js";
+import { tx } from "../db.js";
+import { getMedia, mediaPath, removeVariants } from "../media/store.js";
+import { sniffRaster, type RasterMime } from "../media/sniff.js";
+import { inspectRaster, MediaProcessingError, serveImage } from "../media/variants.js";
 
 // Image generation through one of several services: the user's own ChatGPT plan (by running `codex exec`
 // as a relay that only calls Codex's built-in image tool), or an image API reached with the user's key.
@@ -70,53 +73,13 @@ export interface GeneratedImage extends StoredImage {
   model: string | null;
 }
 
-type ImageMime = "image/png" | "image/jpeg" | "image/webp" | "image/gif";
+type ImageMime = RasterMime;
 
 // Every format keeps the `.png` name so older paths stay valid. The `mime` column is authoritative.
 export const imagePath = (userId: string, id: string) => path.join(IMAGE_DIR, userId, `${id}.png`);
 
 /** Detect the format from magic bytes. A provider's own media type is never trusted for serving. */
-function sniff(buf: Buffer): ImageMime | null {
-  if (buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
-  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
-  if (buf.toString("latin1", 0, 4) === "RIFF" && buf.toString("latin1", 8, 12) === "WEBP") return "image/webp";
-  if (buf.toString("latin1", 0, 4) === "GIF8") return "image/gif";
-  return null;
-}
-
-function dimensions(buf: Buffer, mime: ImageMime): { width: number; height: number } | null {
-  try {
-    switch (mime) {
-      // IHDR: width and height are big-endian at bytes 16 and 20.
-      case "image/png":
-        return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
-      case "image/gif":
-        return { width: buf.readUInt16LE(6), height: buf.readUInt16LE(8) };
-      case "image/webp": {
-        const chunk = buf.toString("latin1", 12, 16);
-        if (chunk === "VP8X") return { width: 1 + buf.readUIntLE(24, 3), height: 1 + buf.readUIntLE(27, 3) };
-        if (chunk === "VP8L") {
-          const bits = buf.readUInt32LE(21);
-          return { width: 1 + (bits & 0x3fff), height: 1 + ((bits >> 14) & 0x3fff) };
-        }
-        return { width: buf.readUInt16LE(26) & 0x3fff, height: buf.readUInt16LE(28) & 0x3fff };
-      }
-      case "image/jpeg": {
-        // Walk the segments to the first start-of-frame marker.
-        let i = 2;
-        while (i + 9 < buf.length) {
-          if (buf[i] !== 0xff) return null;
-          const marker = buf[i + 1]!;
-          if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) return { width: buf.readUInt16BE(i + 7), height: buf.readUInt16BE(i + 5) };
-          i += 2 + buf.readUInt16BE(i + 2);
-        }
-        return null;
-      }
-    }
-  } catch {
-    return null;
-  }
-}
+const sniff = (buf: Buffer): ImageMime | null => sniffRaster(buf);
 
 /** Codex prints `ERROR: {json}` lines. Return only the message, never the transcript, which echoes the prompt. */
 function codexError(stderr: string): string {
@@ -277,63 +240,91 @@ async function generateWithApi(service: ImageService, prompt: string, references
   }
 }
 
-export async function generateImage(opts: { userId: string; threadId: string; service: ImageService; prompt: string; references: string[]; signal?: AbortSignal }): Promise<GeneratedImage> {
-  const references = opts.references.map((id) => {
-    const row = db.prepare("SELECT id FROM images WHERE id = ? AND user_id = ?").get(id, opts.userId);
-    if (!row) throw new Error(`Unknown reference image \`${id}\`. Use ids returned by generate_image.`);
-    return imagePath(opts.userId, id);
+/**
+ * Reference images for an edit: earlier generated images (`img_…`) or the user's own attached images (the
+ * `file_id` of an image attachment). Both only from this account; the original bytes are used, never a preview.
+ */
+export function referencePaths(userId: string, ids: string[]): string[] {
+  return ids.map((id) => {
+    if (db.prepare("SELECT id FROM images WHERE id = ? AND user_id = ?").get(id, userId)) return imagePath(userId, id);
+    const upload = db.prepare("SELECT media_id FROM uploads WHERE id = ? AND user_id = ?").get(id, userId) as { media_id: string | null } | undefined;
+    const media = upload?.media_id ? getMedia(upload.media_id) : undefined;
+    if (media && media.user_id === userId) return mediaPath(media);
+    throw new Error(`Unknown reference image \`${id}\`. Use ids returned by generate_image or the file_id of an attached image.`);
   });
+}
+
+export async function generateImage(opts: { userId: string; threadId: string; service: ImageService; prompt: string; references: string[]; signal?: AbortSignal }): Promise<GeneratedImage> {
+  const references = referencePaths(opts.userId, opts.references);
   const buf = opts.service.def.credential === "codex"
     ? await generateWithCodex(opts.userId, opts.prompt, references, opts.signal)
     : await generateWithApi(opts.service, opts.prompt, references, opts.signal);
   const stored = await storeImage(opts.userId, opts.threadId, buf, opts.prompt);
-  if (!stored) throw new Error(`${opts.service.def.name} did not return a PNG, JPEG, WebP, or GIF image.`);
+  if (!stored) throw new Error(`${opts.service.def.name} did not return a PNG, JPEG, WebP, GIF, or AVIF image.`);
   return { ...stored, service: opts.service.def.name, model: opts.service.model };
 }
 
 /**
  * Saves a raster image to the thread's images (Library, quota, thread deletion). Returns null when the
- * bytes are not PNG, JPEG, WebP, or GIF. `label` is the prompt column: the request or the image's source.
+ * bytes are not a raster image that fully decodes within the pixel limit. `label` is the prompt column:
+ * the request or the image's source.
  */
 export async function storeImage(userId: string, threadId: string, buf: Buffer, label: string): Promise<StoredImage | null> {
   const mime = sniff(buf);
   if (!mime) return null;
-  // The model sees the quota message; nothing is written before the check.
-  assertStorage(userId, buf.length);
-  const size = dimensions(buf, mime);
-  const id = newId("img");
-  mkdirSync(path.join(IMAGE_DIR, userId), { recursive: true });
-  await writeFile(imagePath(userId, id), buf);
-  // Other writes may have used the space during the await; check again right before the charge is recorded.
+  let size: { width: number; height: number };
   try {
-    assertStorage(userId, buf.length);
+    size = await inspectRaster(buf);
   } catch (error) {
-    await rm(imagePath(userId, id), { force: true });
+    if (error instanceof MediaProcessingError) return null;
     throw error;
   }
-  db.prepare("INSERT INTO images (id, user_id, thread_id, prompt, width, height, size, mime, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
-    id,
-    userId,
-    threadId,
-    label,
-    size?.width ?? null,
-    size?.height ?? null,
-    buf.length,
-    mime,
-    Date.now(),
-  );
-  return { id, url: `/api/images/${id}`, mime, width: size?.width ?? null, height: size?.height ?? null };
+  // The model sees the quota message; nothing is written before the check.
+  assertStorage(userId, buf.length);
+  const id = newId("img");
+  const file = imagePath(userId, id);
+  mkdirSync(path.dirname(file), { recursive: true });
+  const temp = `${file}.tmp-${id}`;
+  await writeFile(temp, buf);
+  await rename(temp, file);
+  try {
+    // Other writes may have used the space during the await; check again right before the charge is recorded.
+    tx(() => {
+      assertStorage(userId, buf.length);
+      db.prepare("INSERT INTO images (id, user_id, thread_id, prompt, width, height, size, mime, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+        id, userId, threadId, label, size.width, size.height, buf.length, mime, Date.now(),
+      );
+      if (db.prepare("SELECT 1 FROM threads WHERE id = ? AND user_id = ?").get(threadId, userId)) {
+        db.prepare("INSERT INTO image_threads (image_id, thread_id) VALUES (?, ?)").run(id, threadId);
+      }
+    });
+  } catch (error) {
+    // Quota, a deleted chat, or a failed insert: no row means no file.
+    await rm(file, { force: true });
+    throw error;
+  }
+  return { id, url: `/api/images/${id}`, mime, width: size.width, height: size.height };
 }
 
-/** Generated images belong to their thread. Called when a thread is deleted. */
-export async function deleteThreadImages(userId: string, threadId: string) {
-  const rows = db.prepare("SELECT id FROM images WHERE user_id = ? AND thread_id = ?").all(userId, threadId) as Array<{ id: string }>;
-  db.prepare("DELETE FROM images WHERE user_id = ? AND thread_id = ?").run(userId, threadId);
-  await Promise.all(rows.map((r) => rm(imagePath(userId, r.id), { force: true })));
+/** Deletes one generated image: metadata first, then its file and derivatives. */
+export async function deleteImage(userId: string, id: string): Promise<boolean> {
+  if (!db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(id, userId).changes) return false;
+  await rm(imagePath(userId, id), { force: true });
+  removeVariants(userId, id);
+  return true;
+}
+
+/**
+ * Generated images live while a chat shows them. Called after a thread is deleted (its image_threads rows
+ * are gone by cascade): an image a fork still references survives.
+ */
+export async function deleteThreadImages(userId: string, _threadId: string) {
+  const rows = db.prepare("SELECT id FROM images i WHERE user_id = ? AND NOT EXISTS (SELECT 1 FROM image_threads r WHERE r.image_id = i.id)").all(userId) as Array<{ id: string }>;
+  for (const row of rows) await deleteImage(userId, row.id);
 }
 
 const PROMPT_RULES =
-  "Pass the user's image request in their own words, verbatim where possible. Only light cleanup or resolving references from the conversation is allowed; preserve their meaning and level of detail. Do not add visual details such as subjects, composition, style, lighting, colors, text, or aspect ratio unless the user supplied them or explicitly asked you to embellish the prompt. A short or vague request is valid. If you want to embellish it, ask the user first; otherwise generate it as given. To edit or keep consistency with earlier images, pass their ids as references. Takes up to a minute or two. The image is shown to the user; do not describe it back in full.";
+  "Pass the user's image request in their own words, verbatim where possible. Only light cleanup or resolving references from the conversation is allowed; preserve their meaning and level of detail. Do not add visual details such as subjects, composition, style, lighting, colors, text, or aspect ratio unless the user supplied them or explicitly asked you to embellish the prompt. A short or vague request is valid. If you want to embellish it, ask the user first; otherwise generate it as given. To edit or keep consistency with earlier images, pass their ids as references; an image the user attached is referenced by its file_id. Takes up to a minute or two. The image is shown to the user; do not describe it back in full.";
 
 const serviceLabel = (s: ImageService) => `\`${s.def.id}\`: ${s.def.name}${s.model ? ` (${s.model})` : ""}`;
 
@@ -341,7 +332,7 @@ const serviceLabel = (s: ImageService) => `\`${s.def.id}\`: ${s.def.name}${s.mod
 export function imageTools(userId: string, threadId: string, services: ImageService[], signal?: AbortSignal): ToolSet {
   const base = {
     prompt: z.string().min(1).describe("The user's image request, verbatim or lightly cleaned up. No invented visual details unless the user explicitly requested embellishment."),
-    reference_image_ids: z.array(z.string()).max(8).optional().describe("Ids of earlier generated images to edit or use as references, in order"),
+    reference_image_ids: z.array(z.string()).max(8).optional().describe("Images to edit or use as references, in order: ids returned by generate_image, or the file_id of an image the user attached"),
   };
   if (services.length === 1) {
     const only = services[0]!;
@@ -370,10 +361,10 @@ export function imageTools(userId: string, threadId: string, services: ImageServ
 export const imageRoutes = new Hono<AppEnv>()
   .get("/images/:id", async (c) => {
     const user = c.get("user");
-    const row = db.prepare("SELECT id, mime FROM images WHERE id = ? AND user_id = ?").get(c.req.param("id"), user.id) as { id: string; mime: string } | undefined;
+    const row = db.prepare("SELECT id, mime, size FROM images WHERE id = ? AND user_id = ?").get(c.req.param("id"), user.id) as { id: string; mime: string; size: number } | undefined;
     if (!row) return c.json({ error: "Not found" }, 404);
-    const stream = Readable.toWeb(createReadStream(imagePath(user.id, row.id))) as ReadableStream;
-    return new Response(stream, { headers: { "Content-Type": row.mime, "Cache-Control": "private, no-store" } });
+    // Generated images never change, so the id is the validator.
+    return serveImage(c, { userId: user.id, key: row.id, file: imagePath(user.id, row.id), mime: row.mime, size: row.size, etag: row.id });
   })
   .get("/image-services", (c) => c.json(imageServiceStatuses(c.get("user").id)))
   .get("/image-services/:id/models", async (c) => {

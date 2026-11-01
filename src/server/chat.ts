@@ -45,6 +45,8 @@ import { attachedCollectionIds, conversationKnowledge, type KnowledgeTurn } from
 import { contextText, insertTurnContexts, saveTurnContext, shownFactIds, storedTurnContexts } from "./turn-context.js";
 import { isVoiceTurn, withVoiceNotes } from "./voice/turn.js";
 import { adaptPdfParts } from "./pdf-parts.js";
+import { resolveImageRefs } from "./media/refs.js";
+import { storedImageChunks } from "./media/stream.js";
 import { getProject, projectContext } from "./projects.js";
 import { applyUntrustedEnvelopes, approvalRiskReason, messagesHaveUntrustedContent, riskOfTool, toolsHaveExternalMetadata, wrapUntrusted } from "./prompt-injection.js";
 import { turnSkills } from "./skills.js";
@@ -349,7 +351,7 @@ export async function turnStream(opts: TurnOptions) {
         // Transient so the notice never becomes part of the stored reply or its prompt prefix.
         onRetry: (notice) => writer.write({ type: "data-retry", data: notice, transient: true }),
       });
-      const modelMessages = applyUntrustedEnvelopes(await historyMessages(applied, (tail) => adaptPdfParts(tail, model), tools));
+      const modelMessages = applyUntrustedEnvelopes(await historyMessages(applied, async (tail) => adaptPdfParts(await resolveImageRefs(userId, tail), model), tools));
       // Per-turn taint: project files and every replayed attachment/tool result are third-party content.
       // The approval gate below also checks each step's messages, so a run_code or MCP result taints the
       // next step without a persisted account flag. System 1/2 and the tool block do not reach the gate's
@@ -569,7 +571,7 @@ export async function turnStream(opts: TurnOptions) {
             }
             return undefined;
           },
-        })),
+        }).pipeThrough(storedImageChunks(userId, threadId, describeError))),
       );
     },
   });

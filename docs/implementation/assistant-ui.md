@@ -80,7 +80,7 @@ The top-right ghost button starts a new temporary thread in the in-memory `chat-
 
 The thread adapter owns attachments through `unstable_useAdapters`. Do not override it with a global `attachments` runtime option: AI SDK gives explicit options precedence over context adapters, which would bypass temporary document extraction. The adapter resolves privacy lazily from its own `threadListItem` so background or switched threads use the correct mode.
 
-Once a temporary chat has content, the ghost offers Save to history. Saving copies its current branch through the normal message API, materializes inline attachments, and switches to the new stored thread. Usage is not backfilled. Personalization can be enabled through chat options while temporary; it reads global memory and custom instructions only.
+Once a temporary chat has content, the ghost offers Save to history. Saving copies its current branch through the normal message API, stores inline images once and rewrites them to `okaychat-upload:` references (other inline files are materialized unchanged), and switches to the new stored thread. Usage is not backfilled. Personalization can be enabled through chat options while temporary; it reads global memory and custom instructions only.
 
 ## Model defaults and composer overrides
 
@@ -125,8 +125,13 @@ On mobile, the initial padding and user-message anchor inset are `6rem`, with ma
 
 Attachment adapters live in `runtime/attachments.ts`: images, native/extracted documents, text/code,
 then a binary fallback. Every non-temporary send persists original bytes and propagates quota errors.
-Image/PDF message data URLs remain unchanged; file_id headers link the durable originals. Saving
-temporary messages into normal history also stores inline files, without changing message parts.
+Stored chats reference images as `okaychat-upload:<file_id>` file parts (no base64 in history or requests);
+the server resolves them to the original bytes for the model and the UI loads bounded previews (`media.md`).
+Supported provider image chunks become stored references before reaching the live browser or resumable
+stream buffer; `MessageFile` in `thread.aui.tsx` renders them through `OwnedImage`. Message write responses
+return canonical image-part patches, so the browser cache also holds references instead of inline copies.
+Native PDF data URLs remain unchanged; file_id headers link the durable originals. Temporary chats keep
+images inline in memory.
 
 The AI SDK converter lifts only `file` parts into message attachments; `<attachment>` text parts stay in the
 user message content. `runtime/message-attachments.ts` separates them for display: the bubble renders only typed
@@ -143,7 +148,7 @@ and the user Copy button copies typed text only. The edit composer rebuilds atta
 - `PATCH /api/threads/:id` accepts `title`, `status`, `memoryDisabled`, `pinned`, and `projectId` (`null` removes the project). A project the user does not own returns 404 `Project not found`. Moving needs no memory cleanup: offered memory tools re-check `thread.projectId` on every call.
 - `GET /api/threads?status=regular|archived` filters by status and combines with `project`. Without it both statuses are listed.
 - `POST /api/threads/:id/title` takes optional `text`. Without it the title is derived from the user text parts of the stored current branch (attachment headers skipped, 4000 chars). Foreign threads return 404; `tmp_` ids still return "Temporary chat".
-- `GET /api/threads/:id/export?format=markdown|pdf` exports the current branch (`src/server/export.ts`): `# title`, then `## You` / `## Assistant` with text parts and `_Attachment: name_` lines. Reasoning, tool, and data parts are omitted. PDF renders that Markdown with `react-markdown` + `remark-gfm` (raw HTML escaped) and prints it through the browser worker (`htmlToPdf`); 503 if rendering is unavailable. Responses are `attachment` downloads with `Cache-Control: private, no-store`. 404 for foreign threads, 400 for `tmp_` ids or another format.
+- `GET /api/threads/:id/export?format=markdown|pdf` exports the current branch (`src/server/export.ts`): `# title`, then `## You` / `## Assistant` with text parts, `_Attachment: name_` lines, and `_Image: name_` lines for attached and generated images (PDF export embeds bounded owned previews instead). Reasoning, tool, and data parts are omitted. PDF renders that Markdown with `react-markdown` + `remark-gfm` (raw HTML escaped) and prints it through the browser worker (`htmlToPdf`); 503 if rendering is unavailable. Responses are `attachment` downloads with `Cache-Control: private, no-store`. 404 for foreign threads, 400 for `tmp_` ids or another format.
 
 ## Sidebar row menu (client)
 

@@ -6,9 +6,20 @@ import { promptText } from "./prompts.js";
 import { wrapUntrusted } from "./prompt-injection.js";
 import { costOf, normalizeUsage, recordUsage } from "./usage.js";
 import { adaptPdfParts } from "./pdf-parts.js";
+import { resolveImageRefs } from "./media/refs.js";
+
+/**
+ * A conservative stand-in for one image or file of model input. Providers count images by their own pixel
+ * rules, so this is not exact; reported usage replaces it as soon as a reply arrives.
+ */
+export const FILE_TOKENS = 1_500;
+
+/** Inline data URLs and stored-file references count as one file each, never as their characters. */
+const fileAware = (_key: string, value: unknown) =>
+  typeof value === "string" && (value.startsWith("data:") || value.startsWith("okaychat-upload:")) ? "x".repeat(FILE_TOKENS * 4) : value;
 
 /** Rough token estimate when the provider has not told us yet. */
-export const estimateTokens = (value: unknown) => Math.ceil(JSON.stringify(value).length / 4);
+export const estimateTokens = (value: unknown) => Math.ceil(JSON.stringify(value, fileAware).length / 4);
 
 /** Last known context size: the newest assistant message that reported it, plus anything after it. */
 export function currentContextTokens(messages: UIMessage[]): number {
@@ -124,9 +135,7 @@ function shrink(value: unknown): unknown {
 
 // Inline images and PDFs are base64 data URLs. Counting their characters would wildly overstate the tokens
 // that trimming saves, so each counts as a typical image.
-const FILE_TOKENS = 1_500;
-const estimateSent = (messages: UIMessage[]) =>
-  Math.ceil(JSON.stringify(messages, (_key, value: unknown) => (typeof value === "string" && value.startsWith("data:") ? "x".repeat(FILE_TOKENS * 4) : value)).length / 4);
+const estimateSent = (messages: UIMessage[]) => estimateTokens(messages);
 
 /**
  * Moves the trim boundary to the message before the newest user message, so the latest exchange (and any
@@ -169,7 +178,7 @@ export async function compact(opts: {
   const boundary = opts.messages.at(-1);
   if (!boundary) throw new Error("Nothing to compact");
   const handle = createModel(opts.model, opts.conn, { userId: opts.userId });
-  const history = [...(applied.summary ? summaryMessages(applied.summary) : []), ...(await historyMessages(applied, (tail) => adaptPdfParts(tail, opts.model)))];
+  const history = [...(applied.summary ? summaryMessages(applied.summary) : []), ...(await historyMessages(applied, async (tail) => adaptPdfParts(await resolveImageRefs(opts.userId, tail), opts.model)))];
   const result = await generateText({
     model: handle.model,
     providerOptions: handle.providerOptions,
