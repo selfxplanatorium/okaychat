@@ -41,7 +41,6 @@ export default {
   cmdChatOpenContext: "Show context usage",
   cmdChatCompactNow: "Compact this chat now",
   cmdChatTrimContext: "Trim earlier messages",
-  cmdUxDismissHints: "Dismiss shortcut hints",
   cmdChatLoadImage: "Load a remote image in the chat",
   cmdSettingsProviderModels: "Choose which models a server key shares",
   cmdComposerModel: "Choose model",

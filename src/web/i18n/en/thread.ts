@@ -1,7 +1,6 @@
 export default {
   addAttachment: "Add attachment",
   assistantSaid: "Assistant said",
-  assistantSpeaking: "Assistant is speaking",
   assistantWorking: "Assistant is working",
   attachmentFailed: "{label}, upload failed",
   attachmentOfType: "{type} attachment {name}",
@@ -92,7 +91,6 @@ export default {
   update: "Update",
   uploadFailed: "Upload failed",
   video: "Video",
-  voiceConversation: "Voice conversation",
   welcome: "How can I help you today?",
   workRead: { one: "read a page", other: "read {count} pages" },
   workSearched: { one: "searched the web", other: "searched {count} times" },

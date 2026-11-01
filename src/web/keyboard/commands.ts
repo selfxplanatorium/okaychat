@@ -85,6 +85,7 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "composer.effort", labelKey: "keyboard.cmdComposerEffort", group: "Composer", keys: ["Alt+Shift+T"] },
   { id: "composer.search", labelKey: "keyboard.cmdComposerSearch", group: "Composer", keys: ["Alt+Shift+W"] },
   { id: "composer.research", labelKey: "keyboard.cmdComposerResearch", group: "Composer", keys: ["Alt+Shift+D"] },
+  { id: "composer.searchLimit", labelKey: "composer.searchSteps", group: "Composer", keys: [] },
   { id: "composer.knowledge", labelKey: "keyboard.cmdComposerKnowledge", group: "Composer", keys: ["Alt+Shift+Y"] },
   { id: "composer.attach", labelKey: "keyboard.cmdComposerAttach", group: "Composer", keys: ["Alt+Shift+U"] },
   { id: "composer.prompts", labelKey: "keyboard.cmdComposerPrompts", group: "Composer", keys: [] },
@@ -110,7 +111,6 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "settings.webSearchLimit", labelKey: "ux.openSearchLimitSettings", group: "Settings", keys: [] },
   ...SETTINGS_SECTIONS.map((id): CommandDef => ({ id: `settings.${id}`, labelKey: SETTINGS_LABELS[id], group: "Settings", keys: [] })),
 
-  { id: "ux.dismissHints", labelKey: "keyboard.cmdUxDismissHints", group: "General", keys: [], palette: false },
   { id: "knowledge.newCollection", labelKey: "keyboard.cmdKnowledgeNewCollection", group: "General", keys: [] },
   { id: "knowledge.retryLoad", labelKey: "keyboard.cmdKnowledgeRetryLoad", group: "General", keys: [] },
   { id: "knowledge.editCollection", labelKey: "keyboard.cmdKnowledgeEditCollection", group: "General", keys: [] },

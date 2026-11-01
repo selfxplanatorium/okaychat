@@ -1,10 +1,8 @@
 import { ActionBarMorePrimitive, useAui, useAuiState } from "@assistant-ui/react";
 import type { ThreadSummary } from "@shared/types";
-import { ChevronRightIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
-import { Popover, PopoverContent } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
@@ -12,17 +10,9 @@ import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 import { isTemporaryChat } from "@/state/chat-privacy";
 import { useThreadMeta } from "@/state/thread-meta";
-import { ModelList } from "./ModelPicker";
-
-export function BranchIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
-      <path d="M6 3v18" />
-      <path d="M6 7a8 8 0 0 0 8 8h1v6" />
-      <path d="m12 18 3 3 3-3" />
-    </svg>
-  );
-}
+import { ModelMenuItems } from "./ModelMenuItems";
+import { BranchIcon } from "./branch-icon";
+import { branchPoint } from "./branch-point";
 
 /** Forks waiting for their first answer, keyed by the new thread: the run starts once its history has loaded. */
 const pendingRuns = new Map<string, string>();
@@ -57,19 +47,14 @@ export function PendingBranchRun() {
 }
 
 /**
- * "Branch off" copies the conversation up to this message into a new chat. Choosing a model also forks,
- * then answers again with that model: from a user message it answers that message, from an assistant
- * message it replaces that answer.
+ * Copies through this message with the chosen model. Only a user-message fork starts an answer;
+ * an assistant-message fork keeps the reply and leaves the new model ready for the next message.
  */
 export function BranchMenu() {
   const aui = useAui();
   const role = useAuiState((s) => s.message.role);
   const temporary = useAuiState((s) => isTemporaryChat(s.threadListItem.remoteId ?? s.threadListItem.id));
-  const hasModels = useData((s) => s.models.length > 0);
   const [open, setOpen] = useState(false);
-  // The searchable model list opens in its own popover once the menu closes, anchored to the same button.
-  const [picking, setPicking] = useState(false);
-  const anchor = useRef<HTMLSpanElement>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (!error) return;
@@ -82,20 +67,18 @@ export function BranchMenu() {
 
   const branch = (modelRef?: string) => {
     const message = aui.message.getState();
-    const user = role === "user";
-    // A new answer from an assistant message starts at the user message it answered.
-    const upTo = modelRef && !user ? message.parentId : message.id;
-    if (!upTo) return;
+    const point = branchPoint(message);
+    if (!point) return;
     setError(null);
-    void branchChat(aui, upTo, user || !!modelRef, modelRef).catch((cause) =>
+    void branchChat(aui, point.messageId, point.run, modelRef).catch((cause) =>
       setError(cause instanceof Error ? cause.message : t("composer.branchFailed")),
     );
   };
 
   return (
-    <span ref={anchor} className="relative inline-flex">
+    <span className="relative inline-flex">
       {/* Only for its interaction lock: a hover-revealed action bar stays mounted while the menu or an error shows. */}
-      <ActionBarMorePrimitive.Root open={open || picking || !!error} onOpenChange={setOpen}>
+      <ActionBarMorePrimitive.Root open={open || !!error} onOpenChange={setOpen}>
         <Menu open={open} onOpenChange={(next) => setOpen(next)}>
           <Tooltip>
             <TooltipTrigger
@@ -122,31 +105,10 @@ export function BranchMenu() {
               <BranchIcon />
               {t("composer.branchOff")}
             </MenuItem>
-            {hasModels && (
-              <MenuItem onClick={() => setPicking(true)}>
-                <span className="min-w-0 flex-1 truncate">{t("composer.switchModel")}</span>
-                <ChevronRightIcon className="text-muted-foreground ms-auto" />
-              </MenuItem>
-            )}
+            <ModelMenuItems onSelect={branch} />
           </MenuContent>
         </Menu>
       </ActionBarMorePrimitive.Root>
-      <Popover open={picking} onOpenChange={setPicking}>
-        <PopoverContent
-          anchor={anchor}
-          align={role === "user" ? "end" : "start"}
-          className="flex max-h-[min(22rem,60dvh)] w-[min(20rem,calc(100vw-1rem))] flex-col p-0"
-        >
-          <ModelList
-            compact
-            value={null}
-            onSelect={(ref) => {
-              setPicking(false);
-              branch(ref);
-            }}
-          />
-        </PopoverContent>
-      </Popover>
       {error && (
         <span role="alert" className={cn("text-destructive absolute top-full mt-1 w-max max-w-64 text-xs", role === "user" ? "end-0" : "start-0")}>
           {error}

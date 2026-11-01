@@ -12,6 +12,7 @@ import {
 import { generateId, lastAssistantMessageIsCompleteWithApprovalResponses, lastAssistantMessageIsCompleteWithToolCalls } from "ai";
 import { createAssistantStream } from "assistant-stream";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { resolveReasoningEffort } from "@shared/reasoning";
 import type { MessageEditResult, ThreadSummary } from "@shared/types";
 import { t } from "@/i18n";
 import { api, structuredResponseError, takePrefetched } from "@/lib/api";
@@ -22,8 +23,9 @@ import { loadThreadDetail, useChatModel } from "@/state/thread-meta";
 import { StoredImageAttachmentAdapter, AudioAttachmentAdapter, DocumentAttachmentAdapter, CodeAttachmentAdapter, BinaryAttachmentAdapter } from "./attachments";
 import { chatPrivacyFor, isTemporaryChat, useChatPrivacy, useChatPrivacyStore } from "@/state/chat-privacy";
 import { useVoiceAdapters } from "@/speech/adapters";
-import { chatSearchFor, useChatSearch, useChatSearchStore } from "@/state/chat-search";
-import { chatResearchFor, useChatResearchStore } from "@/state/chat-research";
+import { chatSearchFor, useChatSearch } from "@/state/chat-search";
+import { chatResearchFor } from "@/state/chat-research";
+import { useChatWebStore } from "@/state/chat-web-mode";
 import { persistKnowledgeAttachments, useChatKnowledgeStore } from "@/state/chat-knowledge";
 import { dropThread, readThread, sameRows, ServerRows, writeThread } from "./threadCache";
 import { editedAtOf, rememberEdits } from "@/state/message-edits";
@@ -31,8 +33,8 @@ import { setThreadSync, useThreadSyncStore } from "@/state/thread-sync";
 import { applyRetryNotice, clearRetryNotice, retryChunkData, retryOwnerId } from "@/state/retry-status";
 
 /** Thread metadata the sidebar reads from `threadListItem.custom`. */
-export type ThreadCustom = { pinned: boolean; projectId: string | null };
-const threadCustom = (t: ThreadSummary): ThreadCustom => ({ pinned: t.pinned, projectId: t.projectId });
+export type ThreadCustom = { pinned: boolean; projectId: string | null; branchedFrom: ThreadSummary["branchedFrom"] };
+const threadCustom = (t: ThreadSummary): ThreadCustom => ({ pinned: t.pinned, projectId: t.projectId, branchedFrom: t.branchedFrom });
 
 type MessageRow = { id: string; parent_id: string | null; format: string; content: unknown; edited_at?: number };
 
@@ -171,15 +173,13 @@ const threadListAdapter: RemoteThreadListAdapter = {
     if (chatPrivacyFor({ id: localId }).temporary) {
       const remoteId = `tmp_${generateId()}`;
       useChatPrivacyStore.getState().bind(localId, remoteId);
-      useChatSearchStore.getState().bind(localId, remoteId);
-      useChatResearchStore.getState().bind(localId, remoteId);
+      useChatWebStore.getState().bind(localId, remoteId);
       bindModel(remoteId);
       return { remoteId, externalId: undefined };
     }
     const thread = await api<ThreadSummary>("/threads", { method: "POST", json: { projectId: useData.getState().activeProject } });
     serverRows.created(thread.id);
-    useChatSearchStore.getState().bind(localId, thread.id);
-    useChatResearchStore.getState().bind(localId, thread.id);
+    useChatWebStore.getState().bind(localId, thread.id);
     const knowledgeIds = useChatKnowledgeStore.getState().byId[localId];
     // Persist a choice made on the optimistic chat before the first message is sent, and only then mirror
     // it into the stored chat. A failed PATCH clears the remote entry, so the selector never claims an
@@ -342,7 +342,7 @@ function ModelContextBridge() {
   const aui = useAui();
   const model = useChatModel();
   const privacy = useChatPrivacy();
-  const effort = useData((s) => (model ? s.settings?.reasoningEffort[model.ref] : undefined));
+  const effort = useData((s) => (model ? resolveReasoningEffort(model, s.settings) : undefined));
   const webSearch = useChatSearch().enabled;
   useEffect(
     () =>
@@ -350,8 +350,9 @@ function ModelContextBridge() {
         getModelContext: () => {
           // Retry can select a model and start its run before React installs the next registration.
           const item = aui.threadListItem.getState();
-          const ref = getActiveModel(item.remoteId)?.ref;
-          return { config: { modelName: ref, reasoningEffort: ref ? useData.getState().settings?.reasoningEffort[ref] : undefined, webSearch: chatSearchFor(item), deepResearch: chatResearchFor(item), temporaryPersonalization: chatPrivacyFor(item).personalized } };
+          const active = getActiveModel(item.remoteId);
+          const ref = active?.ref;
+          return { config: { modelName: ref, reasoningEffort: active ? resolveReasoningEffort(active, useData.getState().settings) : undefined, webSearch: chatSearchFor(item), deepResearch: chatResearchFor(item), temporaryPersonalization: chatPrivacyFor(item).personalized } };
         },
       }),
     [aui, model?.ref, effort, webSearch, privacy.personalized, privacy.temporary],

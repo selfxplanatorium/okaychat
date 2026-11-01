@@ -1,5 +1,5 @@
 import { useAui, useAuiState } from "@assistant-ui/react";
-import { Loader2Icon, MicIcon, MicOffIcon, PhoneIcon, PhoneOffIcon, RotateCcwIcon, XIcon } from "lucide-react";
+import { Loader2Icon, MicIcon, MicOffIcon, AudioLinesIcon, PhoneOffIcon, RotateCcwIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState, type FC, type KeyboardEvent } from "react";
 import type { CallEngine } from "@shared/voice";
 import { Button } from "@/components/ui/button";
@@ -270,7 +270,7 @@ export function CallView() {
         <header className="flex items-start justify-between gap-3 border-b px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-4">
           <div className="min-w-0">
             <DialogTitle className="flex items-center gap-2 text-base font-semibold">
-              <PhoneIcon className="text-primary size-4" aria-hidden />
+              <AudioLinesIcon className="text-primary size-4" aria-hidden />
               {t("voice.callTitle")}
             </DialogTitle>
             <DialogDescription className="text-muted-foreground mt-0.5 text-xs">{t("voice.callPrivacy")}</DialogDescription>
@@ -448,7 +448,7 @@ export function CallView() {
         <footer className="flex items-center justify-center gap-3 border-t px-5 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
           {(call.phase === "idle" || call.phase === "ended") && (
             <Button data-command="call.start" onClick={() => chosen && start(chosen)} disabled={!canStart} className="min-h-11 min-w-40">
-              <PhoneIcon className="size-4" aria-hidden />
+              <AudioLinesIcon className="size-4" aria-hidden />
               {call.phase === "ended" ? t("voice.callStartAgain") : t("voice.callStart")}
             </Button>
           )}

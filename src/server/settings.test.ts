@@ -18,6 +18,22 @@ const app = new Hono().patch("/settings", async (c) => c.json(updateSettings("al
 after(() => { db.close(); rmSync(dataDir, { recursive: true, force: true }); });
 beforeEach(() => db.exec("DELETE FROM user_settings"));
 
+test("reasoning defaults to Medium for new and existing accounts and persists per account", async () => {
+  assert.equal(getSettings("alice").defaultReasoningEffort, "medium");
+  db.prepare("INSERT INTO user_settings VALUES (?, ?)").run("alice", JSON.stringify({ reasoningEffort: { "provider/model": "low" } }));
+  assert.equal(getSettings("alice").defaultReasoningEffort, "medium");
+  updateSettings("alice", { defaultReasoningEffort: "high" });
+  assert.equal(getSettings("alice").defaultReasoningEffort, "high");
+  assert.equal(getSettings("alice").reasoningEffort["provider/model"], "low");
+  assert.equal(getSettings("bob").defaultReasoningEffort, "medium");
+  for (const value of [null, "auto", 3]) {
+    const response = await app.request("http://app/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ defaultReasoningEffort: value }) });
+    assert.equal(response.status, 400);
+  }
+  db.prepare("UPDATE user_settings SET json = ? WHERE user_id = ?").run(JSON.stringify({ defaultReasoningEffort: "invalid" }), "alice");
+  assert.equal(getSettings("alice").defaultReasoningEffort, "medium");
+});
+
 test("sub-agents can independently follow the utility model or the chat model", () => {
   const settings = updateSettings("alice", { utilityModel: "provider/utility", subagentModel: null });
   assert.deepEqual(subagentModelRefs(settings, "provider/chat"), ["provider/utility", "provider/chat"]);

@@ -1,8 +1,11 @@
 import { Loader2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
+import { REASONING_EFFORTS } from "@shared/reasoning";
 import { DEFAULT_USER_SETTINGS, SIDEBAR_ITEMS, type ModelInfo } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Select } from "@/components/ui/select";
+import { EffortIcon } from "../chat/EffortIcon";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { t } from "@/i18n";
@@ -10,7 +13,7 @@ import { formatPercent } from "@/i18n/format";
 import { useServices } from "@/state/services";
 import { ServiceAvailability } from "@/components/ServiceAvailability";
 import { useData } from "@/state/data";
-import { ModelSelect } from "../chat/ModelPicker";
+import { effortLabel, ModelSelect } from "../chat/ModelPicker";
 import { ImageServicesSettings } from "./ImageServicesSettings";
 import { SettingsPage, SettingsRow, SettingsSection, SettingsSlider } from "./SettingsUI";
 
@@ -79,6 +82,23 @@ export function GeneralSettings() {
           label={t("general.defaultModel")}
           description={t("general.defaultModelDescription")}
           control={<ModelSelect aria-label={t("general.defaultModel")} className="w-full md:w-80" value={settings.defaultModel ?? ""} onValueChange={(v) => update({ defaultModel: v || null })} choices={[{ value: "", label: t("general.firstAvailableModel") }]} />}
+        />
+        <SettingsRow
+          label={t("general.defaultReasoningEffort")}
+          description={t("general.defaultReasoningEffortDescription")}
+          reset={settings.defaultReasoningEffort !== DEFAULT_USER_SETTINGS.defaultReasoningEffort ? () => update({ defaultReasoningEffort: DEFAULT_USER_SETTINGS.defaultReasoningEffort }) : null}
+          control={
+            <Select
+              aria-label={t("general.defaultReasoningEffort")}
+              className="w-full md:w-80"
+              value={settings.defaultReasoningEffort ?? "medium"}
+              onValueChange={(defaultReasoningEffort) => update({ defaultReasoningEffort })}
+              options={REASONING_EFFORTS.map((effort) => ({
+                value: effort,
+                label: <span className="inline-flex items-center gap-2"><EffortIcon effort={effort} options={REASONING_EFFORTS} />{effortLabel(effort)}</span>,
+              }))}
+            />
+          }
         />
         <SettingsRow
           label={t("general.utilityModel")}

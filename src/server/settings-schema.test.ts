@@ -12,15 +12,17 @@ const { db } = await import("./db.js");
 const { settingsPatch } = await import("./settings-schema.js");
 after(() => { db.close(); rmSync(dataDir, { recursive: true, force: true }); });
 
-test("shortcut hint dismissal is a boolean preference the settings API accepts", () => {
-  const parsed = settingsPatch.safeParse({ shortcutHintsDismissed: true });
-  assert.equal(parsed.success, true);
-  assert.equal(parsed.success && parsed.data.shortcutHintsDismissed, true);
-  assert.equal(settingsPatch.safeParse({ shortcutHintsDismissed: "yes" }).success, false);
+test("the settings endpoint accepts only explicit known default reasoning levels", () => {
+  for (const level of ["none", "minimal", "low", "medium", "high", "xhigh", "max"]) {
+    assert.deepEqual(settingsPatch.parse({ defaultReasoningEffort: level }), { defaultReasoningEffort: level });
+  }
+  for (const level of ["default", "auto", null, 1]) {
+    assert.equal(settingsPatch.safeParse({ defaultReasoningEffort: level }).success, false);
+  }
 });
 
 test("unknown settings keys are dropped instead of reaching user settings", () => {
-  const parsed = settingsPatch.safeParse({ shortcutHintsDismissed: true, notASetting: "injected" });
+  const parsed = settingsPatch.safeParse({ onboardingSkipped: true, notASetting: "injected" });
   assert.equal(parsed.success, true);
   assert.equal(Object.hasOwn(parsed.success ? parsed.data : {}, "notASetting"), false);
 });

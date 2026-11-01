@@ -1,5 +1,6 @@
 export default {
   title: "Voice",
+  callContinue: "Continue voice call",
   description: "Read replies aloud and dictate messages.",
   detectAutomatically: "Detect automatically",
   sample: "Hello! This is how replies will sound when they are read aloud.",

@@ -169,12 +169,11 @@ export interface UserSettings {
   appearance?: UserAppearance;
   /** The user dismissed the first-run provider screen and explores without a connection. */
   onboardingSkipped?: boolean;
-  /** The quiet shortcut hints in an empty chat were dismissed for this account. */
-  shortcutHintsDismissed?: boolean;
   defaultModel?: string | null;
   /** Used for titles and compaction summaries. Falls back to the chat model. */
   utilityModel?: string | null;
   favoriteModels: string[];
+  defaultReasoningEffort: ReasoningEffort;
   reasoningEffort: Record<string, ReasoningEffort>;
   systemPrompt: string;
   /** Fraction of the context window that triggers automatic compaction. 0 disables. */
@@ -207,6 +206,7 @@ export interface UserSettings {
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
   favoriteModels: [],
+  defaultReasoningEffort: "medium",
   reasoningEffort: {},
   systemPrompt: "",
   autoCompactAt: 0.8,

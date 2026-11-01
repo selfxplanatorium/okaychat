@@ -4,6 +4,7 @@ import { t } from "@/i18n";
 import { useCommand, useKeyboardDialog, useShortcutProps } from "@/keyboard/registry";
 import { SIDEBAR_ITEMS } from "@shared/types";
 import { useChatPrivacyStore } from "@/state/chat-privacy";
+import { KnowledgeControl } from "@/components/knowledge/KnowledgeSelector";
 import { ChatSearch } from "./ChatSearch";
 import { CalendarClockIcon, BookOpenIcon, FolderIcon, LibraryIcon, LogOutIcon, PanelLeftIcon, PlusIcon, PuzzleIcon, SearchIcon, SettingsIcon, SquarePenIcon, UserRoundIcon } from "lucide-react";
 import { Link, useLocation } from "wouter";
@@ -107,6 +108,7 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
                   >
                     <item.icon className="size-4 shrink-0" /> {t(item.label)}
                   </Link>
+                  {item.id === "knowledge" && <KnowledgeControl reveal={() => { if (!open) onToggle(); }} />}
                   {"create" in item && (
                     // Sibling, never inside the Link: the row keeps opening its page while this opens the form.
                     <button

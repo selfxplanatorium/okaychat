@@ -1,3 +1,4 @@
+import { REASONING_EFFORTS } from "../shared/reasoning.js";
 import { imageServiceDef } from "../shared/image-services.js";
 import { DEFAULT_USER_SETTINGS, SIDEBAR_ITEMS, type UserSettings } from "../shared/types.js";
 import { HTTPException } from "hono/http-exception";
@@ -11,6 +12,7 @@ export function getSettings(userId: string): UserSettings {
   for (const [key, min] of [["maxSteps", 1], ["maxSearches", 0]] as const) {
     if (!validLimit(settings[key], min)) settings[key] = DEFAULT_USER_SETTINGS[key];
   }
+  if (!REASONING_EFFORTS.includes(settings.defaultReasoningEffort)) settings.defaultReasoningEffort = DEFAULT_USER_SETTINGS.defaultReasoningEffort;
   if (settings.sidebarItems !== undefined && !validSidebarItems(settings.sidebarItems)) delete settings.sidebarItems;
   if (settings.imageServices !== undefined && !validImageServices(settings.imageServices)) delete settings.imageServices;
   if (settings.speech !== undefined && !validSpeechSettings(settings.speech)) delete settings.speech;
@@ -31,6 +33,9 @@ export function updateSettings(userId: string, patch: Partial<UserSettings>): Us
   }
   if (Object.hasOwn(patch, "speech") && !validSpeechSettings(patch.speech)) {
     throw new HTTPException(400, { message: "speech has an unknown engine or value" });
+  }
+  if (Object.hasOwn(patch, "defaultReasoningEffort") && !REASONING_EFFORTS.includes(patch.defaultReasoningEffort!)) {
+    throw new HTTPException(400, { message: "defaultReasoningEffort must be a known reasoning level" });
   }
   const next = { ...getSettings(userId), ...patch };
   db.prepare(

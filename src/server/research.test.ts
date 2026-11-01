@@ -110,9 +110,9 @@ function transport(t: TestContext, script: {
 type Chunk = { type: string; [key: string]: unknown };
 const userMessage = (text = "Research A versus B"): UIMessage => ({ id: `user-${text.length}`, role: "user", parts: [{ type: "text", text }] });
 
-async function run(threadId: string, opts: { messages?: UIMessage[]; deepResearch?: boolean; signal?: AbortSignal } = {}) {
+async function run(threadId: string, opts: { messages?: UIMessage[]; deepResearch?: boolean; webSearch?: boolean; signal?: AbortSignal } = {}) {
   const chunks: Chunk[] = [];
-  const stream = await turnStream({ userId: "alice", threadId, modelRef: "custom-test/mock", uiMessages: opts.messages ?? [userMessage()], deepResearch: opts.deepResearch ?? true, signal: opts.signal });
+  const stream = await turnStream({ userId: "alice", threadId, modelRef: "custom-test/mock", uiMessages: opts.messages ?? [userMessage()], deepResearch: opts.deepResearch ?? true, webSearch: opts.webSearch, signal: opts.signal });
   for await (const chunk of stream) chunks.push(chunk as Chunk);
   return chunks;
 }
@@ -123,7 +123,7 @@ const usageKinds = () => (db.prepare("SELECT kind, count(*) AS n FROM usage GROU
 
 test("deep research plans, collects, follows up a gap, and hands cited findings to the chat model", async (t) => {
   const fake = transport(t, { review: (call) => (call === 1 ? json({ gaps: ["Is B still maintained?"], conflicts: [] }) : json({ gaps: [], conflicts: ["Source X and Y disagree on B's release date."] })) });
-  const chunks = await run("research-chat");
+  const chunks = await run("research-chat", { webSearch: true });
   assert.ok(!chunks.some((c) => c.type === "error"), JSON.stringify(chunks.filter((c) => c.type === "error")));
 
   // Stages ran in order: plan, two workers, review, one follow-up worker, review, then the chat model's report.
@@ -149,10 +149,12 @@ test("deep research plans, collects, follows up a gap, and hands cited findings 
   assert.match(final.findings ?? "", /\[Spec\]\(https:\/\/example.test\/worker%20\d+\) \(primary\)/);
   assert.ok(final.cost >= 0);
 
-  // Workers get only the read-only web pair; the chat model keeps its tools plus the research result.
+  // Workers search; the chat model gets the research result without a separate search mode.
   for (const body of fake.of("worker")) assert.deepEqual(toolNames(body), ["web_fetch", "web_search"]);
   const [chat] = fake.of("chat");
   assert.ok(toolNames(chat!).includes("deep_research"));
+  assert.ok(!toolNames(chat!).includes("web_search"), "research takes priority even when both flags are sent");
+  assert.ok(toolNames(chat!).includes("web_fetch"));
   const result = JSON.stringify(chat!.messages.filter((m) => m.role === "tool"));
   assert.ok(result.includes("Deep research has finished"));
   assert.ok(result.includes("disagree on B's release date"));
@@ -307,6 +309,7 @@ test("chats without research keep their tool block; temporary research leaves no
   const fake = transport(t, {});
   await run("plain-chat", { deepResearch: false });
   assert.ok(!toolNames(fake.of("chat")[0]!).includes("deep_research"));
+  assert.ok(toolNames(fake.of("chat")[0]!).includes("web_search"));
   await run("tmp_research");
   assert.equal(fake.of("chat").length, 2);
   assert.deepEqual(usageKinds(), ["chat:1"], "only the stored chat's plain reply is metered");

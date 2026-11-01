@@ -1,5 +1,6 @@
 "use client";
 
+import { BranchIcon } from "@/components/chat/branch-icon";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -543,6 +544,7 @@ export const ThreadListItem: FC = () => {
           {(isRunning || busy) && (
             <Loader2Icon aria-hidden className="text-muted-foreground -ms-1 size-3.5 shrink-0 animate-spin" />
           )}
+          <ThreadListItemBranchIcon />
           <ThreadListItemTitle fallback={t("common.newChat")} />
         </button>
       ) : isRenaming ? (
@@ -569,6 +571,7 @@ export const ThreadListItem: FC = () => {
               className="text-muted-foreground me-1.5 size-3.5 shrink-0 animate-spin"
             />
           )}
+          <ThreadListItemBranchIcon />
           <ThreadListItemTitle fallback={t("common.newChat")} />
           {isRunning && <span className="sr-only">{t("sidebar.running")}</span>}
         </TooltipTrigger>
@@ -591,6 +594,17 @@ export const ThreadListItem: FC = () => {
     />
     <TooltipContent side="bottom" align="start">{title}</TooltipContent>
     </Tooltip>
+  );
+};
+
+const ThreadListItemBranchIcon: FC = () => {
+  const branched = useAuiState((s) => !!(s.threadListItem.custom as Partial<ThreadCustom> | undefined)?.branchedFrom);
+  if (!branched) return null;
+  return (
+    <span className="text-muted-foreground me-1.5 inline-flex shrink-0">
+      <BranchIcon className="size-3.5" />
+      <span className="sr-only">{t("sidebar.branchedChat")}</span>
+    </span>
   );
 };
 

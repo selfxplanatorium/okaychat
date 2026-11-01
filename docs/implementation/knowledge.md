@@ -211,9 +211,9 @@ force a reindex; choosing a different provider or model warns that every source 
 queue starts immediately. The page adds files (drag/drop or picker), pastes text, or fetches one URL; each
 source shows status, progress, error, retry/cancel/reindex/delete. A chunk browser and search-test box open
 the same passage panel as a chat citation; the test label distinguishes keyword-only, hybrid, and a
-provider outage. The composer's Knowledge menu lists attachable collections with checkmarks and a Manage
-link; phone layouts reach it from the plus menu, and the keyboard command opens that visible submenu rather
-than the hidden desktop trigger. Counts use the locale formatter. The selector narrows to the open chat's
+provider outage. Knowledge is a default sidebar shortcut. The companion collection button beside its page link lists
+attachable collections with checkmarks and a Manage link on desktop and phones; it no longer appears
+in the composer or its plus menu. The collection keyboard command opens the sidebar before its menu. Counts use the locale formatter. The selector narrows to the open chat's
 own project (read from thread metadata, not the sidebar filter), and the selection is PATCHed to the thread,
 bound to a new chat's remote id only after the server accepts it, and hydrated from the thread list/detail.
 Every action added here has a command (`knowledge.editCollection`, `knowledge.pasteSource`,

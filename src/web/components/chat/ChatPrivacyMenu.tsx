@@ -4,6 +4,7 @@ import type { ThreadSummary } from "@shared/types";
 import { CalendarClockIcon, MonitorIcon, MoonIcon, MoreHorizontalIcon, PuzzleIcon, SunIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "wouter";
+import { CallButton } from "@/speech/call/CallButton";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
@@ -191,6 +192,7 @@ export function ChatPrivacyMenu() {
         </PopoverTrigger>
         <PopoverContent align="end" className="w-80 max-w-[calc(100vw-1rem)] p-4">
           <h2 className="text-sm font-medium">{privacy.temporary ? t("composer.temporaryChat") : t("composer.chatOptions")}</h2>
+          {started && <CallButton placement="options" onOpen={() => setOpen(false)} />}
           {privacy.temporary ? <>
             <p className="text-muted-foreground mt-1 text-xs">{t("composer.temporaryOptionsBody")}</p>
             <div className="my-4 flex items-center justify-between gap-4">

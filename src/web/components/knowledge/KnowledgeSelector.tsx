@@ -1,4 +1,4 @@
-import { BookOpenIcon, CheckIcon, Loader2Icon, SettingsIcon } from "lucide-react";
+import { PlusIcon, CheckIcon, Loader2Icon, SettingsIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSeparator, MenuTrigger } from "@/components/ui/menu";
@@ -10,14 +10,7 @@ import { useCommand, useShortcut } from "@/keyboard/registry";
 import { ariaCombo } from "@/keyboard/keys";
 import { useChatModel } from "@/state/thread-meta";
 
-const triggerClass =
-  "hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 shrink-0 pointer-coarse:h-9 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart";
-
-/** The composer control is hidden on phones; the plus menu owns the visible knowledge submenu there. */
-const phoneLayout = () =>
-  typeof window !== "undefined" && (window.matchMedia("(max-width: 639.98px)").matches || window.matchMedia("(pointer: coarse)").matches);
-
-/** The list shared by the desktop popup and the phone plus-menu submenu. */
+/** Collection attachments for the active chat, opened from the sidebar. */
 export function KnowledgeMenuItems() {
   const { ids, collections, loading, toggle, refresh, temporary } = useChatKnowledge();
   const [error, setError] = useState<string | null>(null);
@@ -77,16 +70,15 @@ export function KnowledgeMenuItems() {
   );
 }
 
-/** Desktop composer control and its popup. Phones use the plus menu so the row fits at 360 px. */
-export function KnowledgeControl() {
+/** Sidebar companion to the Knowledge page link. */
+export function KnowledgeControl({ reveal }: { reveal: () => void }) {
   const active = useChatModel();
   const { ids, temporary } = useChatKnowledge();
   const combo = useShortcut("composer.knowledge");
   const trigger = useRef<HTMLButtonElement>(null);
-  // On phones the desktop trigger is hidden; return false so the plus menu's handler opens the visible submenu.
   useCommand("composer.knowledge", () => {
-    if (phoneLayout()) return false;
-    trigger.current?.click();
+    reveal();
+    requestAnimationFrame(() => trigger.current?.click());
   }, !!active?.toolCall && !temporary);
   if (!active?.toolCall || temporary) return null;
   const hint = ids.length ? t("knowledge.selectorAttached", { count: ids.length }) : t("knowledge.selectorHelp");
@@ -99,13 +91,12 @@ export function KnowledgeControl() {
         aria-pressed={ids.length > 0}
         aria-keyshortcuts={combo ? ariaCombo(combo) : undefined}
         title={hint}
-        className={cn(triggerClass, "max-sm:hidden pointer-coarse:hidden", ids.length > 0 && "bg-primary/12! text-primary! hover:bg-primary/18!")}
+        className={cn("text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:outline-ring inline-flex h-8 min-w-8 pointer-coarse:h-11 pointer-coarse:min-w-11 shrink-0 items-center justify-center gap-1 rounded-lg px-1.5", ids.length > 0 && "bg-primary/12 text-primary")}
       >
-        <BookOpenIcon className="size-3.5" />
-        {t("knowledge.selector")}
+        <PlusIcon className="size-4" />
         {ids.length > 0 && <span className="tabular-nums">{formatNumber(ids.length)}</span>}
       </MenuTrigger>
-      <MenuContent side="top" align="start" className="max-h-80 w-72">
+      <MenuContent side="right" align="start" className="max-h-80 w-72">
         <KnowledgeMenuItems />
       </MenuContent>
     </Menu>

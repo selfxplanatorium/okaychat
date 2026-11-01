@@ -12,6 +12,8 @@ export default {
   modelsTitle: "Models",
   defaultModel: "Default model",
   defaultModelDescription: "Used for new chats until you pick another in the composer.",
+  defaultReasoningEffort: "Default reasoning effort",
+  defaultReasoningEffortDescription: "Used until you choose a level for a model in the composer. Models use their closest supported level.",
   firstAvailableModel: "First available model",
   utilityModel: "Utility model",
   utilityModelDescription: "Writes chat titles and compaction summaries. A fast, cheap model works best.",

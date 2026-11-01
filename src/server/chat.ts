@@ -13,6 +13,7 @@ import { frontendTools, type FrontendTools } from "assistant-stream/ai-sdk";
 import { createInMemoryResumableStreamStore, createResumableStreamContext, RESUMABLE_STREAM_ID_HEADER } from "assistant-stream/resumable";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
+import { resolveReasoningEffort } from "../shared/reasoning.js";
 import type { AssistantMetadata, ModelInfo, ReasoningEffort, TokenUsage, UserSettings } from "../shared/types.js";
 import { parseTurnUnavailable, type FixedServiceId, type ServiceStatus, type TurnUnavailable } from "../shared/services.js";
 import type { AppEnv } from "./auth.js";
@@ -175,8 +176,8 @@ export async function turnStream(opts: TurnOptions) {
   const personalized = !temporary || opts.temporaryPersonalization === true;
   const user = { id: userId };
   const settings = getSettings(userId);
-  const effort = (opts.effort ?? settings.reasoningEffort[modelRef]) as ReasoningEffort | undefined;
   const { model, conn } = await resolveModel(userId, modelRef);
+  const effort = resolveReasoningEffort(model, settings, opts.effort);
   const describeError = (error: unknown) => {
     const wire = describeProviderError(error, { log: !temporary, model: model.ref, provider: model.providerId });
     // A rejected key or an exhausted quota is the only evidence this account's providers are unhealthy.
@@ -269,7 +270,7 @@ export async function turnStream(opts: TurnOptions) {
       const searchBudget = new SearchBudget(settings.maxSearches, searchesInCurrentTurn(uiMessages));
       // Research workers spend from this too; the reply's own loop gets what is left.
       const stepBudget = new StepBudget(settings.maxSteps, agentStepsInCurrentTurn(uiMessages));
-      const builtInWeb = model.toolCall && settings.webTools ? webTools({ searchBudget, search: opts.webSearch ?? true }) : {};
+      const builtInWeb = model.toolCall && settings.webTools ? webTools({ searchBudget, search: opts.deepResearch !== true && (opts.webSearch ?? true) }) : {};
       const lastUser = uiMessages.findLast((message) => message.role === "user");
       const query = lastUser?.parts.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n") ?? "";
       const memory: ReturnType<typeof conversationMemory> = temporary

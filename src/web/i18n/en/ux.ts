@@ -8,9 +8,6 @@ export default {
   openWebToolSettings: "Open web tool settings",
   openSearchLimitSettings: "Open search limit settings",
   searchChatsAndCommands: "Search chats and commands",
-  shortcutHintsLabel: "Keyboard shortcuts",
-  shortcutHintsSaveFailed: "Could not save your choice. Try again.",
-  customizeShortcuts: "Customize shortcuts",
   newProjectQuick: "New project",
   newScheduleQuick: "New schedule",
 } as const;

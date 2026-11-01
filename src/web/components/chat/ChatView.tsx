@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef } from "react";
 import { Thread } from "@/components/assistant-ui/elements/thread.aui";
 import { CompactionMarker, ContextMeter, MessageMeta } from "./ContextMeter";
 import { McpPromptsButton, MobileComposerMenu, ResearchToggle, SearchToggle } from "./ComposerControls";
-import { KnowledgeControl } from "@/components/knowledge/KnowledgeSelector";
 import { KnowledgeCitationHost } from "@/components/knowledge/KnowledgeCitation";
 import { EffortPicker, ModelPicker } from "./ModelPicker";
 import { BranchedFromBanner, BranchMenu, PendingBranchRun } from "./branch";
@@ -64,7 +63,6 @@ function ComposerToolbar() {
       </div>
       <SearchToggle />
       <ResearchToggle />
-      <KnowledgeControl />
       <McpPromptsButton />
       <ContextMeter />
     </>

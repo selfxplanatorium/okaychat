@@ -1,13 +1,12 @@
 import { ComposerPrimitive, useAui } from "@assistant-ui/react";
-import { BrainIcon, BookOpenIcon, CheckIcon, ChevronRightIcon, GlobeIcon, GlobeOffIcon, Loader2Icon, PaperclipIcon, PlusIcon, SettingsIcon, SquareSlashIcon, TelescopeIcon, TriangleAlertIcon, ZapIcon } from "lucide-react";
-import { Fragment, useMemo, useRef, useState } from "react";
+import { CheckIcon, ChevronRightIcon, GlobeIcon, GlobeOffIcon, Loader2Icon, PaperclipIcon, PlusIcon, SettingsIcon, SquareSlashIcon, TelescopeIcon, TriangleAlertIcon } from "lucide-react";
+import { Fragment, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Link, useLocation } from "wouter";
 import type { McpPromptInfo } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { t } from "@/i18n";
-import { formatNumber } from "@/i18n/format";
 import { api } from "@/lib/api";
 import { settingsHref } from "@/lib/settings-link";
 import { cn } from "@/lib/utils";
@@ -20,35 +19,108 @@ import { Kbd } from "@/keyboard/Kbd";
 import { ariaCombo } from "@/keyboard/keys";
 import { useCommand, useShortcut } from "@/keyboard/registry";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuSubmenuRoot, MenuSubmenuTrigger, MenuTrigger } from "@/components/ui/menu";
+import { EffortIcon } from "./EffortIcon";
 import { effortLabel, useEffortChoices } from "./ModelPicker";
-import { KnowledgeMenuItems } from "@/components/knowledge/KnowledgeSelector";
-import { useChatKnowledge } from "@/state/chat-knowledge";
+import { Popover, PopoverContent } from "@/components/ui/popover";
 
 const triggerClass =
   "hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 shrink-0 pointer-coarse:h-9 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart";
+
+/** Saves once a drag/key interaction finishes, rather than issuing a request for every pixel. */
+function SearchLimitSlider() {
+  const saved = useData((s) => s.settings?.maxSearches ?? 5);
+  const update = useData((s) => s.updateSettings);
+  const [draft, setDraft] = useState(saved);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
+  const committing = useRef(false);
+  const commit = async () => {
+    if (committing.current || draft === saved) return;
+    committing.current = true;
+    setBusy(true);
+    setError(false);
+    try {
+      await update({ maxSearches: draft });
+    } catch {
+      setDraft(useData.getState().settings?.maxSearches ?? 5);
+      setError(true);
+    } finally {
+      committing.current = false;
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex w-60 flex-col gap-2 p-2">
+      <div className="flex items-center justify-between gap-3 text-xs font-medium">
+        <span>{t("composer.searchSteps")}</span>
+        <output className="tabular-nums">{draft}</output>
+      </div>
+      <input
+        type="range"
+        aria-label={t("composer.searchSteps")}
+        className="settings-slider w-full"
+        min={0}
+        max={50}
+        step={1}
+        value={draft}
+        disabled={busy}
+        style={{ "--settings-slider-progress": `${draft * 2}%`, "--settings-slider-fill-offset": `${0.5 - draft / 50}rem` } as CSSProperties}
+        onChange={(event) => setDraft(Number(event.currentTarget.value))}
+        onPointerUp={() => void commit()}
+        onKeyDown={(event) => event.stopPropagation()}
+        onKeyUp={() => void commit()}
+        onBlur={() => void commit()}
+      />
+      <p className="text-muted-foreground text-xs">{t("composer.searchStepsHelp")}</p>
+      {error && <p role="alert" className="text-destructive text-xs">{t("composer.searchStepsFailed")}</p>}
+    </div>
+  );
+}
 
 export function SearchToggle() {
   const { enabled, toggle } = useChatSearch();
   const active = useChatModel();
   const webTools = useData((s) => s.settings?.webTools ?? true);
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
   // Registered here, not as a click target: on phones the toggle lives in the plus menu.
   useCommand("composer.search", toggle, !!active?.toolCall && webTools);
+  useCommand("composer.searchLimit", () => {
+    const phone = window.matchMedia("(max-width: 639.98px), (pointer: coarse)").matches;
+    if (phone) return false;
+    setOpen(true);
+  }, !!active?.toolCall && webTools);
   if (!active?.toolCall || !webTools) return null;
   return (
-    <button
-      type="button"
-      onClick={toggle}
-      aria-pressed={enabled}
-      className={cn(
-        triggerClass,
-        "flex max-sm:hidden pointer-coarse:hidden",
-        // Pressed state replaces the trigger's hover colors, so both must be overridden with `!`.
-        enabled && "bg-primary/12! text-primary! hover:bg-primary/18!",
-      )}
-    >
-      {enabled ? <GlobeIcon className="size-3.5" /> : <GlobeOffIcon className="size-3.5" />}
-      {t("composer.search")}
-    </button>
+    <Popover open={open} onOpenChange={setOpen}>
+      <button
+        ref={trigger}
+        type="button"
+        onClick={toggle}
+        onContextMenu={(event) => { event.preventDefault(); setOpen(true); }}
+        onKeyDown={(event) => {
+          if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+            event.preventDefault();
+            setOpen(true);
+          }
+        }}
+        aria-pressed={enabled}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title={t("composer.searchStepsHint")}
+        className={cn(
+          triggerClass,
+          "flex max-sm:hidden pointer-coarse:hidden",
+          enabled && "bg-primary/12! text-primary! hover:bg-primary/18!",
+        )}
+      >
+        {enabled ? <GlobeIcon className="size-3.5" /> : <GlobeOffIcon className="size-3.5" />}
+        {t("composer.search")}
+      </button>
+      <PopoverContent anchor={trigger} side="top" aria-label={t("composer.searchSteps")} finalFocus={trigger}>
+        {open && <SearchLimitSlider />}
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -65,10 +137,23 @@ export function ResearchToggle() {
   useCommand("composer.research", toggle, usable);
   const combo = useShortcut("composer.research");
   const blocked = unavailable && enabled;
-  const hint = blocked ? `${t(unavailable)} ${t("composer.researchTurnOff")}.` : unavailable ? t(unavailable) : t("composer.researchHint", { searches, steps });
+  const hint = blocked ? `${t(unavailable)} ${t("composer.researchTurnOff")}.` : unavailable ? t(unavailable) : t("composer.researchHint");
+  const limits = unavailable ? null : t("composer.researchLimits", { searches, steps });
   const payload = useMemo(
-    () => ({ tooltip: combo && usable ? <span className="flex items-center gap-2">{hint}<Kbd combo={combo} /></span> : hint, side: "top" as const }),
-    [hint, combo, usable],
+    () => ({
+      tooltip: (
+        <span className="flex flex-col gap-2 py-1 text-pretty">
+          <span className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-medium">{t("composer.deepResearch")}</span>
+            {combo && usable && <Kbd combo={combo} />}
+          </span>
+          <span>{hint}</span>
+          {limits && <span className="text-muted-foreground border-t pt-2">{limits}</span>}
+        </span>
+      ),
+      side: "top" as const,
+    }),
+    [hint, limits, combo, usable],
   );
   if (!enabled && !(toolCall && webTools)) return null;
   return (
@@ -82,7 +167,7 @@ export function ResearchToggle() {
             onClick={() => usable && toggle()}
             aria-pressed={enabled}
             aria-disabled={!usable || undefined}
-            aria-description={hint}
+            aria-description={limits ? `${hint} ${limits}` : hint}
             aria-keyshortcuts={combo && usable ? ariaCombo(combo) : undefined}
             className={cn(
               triggerClass,
@@ -249,23 +334,21 @@ export function MobileComposerMenu() {
   const webTools = useData((s) => s.settings?.webTools ?? true);
   const showSearch = !!active?.toolCall && webTools;
   const research = useChatResearch();
-  const knowledge = useChatKnowledge();
   const researchBlocked = !!research.unavailable && research.enabled;
   const hasPrompts = useData((s) => s.mcpPrompts.length > 0);
   const loadPrompts = useData((s) => s.refreshMcpPrompts);
   const { pick, dialog } = usePromptPicker();
   const [, navigate] = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const mobileTrigger = useRef<HTMLButtonElement>(null);
-  // The desktop trigger is hidden here. The command opens this menu and its knowledge submenu instead.
-  useCommand("composer.knowledge", () => {
-    const phone = typeof window !== "undefined" && (window.matchMedia("(max-width: 639.98px)").matches || window.matchMedia("(pointer: coarse)").matches);
+  const [searchLimitOpen, setSearchLimitOpen] = useState(false);
+  useCommand("composer.searchLimit", () => {
+    const phone = window.matchMedia("(max-width: 639.98px), (pointer: coarse)").matches;
     if (!phone) return false;
     mobileTrigger.current?.focus({ preventScroll: true });
     setMenuOpen(true);
-    setKnowledgeOpen(true);
-  }, !!active?.toolCall && !knowledge.temporary);
+    setSearchLimitOpen(true);
+  }, showSearch);
   return (
     <div className="hidden shrink-0 max-sm:block pointer-coarse:block">
       {dialog}
@@ -273,7 +356,7 @@ export function MobileComposerMenu() {
         open={menuOpen}
         onOpenChange={(open) => {
           setMenuOpen(open);
-          if (!open) setKnowledgeOpen(false);
+          if (!open) setSearchLimitOpen(false);
           else if (hasPrompts) void loadPrompts();
         }}
       >
@@ -288,21 +371,18 @@ export function MobileComposerMenu() {
           {active?.reasoning && (
             <MenuSubmenuRoot>
               <MenuSubmenuTrigger>
-                {current === "none" ? <ZapIcon /> : <BrainIcon />}
-                <span className="flex-1">{t("composer.reasoningValue", { value: current ? effortLabel(current) : t("composer.effortDefault") })}</span>
+                <EffortIcon effort={current} options={options} />
+                <span className="flex-1">{t("composer.reasoningValue", { value: effortLabel(current) })}</span>
                 <ChevronRightIcon className="text-muted-foreground ml-auto" />
               </MenuSubmenuTrigger>
               {/* -5px (border + padding) lines the submenu's top edge up with the parent menu's. */}
               <MenuContent side="right" align="start" alignOffset={-5}>
                 <MenuLabel>{t("composer.reasoningEffort")}</MenuLabel>
-                <MenuItem onClick={() => set(undefined)}>
-                  <CheckIcon className={cn(!current ? "opacity-100" : "opacity-0")} />
-                  {t("composer.modelDefault")}
-                </MenuItem>
                 {options.map((e) => (
                   <MenuItem key={e} onClick={() => set(e)}>
-                    <CheckIcon className={cn(current === e ? "opacity-100" : "opacity-0")} />
-                    {effortLabel(e)}
+                    <EffortIcon effort={e} options={options} />
+                    <span className="flex-1">{effortLabel(e)}</span>
+                    <CheckIcon className={cn("ml-auto", current === e ? "opacity-100" : "opacity-0")} />
                   </MenuItem>
                 ))}
               </MenuContent>
@@ -318,6 +398,18 @@ export function MobileComposerMenu() {
               <span className="flex-1">{t("composer.search")}</span>
               <CheckIcon className={cn("ml-auto", enabled ? "opacity-100" : "opacity-0")} />
             </MenuItem>
+          )}
+          {showSearch && (
+            <MenuSubmenuRoot open={searchLimitOpen} onOpenChange={setSearchLimitOpen}>
+              <MenuSubmenuTrigger data-command="composer.searchLimit">
+                <SettingsIcon />
+                <span className="flex-1">{t("composer.searchSteps")}</span>
+                <ChevronRightIcon className="text-muted-foreground ml-auto" />
+              </MenuSubmenuTrigger>
+              <MenuContent side="right" align="start" alignOffset={-5}>
+                {searchLimitOpen && <SearchLimitSlider />}
+              </MenuContent>
+            </MenuSubmenuRoot>
           )}
           {(showSearch || research.enabled) && (
             <MenuItem
@@ -345,19 +437,6 @@ export function MobileComposerMenu() {
               <SettingsIcon />
               {t("ux.openSearchLimitSettings")}
             </MenuItem>
-          )}
-          {active?.toolCall && !knowledge.temporary && (
-            <MenuSubmenuRoot open={knowledgeOpen} onOpenChange={setKnowledgeOpen}>
-              <MenuSubmenuTrigger>
-                <BookOpenIcon />
-                <span className="flex-1">{t("knowledge.selector")}</span>
-                {knowledge.ids.length > 0 && <span className="text-muted-foreground text-xs tabular-nums">{formatNumber(knowledge.ids.length)}</span>}
-                <ChevronRightIcon className="text-muted-foreground ml-auto" />
-              </MenuSubmenuTrigger>
-              <MenuContent side="right" align="start" alignOffset={-5} className="max-h-80 w-72">
-                <KnowledgeMenuItems />
-              </MenuContent>
-            </MenuSubmenuRoot>
           )}
           {hasPrompts && (
             <MenuSubmenuRoot>

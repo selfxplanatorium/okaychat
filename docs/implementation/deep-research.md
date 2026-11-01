@@ -12,11 +12,11 @@ The design follows two published systems: Anthropic's multi-agent research syste
 | `src/server/chat.ts` | `turnStream()` runs research when `config.deepResearch` is set and the request ends with a user message, streams its progress, then hands the findings to the chat model |
 | `src/server/tools/search-budget.ts` | `StepBudget`, `SearchShare`, and continuation counting of research steps and searches |
 | `src/server/prompts.ts` | `researchPlan`, `researchWorker`, `researchReview`, `researchReport` (admin-editable like every prompt) |
-| `src/web/state/chat-research.ts` | Per-chat toggle (page memory, bound from local to remote id like Search) and the availability reason |
+| `src/web/state/chat-research.ts` | Research hook over the shared `chat-web-mode.ts` store and the availability reason |
 | `src/web/components/chat/ComposerControls.tsx` | `ResearchToggle` (desktop) and the item in the plus menu (touch and narrow layouts) |
 | `src/web/components/chat/tool-ui.tsx` | `ResearchCard`: live phase, questions, conflicts, open questions, pages read, cost |
 
-The command `composer.research` (Alt+Shift+D) toggles it. The composer placeholder changes while it is on, which is the only visible cue on phones, where the toggle sits in the plus menu.
+Search and Deep research are mutually exclusive modes in `state/chat-web-mode.ts`. Selecting either replaces the other; toggling the active mode off leaves both off. Choices are kept per chat in page memory and bound from optimistic local ids to remote ids. The command `composer.research` (Alt+Shift+D) toggles it. The composer placeholder changes while it is on, which is the only visible cue on phones, where the toggle sits in the plus menu.
 
 ## Flow
 
@@ -41,7 +41,7 @@ Research spends the reply's own allowances. Nothing is raised for it:
 
 With the default limits (5 searches, 20 steps) a run is short: about one search per question. The toggle's tooltip states the account's numbers. When research stops on a limit, the card and the findings say so.
 
-Research cannot start when the model cannot call tools, web tools are off, or the search limit is 0. The composer shows the reason (a warning state when the toggle was already on), and the server refuses the request with the same reason before anything runs. The composer Search switch governs only the chat model's own `web_search`; research workers always search, within the same budget. Desktop help and the mobile menu state this explicitly.
+Research cannot start when the model cannot call tools, web tools are off, or the search limit is 0. The composer shows the reason (a warning state when the toggle was already on), and the server refuses the request with the same reason before anything runs. Research workers search within the same budget. In research mode the chat model's report loop has no `web_search`, even if a client also sends `webSearch: true`; it keeps `web_fetch` to read sources. Desktop help and the mobile menu explain that research replaces Search.
 
 ## Continuations and recovery
 

@@ -63,8 +63,6 @@ import {
   MicIcon,
   MoreHorizontalIcon,
   SquarePenIcon,
-  PhoneIcon,
-  RefreshCwIcon,
   SquareIcon,
   ThumbsDownIcon,
   ThumbsUpIcon,
@@ -92,19 +90,20 @@ import { parseAttachmentText, splitUserMessage, typedText } from "@/runtime/mess
 import { mcpAppOf } from "@/components/chat/McpApp";
 import { ReplyFiles } from "@/components/chat/reply-files";
 import { TurnServiceNote } from "@/components/chat/ServiceNotice";
-import { RetryWithModel } from "@/components/chat/retry-model";
 import { ChatErrorMessage } from "@/components/chat/message-error";
 import { EditableReplyTexts, EditedReplyBadge, ReplyEditAction, ReplyEditorFooter, ReplyEditorShell } from "@/components/chat/AssistantMessageEditor";
 import { editKey, useMessageEdits } from "@/state/message-edits";
+import { RetryMenu } from "@/components/chat/retry-model";
 import { RetryStatus } from "@/components/chat/retry-status";
-import { ShortcutHints } from "@/components/chat/ShortcutHints";
 import { DictationSend, ReadAloudAutoPlay, SpeechServiceHint, useDictateLabel, useSendDictation, VoiceNotice } from "@/speech/ChatVoice";
 import { useLocalSpeechUnavailable } from "@/speech/adapters";
 import { useSpeech } from "@/speech/store";
 import { useThreadSync, type ThreadSync } from "@/state/thread-sync";
 import { useChatResearch } from "@/state/chat-research";
 import { DictationWaveform } from "@/speech/Waveform";
-import { CallButton } from "@/speech/call/CallButton";
+import { CallButton, useCallEntry } from "@/speech/call/CallButton";
+import { useCall } from "@/speech/call/store";
+import { isSpokenMessage } from "@/speech/call/transcript";
 
 export type ThreadGroupPart = MessagePrimitive.GroupedParts.GroupPart;
 
@@ -482,7 +481,6 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
         >
           <AuiIf condition={isNewChatView}>
             <Welcome />
-            <ShortcutHints />
           </AuiIf>
           <AuiIf condition={isHistoryLoadingView}>
             <ThreadHistorySkeleton />
@@ -537,8 +535,10 @@ const ThreadMessage: FC = () => {
     useContext(ThreadComponentsContext);
   const role = useAuiState((s) => s.message.role);
   const isEditing = useAuiState((s) => s.message.composer.isEditing);
-  const isSpoken = useAuiState((s) => s.message.metadata.modality === "voice");
+  const isSpoken = useAuiState((s) => isSpokenMessage(s.thread.messages, s.message.index));
   const { AfterMessage } = useContext(ThreadComponentsContext);
+  const voicePosition = useVoiceRunPosition();
+  const callOpen = useCall((s) => s.open);
 
   const baseline = useContext(MessageBaselineContext);
   const index = useAuiState((s) => s.message.index);
@@ -550,8 +550,6 @@ const ThreadMessage: FC = () => {
 
   const body = isEditing ? (
     <EditComposer />
-  ) : isSpoken ? (
-    <SpokenMessage />
   ) : role === "user" ? (
     <UserMessage />
   ) : (
@@ -562,6 +560,9 @@ const ThreadMessage: FC = () => {
       <MessageEnteringContext.Provider value={entering}>
         {body}
       </MessageEnteringContext.Provider>
+      {isSpoken && !callOpen && (voicePosition === "single" || voicePosition === "end") && (
+        <div className="aui-voice-continue"><CallButton placement="continue" /></div>
+      )}
       {AfterMessage && <AfterMessage />}
     </>
   );
@@ -780,90 +781,23 @@ type VoiceRunPosition = "single" | "start" | "middle" | "end";
 const useVoiceRunPosition = (): VoiceRunPosition =>
   useAuiState((s) => {
     const before =
-      s.thread.messages[s.message.index - 1]?.metadata.modality === "voice";
+      isSpokenMessage(s.thread.messages, s.message.index - 1);
     const after =
-      s.thread.messages[s.message.index + 1]?.metadata.modality === "voice";
+      isSpokenMessage(s.thread.messages, s.message.index + 1);
     if (before) return after ? "middle" : "end";
     return after ? "start" : "single";
   });
 
-const SpokenText: TextMessagePartComponent = ({ text }) => (
-  <p className="aui-spoken-message-text m-0">{text}</p>
-);
-
-const SpokenMessage: FC = () => {
+/** Spoken turns keep the ordinary message layout, tools, Markdown, and actions. */
+const VoiceMessageIcon: FC = () => {
+  const spoken = useAuiState((s) => isSpokenMessage(s.thread.messages, s.message.index));
   const role = useAuiState((s) => s.message.role);
-  const position = useVoiceRunPosition();
-  const isSpeaking = useAuiState(
-    (s) =>
-      s.message.role === "assistant" && s.message.status?.type === "running",
-  );
-  const opensExchange = position === "start" || position === "single";
-
+  if (!spoken) return null;
   return (
-    <MessagePrimitive.Root
-      data-slot="aui_spoken-message-root"
-      data-role={role}
-      data-voice-run={position}
-      className={cn(
-        "aui-spoken-message bg-muted/40 mx-2 px-3 py-1.5 [contain-intrinsic-size:auto_48px] [content-visibility:auto]",
-        position === "single" && "rounded-xl py-2",
-        position === "start" && "rounded-t-xl pt-2",
-        position === "middle" && "-mt-6",
-        position === "end" && "-mt-6 rounded-b-xl pb-2",
-      )}
-    >
-      {opensExchange && (
-        <div
-          data-slot="aui_spoken-exchange-header"
-          className="text-muted-foreground mb-1.5 flex items-center gap-1.5 text-xs"
-        >
-          <PhoneIcon className="size-3" aria-hidden />
-          <span>{t("thread.voiceConversation")}</span>
-        </div>
-      )}
-      <div
-        data-slot="aui_spoken-message-content"
-        className="text-foreground flex items-start gap-2 text-sm leading-relaxed"
-      >
-        <span className="text-muted-foreground mt-1 shrink-0" aria-hidden>
-          {role === "user" ? (
-            <MicIcon className="size-3.5" />
-          ) : (
-            <AudioLinesIcon className="size-3.5" />
-          )}
-        </span>
-        <span className="sr-only">
-          {role === "user" ? t("thread.youSaid") : t("thread.assistantSaid")}
-        </span>
-        <div className="min-w-0 flex-1 wrap-break-word">
-          <MessagePrimitive.Parts components={{ Text: SpokenText }} />
-          {isSpeaking && (
-            <span
-              data-slot="aui_spoken-message-indicator"
-              role="status"
-              className="text-muted-foreground ms-1 animate-pulse font-sans"
-              aria-label={t("thread.assistantSpeaking")}
-            >
-              ●
-            </span>
-          )}
-        </div>
-        <SpokenActionBar />
-      </div>
-    </MessagePrimitive.Root>
-  );
-};
-
-const SpokenActionBar: FC = () => {
-  return (
-    <ActionBarPrimitive.Root
-      hideWhenRunning
-      autohide="always"
-      className="aui-spoken-action-bar text-muted-foreground animate-fade-in flex shrink-0 gap-1 [animation-delay:80ms]"
-    >
-      <CopyActionButton className="size-6" />
-    </ActionBarPrimitive.Root>
+    <span className="text-muted-foreground float-start me-2 mt-1.5">
+      {role === "user" ? <MicIcon className="size-4" aria-hidden /> : <AudioLinesIcon className="size-4" aria-hidden />}
+      <span className="sr-only">{role === "user" ? t("thread.youSaid") : t("thread.assistantSaid")}</span>
+    </span>
   );
 };
 
@@ -1060,6 +994,9 @@ const ComposerAction: FC<{ blocked: boolean }> = ({ blocked }) => {
   const canCancel = useAuiState((s) => s.composer.canCancel);
   const hasVoice = useAuiState((s) => s.thread.voice !== undefined);
   const submitting = useAuiState((s) => s.composer.submission !== undefined);
+  const { available: callsAvailable } = useCallEntry();
+  const emptyNewChat = useAuiState((s) => s.thread.messages.length === 0 && s.composer.isEmpty);
+  const showCall = callsAvailable && emptyNewChat && !hasVoice;
   const showSend = !canCancel || (hasVoice && !submitting);
   const showStop = canCancel && (!hasVoice || submitting);
 
@@ -1084,7 +1021,6 @@ const ComposerAction: FC<{ blocked: boolean }> = ({ blocked }) => {
         {ComposerToolbar && <ComposerToolbar />}
       </div>
       <div className="flex items-center gap-1.5">
-        <CallButton />
         <AuiIf condition={(s) => s.thread.capabilities.dictation}>
           <AuiIf condition={(s) => s.composer.dictation == null}>
             <ComposerPrimitive.Dictate asChild>
@@ -1135,7 +1071,9 @@ const ComposerAction: FC<{ blocked: boolean }> = ({ blocked }) => {
                   "pointer-events-none scale-50 opacity-0 delay-150 duration-(--motion-fast) ease-in-quart",
             )}
           >
-            {dictating ? (
+            {showCall && !dictating ? (
+              <CallButton />
+            ) : dictating ? (
               <TooltipIconButton
                 tooltip={t("thread.sendRecording")}
                 side="bottom"
@@ -1372,6 +1310,7 @@ const AssistantMessage: FC = () => {
         data-slot="aui_assistant-message-content"
         className="text-foreground px-2 leading-relaxed wrap-break-word"
       >
+        <VoiceMessageIcon />
         <ReplyEditorShell active={editing} threadId={remoteId ?? ""} messageId={messageId} parts={parts}>
         <MessagePrimitive.GroupedParts groupBy={groupBy} indicator="never">
           {({ part, children }) => {
@@ -1510,8 +1449,6 @@ const AssistantMessage: FC = () => {
 
 const AssistantActionBar: FC = () => {
   const { BranchAction } = useContext(ThreadComponentsContext);
-  // Like the composer: a rerun from a cached copy would parent on what the cache showed.
-  const sync = useThreadSync();
   // A local server voice is disabled while the worker is down; StopSpeaking is never disabled, so an
   // active playback can always be stopped.
   const readAloudUnavailable = useLocalSpeechUnavailable("tts");
@@ -1525,12 +1462,7 @@ const AssistantActionBar: FC = () => {
       <CopyActionButton />
       <ReplyEditAction />
       {BranchAction && <BranchAction />}
-      <ActionBarPrimitive.Reload asChild disabled={!!sync}>
-        <TooltipIconButton tooltip={t("common.retry")} command="message.retry">
-          <RefreshCwIcon />
-        </TooltipIconButton>
-      </ActionBarPrimitive.Reload>
-      <RetryWithModel />
+      <RetryMenu />
       <AuiIf condition={(s) => s.thread.capabilities.feedback}>
         <ActionBarPrimitive.FeedbackPositive asChild>
           <TooltipIconButton
@@ -1652,6 +1584,7 @@ const UserMessage: FC = () => {
 
       <div className="aui-user-message-content-wrapper relative col-start-2 min-w-0">
         <div className="aui-user-message-content peer depth-bubble text-foreground rounded-(--composer-radius) rounded-ee-md px-4 py-2 wrap-break-word empty:hidden">
+          <VoiceMessageIcon />
           <MessagePrimitive.Parts
             components={{ Text: UserText, File: UserFilePart, Image: UserImagePart }}
           />
@@ -1670,22 +1603,6 @@ const UserMessage: FC = () => {
   );
 };
 
-/** Answers this user message again in the same chat; the old answer stays as a sibling branch. */
-const UserRetryButton: FC = () => {
-  const aui = useAui();
-  const sync = useThreadSync();
-  return (
-    <TooltipIconButton
-      tooltip={t("common.retry")}
-      command="message.retry"
-      disabled={!!sync}
-      onClick={() => aui.thread.startRun({ parentId: aui.message.getState().id })}
-    >
-      <RefreshCwIcon />
-    </TooltipIconButton>
-  );
-};
-
 const UserActionBar: FC = () => {
   const { BranchAction } = useContext(ThreadComponentsContext);
   const sync = useThreadSync();
@@ -1695,7 +1612,7 @@ const UserActionBar: FC = () => {
       autohide="not-last"
       className="aui-user-action-bar-root text-muted-foreground animate-fade-in flex gap-1 [animation-delay:80ms]"
     >
-      <UserRetryButton />
+      <RetryMenu />
       {BranchAction && <BranchAction />}
       <ActionBarPrimitive.Edit asChild disabled={!!sync}>
         <TooltipIconButton tooltip={t("common.edit")} command="message.edit" className="aui-user-action-edit">

@@ -1,6 +1,7 @@
-import { BrainIcon, CheckIcon, ChevronDownIcon, ChevronsUpDownIcon, EyeIcon, SearchIcon, StarIcon, WrenchIcon, ZapIcon } from "lucide-react";
+import { BrainIcon, CheckIcon, ChevronDownIcon, ChevronsUpDownIcon, EyeIcon, SearchIcon, StarIcon, WrenchIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
+import { reasoningOptions, resolveReasoningEffort } from "@shared/reasoning";
 import type { ModelInfo, ReasoningEffort } from "@shared/types";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuTrigger } from "@/components/ui/menu";
@@ -12,6 +13,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useData } from "@/state/data";
 import { settingsHref } from "@/lib/settings-link";
 import { useChatModel, useCurrentThreadId } from "@/state/thread-meta";
+
+import { EffortIcon } from "./EffortIcon";
 
 const OPENCODE_GO = "opencode-go";
 
@@ -332,12 +335,13 @@ export const effortLabel = (effort: ReasoningEffort) => (EFFORT_LABELS[effort] ?
 /** Shared by the desktop effort menu and the mobile composer menu. */
 export function useEffortChoices() {
   const active = useChatModel();
-  const efforts = useData((s) => s.settings?.reasoningEffort ?? {});
+  const settings = useData((s) => s.settings);
+  const efforts = settings?.reasoningEffort ?? {};
   const updateSettings = useData((s) => s.updateSettings);
-  const current = active ? efforts[active.ref] : undefined;
-  const options = (active?.reasoningEfforts?.length ? active.reasoningEfforts : ["low", "medium", "high"]) as ReasoningEffort[];
-  const set = (effort: ReasoningEffort | undefined) => {
-    if (active) void updateSettings({ reasoningEffort: { ...efforts, [active.ref]: effort as never } });
+  const current = resolveReasoningEffort(active ?? { ref: "" }, settings);
+  const options = reasoningOptions(active ?? {});
+  const set = (effort: ReasoningEffort) => {
+    if (active) void updateSettings({ reasoningEffort: { ...efforts, [active.ref]: effort } });
   };
   return { active, current, options, set };
 }
@@ -346,23 +350,19 @@ export function useEffortChoices() {
 export function EffortPicker() {
   const { active, current, options, set } = useEffortChoices();
   if (!active?.reasoning) return null;
-  const instant = current === "none";
   return (
     <Menu>
-      <MenuTrigger data-command="composer.effort" aria-label={t("composer.reasoningEffortValue", { value: current ? effortLabel(current) : t("composer.effortDefault") })} className="hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 shrink-0 pointer-coarse:h-9 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart">
-        {instant ? <ZapIcon className="size-3.5" /> : <BrainIcon className="size-3.5" />}
-        <TextSwap value={current ? effortLabel(current) : t("composer.effortDefault")} />
+      <MenuTrigger data-command="composer.effort" aria-label={t("composer.reasoningEffortValue", { value: effortLabel(current) })} className="hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 shrink-0 pointer-coarse:h-9 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart">
+        <EffortIcon effort={current} options={options} className="size-3.5" />
+        <TextSwap value={effortLabel(current)} />
       </MenuTrigger>
       <MenuContent side="top">
         <MenuLabel>{t("composer.reasoningEffort")}</MenuLabel>
-        <MenuItem onClick={() => set(undefined)}>
-          <CheckIcon className={cn(!current ? "opacity-100" : "opacity-0")} />
-          {t("composer.modelDefault")}
-        </MenuItem>
         {options.map((e) => (
           <MenuItem key={e} onClick={() => set(e)}>
-            <CheckIcon className={cn(current === e ? "opacity-100" : "opacity-0")} />
-            {effortLabel(e)}
+            <EffortIcon effort={e} options={options} />
+            <span className="flex-1">{effortLabel(e)}</span>
+            <CheckIcon className={cn("ml-auto", current === e ? "opacity-100" : "opacity-0")} />
           </MenuItem>
         ))}
       </MenuContent>
