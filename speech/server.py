@@ -424,6 +424,7 @@ def speech_health() -> dict:
         model = report.get("model") if running else None
     return {
         "ok": True,
+        "voiceCalls": True,
         "stt": running,
         "tts": tts.running(),
         "requestedDevice": plan.requested,

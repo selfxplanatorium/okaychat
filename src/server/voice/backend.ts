@@ -113,7 +113,8 @@ function workerLocal(userId: string): Availability<LocalSpeech> {
     value: {
       voice,
       async warm(signal) {
-        if (!(await workerReachable())) throw new CallFailure("worker", "The speech worker is not reachable.");
+        const failure = await workerCallFailure();
+        if (failure) throw new CallFailure(failure.code, failure.detail);
         const fail = (code: CallErrorCode) => (error: unknown) => {
           if (signal.aborted) throw error;
           // A worker that went away between /health and /warm is not a missing model.
@@ -256,16 +257,18 @@ export const workerBackends: CallBackends = {
  * A direct `/health` check with a short deadline. Used at call start and for availability so a stale registry
  * entry cannot block a call after the worker returns; it loads no model and starts no engine.
  */
-async function workerReachable(): Promise<boolean> {
-  if (!speechWorkerConfigured()) return false;
+async function workerCallFailure(): Promise<CallAvailability["localReason"]> {
+  const offline = { code: "worker" as const, detail: "The speech worker is not reachable." };
+  if (!speechWorkerConfigured()) return offline;
   try {
     const health = await fetchWorkerHealth(AbortSignal.timeout(2_000));
-    if (!health?.ok) return false;
-    // The subsequent /warm uses the registry's fail-fast guard; fresh recovery must clear its old outage.
+    if (!health?.ok) return offline;
+    // An older worker still serves dictation/read-aloud. Do not mark the whole service down.
     reportServiceSuccess("speech");
-    return true;
+    if (health.voiceCalls !== true) return { code: "workerVersion", detail: "Rebuild the speech worker to enable voice calls." };
+    return undefined;
   } catch {
-    return false;
+    return offline;
   }
 }
 
@@ -279,9 +282,10 @@ export async function voiceAvailability(userId: string): Promise<CallAvailabilit
   const configured = speechWorkerConfigured();
   // A direct /health check: a call start must not trust a registry entry the short cooldown may have cached
   // while the worker was down. It is cheap, loads no model, and never starts an engine.
-  const reachable = await workerReachable();
+  const workerFailure = await workerCallFailure();
+  const reachable = !workerFailure;
   const reason = (value: Availability<unknown>) => (value.ok ? undefined : { code: value.code, detail: value.detail });
-  const localReason = local.ok ? (reachable ? undefined : { code: "worker" as const, detail: "The speech worker is not reachable." }) : reason(local);
+  const localReason = local.ok ? workerFailure : reason(local);
   return {
     local: local.ok && reachable,
     realtime: target.ok,

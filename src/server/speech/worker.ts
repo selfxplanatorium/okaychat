@@ -143,6 +143,8 @@ export async function workerPreload(kind: "stt" | "tts", name: string): Promise<
 /** The worker's health. Device fields are optional so an older worker payload still reads. */
 export interface WorkerHealth {
   ok: boolean;
+  /** Supports call warm/release and raw PCM transcription; absent on older workers. */
+  voiceCalls?: boolean;
   stt: boolean;
   tts: boolean;
   requestedDevice?: "auto" | "cpu" | "cuda";

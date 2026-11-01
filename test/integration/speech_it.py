@@ -1,11 +1,14 @@
 """Speech worker checks: auth, Piper in two languages, a Piper -> Whisper round trip, limits, and that the
 engine processes exit when idle so the worker returns to its small baseline."""
+import io
 import json
+import struct
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
+import wave
 
 BASE, TOKEN, CONTAINER = sys.argv[1], sys.argv[2], sys.argv[3]
 failures = []
@@ -49,6 +52,7 @@ check(
     status == 200 and health.get("ok") is True and health.get("stt") is False and health.get("tts") is False,
     body.decode(),
 )
+check("voice call capability advertised", health.get("voiceCalls") is True, body.decode())
 print(f"  health device: {health.get('device')} / {health.get('computeType')} (requested {health.get('requestedDevice')})", flush=True)
 check(
     "forced cpu mode is reported",
@@ -64,6 +68,9 @@ check("transcribe needs the token", call("POST", "/transcribe", b"hi", token=Non
 idle = rss_kb()
 check("idle worker is small", idle < 80_000, f"{idle} kB")
 
+check("call warm requires token", call("POST", "/warm?kind=tts&name=en_US-lessac-medium", token=None)[0] == 401)
+check("call warms Piper", call("POST", "/warm?kind=tts&name=en_US-lessac-medium")[0] == 200)
+check("call warms Whisper", call("POST", "/warm?kind=stt&name=base")[0] == 200)
 status, ctype, en = call("POST", "/speak?voice=en_US-lessac-medium", b"Please remind me to buy fresh bread tomorrow morning.")
 check("piper english", status == 200 and ctype == "audio/wav" and en[:4] == b"RIFF" and len(en) > 50_000, f"{status} {len(en)}")
 status, _, de = call("POST", "/speak?voice=de_DE-thorsten-medium", "Guten Morgen, wie geht es dir?".encode())
@@ -79,6 +86,15 @@ check("long text rejected", call("POST", "/speak", b"a" * 5001)[0] == 400)
 status, _, body = call("POST", "/transcribe?model=base&language=en", en)
 text = json.loads(body).get("text", "") if status == 200 else body.decode()
 check("whisper round trip", status == 200 and "bread" in text.lower() and "tomorrow" in text.lower(), text)
+# The call transport sends raw PCM16, unlike dictation's encoded audio container.
+with wave.open(io.BytesIO(en), "rb") as wav:
+    rate = wav.getframerate()
+    frames = wav.readframes(wav.getnframes())
+    samples = struct.unpack(f"<{len(frames) // 2}h", frames)
+pcm = b"".join(struct.pack("<h", samples[min(len(samples) - 1, i * rate // 16000)]) for i in range(len(samples) * 16000 // rate))
+status, _, body = call("POST", "/transcribe?model=base&language=en&format=pcm16&vad=0", pcm)
+text = json.loads(body).get("text", "") if status == 200 else body.decode()
+check("call PCM round trip", status == 200 and "bread" in text.lower() and "tomorrow" in text.lower(), text)
 status, _, body = call("POST", "/transcribe?model=base", de)
 check("whisper detects german", status == 200 and json.loads(body).get("language") == "de", body.decode())
 check("garbage audio rejected", call("POST", "/transcribe?model=base", b"not audio at all" * 10)[0] == 400)

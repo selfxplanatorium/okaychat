@@ -129,7 +129,7 @@ and put the header line back on top of `requirements.txt`.
 - `src/server/voice/*.test.ts` and `src/web/speech/call/*.test.ts`: voice-call protocol, limits, engine fallback, state machine, VAD, sentence chunking, and playback jitter; see `docs/implementation/voice-calls.md`.
 - `src/web/speech/text.test.ts`: Markdown cleanup and splitting.
 - `speech/test_device.py`: pure device-resolution and fallback tests (`python3 -m unittest discover -s speech -p 'test_*.py'`), run by `test/integration/speech.sh`.
-- `test/integration/speech.sh`: the real CPU worker container: auth, forced CPU health, Piper in two languages, a Piper → Whisper round trip, limits, read-only root, and that memory returns to baseline after the idle timeout.
+- `test/integration/speech.sh`: the real CPU worker container: auth, forced CPU health, voice-call capability and warm-up, Piper in two languages, encoded and call PCM Piper → Whisper round trips, limits, read-only root, and that memory returns to baseline after the idle timeout.
 - `test/integration/speech-gpu.sh`: the CUDA container. Skips with exit 0 when there is no Docker/NVIDIA runtime, and otherwise asserts a real CUDA transcription plus the idle child exit that releases VRAM. Uses its own container and volume names.
 
 ## Compared with Open WebUI and LibreChat

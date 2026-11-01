@@ -27,6 +27,7 @@ export type CallErrorCode =
   | "rate"
   | "unavailable"
   | "worker"
+  | "workerVersion"
   | "model"
   | "voice"
   | "thread"

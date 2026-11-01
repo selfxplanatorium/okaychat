@@ -64,6 +64,7 @@ Every failure renders a translated reason, a fix, and Retry. Retry releases the 
 | `insecure` | HTTPS required | Serve okaychat over HTTPS or localhost |
 | `unavailable` | Voice calls unavailable | Admin enables Whisper/Piper or the account connects OpenAI |
 | `worker` | Speech worker offline | Start the speech worker container |
+| `workerVersion` | Speech worker needs an update | Rebuild and restart the speech worker |
 | `model` | Whisper model missing | Install/choose the model in Admin → Voice |
 | `voice` | Piper voice missing | Install/choose the voice in Settings/Admin → Voice |
 | `network` | Connection lost | Check the network; Retry |
@@ -131,7 +132,9 @@ Target: **first audio under 1.5 s after the user stops speaking on a warm worker
 - Chat turn persistence still runs through the browser's assistant-ui history adapter, as with typed messages. A call in a tab that is closed mid-turn keeps the server generating until its cancel/stream timeout, like a typed turn.
 - A reply that needs tool approval (or a generative-UI interaction) is not answerable inside the call view; the model waits while the call says "Thinking". End the call to review and approve it in the chat.
 - The playback queue is deliberately bounded: a reply synthesized much faster than it plays can exceed 30 s of queued audio, in which case later chunks are dropped and a translated notice appears. This is explicit truncation, not a silent gap.
-- `GET /api/voice` asks the worker `/health` (2 s cap) to report the local pipeline, but its result no longer hides the entry point: a configured worker that is down still shows the call button, and Retry re-probes. Opening the call view also re-probes. It never downloads or loads a model; models loading for another call still report available because idle children are not required.
+- `GET /api/voice` asks the worker `/health` (2 s cap) to report the local pipeline, but its result no longer hides the entry point: a configured worker that is down still shows the call button, and Retry re-probes. Opening the call view also re-probes. It never downloads or loads a model; models loading for another call still report available because idle children are not required. A healthy worker without `voiceCalls: true` reports `workerVersion`, not an outage.
 - A successful direct health check clears the speech registry's cached outage before `/warm`, so recovery works inside its TTL/cooldown too. A subsequent `service_unavailable` from warming or synthesis is shown as a worker outage rather than a missing model/voice.
 - Local and Realtime transcripts are stored as normal chat messages, so they are visible in history and to any later chat turn (except temporary chats). The privacy line states this; audio itself is still never recorded.
 - Realtime usage is not in okaychat's usage dashboard.
+
+The worker health payload advertises `voiceCalls: true` for warm/release and PCM transcription support. Call availability and startup require this capability; an older healthy container reports `workerVersion` without disabling ordinary TTS/STT. Rebuild with `scripts/dev-speech.sh` in dev, or rebuild and recreate the `speech` service using the same compose files (including the GPU override if used) as the deployment. Restarting an old image does not update its endpoints.

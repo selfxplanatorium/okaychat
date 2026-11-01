@@ -143,6 +143,8 @@ export default {
   callFixOrigin: "Open okaychat from its own address, then try again.",
   callErrUnavailable: "Voice calls are unavailable",
   callFixUnavailable: "Ask your admin to enable Whisper and Piper, or connect OpenAI in Settings → Voice.",
+  callErrWorkerVersion: "Speech worker needs an update",
+  callFixWorkerVersion: "Rebuild and restart the speech worker to enable voice calls. Read aloud and dictation can still work.",
   callErrWorker: "Speech worker is offline",
   callFixWorker: "Start the speech worker container, then try again.",
   callErrModel: "Whisper model missing",

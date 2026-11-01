@@ -11,6 +11,7 @@ export const FAILURE_TEXT: Record<CallFailureCode, { title: PlainMessageKey; fix
   insecure: { title: "voice.callErrInsecure", fix: "voice.callFixInsecure" },
   unavailable: { title: "voice.callErrUnavailable", fix: "voice.callFixUnavailable" },
   worker: { title: "voice.callErrWorker", fix: "voice.callFixWorker" },
+  workerVersion: { title: "voice.callErrWorkerVersion", fix: "voice.callFixWorkerVersion" },
   model: { title: "voice.callErrModel", fix: "voice.callFixModel" },
   voice: { title: "voice.callErrVoice", fix: "voice.callFixVoice" },
   network: { title: "voice.callErrNetwork", fix: "voice.callFixNetwork" },
@@ -38,6 +39,8 @@ export function noticeText(code: CallErrorCode): PlainMessageKey {
       return "voice.callNoticeIdle";
     case "worker":
       return "voice.callErrWorker";
+    case "workerVersion":
+      return "voice.callErrWorkerVersion";
     case "model":
       return "voice.callErrModel";
     case "protocol":

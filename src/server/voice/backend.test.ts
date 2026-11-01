@@ -90,7 +90,7 @@ test("a configured but unreachable worker is reported as unavailable", async () 
 test("a reachable worker makes the local pipeline available without loading a model", async () => {
   const server = createServer((req, res) => {
     res.writeHead(req.url === "/health" ? 200 : 404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, stt: false, tts: false }));
+    res.end(JSON.stringify({ ok: true, voiceCalls: true, stt: false, tts: false }));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   process.env.OKAYCHAT_SPEECH_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -102,6 +102,33 @@ test("a reachable worker makes the local pipeline available without loading a mo
     assert.equal(status.localReason, undefined);
   } finally {
     delete process.env.OKAYCHAT_SPEECH_URL;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("an older healthy worker needs an update for calls, while speech stays available", async () => {
+  const paths: string[] = [];
+  const server = createServer((req, res) => {
+    paths.push(req.url!);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: true, stt: true, tts: true }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  process.env.OKAYCHAT_SPEECH_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    reportServiceFailure("speech");
+    const status = await voiceAvailability("alice");
+    assert.equal(status.local, false);
+    assert.equal(status.localReason?.code, "workerVersion");
+    assert.equal(serviceDown("speech"), false, "old worker still serves ordinary TTS/STT");
+    const local = workerBackends.local("alice");
+    assert.equal(local.ok, true);
+    if (!local.ok) return;
+    await assert.rejects(local.value.warm(new AbortController().signal), (error) => error instanceof CallFailure && error.code === "workerVersion");
+    assert.deepEqual(paths, ["/health", "/health"], "no unsupported warm requests");
+  } finally {
+    delete process.env.OKAYCHAT_SPEECH_URL;
+    resetServicesForTests();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
@@ -127,7 +154,7 @@ test("a recovered worker clears the fail-fast guard before warming, and a new ou
     const health = req.url === "/health";
     if (!health) warms++;
     res.writeHead(!health && refuseWarm ? 503 : 200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(health ? { ok: true, stt: false, tts: false } : { ok: !refuseWarm }));
+    res.end(JSON.stringify(health ? { ok: true, voiceCalls: true, stt: false, tts: false } : { ok: !refuseWarm }));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   process.env.OKAYCHAT_SPEECH_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
