@@ -32,6 +32,7 @@ import { injectScreenshots, injectToolImages, type ToolImage } from "./tools/scr
 import type { VisualShot } from "./documents/visual.js";
 import { emailTools } from "./email/tools.js";
 import { hasAccounts } from "./email/accounts.js";
+import { textDraftTools } from "./text-drafts.js";
 import { draftTools } from "./email/draft-tool.js";
 import { webTools } from "./tools/web.js";
 import { SearchBudget, StepBudget, searchesInCurrentTurn, agentStepsInCurrentTurn } from "./tools/search-budget.js";
@@ -327,6 +328,7 @@ export async function turnStream(opts: TurnOptions) {
         ...(skills.tools),
         ...email.tools,
         ...drafts,
+        ...(model.toolCall && !temporary ? textDraftTools({ userId: user.id, threadId }) : {}),
         ...subagents,
         ...(useArtifacts ? artifactTools(threadId, user.id, { shots, canViewImages: model.inputModalities.includes("image"), savedThisTurn: artifactsInCurrentTurn(uiMessages), shotsThisTurn: screenshotsInCurrentTurn(uiMessages), browserDown }) : {}),
         ...(imageServices.length ? imageTools(user.id, threadId, imageServices, signal) : {}),

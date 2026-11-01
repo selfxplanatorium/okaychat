@@ -22,7 +22,8 @@ export type UntrustedKind =
   | "delegate"
   | "code_output"
   | "email"
-  | "email_draft";
+  | "email_draft"
+  | "text_draft";
 
 export interface UntrustedSource {
   kind: UntrustedKind;
@@ -66,6 +67,7 @@ export const UNTRUSTED_TOOL_NAMES: ReadonlySet<string> = new Set([
   "email_search",
   "email_read",
   "draft_email",
+  "draft_text",
   "install_skill",
 ]);
 

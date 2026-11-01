@@ -317,8 +317,10 @@ test("migration adds the edit columns and leaves existing rows unedited", () => 
       db.prepare("INSERT INTO messages (id,thread_id,format,content,bytes,created_at) VALUES ('m','t','ai-sdk/v6',?,10,1)").run(JSON.stringify({ role: "assistant", parts: [{ type: "text", text: "Old reply" }] }));
       db.exec("ALTER TABLE messages DROP COLUMN edited_at");
       db.exec("ALTER TABLE messages DROP COLUMN original_enc");
-      const version = db.prepare("PRAGMA user_version").get().user_version;
-      db.exec("PRAGMA user_version = " + (version - 1));
+      // Recreate schema 32, before reply editing (33) and writing drafts (34).
+      // A fixed historical version stays valid when future migrations are appended.
+      db.exec("ALTER TABLE email_drafts DROP COLUMN kind");
+      db.exec("PRAGMA user_version = 32");
       db.close();`);
     const result = JSON.parse(run(`const { db } = await import(${JSON.stringify(dbUrl)});
       const { listMessagesJson } = await import(${JSON.stringify(threadsUrl)});

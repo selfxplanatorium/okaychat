@@ -34,6 +34,7 @@ const REVIEW_TTL_MS = 10 * 60_000;
 const SENDING_STALE_MS = 5 * 60_000;
 
 interface DraftRow {
+  kind: "email" | "text";
   id: string;
   thread_id: string;
   user_id: string;
@@ -131,6 +132,12 @@ function rowOf(userId: string, threadId: string, id: string): DraftRow {
   return row!;
 }
 
+function assertTextFields(fields: EmailDraftFields): void {
+  if (fields.accountId || fields.inReplyTo || fields.to.length || fields.cc.length || fields.bcc.length) {
+    fail(422, "Text drafts only support a title and body.");
+  }
+}
+
 function fieldsOf(row: DraftRow): EmailDraftFields {
   return {
     accountId: row.account_id,
@@ -145,6 +152,7 @@ function fieldsOf(row: DraftRow): EmailDraftFields {
 
 function toDraft(row: DraftRow): EmailDraft {
   return {
+    kind: row.kind,
     id: row.id,
     threadId: row.thread_id,
     messageId: row.message_id,
@@ -170,25 +178,26 @@ export function createDraft(
   userId: string,
   threadId: string,
   input: Partial<EmailDraftFields>,
-  meta: { toolCallId?: string; by: "user" | "model" },
+  meta: { toolCallId?: string; by: "user" | "model"; kind?: "email" | "text" },
 ): EmailDraft {
   assertThread(userId, threadId);
   const parsed = parseInput(draftFieldsSchema.partial(), input);
   const fields: EmailDraftFields = { ...emptyDraftFields(), ...parsed };
+  if (meta.kind === "text") assertTextFields(fields);
   if (fields.accountId && !accountExists(userId, fields.accountId)) fail(404, "Email account not found");
   const perThread = (db.prepare("SELECT count(*) AS n FROM email_drafts WHERE user_id = ? AND thread_id = ?").get(userId, threadId) as { n: number }).n;
-  if (perThread >= LIMITS.perThread) fail(409, `A chat can hold at most ${LIMITS.perThread} email drafts. Discard some first.`);
+  if (perThread >= LIMITS.perThread) fail(409, `A chat can hold at most ${LIMITS.perThread} drafts. Discard some first.`);
   const perUser = (db.prepare("SELECT count(*) AS n FROM email_drafts WHERE user_id = ?").get(userId) as { n: number }).n;
-  if (perUser >= LIMITS.perUser) fail(409, `An account can hold at most ${LIMITS.perUser} email drafts. Discard some first.`);
+  if (perUser >= LIMITS.perUser) fail(409, `An account can hold at most ${LIMITS.perUser} drafts. Discard some first.`);
   const id = newId("drf");
   const now = Date.now();
   db.prepare(
-    `INSERT INTO email_drafts (id, thread_id, user_id, tool_call_id, account_id, to_json, cc_json, bcc_json, subject, body, in_reply_to, revision, status, updated_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'draft', ?, ?, ?)`,
+    `INSERT INTO email_drafts (id, thread_id, user_id, tool_call_id, account_id, to_json, cc_json, bcc_json, subject, body, in_reply_to, revision, status, updated_by, created_at, updated_at, kind)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'draft', ?, ?, ?, ?)`,
   ).run(
     id, threadId, userId, meta.toolCallId ?? null, fields.accountId,
     JSON.stringify(clean(fields.to)), JSON.stringify(clean(fields.cc)), JSON.stringify(clean(fields.bcc)),
-    fields.subject, fields.body, fields.inReplyTo, meta.by, now, now,
+    fields.subject, fields.body, fields.inReplyTo, meta.by, now, now, meta.kind ?? "email",
   );
   return getDraft(userId, threadId, id);
 }
@@ -205,6 +214,7 @@ export function updateDraft(userId: string, threadId: string, id: string, input:
   if (patch.revision !== row.revision) fail(409, `This draft changed since it was loaded (now revision ${row.revision}).`);
   const current = fieldsOf(row);
   const next: EmailDraftFields = { ...current, ...patch.fields };
+  if (row.kind === "text") assertTextFields(next);
   next.to = clean(next.to);
   next.cc = clean(next.cc);
   next.bcc = clean(next.bcc);
@@ -246,6 +256,7 @@ export function deleteDraft(userId: string, threadId: string, id: string): void 
  */
 export async function draftEml(userId: string, threadId: string, id: string): Promise<{ filename: string; content: ArrayBuffer }> {
   const row = rowOf(userId, threadId, id);
+  if (row.kind === "text") fail(422, "Text drafts cannot be exported as email.");
   const fields = fieldsOf(row);
   const to = recipients("To", fields.to);
   const cc = recipients("Cc", fields.cc);
@@ -281,6 +292,7 @@ const format = (list: EmailAddress[]) => list.map((entry) => (entry.name ? `${en
 
 /** Builds the exact payload from the stored revision and the live account. Throws the reason it cannot be sent. */
 function prepare(userId: string, row: DraftRow): { review: Omit<EmailDraftReview, "reviewId" | "expiresAt">; mail: ApprovedMail; reply: string | null } {
+  if (row.kind === "text") fail(422, "Text drafts cannot be sent as email.");
   const fields = fieldsOf(row);
   if (!fields.accountId) fail(422, "Choose the email account to send from.");
   if (!accountExists(userId, fields.accountId!)) fail(422, "The email account for this draft was removed. Choose another account.");
@@ -420,8 +432,8 @@ export function copyDraftsForBranch(userId: string, sourceId: string, targetId: 
   const text = messageJson.join("\n");
   const insert = db.prepare(
     `INSERT INTO email_drafts (id, thread_id, user_id, message_id, tool_call_id, account_id, to_json, cc_json, bcc_json, subject, body, in_reply_to,
-       revision, status, updated_by, sent_at, send_count, last_error, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       revision, status, updated_by, sent_at, send_count, last_error, created_at, updated_at, kind)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   tx(() => {
     for (const row of rows) {
@@ -429,7 +441,7 @@ export function copyDraftsForBranch(userId: string, sourceId: string, targetId: 
       const status = row.status === "sending" ? (row.sending_from ?? "draft") : row.status;
       insert.run(
         row.id, targetId, userId, row.message_id, row.tool_call_id, row.account_id, row.to_json, row.cc_json, row.bcc_json, row.subject, row.body, row.in_reply_to,
-        row.revision, status, row.updated_by, row.sent_at, row.send_count, row.last_error, row.created_at, Date.now(),
+        row.revision, status, row.updated_by, row.sent_at, row.send_count, row.last_error, row.created_at, Date.now(), row.kind,
       );
     }
   });

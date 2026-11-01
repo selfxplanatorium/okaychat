@@ -25,7 +25,7 @@ changing the UI contract.
 | `src/server/email/errors.ts` | Actionable error mapping; never echoes an auth reply |
 | `src/web/components/settings/EmailSettings.tsx` | Account cards and the add/edit wizard: live discovery progress, cancellation, manual-entry usernames, honest test status |
 | `src/web/components/chat/email-tools.tsx` | List/search/read cards and the send/reply review card |
-| `src/web/components/chat/EmailDraftCard.tsx` | Inline editable letter: fields, autosave status, review dialog, send/copy/.eml/mailto/discard/rewrite |
+| `src/web/components/chat/EmailDraftCard.tsx` | Inline editable letter: fields, autosave status, review dialog, send/copy/.eml/mailto/discard |
 | `src/web/components/chat/email-draft-state.ts` | Debounced revision-checked autosave controller, scoped reload outbox, card-state derivation |
 
 ## Data
@@ -41,7 +41,10 @@ new destination. Message bodies are not mirrored into SQLite. Downloaded attachm
 A user may connect at most 10 accounts. The first account becomes the default; deleting the default
 promotes the oldest remaining one. The default cannot be cleared to nothing.
 
-`email_drafts` holds the inline editable letters. The key is `(thread_id, id)`, like messages, so a
+`email_drafts` holds the inline editable letters and writing drafts. The immutable `kind` is `email`
+for letters (and existing rows) or `text` for the reduced writing editor; see
+[Writing drafts](writing-drafts.md). Both share the same ownership, revision, autosave, and caps.
+Text drafts reject mail fields and mail actions on the server. The key is `(thread_id, id)`, like messages, so a
 branch can keep the same opaque card id. Every row belongs to a user and a chat, stores the recipient
 arrays, subject, plain-text body, optional reply handle, sending account, `revision`, `status`
 (`draft|sending|sent`), last writer (`user|model`), sent timestamp/count, last send error, and one
@@ -58,6 +61,12 @@ account id to fetch folders; inventory itself opens no mail connection, so an un
 read-disabled default cannot hide the other accounts. Send/reply require an explicit `accountId`;
 list/search/read can fall back to the default. The inventory is scanned and enveloped like mail
 content because signatures and labels are user-supplied text.
+
+The default chat prompt and the tool description direct the model to use the editable draft card
+for email-writing requests, including sample emails, unless the user explicitly requests plain text
+or Markdown. Unknown recipients can be omitted; no mailbox connection is required. This is a model
+instruction, not automatic detection of email-shaped Markdown: a normal text reply does not become
+a card. A server-wide override of the Chat assistant prompt replaces that default instruction too.
 
 `draft_email` is separate from the six mailbox tools and exists in every stored chat, even with no
 mailbox: a draft can still be copied, downloaded, or opened in a mail app. A call without `draftId`
@@ -158,8 +167,7 @@ requires one.
 
 The toolbar also copies a readable message (with the HTTPS clipboard fallback), downloads a Unicode
 `.eml` built by `buildMime`, opens `mailto:` with encoded subject/body/recipients, discards after a
-confirmation dialog, and asks for a rewrite after saving local changes by appending a user turn
-that names the draft id. All other actions keep working with no account. When no connected account can send, Send is disabled and
+confirmation dialog. These actions keep working with no account. When no connected account can send, Send is disabled and
 a Settings → Email link explains why. At 360px the header, fields, and toolbar wrap with `min-w-0`;
 the body auto-grows without a fixed-height jump. Fields have labels; status is announced through a
 polite live region, copy feedback included; Ctrl/⌘+Enter opens the review, Escape only blurs a field;

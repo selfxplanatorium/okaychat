@@ -29,6 +29,8 @@ export interface EmailDraftFields {
 }
 
 export interface EmailDraft extends EmailDraftFields {
+  /** Text drafts share revision/autosave storage but can never be sent as mail. */
+  kind?: "email" | "text";
   id: string;
   threadId: string;
   messageId: string | null;

@@ -1,4 +1,4 @@
-import { useAui, useAuiState, type ToolCallMessagePartProps } from "@assistant-ui/react";
+import { useAuiState, type ToolCallMessagePartProps } from "@assistant-ui/react";
 import {
   AlertCircleIcon,
   CheckCircle2Icon,
@@ -6,10 +6,10 @@ import {
   CopyIcon,
   DownloadIcon,
   ExternalLinkIcon,
+  FileTextIcon,
   Loader2Icon,
   MailIcon,
   SendIcon,
-  SparklesIcon,
   Trash2Icon,
   TriangleAlertIcon,
 } from "lucide-react";
@@ -41,7 +41,6 @@ import { api } from "@/lib/api";
 import { settingsHref } from "@/lib/settings-link";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
-import { useThreadSync } from "@/state/thread-sync";
 import {
   DraftAutosave,
   clearOutbox,
@@ -223,15 +222,17 @@ function StatusLine({ state, error, onRetry, onReload }: { state: DraftSaveStatu
   return <span className="text-muted-foreground inline-flex items-center gap-1 text-[11px]"><CheckIcon aria-hidden className="size-3" />{t("email.draftSaved")}</span>;
 }
 
-export function EmailDraftCard(props: ToolCallMessagePartProps) {
+export function TextDraftCard(props: ToolCallMessagePartProps) {
+  return <EmailDraftCard {...props} textDraft />;
+}
+
+export function EmailDraftCard(props: ToolCallMessagePartProps & { textDraft?: boolean }) {
+  const textDraft = props.textDraft === true;
   const { args, result, status } = props;
-  const aui = useAui();
   const threadId = useAuiState((s) => s.threadListItem.remoteId ?? undefined);
   const messageId = useAuiState((s) => s.message.id);
-  const running = useAuiState((s) => s.thread.isRunning);
-  const threadSync = useThreadSync();
   const userId = useData((s) => s.me?.id);
-  const { accounts, loading: accountsLoading, error: accountsError, reload: reloadAccounts } = useDraftAccounts(userId);
+  const { accounts, loading: accountsLoading, error: accountsError, reload: reloadAccounts } = useDraftAccounts(textDraft ? undefined : userId);
 
   const resultDraft = draftOf(result);
   const resultAction = typeof result === "object" && result ? (result as DraftToolResult).action : undefined;
@@ -364,8 +365,8 @@ export function EmailDraftCard(props: ToolCallMessagePartProps) {
 
   // A save can fail because its account was removed or had sending turned off since the list loaded.
   useEffect(() => {
-    if (saveError) void reloadAccounts();
-  }, [reloadAccounts, saveError]);
+    if (!textDraft && saveError) void reloadAccounts();
+  }, [reloadAccounts, saveError, textDraft]);
 
   // A failed first load is retried when the connection returns or the reader comes back to the tab.
   useEffect(() => {
@@ -409,7 +410,7 @@ export function EmailDraftCard(props: ToolCallMessagePartProps) {
     return () => { abort.abort(); clearInterval(timer); };
   }, [base, draft?.status]);
 
-  const viewFields = fields ?? previewFields(args);
+  const viewFields = fields ?? previewFields(textDraft ? { ...(args as object), subject: (args as { title?: string })?.title } : args);
   const wordCount = draftWordCount(viewFields.body);
   const edited = !!draft && (draft.updatedBy === "user" || autosave !== "saved");
   const selectedAccount = viewFields.accountId ? accounts.find((entry) => entry.id === viewFields.accountId) : undefined;
@@ -430,8 +431,6 @@ export function EmailDraftCard(props: ToolCallMessagePartProps) {
   const readOnly = !draft || loading || draft.status === "sent" || sendingByServer || discarded || !!loadError;
   const saveSettled = autosave === "saved";
   const sendActionAllowed = !!draft && !!base && (draft.status === "draft" || draft.status === "sent") && !discarded && !loadError && !loading && !!selectedAccount?.sendEnabled && !accountsLoading && saveSettled && viewFields.to.length > 0;
-  const temporary = !!threadId?.startsWith("tmp_");
-  const busy = running || !!threadSync || sending || discarding;
 
   const updateFields = (patch: Partial<EmailDraftFields>) => {
     setActionError(null);
@@ -451,7 +450,7 @@ export function EmailDraftCard(props: ToolCallMessagePartProps) {
 
   const startReview = async () => {
     const controller = controllerRef.current;
-    if (!base || !controller) return;
+    if (textDraft || !base || !controller) return;
     setActionError(null);
     // Never review while a save is pending: the payload must be the record the server holds.
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -499,6 +498,10 @@ export function EmailDraftCard(props: ToolCallMessagePartProps) {
   };
 
   const copyDraft = () => {
+    if (textDraft) {
+      copyToClipboard(viewFields.body);
+      return;
+    }
     const header = [
       viewFields.to.length ? `To: ${joinRecipients(viewFields.to)}` : "",
       viewFields.cc.length ? `Cc: ${joinRecipients(viewFields.cc)}` : "",
@@ -572,24 +575,8 @@ export function EmailDraftCard(props: ToolCallMessagePartProps) {
     }
   };
 
-  const rewrite = async () => {
-    if (!draft || temporary) return;
-    const controller = controllerRef.current;
-    if (!controller) return;
-    await controller.flush();
-    if (controller.snapshot().dirty || controller.snapshot().status !== "saved") {
-      setActionError(t("email.draftSendFirst"));
-      return;
-    }
-    const subject = draft.subject || t("email.noSubject");
-    aui.thread.append({
-      role: "user",
-      content: [{ type: "text", text: t("email.draftRewritePrompt", { subject, id: draft.id }) }],
-      startRun: true,
-    });
-  };
-
   const onCardKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (textDraft) return;
     if (!(event.metaKey || event.ctrlKey) || event.key !== "Enter") return;
     event.preventDefault();
     event.stopPropagation();
@@ -604,17 +591,17 @@ export function EmailDraftCard(props: ToolCallMessagePartProps) {
 
   return (
     <section
-      data-slot="email-draft-card"
+      data-slot={textDraft ? "text-draft-card" : "email-draft-card"}
       data-no-drawer-swipe
       role="group"
-      aria-label={t("email.draftTitle")}
+      aria-label={textDraft ? t("email.textDraftTitle") : t("email.draftTitle")}
       tabIndex={-1}
       onKeyDown={onCardKeyDown}
       className="depth-float bg-card my-3 min-w-0 rounded-2xl border p-3 sm:p-4"
     >
       <div className="mb-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <MailIcon aria-hidden className="text-muted-foreground size-4 shrink-0" />
-        <h3 className="min-w-0 flex-1 truncate text-sm font-medium">{t("email.draftTitle")}</h3>
+        {textDraft ? <FileTextIcon aria-hidden className="text-muted-foreground size-4 shrink-0" /> : <MailIcon aria-hidden className="text-muted-foreground size-4 shrink-0" />}
+        <h3 className="min-w-0 flex-1 truncate text-sm font-medium">{textDraft ? t("email.textDraftTitle") : t("email.draftTitle")}</h3>
         {draft?.status === "sent" ? <span className="text-success inline-flex items-center gap-1 text-[11px]"><CheckCircle2Icon aria-hidden className="size-3.5" />{t("email.draftSentStatus")}</span> : null}
         {edited ? (
           <span className="text-muted-foreground inline-flex items-center gap-1 text-[11px]">
@@ -646,7 +633,7 @@ export function EmailDraftCard(props: ToolCallMessagePartProps) {
             </div>
           ) : null}
 
-          {draft?.status !== "sent" && !readOnly && ((draft?.accountMissing && !selectedAccount) || noSender) ? (
+          {!textDraft && draft?.status !== "sent" && !readOnly && ((draft?.accountMissing && !selectedAccount) || noSender) ? (
             <div className="bg-muted/50 mb-2 flex min-w-0 flex-col gap-1 rounded-lg p-2.5 text-xs">
               <p className="font-medium">{draft?.accountMissing && !selectedAccount ? t("email.draftAccountMissing") : t("email.draftNoAccount")}</p>
               <p className="text-muted-foreground">{t("email.draftNoAccountBody")}</p>
@@ -656,7 +643,7 @@ export function EmailDraftCard(props: ToolCallMessagePartProps) {
             </div>
           ) : null}
 
-          {draft?.status !== "sent" && selectedAccount && !selectedAccount.sendEnabled ? (
+          {!textDraft && draft?.status !== "sent" && selectedAccount && !selectedAccount.sendEnabled ? (
             <div className="text-warning mb-2 flex flex-wrap items-center gap-2 text-xs">
               <AlertCircleIcon aria-hidden className="size-4 shrink-0" />
               <span className="min-w-0 flex-1">{t("email.draftSendingOff", { address: selectedAccount.address })}</span>
@@ -665,88 +652,93 @@ export function EmailDraftCard(props: ToolCallMessagePartProps) {
           ) : null}
 
           <div className="flex flex-col gap-1.5">
-            <div className="grid min-w-0 grid-cols-[3.25rem_minmax(0,1fr)] items-center gap-2 sm:grid-cols-[3.75rem_minmax(0,1fr)]">
-              <span className="text-muted-foreground text-xs">{t("email.draftFrom")}</span>
-              <Select<string>
-                value={viewFields.accountId && accounts.some((entry) => entry.id === viewFields.accountId) ? viewFields.accountId : NONE}
-                disabled={readOnly || accountsLoading || accounts.length === 0}
-                aria-label={t("email.draftFrom")}
-                className="bg-transparent pointer-coarse:min-h-11"
-                placeholder={t("email.draftChooseAccount")}
-                options={senderOptions}
-                onValueChange={(value) => {
-                  if (value === NONE) updateFields({ accountId: null });
-                  else updateFields({ accountId: value });
-                }}
-              />
-            </div>
+            {!textDraft ? (
+              <>
+                <div className="grid min-w-0 grid-cols-[3.25rem_minmax(0,1fr)] items-center gap-2 sm:grid-cols-[3.75rem_minmax(0,1fr)]">
+                  <span className="text-muted-foreground text-xs">{t("email.draftFrom")}</span>
+                  <Select<string>
+                    value={viewFields.accountId && accounts.some((entry) => entry.id === viewFields.accountId) ? viewFields.accountId : NONE}
+                    disabled={readOnly || accountsLoading || accounts.length === 0}
+                    aria-label={t("email.draftFrom")}
+                    className="bg-transparent pointer-coarse:min-h-11"
+                    placeholder={t("email.draftChooseAccount")}
+                    options={senderOptions}
+                    onValueChange={(value) => {
+                      if (value === NONE) updateFields({ accountId: null });
+                      else updateFields({ accountId: value });
+                    }}
+                  />
+                </div>
 
-            <RecipientField
-              id={`${fieldId}-to`}
-              label={t("email.draftTo")}
-              value={viewFields.to}
-              readOnly={readOnly}
-              placeholder={t("email.draftToPlaceholder")}
-              onChange={(to) => updateFields({ to })}
-            />
-            {showCc || viewFields.cc.length ? (
-              <RecipientField
-                id={`${fieldId}-cc`}
-                label={t("email.draftCc")}
-                value={viewFields.cc}
-                readOnly={readOnly}
-                placeholder={t("email.draftRecipientPlaceholder")}
-                onChange={(cc) => updateFields({ cc })}
-              />
-            ) : null}
-            {showBcc || viewFields.bcc.length ? (
-              <RecipientField
-                id={`${fieldId}-bcc`}
-                label={t("email.draftBcc")}
-                value={viewFields.bcc}
-                readOnly={readOnly}
-                placeholder={t("email.draftRecipientPlaceholder")}
-                onChange={(bcc) => updateFields({ bcc })}
-              />
-            ) : null}
-            {!readOnly && (!showCc || !showBcc) ? (
-              <div className="flex flex-wrap gap-2 ps-[calc(3.25rem+0.5rem)] text-[11px] sm:ps-[calc(3.75rem+0.5rem)]">
-                {!showCc && !viewFields.cc.length ? <button type="button" aria-expanded={showCc} className="text-muted-foreground hover:text-foreground inline-flex min-h-10 items-center underline underline-offset-2 rounded focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 pointer-coarse:min-h-11" onClick={() => setShowCc(true)}>{t("email.draftAddCc")}</button> : null}
-                {!showBcc && !viewFields.bcc.length ? <button type="button" aria-expanded={showBcc} className="text-muted-foreground hover:text-foreground inline-flex min-h-10 items-center underline underline-offset-2 rounded focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 pointer-coarse:min-h-11" onClick={() => setShowBcc(true)}>{t("email.draftAddBcc")}</button> : null}
-              </div>
+                <RecipientField
+                  id={`${fieldId}-to`}
+                  label={t("email.draftTo")}
+                  value={viewFields.to}
+                  readOnly={readOnly}
+                  placeholder={t("email.draftToPlaceholder")}
+                  onChange={(to) => updateFields({ to })}
+                />
+                {showCc || viewFields.cc.length ? (
+                  <RecipientField
+                    id={`${fieldId}-cc`}
+                    label={t("email.draftCc")}
+                    value={viewFields.cc}
+                    readOnly={readOnly}
+                    placeholder={t("email.draftRecipientPlaceholder")}
+                    onChange={(cc) => updateFields({ cc })}
+                  />
+                ) : null}
+                {showBcc || viewFields.bcc.length ? (
+                  <RecipientField
+                    id={`${fieldId}-bcc`}
+                    label={t("email.draftBcc")}
+                    value={viewFields.bcc}
+                    readOnly={readOnly}
+                    placeholder={t("email.draftRecipientPlaceholder")}
+                    onChange={(bcc) => updateFields({ bcc })}
+                  />
+                ) : null}
+                {!readOnly && (!showCc || !showBcc) ? (
+                  <div className="flex flex-wrap gap-2 ps-[calc(3.25rem+0.5rem)] text-[11px] sm:ps-[calc(3.75rem+0.5rem)]">
+                    {!showCc && !viewFields.cc.length ? <button type="button" aria-expanded={showCc} className="text-muted-foreground hover:text-foreground inline-flex min-h-10 items-center underline underline-offset-2 rounded focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 pointer-coarse:min-h-11" onClick={() => setShowCc(true)}>{t("email.draftAddCc")}</button> : null}
+                    {!showBcc && !viewFields.bcc.length ? <button type="button" aria-expanded={showBcc} className="text-muted-foreground hover:text-foreground inline-flex min-h-10 items-center underline underline-offset-2 rounded focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 pointer-coarse:min-h-11" onClick={() => setShowBcc(true)}>{t("email.draftAddBcc")}</button> : null}
+                  </div>
+                ) : null}
+
+                <div className="border-border/70 mt-1 border-t" />
+
+              </>
             ) : null}
 
-            <div className="border-border/70 mt-1 border-t" />
-
-            <label htmlFor={`${fieldId}-subject`} className="sr-only">{t("email.draftSubject")}</label>
+            <label htmlFor={`${fieldId}-subject`} className="sr-only">{textDraft ? t("email.textDraftTitleLabel") : t("email.draftSubject")}</label>
             <Input
               id={`${fieldId}-subject`}
               value={viewFields.subject}
               readOnly={readOnly}
               maxLength={EMAIL_DRAFT_LIMITS.subject}
-              placeholder={t("email.draftSubjectPlaceholder")}
+              placeholder={textDraft ? t("email.textDraftTitleLabel") : t("email.draftSubjectPlaceholder")}
               aria-invalid={hasLineBreak(viewFields.subject) || undefined}
               className="bg-transparent px-1.5 text-base font-medium focus-visible:bg-muted/50 md:text-sm"
               onChange={(event) => updateFields({ subject: event.target.value })}
               onKeyDown={fieldKeyDown}
             />
 
-            <label htmlFor={`${fieldId}-body`} className="sr-only">{t("email.draftBody")}</label>
+            <label htmlFor={`${fieldId}-body`} className="sr-only">{textDraft ? t("email.textDraftBodyLabel") : t("email.draftBody")}</label>
             <Textarea
               id={`${fieldId}-body`}
               value={viewFields.body}
               readOnly={readOnly}
               maxLength={EMAIL_DRAFT_LIMITS.body}
-              placeholder={t("email.draftBodyPlaceholder")}
+              placeholder={textDraft ? t("email.textDraftBodyPlaceholder") : t("email.draftBodyPlaceholder")}
               className="min-h-32 resize-none bg-transparent px-1.5 text-sm leading-relaxed focus-visible:bg-muted/50"
               onChange={(event) => updateFields({ body: event.target.value })}
               onKeyDown={fieldKeyDown}
             />
           </div>
 
-          {viewFields.inReplyTo ? <p className="text-muted-foreground mt-1 text-[11px]">{t("email.draftReplyNote")}</p> : null}
+          {!textDraft && viewFields.inReplyTo ? <p className="text-muted-foreground mt-1 text-[11px]">{t("email.draftReplyNote")}</p> : null}
 
-          {missingSignature && !readOnly ? (
+          {!textDraft && missingSignature && !readOnly ? (
             <div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-2 text-[11px]">
               <span>{t("email.draftSignatureMissing")}</span>
               <button type="button" data-command="email.draftSignature" className="text-primary min-h-10 underline underline-offset-2 rounded focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 pointer-coarse:min-h-11" onClick={() => updateFields({ body: `${viewFields.body}${signatureBlock}` })}>
@@ -770,50 +762,54 @@ export function EmailDraftCard(props: ToolCallMessagePartProps) {
           </div>
 
           <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
-            <Button
-              type="button"
-              size="sm"
-              className="pointer-coarse:min-h-11"
-              data-command="email.draftSend"
-              aria-keyshortcuts="Control+Enter Meta+Enter"
-              disabled={!sendActionAllowed}
-              onClick={() => void startReview()}
-            >
-              <SendIcon aria-hidden />
-              {draft?.status === "sent" ? t("email.draftSendAgain") : t("email.draftSend")}
-            </Button>
-            {noSender || (draft?.accountMissing && !selectedAccount) ? (
-              <Link href={settingsHref("email")} className="text-primary inline-flex min-h-10 items-center gap-1 px-1 text-xs underline-offset-4 hover:underline pointer-coarse:min-h-11">
-                {t("email.draftOpenSettings")} <ExternalLinkIcon aria-hidden className="size-3" />
-              </Link>
+            {!textDraft ? (
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="pointer-coarse:min-h-11"
+                  data-command="email.draftSend"
+                  aria-keyshortcuts="Control+Enter Meta+Enter"
+                  disabled={!sendActionAllowed}
+                  onClick={() => void startReview()}
+                >
+                  <SendIcon aria-hidden />
+                  {draft?.status === "sent" ? t("email.draftSendAgain") : t("email.draftSend")}
+                </Button>
+                {noSender || (draft?.accountMissing && !selectedAccount) ? (
+                  <Link href={settingsHref("email")} className="text-primary inline-flex min-h-10 items-center gap-1 px-1 text-xs underline-offset-4 hover:underline pointer-coarse:min-h-11">
+                    {t("email.draftOpenSettings")} <ExternalLinkIcon aria-hidden className="size-3" />
+                  </Link>
+                ) : null}
+              </>
             ) : null}
-            <Button type="button" variant="ghost" size="sm" className="pointer-coarse:min-h-11" data-command="email.draftCopy" onClick={copyDraft}>
+            <Button type="button" variant="ghost" size="sm" className="pointer-coarse:min-h-11" data-command={textDraft ? "textDraft.copy" : "email.draftCopy"} onClick={copyDraft}>
               {isCopied ? <CheckIcon aria-hidden /> : <CopyIcon aria-hidden />}
               <span aria-live="polite">{isCopied ? t("email.draftCopied") : t("email.draftCopy")}</span>
             </Button>
-            <Button type="button" variant="ghost" size="sm" className="pointer-coarse:min-h-11" data-command="email.draftDownload" disabled={downloading || !base} onClick={() => void downloadEml()}>
-              {downloading ? <Loader2Icon aria-hidden className="animate-spin motion-reduce:animate-none" /> : <DownloadIcon aria-hidden />}
-              {t("email.draftDownload")}
-            </Button>
-            <a
-              href={mailtoHref}
-              data-command="email.draftMailto"
-              className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "pointer-coarse:min-h-11")}
-            >
-              <ExternalLinkIcon aria-hidden />
-              {t("email.draftMailto")}
-            </a>
-            <Button type="button" variant="ghost" size="sm" className="pointer-coarse:min-h-11" data-command="email.draftRewrite" disabled={busy || temporary || !draft} onClick={() => void rewrite()}>
-              <SparklesIcon aria-hidden />
-              {t("email.draftRewrite")}
-            </Button>
-            <Button type="button" variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive pointer-coarse:min-h-11 ms-auto" data-command="email.draftDiscard" disabled={discarding || !base} onClick={() => setDiscardOpen(true)}>
+            {!textDraft ? (
+              <>
+                <Button type="button" variant="ghost" size="sm" className="pointer-coarse:min-h-11" data-command="email.draftDownload" disabled={downloading || !base} onClick={() => void downloadEml()}>
+                  {downloading ? <Loader2Icon aria-hidden className="animate-spin motion-reduce:animate-none" /> : <DownloadIcon aria-hidden />}
+                  {t("email.draftDownload")}
+                </Button>
+                <a
+                  href={mailtoHref}
+                  data-command="email.draftMailto"
+                  className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "pointer-coarse:min-h-11")}
+                >
+                  <ExternalLinkIcon aria-hidden />
+                  {t("email.draftMailto")}
+                </a>
+              </>
+            ) : null}
+            <Button type="button" variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive pointer-coarse:min-h-11 ms-auto" data-command={textDraft ? "textDraft.discard" : "email.draftDiscard"} disabled={discarding || !base} onClick={() => setDiscardOpen(true)}>
               <Trash2Icon aria-hidden />
               {t("email.draftDiscard")}
             </Button>
           </div>
 
-          {accountsError ? (
+          {!textDraft && accountsError ? (
             <div className="text-muted-foreground mt-2 flex items-center gap-2 text-[11px]">
               <span>{t("email.draftAccountsError")}</span>
               <button type="button" className="inline-flex min-h-10 items-center underline underline-offset-2 rounded focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 pointer-coarse:min-h-11" onClick={() => void reloadAccounts()}>{t("email.draftRetry")}</button>
@@ -862,7 +858,7 @@ export function EmailDraftCard(props: ToolCallMessagePartProps) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("email.draftDiscardTitle")}</DialogTitle>
-            <DialogDescription>{t("email.draftDiscardBody")}</DialogDescription>
+            <DialogDescription>{textDraft ? t("email.textDraftDiscardBody") : t("email.draftDiscardBody")}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button type="button" variant="outline" disabled={discarding} onClick={() => setDiscardOpen(false)}>{t("common.cancel")}</Button>

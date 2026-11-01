@@ -26,7 +26,7 @@ after(() => { db.close(); rmSync(dataDir, { recursive: true, force: true }); });
 
 type ProviderRequest = { messages: Array<{ role: string; content: unknown }>; tools?: Array<{ function: { name: string } }> };
 
-function fakeProvider(t: TestContext, args: Record<string, unknown>) {
+function fakeProvider(t: TestContext, args: Record<string, unknown>, toolName = "draft_email") {
   const requests: ProviderRequest[] = [];
   t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -35,7 +35,7 @@ function fakeProvider(t: TestContext, args: Record<string, unknown>) {
     requests.push(body);
     const first = requests.length === 1;
     const delta = first
-      ? { role: "assistant", tool_calls: [{ index: 0, id: "draft-1", type: "function", function: { name: "draft_email", arguments: JSON.stringify(args) } }] }
+      ? { role: "assistant", tool_calls: [{ index: 0, id: "draft-1", type: "function", function: { name: toolName, arguments: JSON.stringify(args) } }] }
       : { role: "assistant", content: "Here is a draft." };
     const chunks = [
       { id: "mock", object: "chat.completion.chunk", created: 1, model: "mock", choices: [{ index: 0, delta, finish_reason: null }] },
@@ -62,4 +62,21 @@ test("draft_email is offered without a mailbox, runs without approval, and retur
   const toolMessage = JSON.stringify(requests[1]?.messages.find((message) => message.role === "tool"));
   assert.match(toolMessage, /untrusted_data/);
   assert.match(toolMessage, /email_draft/);
+});
+
+
+test("draft_text is offered in stored chats and creates an enveloped writing draft", async (t) => {
+  const { requests } = fakeProvider(t, { title: "Team message", body: "See you Friday." }, "draft_text");
+  ensureThread("alice", "writing-chat");
+  const messages: UIMessage[] = [{ id: "u1", role: "user", parts: [{ type: "text", text: "Write a message to my team." }] }];
+  const chunks: Array<{ type: string; [key: string]: unknown }> = [];
+  for await (const chunk of await turnStream({ userId: "alice", threadId: "writing-chat", modelRef: "custom-test/mock", uiMessages: messages, interactive: true })) chunks.push(chunk);
+  assert.ok(requests[0]?.tools?.some((item) => item.function.name === "draft_text"));
+  const output = chunks.find((chunk) => chunk.type === "tool-output-available") as { output: { draft: { id: string } } } | undefined;
+  assert.ok(output);
+  const draft = getDraft("alice", "writing-chat", output.output.draft.id);
+  assert.equal(draft.kind, "text");
+  assert.equal(draft.body, "See you Friday.");
+  assert.equal(chunks.some((chunk) => chunk.type === "tool-approval-request"), false);
+  assert.match(JSON.stringify(requests[1]?.messages.find((message) => message.role === "tool")), /text_draft/);
 });

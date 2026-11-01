@@ -636,6 +636,8 @@ const migrations: Array<string | (() => void)> = [
   ALTER TABLE messages ADD COLUMN edited_at INTEGER;
   ALTER TABLE messages ADD COLUMN original_enc TEXT;
   `,
+  // Writing drafts reuse the owned, revision-checked draft lifecycle without mail actions.
+  `ALTER TABLE email_drafts ADD COLUMN kind TEXT NOT NULL DEFAULT 'email' CHECK (kind IN ('email', 'text'));`,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

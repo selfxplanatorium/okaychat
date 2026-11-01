@@ -135,11 +135,12 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "email.removeAccount", labelKey: "keyboard.cmdEmailRemoveAccount", group: "Settings", keys: [] },
   { id: "email.setDefault", labelKey: "keyboard.cmdEmailSetDefault", group: "Settings", keys: [] },
   { id: "email.confirmRemove", labelKey: "keyboard.cmdEmailConfirmRemove", group: "Settings", keys: [] },
+  { id: "textDraft.copy", labelKey: "keyboard.cmdTextDraftCopy", group: "Messages", keys: [] },
+  { id: "textDraft.discard", labelKey: "keyboard.cmdTextDraftDiscard", group: "Messages", keys: [] },
   { id: "email.draftSend", labelKey: "keyboard.cmdEmailDraftSend", group: "Messages", keys: [] },
   { id: "email.draftCopy", labelKey: "keyboard.cmdEmailDraftCopy", group: "Messages", keys: [] },
   { id: "email.draftDownload", labelKey: "keyboard.cmdEmailDraftDownload", group: "Messages", keys: [] },
   { id: "email.draftMailto", labelKey: "keyboard.cmdEmailDraftMailto", group: "Messages", keys: [] },
-  { id: "email.draftRewrite", labelKey: "keyboard.cmdEmailDraftRewrite", group: "Messages", keys: [] },
   { id: "email.draftSignature", labelKey: "keyboard.cmdEmailDraftSignature", group: "Messages", keys: [] },
   { id: "email.draftDiscard", labelKey: "keyboard.cmdEmailDraftDiscard", group: "Messages", keys: [] },
   // Voice calls: reachable by name; Space/Escape act inside the call view. They are global so they also run

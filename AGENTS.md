@@ -75,6 +75,7 @@ src/server/
   ollama-model.ts     Native Ollama `/api/chat` LanguageModelV4 adapter (stream, tools, thinking, usage, abort)
   catalog/            models.dev catalog + provider connections (encrypted keys); ollama.ts is native transport/metadata, ollama-routes.ts its management API
   mcp/                MCP connection manager, OAuth provider, storage
+  text-drafts.ts      Editable writing drafts (draft_text), sharing owned revision/autosave storage with email drafts
   email/              IMAP/SMTP accounts, ordered discovery, MIME, six mailbox tools, editable drafts (records, tool, routes, review/send), settings API
   tools/              Built-in tools: web_search, web_fetch (+ Scrapling fallback), generate_image (Codex or image APIs), delegate_task (sub-agents), run_code (sandbox client)
   turn-context.ts     Stores each turn's memory/skills block and replays it so later requests keep the cached prefix
@@ -140,6 +141,7 @@ docs/                 Reusable documentation (see below)
 - `docs/implementation/code-sandbox.md`: the `run_code` sandbox container, its per-run jail, installed tools, and the runner API.
 - `docs/implementation/speech.md`: read-aloud and speech-to-text engines, the speech worker, recording retention, and the Open WebUI/LibreChat comparison.
 - `docs/implementation/voice-calls.md`: the `/api/voice/call` protocol, local Whisper/Piper pipeline, OpenAI Realtime WebRTC fallback, call view, limits, privacy (no recordings), failures, and the unmeasured latency target.
+- `docs/implementation/writing-drafts.md`: the simple reusable-text editor, `draft_text`, shared draft lifecycle, kind separation, and model guidance.
 - `docs/implementation/email.md`: IMAP/SMTP accounts, the discovery chain, TLS and host rules, the six mailbox tools, editable draft cards, attachments, limits, and the OAuth gap.
 - `docs/implementation/browser-worker.md`: the browser worker container, its job API, token, egress firewall, and rendering policies.
 - `docs/implementation/storage-quota.md`: what counts against the per-user storage quota and where it is enforced.
