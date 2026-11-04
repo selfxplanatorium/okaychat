@@ -121,6 +121,23 @@ test("every chat shares the first system message; chat context and the date come
   assert.equal(a[1]!.role, "system");
   assert.ok(JSON.stringify(a[1]).includes("LAYER_PROJECT_INSTRUCTIONS"), "project context is the second system message");
   assert.ok(JSON.stringify(a.filter((m) => m.role === "user")).includes("Today's date"), "the date rides in the turn context");
+  const block = a.find((m) => m.role === "user" && JSON.stringify(m.content).includes("Today's date"));
+  assert.ok(JSON.stringify(block!.content).startsWith('"<app_context>'), "the turn context names the app as its author, so it does not read as the user's words");
+});
+
+test("a temporary chat sends the date once, before its first user message", async (t) => {
+  const requests = provider(t, false);
+  const user = (id: string, text: string): UIMessage => ({ id, role: "user", parts: [{ type: "text", text }] });
+  const reply = (id: string): UIMessage => ({ id, role: "assistant", parts: [{ type: "text", text: "Okay." }] });
+  await run("tmp_dates", [user("t1", "first")]);
+  await run("tmp_dates", [user("t1", "first"), reply("r1"), user("t2", "second")]);
+  await run("tmp_dates", [user("t1", "first"), reply("r1"), user("t2", "second"), reply("r2"), user("t3", "third")]);
+  for (const request of requests) {
+    const sent = request.messages.filter((m) => m.role !== "system").map((m) => JSON.stringify(m.content));
+    assert.equal(sent.filter((text) => text.includes("Today's date")).length, 1, "the date is not repeated beside every message");
+    assert.ok(sent[0]!.includes("Today's date") && sent[1]!.includes("first"), "the date sits before the first user message");
+  }
+  assert.deepEqual(requests[2]!.messages.slice(0, requests[1]!.messages.length), requests[1]!.messages, "each temporary request extends the previous one");
 });
 
 for (const approved of [true, false]) {

@@ -42,7 +42,7 @@ import { errorJson, AppError } from "./errors.js";
 import { describeBoundaryError, describeProviderError, toolErrorWireText, wireErrorText } from "./provider-errors.js";
 import { conversationMemory, factsContext, memoryPreferences, temporaryMemory } from "./memory.js";
 import { attachedCollectionIds, conversationKnowledge, type KnowledgeTurn } from "./knowledge/tools.js";
-import { contextText, insertTurnContexts, saveTurnContext, shownFactIds, storedTurnContexts } from "./turn-context.js";
+import { contextText, insertTurnContexts, saveTurnContext, shownFactIds, storedTurnContexts, turnBlock } from "./turn-context.js";
 import { isVoiceTurn, withVoiceNotes } from "./voice/turn.js";
 import { adaptPdfParts } from "./pdf-parts.js";
 import { resolveImageRefs } from "./media/refs.js";
@@ -371,14 +371,18 @@ export async function turnStream(opts: TurnOptions) {
       let converted = modelMessages;
       const date = promptText("date", { date: new Date().toISOString().slice(0, 10) });
       if (temporary) {
-        const currentContext = [
-          contextText({ date, memory: memory.context, skills: skills.context, knowledge: "", knowledgeIds: [] }),
+        // Nothing is stored, so the date goes once before the first user message: the same bytes every turn,
+        // and not beside every new message. Memory retrieved for the latest message stays beside that message.
+        const firstUserIndex = converted.findIndex((message) => message.role === "user");
+        const lastUserIndex = converted.findLastIndex((message) => message.role === "user");
+        const latestAt = lastUserIndex < 0 ? converted.length : lastUserIndex;
+        const dateAt = firstUserIndex < 0 ? converted.length : firstUserIndex;
+        const latestContext = [
+          contextText({ date: dateAt === latestAt ? date : "", memory: memory.context, skills: skills.context, knowledge: "", knowledgeIds: [] }),
           lastUser && isVoiceTurn(lastUser) ? promptText("voiceCall") : "",
         ].filter(Boolean).join("\n\n");
-        if (currentContext) {
-          const lastUserIndex = converted.findLastIndex((message) => message.role === "user");
-          converted.splice(lastUserIndex < 0 ? converted.length : lastUserIndex, 0, { role: "user", content: currentContext });
-        }
+        if (latestContext) converted.splice(latestAt, 0, turnBlock(latestContext));
+        if (dateAt !== latestAt) converted.splice(dateAt, 0, turnBlock(date));
       } else {
         // A continuation or retry of this turn reuses the block it started with. A new block carries only what
         // the replayed earlier blocks do not already show, so each turn adds as few uncached tokens as possible.

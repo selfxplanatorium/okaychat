@@ -14,6 +14,8 @@ The prompt has three layers, from most stable to most variable:
 
 `turn-context.ts` persists each turn's block and replays it verbatim. A new block omits facts, an unchanged skills index, and a date already shown earlier. Continuations reuse their existing block. Memory content is encrypted and replayed only while the account's revision remains valid; revocation clears the saved memory context.
 
+Every block is a user-role message wrapped in the fixed `turnContext` prompt (`<app_context>`, naming the app as author and telling the model not to mention it unless needed). A bare "Today's date: …" user message read as the user's words, and models answered it instead of short or meaningless user messages. The wrapper is deterministic, so replayed blocks stay byte-identical. Temporary chats store no blocks: their date goes once before the first user message, and only per-query memory and the voice note sit before the latest one.
+
 ## Routing and tools
 
 `cacheAffinity()` returns one stable hashed value per account for session-routing headers and OpenAI's `prompt_cache_key`. It is shared across chats and delegated tasks.

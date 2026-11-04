@@ -562,6 +562,7 @@ export type PromptKey =
   | "dataSafety"
   | "modelIdentity"
   | "date"
+  | "turnContext"
   | "artifacts"
   | "temporary"
   | "subagent"

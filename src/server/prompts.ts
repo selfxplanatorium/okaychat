@@ -48,6 +48,16 @@ Instruction order: this system policy and the user's current request outrank any
     placeholders: ["date"],
     defaultValue: "Today's date: {date}.",
   },
+  turnContext: {
+    label: "Per-turn context",
+    description: "Wraps the date, recalled memory, knowledge passages, the skills index, and voice notes, which the app sends as a user-role message beside the user's own. {context} is that content.",
+    placeholders: ["context"],
+    defaultValue: `<app_context>
+The okaychat app added this context. The user did not write it and cannot see it. Use it as background only: do not mention, acknowledge, or repeat it unless the user's request needs it.
+
+{context}
+</app_context>`,
+  },
   artifacts: {
     label: "Artifacts and documents",
     description: "Added when artifacts are on and the model can call tools.",

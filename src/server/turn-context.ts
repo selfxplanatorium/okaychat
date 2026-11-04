@@ -3,6 +3,7 @@ import { decrypt, encrypt } from "./crypto.js";
 import { db, tx } from "./db.js";
 import { assertStorage } from "./quota.js";
 import { wrapUntrusted } from "./prompt-injection.js";
+import { promptText } from "./prompts.js";
 
 // The date, recalled memory, the skills index, and retrieved knowledge sit beside the user message they
 // were computed for. Providers cache by exact prefix, so dropping that block in the next turn would
@@ -117,6 +118,13 @@ export function saveTurnContext(userId: string, threadId: string, messageId: str
 export const shownFactIds = (memory: string) => new Set([...memory.matchAll(/"id":"([^"]+)"/g)].map((match) => match[1]!));
 
 /**
+ * The block as the model receives it. A bare user-role "Today's date: …" reads as something the user said,
+ * so models answered it instead of the user's message. The envelope names the app as the author. It is
+ * fixed text, so replayed blocks stay byte-identical.
+ */
+export const turnBlock = (text: string): ModelMessage => ({ role: "user", content: promptText("turnContext", { context: text }) });
+
+/**
  * Inserts each user message's context as a user message directly before it. `ui` and `model` are the same
  * branch before and after conversion; user messages convert one to one, so the nth of each correspond.
  */
@@ -129,7 +137,7 @@ export function insertTurnContexts(ui: UIMessage[], model: ModelMessage[], conte
   for (const message of model) {
     if (message.role === "user") {
       const text = contexts.get(ids[n++]!);
-      if (text) out.push({ role: "user", content: text });
+      if (text) out.push(turnBlock(text));
     }
     out.push(message);
   }
