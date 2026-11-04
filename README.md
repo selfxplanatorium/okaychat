@@ -1,107 +1,143 @@
-# okaychat
+<p align="center">
+  <img src="docs/assets/hero.svg" alt="okaychat — self-hosted AI chat that stays yours" width="100%">
+</p>
 
-A self-hosted, multi-user AI chat app. OpenCode Go is the primary connection; you can also connect your own ChatGPT plan, other model providers, or custom OpenAI-compatible endpoints. Each account has its own connections, settings, files, and conversations.
+<p align="center">
+  <b>A fast, private, multi-user AI chat server with every provider, real tools, and a UI that feels finished.</b><br>
+  Bring your own keys. Keep your conversations, files, and memory on your own machine.
+</p>
 
-## Features
+<p align="center">
+  <a href="#quick-start"><img alt="Docker" src="https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white"></a>
+  <a href="https://nodejs.org"><img alt="Node 22.13+" src="https://img.shields.io/badge/Node-22.13%2B-5FA04E?logo=nodedotjs&logoColor=white"></a>
+  <a href="docs/implementation/security.md"><img alt="Self-hosted" src="https://img.shields.io/badge/self--hosted-yes-b5c062"></a>
+  <a href="docs/ROADMAP.md"><img alt="Roadmap" src="https://img.shields.io/badge/roadmap-open-b5c062"></a>
+</p>
 
-- Streaming chat with reasoning and tool logs, branching, file attachments, Markdown/math/Mermaid, reload recovery, and Markdown/PDF export.
-- MCP tools, resources, prompts, approval forms, and embedded apps. Plugins also holds per-account Agent Skills.
-- Keyless web search, image generation, document creation/editing, interactive widgets, and code execution in a separate offline sandbox.
-- Projects, scheduled prompts, a persistent file library, public read-only chat links, and opt-in memory with reviewed import/export.
-- Per-chat model and reasoning controls, token/context/cost tracking, prompt caching, and automatic or manual compaction.
-- Synced appearance and keyboard settings, accent-adaptable branding, and an installable mobile web app.
+---
 
-Admins can manage accounts and groups, set storage limits and system prompts, and share provider connections or MCP servers with selected audiences.
+## Why okaychat
 
-## Run with Docker
+- **Every model, one place.** OpenCode Go, your own ChatGPT plan, OpenCode Zen, a local Ollama, and any OpenAI-compatible, Anthropic, or Google endpoint. Per-chat model and reasoning controls, live context and cost metering, prompt caching, and automatic compaction.
+- **Tools that actually work.** MCP servers, web search, a real offline code sandbox, document editing, image generation, knowledge bases, memory, deep research, scheduled prompts, and voice — not a chat box with a prompt.
+- **Built for several people.** Accounts, groups, per-audience shared keys, model policies, storage quotas, public read-only shares, and admin controls that do not require editing a config file.
+- **Private by default.** SQLite plus files on your disk. Credentials and memory are encrypted at rest. Outbound requests to user-chosen URLs are DNS-checked, every hop. Chromium runs in its own container, away from app data.
+- **Fast where it counts.** Streaming, reload recovery, a virtualized sidebar, a windowed message list, lazy routes, cached thread history, and a production bundle split so sign-in does not download the app.
 
-Use Docker Compose on a Linux host that supports the container capabilities and namespace settings in [docker-compose.yml](docker-compose.yml). Linux amd64 is the tested container platform; the browser worker and sandbox check their isolation requirements at startup.
+## Quick start
 
-1. Copy the environment template:
-
-   ```sh
-   cp .env.example .env
-   ```
-
-2. Set `OKAYCHAT_SECRET` and `OKAYCHAT_SANDBOX_TOKEN` in `.env` to different random values. Generate each with:
-
-   ```sh
-   openssl rand -base64 32
-   ```
-
-3. Build and start the services:
-
-   ```sh
-   docker compose up -d --build
-   ```
-
-Open http://localhost:8787. The first account is the administrator. Connect OpenCode Go during onboarding or choose another provider in Settings → Providers. The ChatGPT connection uses each user's own Codex device login; Docker includes the CLI by default.
-
-| Service | Purpose |
-| --- | --- |
-| `okaychat` | App and SQLite database, with persistent data in the `okaychat-data` volume. |
-| `searxng` | Private web search; no public host port. |
-| `sandbox` | Python/Bash and offline document/media tools. Each code run has its own filesystem and network namespaces, with no network access. |
-| `browser` | Chromium rendering and Scrapling page fetching. Separate users and an egress firewall keep untrusted pages away from app data and secrets. |
-
-The app generates the browser worker's token into the shared `okaychat-browser-token` volume. Sandbox workspaces use `okaychat-sandbox`; produced files are copied into app storage. See the [browser worker](docs/implementation/browser-worker.md) and [code sandbox](docs/implementation/code-sandbox.md) guides for their boundaries and platform limits.
-
-To omit Scrapling's stealth-browser fallback while keeping document rendering:
+Linux amd64 with Docker Compose is the tested platform. The browser worker and sandbox verify their isolation requirements at startup.
 
 ```sh
-docker compose build --build-arg SCRAPLING_BROWSER=false
+git clone https://github.com/selfxplanatorium/okaychat.git
+cd okaychat
+cp .env.example .env
 ```
 
-## Configuration and storage
+Generate two independent secrets and put them in `.env`:
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `OKAYCHAT_SECRET` | required | Encrypts provider/MCP credentials and memory. Changing or losing it makes existing encrypted data unreadable. |
-| `OKAYCHAT_SANDBOX_TOKEN` | required by Compose | Shared secret between the app and code sandbox. |
-| `OKAYCHAT_ALLOW_SIGNUP` | `false` | Allows later accounts to register; the administrator can change this in the app. |
-| `OKAYCHAT_PUBLIC_URL` | inferred | Public origin for MCP OAuth redirects behind a reverse proxy. |
-| `OKAYCHAT_PORT` | `8787` | App host port in Compose. |
-| `OKAYCHAT_DATA_DIR` | `./data` locally, `/data` in Compose | SQLite, generated image files, and local runtime state. |
-| `OKAYCHAT_STORAGE_LIMIT` | `1073741824` | Default per-user storage quota in bytes; admins can override it per account. |
-| `OKAYCHAT_SEARXNG_URL` | supplied by Compose | SearXNG endpoint; without it, search uses public-engine fallbacks. |
-| `SANDBOX_IDLE_MINUTES` | `30` | Lifetime of unused sandbox workspaces. Saved outputs remain in app storage. |
+```sh
+openssl rand -base64 32   # OKAYCHAT_SECRET
+openssl rand -base64 32   # OKAYCHAT_SANDBOX_TOKEN
+```
 
-Back up the app data volume and retain `OKAYCHAT_SECRET` separately. Upload originals remain until Library/account deletion; sandbox scratch cleanup does not remove saved outputs. [Storage accounting and limits](docs/implementation/storage-quota.md) explains what counts toward quota.
+```sh
+docker compose up -d --build
+```
 
-HTTPS is needed for PWA installation and browser features such as microphone dictation outside localhost. See [mobile/PWA behavior](docs/implementation/mobile-pwa.md) for installation and offline-shell limits.
+Open <http://localhost:8787>. The first account becomes the administrator. Connect OpenCode Go during onboarding, or pick a provider under **Settings → Providers**.
+
+| Service | What it does |
+| --- | --- |
+| `okaychat` | App, API, SQLite, and uploads. Data lives in the `okaychat-data` volume. |
+| `searxng` | Private web search, no public port. |
+| `sandbox` | Python/Bash and document tools. Every run gets its own filesystem and network namespaces with no network. |
+| `browser` | Chromium rendering and page fetching. Separate users and an egress firewall keep untrusted pages away from secrets. |
+
+Back up the data volume and keep `OKAYCHAT_SECRET` separately. Losing the secret makes encrypted credentials and memory unreadable. [Storage accounting](docs/implementation/storage-quota.md) explains quotas; [security](docs/implementation/security.md) explains the boundaries.
+
+## A tour
+
+<table>
+<tr><td width="50%" valign="top">
+
+**Chat**
+- Streaming Markdown, math, Mermaid, syntax highlighting, and reasoning logs
+- Branches, editable replies, retries, model switching, and full-text search
+- Attachments: images, PDFs, DOCX, and text/code files
+- Prompt-injection envelopes, approval gates, and honest errors
+- Markdown/PDF export and public read-only links
+
+**Models**
+- OpenCode Go, ChatGPT plan, OpenCode Zen, Ollama, and 100+ providers
+- Custom OpenAI-compatible endpoints
+- Per-model reasoning effort and context/cost metering
+- Shared keys with per-audience model policies
+
+</td><td width="50%" valign="top">
+
+**Tools**
+- MCP tools, resources, prompts, OAuth, forms, and embedded apps
+- Keyless web search and readable page fetching
+- Code execution in an offline sandbox
+- PDF, Word, and Excel creation and in-place editing
+- Artifacts, interactive widgets, and screenshots for vision models
+
+**Knowledge & memory**
+- Collections with hybrid lexical + vector retrieval and citations
+- Opt-in encrypted memory with review, edit, and import/export
+- Projects with instructions and pinned files
+- Skills (Agent Skills) and deep research with cited reports
+
+</td></tr>
+</table>
+
+**More:** scheduled prompts, voice calls, read-aloud and dictation, image generation, email drafting and sending, a persistent file library, keyboard-first controls, an installable PWA, and a theme engine with light/dark/system modes.
 
 ## Development
 
-Use Node.js 22.13 or newer:
+Node 22.13 or newer.
 
 ```sh
 npm ci
 cp .env.example .env
 npx playwright-core install chromium
+npm run dev
 ```
 
-Set `OKAYCHAT_SECRET` in `.env`, then run `npm run dev`. The API listens on `127.0.0.1:8787`, and the local browser worker on `127.0.0.1:8791`. The dev command configures Tailscale Serve on HTTPS port 5173, proxying to Vite on `127.0.0.1:5173`; use `https://<host>.<tailnet>.ts.net:5173`. Tailscale must be running with HTTPS/Serve enabled and permission for your user to configure Serve. The local worker uses application-level egress checks; use `scripts/dev-browser.sh` for the container's enforced boundaries.
+The server listens on `127.0.0.1:8787`, Vite on `127.0.0.1:5173`, and the local browser worker on `127.0.0.1:8791`. The dev command configures Tailscale Serve so the UI is available over HTTPS on port 5173; Tailscale must be running with Serve/HTTPS enabled.
 
-Web search and code execution need their sidecars in development. `.env.example` lists the variables; [AGENTS.md](AGENTS.md#commands) includes the setup commands.
-
-## Checks and build output
+Web search and code execution use sidecars in development. `.env.example` lists the variables, and [AGENTS.md](AGENTS.md#commands) has the exact commands.
 
 ```sh
-npm run typecheck
-npm test
-npm run build
+npm run typecheck   # both TypeScript projects
+npm test            # node test runner
+npm run build       # web bundle + server
+npm start           # serve the production build
 ```
 
-`npm start` serves a production build. `test/integration/run.sh` runs the separate real-container isolation suites. Build output under `dist/` is disposable and gitignored; source assets under `src/web/public/` and bundled fonts are runtime inputs. Keep research snapshots, design experiments, prompts, and other temporary working files outside the repository.
+## Architecture
 
-## Documentation
+| Layer | Choice |
+| --- | --- |
+| Server | Hono on Node, Web-standard `Request`/`Response` |
+| LLM | AI SDK v7 with native Ollama transport and per-provider wire formats |
+| Data | SQLite via `node:sqlite`; one file, one volume |
+| Web | Vite + React 19 + Tailwind v4 + assistant-ui |
+| Workers | Separate `browser`, `sandbox`, and `speech` containers |
 
-- [Roadmap](docs/ROADMAP.md): current features, completed work, and known gaps.
-- [AGENTS.md](AGENTS.md): architecture, conventions, implementation-guide index, and development commands.
-- [Chat runtime](docs/implementation/assistant-ui.md), [memory](docs/implementation/memory.md), and [MCP](docs/implementation/mcp.md): conversation and tool behavior.
-- [Security](docs/implementation/security.md): threat model, controls, and residual limits.
-- [Appearance and branding](docs/implementation/appearance.md): separate icon/wordmark assets and theme adaptation.
+The long-form implementation guides live in [`docs/implementation/`](docs/implementation/). Start with [chat runtime](docs/implementation/assistant-ui.md), [security](docs/implementation/security.md), and [prompt caching](docs/implementation/prompt-caching.md).
+
+## Security
+
+- Secrets are encrypted with `OKAYCHAT_SECRET` (AES-256-GCM).
+- `publicFetch` pins public DNS and revalidates every redirect for user- and model-chosen URLs.
+- Chromium, code execution, and speech run outside the app container.
+- Model-written HTML runs in a null-origin frame with a restrictive CSP.
+- Every response gets clickjacking, MIME, and referrer protections; writes are CSRF-guarded.
+
+Read the full [threat model and residual risks](docs/implementation/security.md) before exposing an instance to the internet.
 
 ## Credits
 
-The appearance system is ported from [T3 Code](https://github.com/pingdotgg/t3code) (MIT). The chat UI is built on [assistant-ui](https://www.assistant-ui.com). Bundled font provenance and licenses are listed in the [font guide](docs/implementation/bundled-fonts.md).
+The appearance system is ported from [T3 Code](https://github.com/pingdotgg/t3code) (MIT). The chat UI is built on [assistant-ui](https://www.assistant-ui.com). Bundled fonts and their licenses are listed in the [font guide](docs/implementation/bundled-fonts.md).
