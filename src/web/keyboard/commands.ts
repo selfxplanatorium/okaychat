@@ -68,6 +68,7 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "chat.copyLastCode", labelKey: "keyboard.cmdChatCopyLastCode", group: "Chat", keys: ["Alt+Shift+B"] },
   { id: "chat.artifact", labelKey: "keyboard.cmdChatArtifact", group: "Chat", keys: ["Alt+Shift+A"] },
   { id: "chat.options", labelKey: "keyboard.cmdChatOptions", group: "Chat", keys: [] },
+  { id: "chat.bookmarks", labelKey: "keyboard.cmdChatBookmarks", group: "Chat", keys: [] },
   { id: "chat.share", labelKey: "keyboard.cmdChatShare", group: "Chat", keys: [] },
   { id: "chat.menu", labelKey: "keyboard.cmdChatMenu", group: "Chat", keys: [] },
   { id: "chat.rename", labelKey: "keyboard.cmdChatRename", group: "Chat", keys: ["F2"] },
@@ -90,6 +91,7 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "composer.knowledge", labelKey: "keyboard.cmdComposerKnowledge", group: "Composer", keys: ["Alt+Shift+Y"] },
   { id: "composer.attach", labelKey: "keyboard.cmdComposerAttach", group: "Composer", keys: ["Alt+Shift+U"] },
   { id: "composer.prompts", labelKey: "keyboard.cmdComposerPrompts", group: "Composer", keys: [] },
+  { id: "composer.managePrompts", labelKey: "keyboard.cmdComposerManagePrompts", group: "Composer", keys: [] },
   { id: "composer.dictate", labelKey: "keyboard.cmdComposerDictate", group: "Composer", keys: [] },
 
   { id: "message.next", labelKey: "keyboard.cmdMessageNext", group: "Messages", keys: ["J", "ArrowDown"], scope: "message", palette: false },
@@ -105,6 +107,9 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "message.retryWithModel", labelKey: "keyboard.cmdMessageRetryWithModel", group: "Messages", keys: ["W"], scope: "message", palette: false },
   { id: "message.branch", labelKey: "keyboard.cmdMessageBranch", group: "Messages", keys: ["B"], scope: "message", palette: false },
   { id: "message.more", labelKey: "keyboard.cmdMessageMore", group: "Messages", keys: ["M"], scope: "message", palette: false },
+  { id: "message.bookmark", labelKey: "keyboard.cmdMessageBookmark", group: "Messages", keys: [], scope: "message", palette: false },
+  { id: "message.feedback", labelKey: "keyboard.cmdMessageFeedback", group: "Messages", keys: [], scope: "message", palette: false },
+  { id: "message.details", labelKey: "keyboard.cmdMessageDetails", group: "Messages", keys: [], scope: "message", palette: false },
   { id: "message.exit", labelKey: "keyboard.cmdMessageExit", group: "Messages", keys: ["Escape"], scope: "message", palette: false },
 
   { id: "settings.compaction", labelKey: "ux.compactionSettings", group: "Settings", keys: [] },

@@ -80,6 +80,10 @@ export function storageUsedSql(user: string): string {
       FROM knowledge_chunks WHERE user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(COALESCE(length(CAST(knowledge AS BLOB)), 0) + COALESCE(length(CAST(knowledge_ids AS BLOB)), 0)), 0)
       FROM turn_context WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(length(CAST(name AS BLOB)) + length(CAST(shortcut AS BLOB)) + length(CAST(body AS BLOB))), 0)
+      FROM saved_prompts WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(length(CAST(f.comment_enc AS BLOB))), 0)
+      FROM message_feedback f JOIN threads t ON t.id = f.thread_id WHERE t.user_id = ${user}
   )), 0)`;
 }
 

@@ -30,6 +30,7 @@ import { useChatWebStore } from "@/state/chat-web-mode";
 import { persistKnowledgeAttachments, useChatKnowledgeStore } from "@/state/chat-knowledge";
 import { dropThread, readThread, sameRows, ServerRows, writeThread } from "./threadCache";
 import { editedAtOf, rememberEdits } from "@/state/message-edits";
+import { forgetStoredThread, reportStoredMessage, reportStoredRows } from "./message-persistence";
 import { setThreadSync, useThreadSyncStore } from "@/state/thread-sync";
 import { applyRetryNotice, clearRetryNotice, retryChunkData, retryOwnerId } from "@/state/retry-status";
 
@@ -112,6 +113,7 @@ async function saveRow(remoteId: string, row: MessageRow): Promise<void> {
     throw error;
   }
   // The body of a re-sent message never carries `edited_at`; the server keeps the row's edit, so the cache must too.
+  reportStoredMessage(remoteId, stored.id);
   const editedAt = editedAtOf(remoteId, stored.id);
   cacheRows(remoteId, serverRows.acknowledged(remoteId, editedAt === undefined ? stored : { ...stored, edited_at: editedAt }), Date.now());
 }
@@ -132,6 +134,7 @@ async function saveEdit(remoteId: string, path: string, method: "PATCH" | "DELET
       ...(result.editedAt === null ? {} : { edited_at: result.editedAt }),
     };
     serverIds.get(remoteId)?.add(row.id);
+    reportStoredMessage(remoteId, row.id);
     cacheRows(remoteId, serverRows.acknowledged(remoteId, row), Date.now());
     return result;
   } catch (error) {
@@ -213,6 +216,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
   async delete(remoteId) {
     if (isTemporaryChat(remoteId)) return;
     await api(`/threads/${remoteId}`, { method: "DELETE" });
+    forgetStoredThread(remoteId);
   },
   async fetch(remoteId) {
     if (isTemporaryChat(remoteId)) return { remoteId, status: "regular", title: t("composer.temporaryChat") };
@@ -254,6 +258,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
               const token = serverRows.beginLoad(remoteId);
               return request().then((rows) => {
                 serverIds.set(remoteId, new Set(rows.map((row) => row.id)));
+                reportStoredRows(remoteId, rows.map((row) => row.id));
                 rememberEdits(remoteId, rows);
                 cacheRows(remoteId, serverRows.loaded(remoteId, token, rows), aui.threadListItem.getState().lastMessageAt?.getTime());
                 return rows;
