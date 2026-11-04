@@ -129,6 +129,7 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
             <ScrollArea
               className="min-h-0 flex-1"
               viewportProps={{
+                id: "sidebar-chats",
                 style: { maskImage: "linear-gradient(to bottom, transparent, black var(--chat-list-fade, 0px))" },
                 onScroll: (event) => {
                   const list = event.currentTarget;
@@ -140,6 +141,7 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
                 className="glide-host px-2"
                 // Arrows move between chats, like a list. Rows are focusable one by one, so Tab still walks them too.
                 onKeyDown={(event) => {
+                  if (event.defaultPrevented) return;
                   if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
                   const rows = [...event.currentTarget.querySelectorAll<HTMLElement>("[data-slot=aui_thread-list-item-trigger], [data-slot=aui_thread-list-item-select]")];
                   const index = rows.indexOf(event.target as HTMLElement);

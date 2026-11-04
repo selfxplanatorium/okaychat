@@ -37,6 +37,22 @@ test("server hydration replaces stale attachments and clearing detaches", () => 
   assert.deepEqual(useChatKnowledgeStore.getState().byId["thr_1"], []);
 });
 
+test("list hydration updates attachments in one notification and clears stale choices", () => {
+  const store = useChatKnowledgeStore.getState();
+  store.set("stale", ["knc_old"]);
+  store.set("outside-list", ["knc_keep"]);
+  let notifications = 0;
+  const unsubscribe = useChatKnowledgeStore.subscribe(() => notifications++);
+  store.hydrateMany([
+    ...Array.from({ length: 100_000 }, (_, i) => ({ id: `chat_${i}`, knowledgeIds: [] })),
+    { id: "stale", knowledgeIds: [] },
+    { id: "attached", knowledgeIds: ["knc_new"] },
+  ]);
+  unsubscribe();
+  assert.equal(notifications, 1);
+  assert.deepEqual(useChatKnowledgeStore.getState().byId, { "outside-list": ["knc_keep"], attached: ["knc_new"] });
+});
+
 test("a failed first attachment PATCH clears the stored chat instead of claiming it", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = (async () => new Response(JSON.stringify({ error: "nope" }), { status: 400, headers: { "Content-Type": "application/json" } })) as typeof fetch;

@@ -1,5 +1,41 @@
 /* Motion owned by the shell area. Shared tokens live in motion.css. */
 
+/* The viewport keeps this small repeated tile painted while scrolling outruns React.
+ * A background on the huge scrolling spacer can itself miss compositor rasterization. */
+#sidebar-chats:has(.thread-list-virtual) {
+  --placeholder-pitch: calc(2rem + 2px);
+  --placeholder-start: calc((var(--placeholder-pitch) - 0.5rem) / 2);
+  --placeholder-end: calc((var(--placeholder-pitch) + 0.5rem) / 2);
+  background-image: linear-gradient(
+    to bottom,
+    transparent 0 var(--placeholder-start),
+    var(--muted) var(--placeholder-start) var(--placeholder-end),
+    transparent var(--placeholder-end) var(--placeholder-pitch)
+  );
+  background-position: 0.625rem 0;
+  background-size: 75% var(--placeholder-pitch);
+  background-repeat: repeat-y;
+}
+
+/* Loaded rows cover the fallback, including the two-pixel inter-row gap. */
+.thread-list-virtual-row {
+  isolation: isolate;
+}
+.thread-list-virtual-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 -2px;
+  z-index: -1;
+  background: var(--sidebar);
+  pointer-events: none;
+}
+
+@media (pointer: coarse) {
+  #sidebar-chats:has(.thread-list-virtual) {
+    --placeholder-pitch: calc(2.75rem + 2px);
+  }
+}
+
 /*
  * Sidebar. The column animates its width (desktop) or its position (mobile)
  * while its contents keep a fixed width and fade on their own, so labels never

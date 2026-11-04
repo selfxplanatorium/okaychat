@@ -18,6 +18,7 @@ interface ChatKnowledgeState {
   set: (id: string, ids: string[]) => void;
   bind: (localId: string, remoteId: string) => void;
   hydrate: (remoteId: string, ids: string[]) => void;
+  hydrateMany: (threads: ReadonlyArray<{ id: string; knowledgeIds: string[] }>) => void;
   loadCollections: (projectId: string | null) => Promise<KnowledgeCollection[]>;
 }
 
@@ -34,6 +35,17 @@ export const useChatKnowledgeStore = create<ChatKnowledgeState>((set, get) => ({
   },
   hydrate: (remoteId, ids) => {
     set((state) => ({ byId: { ...state.byId, [remoteId]: [...ids] } }));
+  },
+  hydrateMany: (threads) => {
+    // One copy and notification for the whole list, rather than quadratic work per chat.
+    set((state) => {
+      const byId = { ...state.byId };
+      for (const thread of threads) {
+        if (thread.knowledgeIds.length) byId[thread.id] = [...thread.knowledgeIds];
+        else delete byId[thread.id];
+      }
+      return { byId };
+    });
   },
   loadCollections: async (projectId) => {
     // Only the newest request may write: an older project's answer would offer collections this chat cannot use.

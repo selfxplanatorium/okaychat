@@ -153,7 +153,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
     const path = threadsPath(useData.getState().activeProject);
     const threads = await (takePrefetched<ThreadSummary[]>(path) ?? api<ThreadSummary[]>(path));
     useData.getState().rememberThreadModels(Object.fromEntries(threads.flatMap((t) => (t.modelRef ? [[t.id, t.modelRef]] : []))));
-    for (const t of threads) useChatKnowledgeStore.getState().hydrate(t.id, t.knowledgeIds);
+    useChatKnowledgeStore.getState().hydrateMany(threads);
     return {
       threads: threads.map((t) => ({
         remoteId: t.id,

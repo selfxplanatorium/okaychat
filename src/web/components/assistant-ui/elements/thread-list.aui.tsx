@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -48,6 +49,7 @@ import {
   type ReactElement,
   type RefObject,
 } from "react";
+import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { isTemporaryChat, useChatPrivacyStore } from "@/state/chat-privacy";
 import { chatPath, getActiveModel, useData } from "@/state/data";
 import { api } from "@/lib/api";
@@ -278,6 +280,7 @@ export const useThreadListGroups = (searchQuery = "") => {
       })
       .map(({ index }) => index);
     const pinned = filteredIndices.filter((index) => custom(threadIds[index]!)?.pinned);
+    const pinnedSet = new Set(pinned);
     if (
       startOfToday === undefined ||
       !filteredIndices.some((index) => dates[index])
@@ -294,7 +297,7 @@ export const useThreadListGroups = (searchQuery = "") => {
     const time = (index: number) =>
       dates[index]?.getTime() ?? Number.MAX_SAFE_INTEGER;
     const sorted = filteredIndices
-      .filter((index) => !pinned.includes(index))
+      .filter((index) => !pinnedSet.has(index))
       .sort((a, b) => time(b) - time(a));
 
     const result: ThreadListGroup[] = pinned.length
@@ -353,6 +356,97 @@ const ThreadListGroupLabel: FC<{ label: GroupLabel }> = ({ label }) => {
   );
 };
 
+type ListEntry = { key: string; index: number; label?: never } | { key: string; label: GroupLabel; index?: never };
+
+/** Keep the current and last-interacted chat mounted for shortcuts, menus, dialogs, and focus. */
+const VirtualThreadList: FC<{ entries: ListEntry[] }> = ({ entries }) => {
+  const host = useRef<HTMLDivElement>(null);
+  const activeId = useAuiState((s) => s.threads.mainThreadId);
+  const [heldKey, setHeldKey] = useState<string | null>(null);
+  const [pendingFocus, setPendingFocus] = useState<string | null>(null);
+  const positions = useMemo(() => new Map(entries.map((entry, index) => [entry.key, index])), [entries]);
+  const activeIndex = positions.get(activeId);
+  const heldIndex = heldKey === null ? undefined : positions.get(heldKey);
+  const focusIndex = pendingFocus === null ? undefined : positions.get(pendingFocus);
+  const getItemKey = useCallback((index: number) => entries[index]!.key, [entries]);
+  const estimateSize = useCallback(() => window.matchMedia("(pointer: coarse)").matches ? 44 : 32, []);
+  const rangeExtractor = useCallback((range: Parameters<typeof defaultRangeExtractor>[0]) => {
+    const indices = new Set(defaultRangeExtractor(range));
+    for (const index of [activeIndex, heldIndex, focusIndex]) if (index !== undefined) indices.add(index);
+    return [...indices].sort((a, b) => a - b);
+  }, [activeIndex, heldIndex, focusIndex]);
+  const virtualizer = useVirtualizer({
+    count: entries.length,
+    getScrollElement: () => host.current?.closest<HTMLElement>("#sidebar-chats") ?? null,
+    getItemKey,
+    estimateSize,
+    gap: 2,
+    overscan: 32,
+    rangeExtractor,
+  });
+
+  useLayoutEffect(() => {
+    if (pendingFocus === null) return;
+    const index = positions.get(pendingFocus);
+    if (index !== undefined) {
+      host.current?.querySelector<HTMLElement>(`[data-virtual-index="${index}"] [data-slot=aui_thread-list-item-trigger], [data-virtual-index="${index}"] [data-slot=aui_thread-list-item-select]`)?.focus();
+    }
+    setPendingFocus(null);
+  }, [pendingFocus, positions]);
+
+  const hold = (target: EventTarget) => {
+    const index = (target as HTMLElement).closest<HTMLElement>("[data-virtual-index]")?.dataset.virtualIndex;
+    if (index !== undefined) setHeldKey(entries[Number(index)]!.key);
+  };
+
+  const items = virtualizer.getVirtualItems();
+  const totalHeight = virtualizer.getTotalSize();
+
+  return (
+    <div
+      ref={host}
+      className="thread-list-virtual relative"
+      style={{ height: totalHeight, overflowAnchor: "none" }}
+      onFocusCapture={(event) => hold(event.target)}
+      onPointerDownCapture={(event) => hold(event.target)}
+      onKeyDownCapture={(event) => {
+        if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+        if (!(event.target as HTMLElement).matches("[data-slot=aui_thread-list-item-trigger], [data-slot=aui_thread-list-item-select]")) return;
+        const index = Number((event.target as HTMLElement).closest<HTMLElement>("[data-virtual-index]")?.dataset.virtualIndex);
+        const step = event.key === "ArrowUp" || event.key === "End" ? -1 : 1;
+        let next = event.key === "Home" ? 0 : event.key === "End" ? entries.length - 1
+          : event.key === "ArrowDown" || event.key === "ArrowUp" ? index + step : -1;
+        if (!["Home", "End", "ArrowDown", "ArrowUp"].includes(event.key)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        while (next >= 0 && next < entries.length && entries[next]!.label !== undefined) next += step;
+        if (next < 0 || next >= entries.length) return;
+        virtualizer.scrollToIndex(next, { align: "auto" });
+        setPendingFocus(entries[next]!.key);
+      }}
+    >
+      {items.map((item) => {
+        const entry = entries[item.index]!;
+        return (
+          <div
+            key={entry.key}
+            data-index={item.index}
+            data-virtual-index={item.index}
+            ref={virtualizer.measureElement}
+            className="thread-list-virtual-row absolute start-0 w-full"
+            // GlideHighlight reads layout offsets; transforms would hide the virtual position from it.
+            style={{ top: item.start }}
+          >
+            {entry.label !== undefined ? <ThreadListGroupLabel label={entry.label} /> : (
+              <ThreadListPrimitive.ItemByIndex index={entry.index} components={{ ThreadListItem }} />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 /**
  * Slides rows and labels whose layout position changed since the last render from their old
  * place to the new one; anything that stayed put is left alone.
@@ -400,6 +494,13 @@ const ThreadListItemGroups: FC<{ searchQuery?: string }> = ({
   );
   useEffect(() => useThreadSelection.getState().setOrder(order), [order]);
 
+  const entries = useMemo<ListEntry[]>(() => groups
+    ? groups.flatMap((group) => [
+      { key: `group:${group.label}`, label: group.label },
+      ...group.indices.map((index) => ({ key: threadIds[index]!, index })),
+    ])
+    : filteredIndices.map((index) => ({ key: threadIds[index]!, index })), [groups, filteredIndices, threadIds]);
+
   // Message matches render below, so an empty title match is not a dead end.
   if (query && filteredIndices.length === 0) {
     return (
@@ -412,7 +513,9 @@ const ThreadListItemGroups: FC<{ searchQuery?: string }> = ({
     );
   }
 
-  // Labels and rows are flat siblings, so a chat changing groups moves its node instead of remounting.
+  if (entries.length > 300) return <VirtualThreadList entries={entries} />;
+
+  // Small lists keep their layout animations; large lists mount only a viewport of rows.
   return (
     <div ref={scope} className="contents">
       {groups
@@ -833,6 +936,7 @@ const ThreadListItemMenu: FC<{
   const isMain = useAuiState((s) => s.threads.mainThreadId === s.threadListItem.id);
   const reveal = () => {
     if (document.querySelector(".shell-sidebar")?.getAttribute("data-open") !== "true") runCommand("nav.chatList");
+    rowRef.current?.scrollIntoView({ block: "nearest" });
   };
   useCommand("chat.rename", () => {
     reveal();

@@ -65,7 +65,7 @@ export function listThreads(userId: string, projectId?: string | null, status?: 
   if (projectId === null) where.push("t.project_id IS NULL");
   else if (projectId !== undefined) where.push("t.project_id = ?"), values.push(projectId);
   if (status !== undefined) where.push("t.status = ?"), values.push(status);
-  const rows = db.prepare(`${SELECT_THREADS} WHERE ${where.join(" AND ")} ORDER BY t.updated_at DESC LIMIT 500`).all(...values) as unknown as ThreadRow[];
+  const rows = db.prepare(`${SELECT_THREADS} WHERE ${where.join(" AND ")} ORDER BY t.updated_at DESC`).all(...values) as unknown as ThreadRow[];
   return rows.map(toSummary);
 }
 

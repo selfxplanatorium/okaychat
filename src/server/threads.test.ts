@@ -83,6 +83,29 @@ test("the thread list filters by status, combined with project", async () => {
   assert.equal((await call("/threads?status=deleted")).status, 400);
 });
 
+test("thread lists include all chats beyond 500, with ownership, ordering and filters intact", async () => {
+  db.exec("BEGIN");
+  try {
+    for (let i = 0; i < 1200; i++) {
+      thread(`bulk_${i}`, "alice", { projectId: "p_alice", status: i < 600 ? "regular" : "archived" });
+      db.prepare("UPDATE threads SET updated_at = ? WHERE id = ?").run(2000 + i, `bulk_${i}`);
+    }
+    thread("foreign", "bob", { projectId: "p_bob" });
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  const list = await (await call("/threads")).json() as ThreadSummary[];
+  assert.equal(list.length, 1202);
+  assert.equal(list[0]!.id, "bulk_1199");
+  assert.ok(list.every((row, i) => i === 0 || list[i - 1]!.updatedAt >= row.updatedAt));
+  assert.ok(!list.some((row) => row.id === "foreign" || row.id === "t9"));
+  assert.equal((await ids("/threads?project=p_alice&status=regular")).length, 600);
+  assert.equal((await ids("/threads?project=p_alice&status=archived")).length, 601);
+  assert.deepEqual(await ids("/threads?project=none"), ["t1"]);
+});
+
 test("a title regenerated without text comes from the stored user messages", async () => {
   store("t1", "m1", null, "user", [{ type: "text", text: '<attachment name="a.pdf" file_id="upl_1"></attachment>' }, { type: "text", text: "Plan a trip to Lisbon\nwith kids" }]);
   store("t1", "m2", "m1", "assistant", [{ type: "text", text: "Assistant words never title" }]);

@@ -23,6 +23,7 @@ okaychat is a self-hosted AI chat app meant to replace LibreChat and Open WebUI.
 | Web | Vite + React 19 + Tailwind v4 | No SSR needed |
 | Chat UI | assistant-ui (`@assistant-ui/react`, `@assistant-ui/ai-sdk`), components copied into `src/web/components/assistant-ui/elements/` | Required by the product brief. Copied (shadcn-style) so we can add slots |
 | UI primitives | Base UI (`@base-ui/react`), lucide icons, zustand stores | Same primitives the assistant-ui registry uses |
+| Sidebar windowing | `@tanstack/react-virtual` | Small headless virtualizer: all chat metadata loads without a count cap, while long sidebars mount only viewport rows. Handles measurement and scrolling without a second UI system. See `docs/implementation/assistant-ui.md` |
 | Math / diagrams | `remark-math` + KaTeX, Mermaid, both lazy-loaded on first use | Chat Markdown renders LaTeX and ```` ```mermaid ```` blocks. See `docs/implementation/code-blocks.md` |
 | Generative UI | `generative-frame` (spec mode + sandboxed widgets) | Both renderers, streaming, render reports for repair. See `docs/implementation/generative-ui.md` |
 | Files | `unpdf` (PDF), `mammoth` (DOCX) | Pure JS, no native deps |
