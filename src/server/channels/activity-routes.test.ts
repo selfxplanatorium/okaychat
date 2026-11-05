@@ -255,3 +255,34 @@ test("the stream negotiates a capability only for opted-in clients", { timeout: 
   assert.equal(optedIn.ephemeral!.activityLeaseMs, 75_000);
   assert.equal(optedIn.ephemeral!.typingLeaseMs, 6_000);
 });
+
+test("a watched stream sleeps between frames instead of starving the event loop", { timeout: 15_000 }, async () => {
+  const channelId = seedRoom(["alice", "bob"]);
+  const response = await call("/channels/events?ephemeral=1", { user: "alice" });
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  const pump = (async () => {
+    for (;;) {
+      const part = await reader.read();
+      if (part.done) return;
+      text += decoder.decode(part.value);
+    }
+  })();
+  try {
+    while (!text.includes("event: ready")) await new Promise((resolve) => setTimeout(resolve, 10));
+    const connectionId = (JSON.parse(/event: ready\ndata: (.+)\n/.exec(text)![1]!) as { ephemeral: { connectionId: string } }).ephemeral.connectionId;
+    const accepted = await call("/channels/activity", { method: "POST", json: { connectionId, seq: 1, state: "active", watch: { channelId, rootId: null } }, user: "alice" });
+    assert.equal(accepted.status, 200);
+    // With a watch the pump has a due time. A clock mix-up there made every wait zero, so timers never ran.
+    let ticks = 0;
+    const timer = setInterval(() => ticks++, 20);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    clearInterval(timer);
+    assert.ok(ticks >= 10, `timers ran ${ticks} times`);
+    assert.ok(text.includes("event: ephemeral"), text);
+  } finally {
+    await reader.cancel();
+    await pump.catch(() => {});
+  }
+});

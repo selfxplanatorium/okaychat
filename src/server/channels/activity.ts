@@ -246,6 +246,13 @@ function removeFromIndex(map: Map<string, Set<string>>, key: string, id: string)
   if (!set.size) map.delete(key);
 }
 
+/** Typing must name the watched scope, so losing the watch ends this connection's typing too. */
+function dropWatch(conn: Connection): void {
+  clearTyping(conn);
+  if (conn.watch) removeFromIndex(channelWatchers, conn.watch.channelId, conn.id);
+  conn.watch = null;
+}
+
 function setWatch(conn: Connection, watch: { channelId: string; rootId: string | null } | null): void {
   const previous = conn.watch;
   if (previous?.channelId === watch?.channelId && previous?.rootId === watch?.rootId) return;
@@ -304,8 +311,7 @@ function removeConnection(conn: Connection, options: { grace: boolean }): void {
   if (conn.closed) return;
   conn.closed = true;
   clearTyping(conn);
-  if (conn.watch) removeFromIndex(channelWatchers, conn.watch.channelId, conn.id);
-  conn.watch = null;
+  dropWatch(conn);
   conn.dirty = false;
   connections.delete(conn.id);
   removeFromIndex(byUser, conn.userId, conn.id);
@@ -353,7 +359,8 @@ export function registerChannelActivity(input: { userId: string; sessionHash: st
     dirty: false,
     forceSnapshot: false,
     clearPending: false,
-    lastFrameAt: 0,
+    // Monotonic time starts near zero at boot; zero here would delay the first frame by the frame cap.
+    lastFrameAt: Number.NEGATIVE_INFINITY,
     lastSnapshotAt: 0,
     blocked: false,
     closed: false,
@@ -473,7 +480,8 @@ function nextDueAt(conn: Connection): number | null {
   const now = activityNow();
   if (conn.clearPending) return now;
   if (!conn.watch) return null;
-  let due = conn.lastSnapshotAt === 0 ? now : conn.lastSnapshotAt + L.snapshotMs;
+  // A periodic snapshot still respects the frame cap, or takeFrame refuses it and the pump spins.
+  let due = conn.lastSnapshotAt === 0 ? now : Math.max(conn.lastSnapshotAt + L.snapshotMs, conn.lastFrameAt + L.outputCoalesceMs);
   if (conn.forceSnapshot) due = Math.max(now, conn.lastFrameAt + L.outputCoalesceMs);
   if (conn.dirty) due = Math.min(due, Math.max(now, conn.lastFrameAt + L.outputCoalesceMs));
   return due;
@@ -485,7 +493,7 @@ function takeFrame(conn: Connection): string | null {
   if (conn.clearPending) {
     conn.clearPending = false;
     conn.dirty = false;
-    conn.watch = null;
+    dropWatch(conn);
     conn.forceSnapshot = false;
     conn.lastSnapshotAt = now;
     return clearFrame(conn);
@@ -503,7 +511,7 @@ function takeFrame(conn: Connection): string | null {
     conn.clearPending = false;
     conn.dirty = false;
     conn.forceSnapshot = false;
-    conn.watch = null;
+    dropWatch(conn);
     conn.lastSnapshotAt = now;
     return clearFrame(conn);
   }
@@ -517,7 +525,7 @@ function takeFrame(conn: Connection): string | null {
   if (Buffer.byteLength(body, "utf8") > L.maxFrameBytes) {
     // One oversized state is a hard bound, not a retry loop: stop ephemeral output, keep durable.
     conn.blocked = true;
-    conn.watch = null;
+    dropWatch(conn);
     return clearFrame(conn);
   }
   return body;

@@ -465,3 +465,33 @@ test("a committed human post clears only its author's typing; a rolled-back send
   const retained = take(watcher)!;
   assert.deepEqual(typingOf(retained, null), ["bob", "carol"], "a failed send does not clear renewed typing");
 });
+
+test("a lost watch leaves no watcher index entry, and a due periodic snapshot is never coalesced away", () => {
+  const channelId = makeChannel(["alice", "bob"]);
+  const alice = register("alice");
+  watch("alice", alice, channelId);
+  assert.equal(take(alice)!.kind, "snapshot");
+  db.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = 'alice'").run(channelId);
+  activity.clearChannelActivityForMember(channelId, "alice");
+  advance(CHANNEL_COALESCE);
+  assert.equal(take(alice)!.kind, "clear");
+  assert.equal(activity.channelActivityState().watches, 0);
+  alice.release();
+  assert.equal(activity.channelActivityState().watches, 0);
+
+  // A patch shortly before the snapshot deadline: nextDueAt must not report a time takeFrame refuses.
+  const otherRoom = makeChannel(["carol", "dave"]);
+  const carol = register("carol");
+  const dave = register("dave");
+  watch("carol", carol, otherRoom);
+  take(carol);
+  advance(29_000);
+  watch("dave", dave, otherRoom);
+  activity.sweepChannelActivity();
+  assert.equal(take(carol)!.kind, "patch");
+  advance(1_500);
+  const due = carol.nextDueAt()!;
+  assert.ok(due > clock, "the snapshot waits for the frame cap");
+  advance(due - clock);
+  assert.equal(take(carol)!.kind, "snapshot");
+});
