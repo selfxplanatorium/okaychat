@@ -96,16 +96,20 @@ async function attempt(claimed: ClaimedDelivery): Promise<void> {
       signal: controller.signal,
     });
     if (result.errorCode === "shutdown") return;
-    settleDelivery({
-      deliveryId: row.id,
-      attemptNumber: row.attempts,
-      expectedVersion: row.version,
-      outcome: result.outcome,
-      httpStatus: result.httpStatus,
-      errorCode: result.errorCode,
-      durationMs: result.durationMs,
-      retryDelayMs: result.outcome === "failed" ? retryDelay(row.attempts) : undefined,
-    });
+    try {
+      settleDelivery({
+        deliveryId: row.id,
+        attemptNumber: row.attempts,
+        expectedVersion: row.version,
+        outcome: result.outcome,
+        httpStatus: result.httpStatus,
+        errorCode: result.errorCode,
+        durationMs: result.durationMs,
+        retryDelayMs: result.outcome === "failed" ? retryDelay(row.attempts) : undefined,
+      });
+    } catch {
+      // A transient storage failure must not stop the process; the lease expires and the next pump retries.
+    }
   } finally {
     controllers.delete(row.id);
     inFlight.delete(row.id);

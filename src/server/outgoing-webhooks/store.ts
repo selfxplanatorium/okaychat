@@ -590,13 +590,26 @@ export function admitEvent<K extends ProductionEventType>(input: AdmissionInput<
           const stored = (db.prepare("SELECT COUNT(*) AS n FROM outgoing_webhook_deliveries").get() as { n: number }).n;
           if (stored >= WEBHOOK_LIMITS.deliveryRowsPerProcess) return "capacity" as const;
           if (!consumeWindow("admission", input.userId, "", minute, WEBHOOK_LIMITS.admissionsPerAccountMinute)) return "rate" as const;
-          const text = textProjection(input.text, !!endpoint.include_message_text);
-          const data = input.data(text) as unknown as Record<string, unknown>;
+          let text = textProjection(input.text, !!endpoint.include_message_text);
+          let data = input.data(text) as unknown as Record<string, unknown>;
           if (!validTextProjection(data)) return "projection" as const;
           const sequence = allocateSequence(endpoint.id);
           const deliveryId = `whd_${sha256(JSON.stringify([1, eventId, endpoint.id]))}`;
-          const envelope = envelopeFor(eventId, deliveryId, sequence, occurredAt, input.type, data);
-          const plain = JSON.stringify(envelope);
+          let envelope = envelopeFor(eventId, deliveryId, sequence, occurredAt, input.type, data);
+          let plain = JSON.stringify(envelope);
+          // JSON escaping can push an opted-in text past the body cap. Cut the text further rather than
+          // dropping the whole event; the payload keeps its ids and flags the truncation.
+          if (bodyBytes(plain) > WEBHOOK_LIMITS.bodyBytes && text) {
+            let value = Array.from(text.value);
+            for (let attempt = 0; attempt < 8 && value.length && bodyBytes(plain) > WEBHOOK_LIMITS.bodyBytes; attempt++) {
+              value = value.slice(0, Math.floor(value.length * 0.7));
+              text = { value: value.join(""), truncated: true };
+              data = input.data(text) as unknown as Record<string, unknown>;
+              if (!validTextProjection(data)) return "projection" as const;
+              envelope = envelopeFor(eventId, deliveryId, sequence, occurredAt, input.type, data);
+              plain = JSON.stringify(envelope);
+            }
+          }
           if (bodyBytes(plain) > WEBHOOK_LIMITS.bodyBytes) return "projection" as const;
           assertStorage(input.userId, WEBHOOK_LIMITS.deliveryReservationBytes);
           db.prepare(

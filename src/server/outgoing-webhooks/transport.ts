@@ -1,6 +1,6 @@
 import type { DeliveryErrorCode } from "../../shared/outgoing-webhooks.js";
 import { WEBHOOK_LIMITS, WEBHOOK_USER_AGENT } from "../../shared/outgoing-webhooks.js";
-import { publicFetch } from "../public-fetch.js";
+import { BlockedAddressError, publicFetch } from "../public-fetch.js";
 
 /**
  * One delivery attempt. This is the only network boundary for outgoing webhooks: every attempt —
@@ -76,6 +76,7 @@ export async function sendWebhook(input: WebhookTransportInput): Promise<Webhook
     const durationMs = Date.now() - startedAt;
     if (timeout.signal.aborted) return { outcome: "failed", httpStatus: null, errorCode: "timeout", durationMs };
     if (input.signal.aborted) return { outcome: "failed", httpStatus: null, errorCode: "shutdown", durationMs };
+    if (error instanceof BlockedAddressError) return { outcome: "failed", httpStatus: null, errorCode: "blocked_destination", durationMs };
     const code = typeof (error as { code?: unknown }).code === "string" ? String((error as { code: string }).code) : "";
     // Never retain error.message: it can contain the destination, a Location, or upstream text.
     if (code === "ENOTFOUND" || code === "EAI_AGAIN" || code === "EAI_FAIL" || code === "EAI_NONAME") {
