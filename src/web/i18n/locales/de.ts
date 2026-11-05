@@ -541,6 +541,7 @@ const de: Translation = {
     languageDescription: "Gilt für diese App auf jedem Gerät, an dem du angemeldet bist.",
     languageLabel: "App-Sprache",
     languageBrowser: "Browsersprache verwenden",
+  languageNotInstalled: "{language} (nicht installiert)",
     languageFailed: "Die Sprache konnte nicht gespeichert werden. {error}",
     languageNote: "Modellantworten, Chat-Titel und bereits gespeicherter Text bleiben in der Sprache, in der sie geschrieben wurden.",
     translationTitle: "Nachrichtenübersetzung",

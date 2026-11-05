@@ -956,6 +956,7 @@ const it: Translation = {
     languageDescription: "Si applica a questa app su ogni dispositivo su cui accedi.",
     languageLabel: "Lingua dell’app",
     languageBrowser: "Usa la lingua del browser",
+  languageNotInstalled: "{language} (non installato)",
     languageFailed: "Impossibile salvare la lingua. {error}",
     languageNote: "Le risposte del modello, i titoli delle chat e il testo che hai già salvato mantengono la lingua in cui sono stati scritti.",
     translationTitle: "Traduzione dei messaggi",

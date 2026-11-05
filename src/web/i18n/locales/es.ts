@@ -541,6 +541,7 @@ const es: Translation = {
     languageDescription: "Se aplica a esta app en todos los dispositivos en los que inicies sesión.",
     languageLabel: "Idioma de la app",
     languageBrowser: "Usar el idioma del navegador",
+  languageNotInstalled: "{language} (no instalado)",
     languageFailed: "No se pudo guardar el idioma. {error}",
     languageNote: "Las respuestas del modelo, los títulos de chat y el texto que ya guardaste mantienen el idioma en que se escribieron.",
     translationTitle: "Traducción de mensajes",

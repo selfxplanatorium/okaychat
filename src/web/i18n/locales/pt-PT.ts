@@ -956,6 +956,7 @@ const ptPT: Translation = {
     languageDescription: "Aplica-se a esta aplicação em todos os dispositivos em que inicias sessão.",
     languageLabel: "Idioma da aplicação",
     languageBrowser: "Utilizar o idioma do navegador",
+  languageNotInstalled: "{language} (não instalado)",
     languageFailed: "Não foi possível guardar o idioma. {error}",
     languageNote: "As respostas do modelo, os títulos das conversas e o texto que já guardaste mantêm o idioma em que foram escritos.",
     translationTitle: "Tradução de mensagens",

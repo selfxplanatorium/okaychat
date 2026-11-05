@@ -4,6 +4,7 @@ export default {
   languageDescription: "Applies to this app on every device you sign in to.",
   languageLabel: "App language",
   languageBrowser: "Use browser language",
+  languageNotInstalled: "{language} (not installed)",
   languageFailed: "The language could not be saved. {error}",
   languageNote: "Model answers, chat titles, and text you already saved keep the language they were written in.",
   translationTitle: "Message translation",

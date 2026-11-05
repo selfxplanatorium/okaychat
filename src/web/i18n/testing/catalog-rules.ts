@@ -73,7 +73,11 @@ export type CatalogOptions = {
 export function catalogProblems(tag: string, translation: unknown, options: CatalogOptions = {}): string[] {
   const problems: string[] = [];
   if (!isRecord(translation)) return [`${tag}: the catalog is not an object`];
-  const categories = new Set<string>(new Intl.PluralRules(tag).resolvedOptions().pluralCategories);
+  const rules = new Intl.PluralRules(tag);
+  const categories = new Set<string>(rules.resolvedOptions().pluralCategories);
+  // French selects the singular for zero ("0 message"), so a `one` form that spells out "1" would lie for
+  // zero. Other locales (it, pt-PT, de, es) select `other` for zero and may spell the single case out.
+  const singularZero = rules.select(0) === "one";
   for (const [ns, entries] of Object.entries(translation)) {
     const source = SOURCE[ns];
     if (!source || !own(SOURCE, ns)) {
@@ -91,8 +95,10 @@ export function catalogProblems(tag: string, translation: unknown, options: Cata
         continue;
       }
       const english = source[key];
-      const allowed = new Set(sourceTexts(english).flatMap(placeholders));
+      const englishTexts = sourceTexts(english);
+      const allowed = new Set(englishTexts.flatMap(placeholders));
       const needed = [...allowed].filter((name) => name !== "count");
+      const counted = typeof english !== "string" && englishTexts.some((text) => text.includes("{count}"));
       let forms: Array<[string, unknown]>;
       if (typeof english === "string") {
         if (typeof value !== "string") {
@@ -121,6 +127,9 @@ export function catalogProblems(tag: string, translation: unknown, options: Cata
         const used = new Set(placeholders(text));
         for (const name of used) if (!allowed.has(name)) problems.push(`${where} uses unknown {${name}}`);
         for (const name of needed) if (!used.has(name)) problems.push(`${where} is missing {${name}}`);
+        if (rule === "one" && singularZero && counted && !used.has("count")) {
+          problems.push(`${where} is missing {count} although ${tag} uses the singular for zero`);
+        }
       }
     }
   }

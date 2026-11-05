@@ -68,8 +68,11 @@ export function GeneralSettings() {
     ...shipped
       .map((tag) => ({ value: tag, label: formatNativeLanguageName(tag) }))
       .sort((a, b) => compareText(a.label, b.label)),
-    // A valid stored tag this build does not ship (for example de-AT) still has a readable name.
-    ...(language && !shipped.includes(language) ? [{ value: language, label: formatNativeLanguageName(language) }] : []),
+    // A valid stored tag this build does not ship (for example de-AT) stays selectable and says so, so a
+    // raw code is never mistaken for a translated interface that failed to load.
+    ...(language && !shipped.includes(language)
+      ? [{ value: language, label: t("general.languageNotInstalled", { language: formatNativeLanguageName(language) }) }]
+      : []),
   ];
   const translationChoices = [
     { value: "", label: t("general.translateIntoUi") },

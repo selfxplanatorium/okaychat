@@ -146,13 +146,16 @@ test("the validator rejects each malformed shape independently", () => {
     ["missing placeholder", { shell: { tabTitle: "okaychat" } }, "missing {title}"],
     ["missing placeholder in a form", { sidebar: { pinFailedSome: "{failed}" } }, "missing {total}"],
     ["namespace not an object", { common: "x" }, "common is not an object"],
+    ["hardcoded singular in a plural", { sidebar: { selectedCount: { one: "une discussion", other: "{count} discussions" } } }, "uses the singular for zero"],
   ];
   for (const [name, catalog, expected] of cases) {
     const problems = catalogProblems("fr", catalog);
     assert.ok(problems.some((problem) => problem.includes(expected)), `${name}: ${problems.join("; ")}`);
   }
-  // `count` may be spelled out in a form, other placeholders may not be dropped.
-  assert.deepEqual(catalogProblems("fr", { sidebar: { selectedCount: { one: "une discussion", other: "{count} discussions" } } }), []);
+  // `count` may be spelled out where the language selects the singular only for one, but not in French,
+  // where zero is singular too; other placeholders may never be dropped.
+  assert.deepEqual(catalogProblems("fr", { sidebar: { selectedCount: { one: "{count} discussion", other: "{count} discussions" } } }), []);
+  assert.deepEqual(catalogProblems("it", { sidebar: { selectedCount: { one: "una chat", other: "{count} chat" } } }), []);
   const all = catalogProblems("fr", { sidebar: { selectedCount: { one: "{count}", other: "{count}" } } }, { allCategories: true });
   assert.ok(all.some((problem) => problem.includes('missing the "many" form')));
   const required = catalogProblems("fr", { common: { add: "Ajouter" } }, { required: ["common.add", "common.back"] });
