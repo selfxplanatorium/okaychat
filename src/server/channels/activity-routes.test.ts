@@ -45,6 +45,7 @@ beforeEach(() => {
 });
 
 after(() => {
+  resetChannelActivity();
   db.close();
   rmSync(dataDir, { recursive: true, force: true });
 });

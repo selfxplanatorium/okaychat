@@ -142,6 +142,9 @@ okaychat's channel transport, not which conversation it is reading, and they are
 receipts. Nothing is stored: a restart shows everyone offline, and the same empty view follows a
 reconnect. No activity path writes SQLite; a keystroke never becomes a row.
 
+Disconnect grace rechecks its originating session when projected and during the sweep, including
+when logout happens after the stream closed. A revoked session cannot retain presence through grace.
+
 The two account preferences live in `user_settings.json` as
 `channelActivity: {sharePresence, shareTyping}` (missing or invalid means both true). They are
 independent: hiding presence can still share typing. Hidden presence projects as `offline`, which the UI
