@@ -1057,6 +1057,7 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
         className="aui-composer-input caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base leading-6 outline-none"
         rows={1}
         submitMode={sync || unavailable ? "none" : submitMode}
+        blocked={!!sync || !!unavailable}
         autoFocus={autoFocus && finePointer}
         enterKeyHint="send"
         aria-label={t("thread.messageInput")}

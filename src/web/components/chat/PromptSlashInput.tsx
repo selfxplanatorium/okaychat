@@ -15,7 +15,10 @@ import { slashTokenAt, slashTokenKey } from "./prompt-slash";
 // The main composer input with a personal-prompt slash menu. The menu only appears when the whole input is
 // `/` plus a shortcut fragment, so URLs, paths, and prose never open it. See docs/implementation/saved-prompts.md.
 
-type Props = ComponentProps<typeof ComposerPrimitive.Input>;
+type Props = ComponentProps<typeof ComposerPrimitive.Input> & {
+  /** While history is syncing, Enter must not append a message that no run will answer. */
+  blocked?: boolean;
+};
 
 // An empty or failed library must not leave an empty bordered popup; normal typing/sending stays untouched.
 const rowsWouldShow = (rows: number, loading: boolean, loaded: boolean, failed: boolean) => rows > 0 || loading || (loaded && !failed);
@@ -24,7 +27,7 @@ const rowsWouldShow = (rows: number, loading: boolean, loaded: boolean, failed: 
 const preview = (text: string) => [...text].slice(0, 160).join("");
 
 export const PromptSlashInput = forwardRef<HTMLTextAreaElement, Props>(function PromptSlashInput(
-  { onChange, onSelect, onKeyDown, onCompositionStart, onCompositionEnd, ...rest },
+  { onChange, onSelect, onKeyDown, onCompositionStart, onCompositionEnd, blocked = false, ...rest },
   forwardedRef,
 ) {
   const aui = useAui();
@@ -125,6 +128,12 @@ export const PromptSlashInput = forwardRef<HTMLTextAreaElement, Props>(function 
           readSelection(event.currentTarget);
         }}
         onKeyDown={(event) => {
+          if (blocked && event.key === "Enter" && !event.shiftKey) {
+            // assistant-ui would append the message but skip the run while history is syncing.
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
           if (menuOpen && slash) {
             if ((event.key === "ArrowDown" || event.key === "ArrowUp") && rows.length > 0) {
               event.preventDefault();
