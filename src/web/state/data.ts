@@ -1,3 +1,4 @@
+import { startConversationImportAccount } from "./conversation-imports";
 import { setVideoAccount } from "@/state/video-jobs";
 import { create } from "zustand";
 import type { ChatTargetInfo, McpPromptInfo, McpServerInfo, Me, Project, ProviderInfo, StorageInfo, UserSettings } from "@shared/types";
@@ -228,6 +229,7 @@ let preloaded: { userId: string; promise?: Promise<void> } | undefined;
 
 /** Starts the shell's data requests as soon as the session is known, alongside the shell chunk and appearance. */
 export function preloadData(userId: string) {
+  startConversationImportAccount(userId);
   setLibraryAccount(userId);
   setVideoAccount(userId);
   // Agent summaries and last-response evidence are account-scoped; a late answer for the previous

@@ -1,3 +1,4 @@
+import { parentFirst } from "./threadCache";
 import { AssistantChatTransport, createResumableSessionStorage, RESUMABLE_STREAM_ID_HEADER, useChatRuntime } from "@assistant-ui/ai-sdk";
 import {
   AssistantRuntimeProvider,
@@ -306,7 +307,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
             const decode = (rows: MessageRow[]) => {
               const headId = initialHeads.get(remoteId);
               return {
-                messages: rows.map((row) => fmt.decode(row as Parameters<typeof fmt.decode>[0])),
+                messages: parentFirst(rows).map((row) => fmt.decode(row as Parameters<typeof fmt.decode>[0])),
                 ...(headId && rows.some((row) => row.id === headId) ? { headId } : {}),
               };
             };
@@ -572,6 +573,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     },
     adapter: threadListAdapter,
   });
+  useEffect(()=> {
+    const refresh=()=>{void runtime.threads.reload().catch(()=>{});};
+    window.addEventListener("okaychat:conversation-imported",refresh);
+    return ()=>window.removeEventListener("okaychat:conversation-imported",refresh);
+  },[runtime]);
   const config = useMemo(() => {
     const all: Record<string, object> = { ...toolkit, ...widgets.toolkit };
     for (const [name, render] of Object.entries(widgetHelperRenders)) {

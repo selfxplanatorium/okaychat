@@ -69,6 +69,23 @@ export function warmThreadCache(): void {
   void openDb();
 }
 
+/** Imported source timestamps need not be monotonic. Hydration requires parents first. */
+export function parentFirst<T extends Row>(rows: T[]): T[] {
+  const byId = new Map(rows.map((row)=>[row.id,row]));
+  const emitted = new Set<string>();
+  const output: T[] = [];
+  for (const row of rows) {
+    const chain: T[] = [], seen = new Set<string>();
+    let current: T|undefined = row;
+    while (current && !emitted.has(current.id) && !seen.has(current.id)) {
+      seen.add(current.id); chain.push(current);
+      current = current.parent_id ? byId.get(current.parent_id) : undefined;
+    }
+    for (const item of chain.reverse()) { emitted.add(item.id); output.push(item); }
+  }
+  return output;
+}
+
 /** The newest message and its ancestors, oldest first, cut to the last MAX_ROWS with the first one made a root. */
 export function branchTail<T extends Row>(rows: T[]): T[] {
   const byId = new Map(rows.map((row) => [row.id, row]));

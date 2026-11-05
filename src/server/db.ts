@@ -2190,6 +2190,45 @@ CREATE UNIQUE INDEX usage_video_job ON usage(video_job_id) WHERE video_job_id IS
   },
   // How a knowledge source's text was obtained (docs/implementation/extraction.md); null for pasted text and older rows.
   `ALTER TABLE knowledge_sources ADD COLUMN extraction TEXT CHECK (extraction IN ('text','ocr'));`,
+
+  `CREATE TABLE conversation_import_jobs (
+    id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK(kind IN ('import','export')),
+    state TEXT NOT NULL CHECK(state IN ('receiving','validating','ready','queued','importing','paused','cancelling','done','cancelled','failed','expired')),
+    adapter TEXT CHECK(adapter IN ('mapping-v1','portable-v1')), adapter_version INTEGER,
+    project_id TEXT, model_ref TEXT, admission_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL, terminal_at INTEGER, input_sha256 TEXT, manifest_sha256 TEXT,
+    confirmation_sha256 TEXT, reservation_bytes INTEGER NOT NULL DEFAULT 0 CHECK(reservation_bytes >= 0),
+    cancel_requested INTEGER NOT NULL DEFAULT 0 CHECK(cancel_requested IN (0,1)), error_code TEXT,
+    selection_json TEXT CHECK(selection_json IS NULL OR json_valid(selection_json))
+  );
+  CREATE UNIQUE INDEX conversation_import_one_active ON conversation_import_jobs(user_id)
+    WHERE state IN ('receiving','validating','ready','queued','importing','paused','cancelling');
+  CREATE INDEX conversation_import_jobs_expiry ON conversation_import_jobs(expires_at,state);
+  CREATE INDEX conversation_import_jobs_owner ON conversation_import_jobs(user_id,admission_at DESC);
+  CREATE TABLE conversation_import_items (
+    job_id TEXT NOT NULL REFERENCES conversation_import_jobs(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL CHECK(ordinal >= 0), item_key TEXT NOT NULL, source_namespace TEXT, source_id TEXT,
+    payload_sha256 TEXT, title TEXT, created_at INTEGER, updated_at INTEGER,
+    message_count INTEGER NOT NULL DEFAULT 0, normalized_bytes INTEGER NOT NULL DEFAULT 0,
+    warnings_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(warnings_json)),
+    state TEXT NOT NULL CHECK(state IN ('valid','invalid','pending','imported','duplicate','failed','cancelled','unselected')),
+    selected INTEGER NOT NULL DEFAULT 0 CHECK(selected IN (0,1)),
+    thread_id TEXT REFERENCES threads(id) ON DELETE SET NULL, error_code TEXT,
+    PRIMARY KEY(job_id,ordinal), UNIQUE(job_id,item_key)
+  );
+  CREATE TABLE conversation_source_ids (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    namespace TEXT NOT NULL CHECK(namespace IN ('mapping-v1','portable-v1')), source_id TEXT NOT NULL,
+    thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+    payload_sha256 TEXT NOT NULL, title_bytes INTEGER NOT NULL CHECK(title_bytes >= 0), created_at INTEGER NOT NULL,
+    PRIMARY KEY(user_id,namespace,source_id)
+  );
+  CREATE UNIQUE INDEX conversation_source_thread ON conversation_source_ids(thread_id);`,
+  `ALTER TABLE conversation_import_jobs ADD COLUMN received_bytes INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE conversation_import_jobs ADD COLUMN total_bytes INTEGER;
+   ALTER TABLE conversation_import_jobs ADD COLUMN staging_present INTEGER NOT NULL DEFAULT 0 CHECK(staging_present IN (0,1));
+   ALTER TABLE conversation_source_ids ADD COLUMN origin TEXT NOT NULL DEFAULT 'import' CHECK(origin IN ('import','export'));`,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

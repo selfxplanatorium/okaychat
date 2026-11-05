@@ -1,3 +1,4 @@
+import { parentFirst } from "./threadCache";
 /// <reference types="node" />
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -129,4 +130,10 @@ test("after sign-out, a late write cannot recreate the cache", async () => {
   await writeThread("t", [msg("a", null)], Date.now());
   assert.equal(await readThread("t"), undefined);
   assert.deepEqual(opened, []);
+});
+
+test("source timestamp order hydrates parents before children",()=> {
+  const rows = [row("middle","root"),row("leaf","middle"),row("root",null)];
+  assert.deepEqual(parentFirst(rows).map((r)=>r.id),["root","middle","leaf"]);
+  assert.equal(rows[0]!.id,"middle");
 });

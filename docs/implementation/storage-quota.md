@@ -158,3 +158,10 @@ for bounded statistics. Bodies cleared at 24 hours keep their reservation until 
 seven days, so a sent request never needs a post-network quota check. A drop rolls back only that
 endpoint's nested admission savepoint and advances its drop counter; it never fails the chat, room, or
 archive action that produced the event.
+
+External conversation transfer core also counts `conversation_import_jobs.reservation_bytes` and
+2 KiB plus `title_bytes` per `conversation_source_ids` row. Its per-conversation transaction reduces
+the held reservation before asserting the incoming charge; rollback restores the reservation. Source
+identity titles are updated with the thread title transaction. Existing native titles stay uncharged
+unless a portable export identity is allocated. Admission reserves 80 MiB before body reading. Physical staging keeps the whole 80 MiB until cleanup
+succeeds, separately from transferred account bytes, and is included in the common archive budget.

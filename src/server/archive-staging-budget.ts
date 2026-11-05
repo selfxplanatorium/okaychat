@@ -56,5 +56,10 @@ export function stagingFullError(): AppError {
  * caller re-checks itself.
  */
 export function assertStagingCapacity(incomingBytes: number, otherRoom = roomStagingReserved()): void {
-  if (personalStagingBytes() + otherRoom + incomingBytes > ROOM_ARCHIVE_LIMITS.globalStagingBytes) throw stagingFullError();
+  if (personalStagingBytes() + otherRoom + conversationStagingReserved() + incomingBytes > ROOM_ARCHIVE_LIMITS.globalStagingBytes) throw stagingFullError();
+}
+
+/** Physical reservation stays whole until successful cleanup, even as account quota transfers. */
+export function conversationStagingReserved(): number {
+  return (db.prepare("SELECT count(*) * 83886080 AS n FROM conversation_import_jobs WHERE staging_present=1").get() as {n:number}).n;
 }

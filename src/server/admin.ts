@@ -1,3 +1,4 @@
+import { removeUserImports } from "./conversation-import/jobs.js";
 import { deletingUserVideos, removeUserVideoFiles } from "./video/maintenance.js";
 import { deleteChatGPTUser } from "./chatgpt-oauth-store.js";
 import { n8nRoutes } from "./n8n/routes.js";
@@ -148,6 +149,7 @@ export const adminRoutes = new Hono<AppEnv>()
     // Active webhook attempts stop before their endpoint rows cascade away.
     abortUserEndpointSends(id);
     deletingUserVideos(id);
+    removeUserImports(id);
     db.prepare("DELETE FROM users WHERE id = ?").run(id);
     await removeUserVideoFiles(id);
     abortRevokedAgentRuns();

@@ -67,6 +67,8 @@ export function storageUsedSql(user: string): string {
   // parameter repeats once per counted table.
   return `COALESCE((SELECT SUM(bytes) FROM (
     SELECT COALESCE(SUM(length(data)), 0) AS bytes FROM uploads WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(reservation_bytes), 0) FROM conversation_import_jobs WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(2048 + title_bytes), 0) FROM conversation_source_ids WHERE user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(length(CAST(content AS BLOB)) + size), 0) FROM artifacts
       WHERE thread_id IN (SELECT id FROM threads WHERE user_id = ${user})
     UNION ALL SELECT COALESCE(SUM(length(data)), 0) FROM user_fonts WHERE user_id = ${user}

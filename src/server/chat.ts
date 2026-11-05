@@ -1,3 +1,4 @@
+import { db } from "./db.js";
 import { videoTools } from "./tools/video.js";
 import { videoModeEligible, videoVoiceActive, type VideoTurnContext } from "./video/eligibility.js";
 import { videoServiceStatuses } from "./video/services.js";
@@ -1152,7 +1153,11 @@ export const chatRoutes = new Hono<AppEnv>()
           providerOptions: handle.providerOptions,
           maxRetries: 0,
           maxOutputTokens: 400,
-          prompt: resolvePrompt("title", { userId: user.id, modelRef: model.ref }, { message: text.slice(0, 4000) }),
+          prompt: resolvePrompt("title", { userId: user.id, modelRef: model.ref }, {
+            message: db.prepare("SELECT 1 FROM messages m JOIN threads t ON t.id=m.thread_id WHERE t.id=? AND t.user_id=? AND m.imported=1 LIMIT 1").get(threadId,user.id)
+              ? wrapUntrusted(text.slice(0,4000),{kind:"past_chat",name:"imported conversation"}).text
+              : text.slice(0,4000),
+          }),
         });
         const usage = normalizeUsage(result.totalUsage);
         recordUsage({ userId: user.id, threadId, providerId: model.providerId, modelId: model.id, kind: "title", usage, cost: costOf(model.cost, usage) });
