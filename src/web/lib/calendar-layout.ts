@@ -195,3 +195,15 @@ export const civilDate = (value: string): CivilDate | null => parseDateString(va
 
 /** An event is "dense" once a visible range exceeds this many summaries. */
 export const DENSE_RANGE_LIMIT = 600;
+
+
+/** Default clock on the day chosen in the grid, preserving a one-hour midnight crossing. */
+export function newEventTimes(zone: string, initialDate: string, now = Date.now()): { start: string; end: string } {
+  const civil = formatInZone(zone, now);
+  const date = parseDateString(initialDate) ?? civil;
+  const minute = civil.minute < 30 ? 30 : 0;
+  const hour = (civil.hour + (civil.minute < 30 ? 0 : 1)) % 24;
+  const clock = (value: number) => `${String(value).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  const endDate = hour === 23 ? addCivilDays(date, 1) : date;
+  return { start: `${formatDateString(date)}T${clock(hour)}`, end: `${formatDateString(endDate)}T${clock((hour + 1) % 24)}` };
+}

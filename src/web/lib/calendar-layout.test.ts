@@ -88,3 +88,14 @@ test("overlap columns are deterministic and shared per connected cluster", () =>
   assert.deepEqual(placements.get("c"), { column: 2, columns: 3 });
   assert.deepEqual(placements.get("d"), { column: 0, columns: 1 });
 });
+
+
+test("new timed events use the chosen calendar day, including midnight crossings", async () => {
+  const { newEventTimes } = await import("./calendar-layout.js");
+  assert.deepEqual(newEventTimes("UTC", "2026-12-10", Date.UTC(2026, 10, 5, 12, 10)), {
+    start: "2026-12-10T12:30", end: "2026-12-10T13:30",
+  });
+  assert.deepEqual(newEventTimes("UTC", "2026-12-31", Date.UTC(2026, 10, 5, 22, 45)), {
+    start: "2026-12-31T23:00", end: "2027-01-01T00:00",
+  });
+});

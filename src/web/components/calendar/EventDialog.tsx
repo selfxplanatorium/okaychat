@@ -12,6 +12,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useCommand } from "@/keyboard/registry";
 import { ApiError, api } from "@/lib/api";
+import { newEventTimes } from "@/lib/calendar-layout";
 import { uuidV4 } from "@/lib/ids";
 import { useCalendar } from "@/state/calendar";
 import { CalendarConflictDialog } from "./CalendarConflictDialog";
@@ -40,25 +41,10 @@ const localOf = (zone: string, at: number): string => {
   return `${formatDateString(parts)}T${String(parts.hour).padStart(2, "0")}:${String(parts.minute).padStart(2, "0")}`;
 };
 
-function nextHalfHour(zone: string, now = Date.now()): { start: string; end: string } {
-  const civil = formatInZone(zone, now);
-  const base = { year: civil.year, month: civil.month, day: civil.day };
-  let minute = civil.minute < 30 ? 30 : 0;
-  let hour = civil.minute < 30 ? civil.hour : civil.hour + 1;
-  let date = base;
-  if (hour >= 24) {
-    hour -= 24;
-    date = addCivilDays(base, 1);
-  }
-  const start = `${formatDateString(date)}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-  const endDate = hour === 23 ? addCivilDays(date, 1) : date;
-  const end = `${formatDateString(endDate)}T${String((hour + 1) % 24).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-  return { start, end };
-}
 
 function formOf(event: CalendarEvent | null, zone: string, initialDate: string): Form {
   if (!event) {
-    const defaults = nextHalfHour(zone);
+    const defaults = newEventTimes(zone, initialDate);
     return {
       title: "",
       allDay: false,
@@ -109,7 +95,9 @@ export function EventDialog({
   onClose: () => void;
 }) {
   const [form, setForm] = useState<Form>(() => formOf(event, zone, initialDate));
-  const [resolved, setResolved] = useState<CalendarResolveResult | null>(null);
+  const [resolution, setResolution] = useState<{ key: string; result: CalendarResolveResult } | null>(null);
+  const resolutionKey = JSON.stringify([form.allDay, form.timeZone, form.startLocal, form.endLocal]);
+  const resolved = resolution?.key === resolutionKey ? resolution.result : null;
   const [selectedStart, setSelectedStart] = useState<number | null>(event && !event.allDay ? event.startAt : null);
   const [selectedEnd, setSelectedEnd] = useState<number | null>(event && !event.allDay ? event.endAt : null);
   const [resolveFailed, setResolveFailed] = useState(false);
@@ -130,7 +118,7 @@ export function EventDialog({
     const next = formOf(event, zone, initialDate);
     initial.current = next;
     setForm(next);
-    setResolved(null);
+    setResolution(null);
     setSelectedStart(event && !event.allDay ? event.startAt : null);
     setSelectedEnd(event && !event.allDay ? event.endAt : null);
     setError(null);
@@ -146,11 +134,11 @@ export function EventDialog({
 
   useEffect(() => {
     if (!open || form.allDay) {
-      setResolved(null);
+      setResolution(null);
       return;
     }
     if (!parseLocalDateTime(form.startLocal) || !parseLocalDateTime(form.endLocal)) {
-      setResolved(null);
+      setResolution(null);
       return;
     }
     const token = ++resolveToken.current;
@@ -161,19 +149,22 @@ export function EventDialog({
       })
         .then((result) => {
           if (token !== resolveToken.current) return;
-          setResolved(result);
+          setResolution({ key: resolutionKey, result });
           setResolveFailed(false);
           setSelectedStart((current) => (result.startCandidates.some((candidate) => candidate.at === current) ? current : result.startCandidates.length === 1 ? result.startCandidates[0]!.at : null));
           setSelectedEnd((current) => (result.endCandidates.some((candidate) => candidate.at === current) ? current : result.endCandidates.length === 1 ? result.endCandidates[0]!.at : null));
         })
         .catch(() => {
           if (token === resolveToken.current) {
-            setResolved(null);
+            setResolution(null);
             setResolveFailed(true);
           }
         });
     }, 400);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      resolveToken.current++;
+    };
   }, [open, form.allDay, form.timeZone, form.startLocal, form.endLocal]);
 
   const dirty = JSON.stringify(form) !== JSON.stringify(initial.current);
@@ -440,7 +431,7 @@ export function EventDialog({
               </Button>
             )}
             <Button variant="outline" onClick={requestClose}>{t("calendar.cancel")}</Button>
-            <Button onClick={() => void save()} disabled={saving} data-command="calendar.save">
+            <Button onClick={() => void save()} disabled={saving || (!form.allDay && !resolved)} data-command="calendar.save">
               {saving ? t("calendar.saving") : t("calendar.save")}
             </Button>
           </DialogFooter>

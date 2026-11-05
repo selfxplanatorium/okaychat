@@ -117,6 +117,7 @@ export class NoteAutosave {
     this.setStatus("saving");
     try {
       const saved = await this.deps.save(capturedValue, capturedRevision);
+      if (this.disposed) return;
       this.server = saved;
       this.revision = saved.revision;
       if (capturedSequence === this.sequence) {
@@ -129,6 +130,7 @@ export class NoteAutosave {
         this.schedule();
       }
     } catch (error) {
+      if (this.disposed) return;
       const status = (error as { status?: number }).status;
       if (status === 409) this.setStatus("conflict");
       else if (status === 404) this.setStatus("deleted");
@@ -141,6 +143,17 @@ export class NoteAutosave {
         this.pendingFlush = false;
         if (this.status === "dirty" || this.status === "offline" || this.status === "error") void this.flush();
       }
+    }
+  }
+
+  /** Recover the actual local payload before comparing its base revision. */
+  restore(value: NoteWrite, baseRevision: number): void {
+    this.value = { ...value, tags: [...value.tags] };
+    this.sequence++;
+    if (baseRevision !== this.revision) this.setStatus("conflict");
+    else {
+      this.setStatus("dirty");
+      this.schedule();
     }
   }
 

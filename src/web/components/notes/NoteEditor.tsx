@@ -61,7 +61,6 @@ export function NoteEditor({
   const [discardOpen, setDiscardOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const controller = useRef<NoteAutosave | null>(null);
-  const outboxTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tagsRef = useRef<HTMLInputElement>(null);
   const aui = useAui();
   const [, navigate] = useLocation();
@@ -90,14 +89,7 @@ export function NoteEditor({
     setServer(note);
     setStatus("saved");
     const entry = readOutbox(accountId, note.id);
-    if (entry) {
-      if (entry.baseRevision === note.revision) {
-        instance.edit(entry.value);
-      } else {
-        // The saved revision moved while this tab was away: keep local text and offer a conflict path.
-        instance.conflictAgainst(note);
-      }
-    }
+    if (entry) instance.restore(entry.value, entry.baseRevision);
     return () => {
       instance.dispose();
       if (controller.current === instance) controller.current = null;
@@ -107,18 +99,16 @@ export function NoteEditor({
   }, [note.id, accountId]);
 
   const scheduleOutbox = (next: NoteWrite, revision: number, base: Note) => {
-    if (outboxTimer.current) clearTimeout(outboxTimer.current);
-    outboxTimer.current = setTimeout(() => {
-      const result = writeOutbox(accountId, note.id, {
-        version: 1,
-        baseRevision: revision,
-        baseValue: writeOf(base),
-        value: next,
-        editSequence: Date.now(),
-        savedAt: Date.now(),
-      });
-      setLocalOnly(result !== "saved");
-    }, 250);
+    // Persist before navigation can unmount the editor; a delayed write can resurrect a discarded draft.
+    const result = writeOutbox(accountId, note.id, {
+      version: 1,
+      baseRevision: revision,
+      baseValue: writeOf(base),
+      value: next,
+      editSequence: Date.now(),
+      savedAt: Date.now(),
+    });
+    setLocalOnly(result !== "saved");
   };
 
   useEffect(() => {

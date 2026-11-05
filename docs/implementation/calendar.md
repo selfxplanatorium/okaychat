@@ -96,11 +96,17 @@ Home/End, PageUp/PageDown, Enter opens the day agenda, Space creates). Week has 
 24-hour scroll grid, explicit transition offsets, and an always-available list. Agenda groups by civil
 date. Every event stays reachable as an accessible button.
 
+New timed events use the chosen grid/anchor date with a rounded clock default (including an
+end on the next civil day when it crosses midnight).
+
 The dialog is explicit-save (date and reminder edits have timed consequences). Timed fields are local
 clock strings resolved through the server after a short debounce; a gap disables Save, a fold requires
-a radio choice, and a stored event reopens on its exact instant. Closing with changes asks Keep
+a radio choice, and a stored event reopens on its exact instant. Resolution results are bound to the exact
+zone/local-clock inputs; Save waits for a matching result and ignores responses invalidated by an
+input change or dialog close. Closing with changes asks Keep
 editing/Discard. 409 keeps the local form and offers Reload/Save as a new event/Copy. No autosave or
-local outbox.
+local outbox. Background focus/online refresh updates the range summaries only; the open editor
+keeps its original record and CAS revision until explicit Reload or reopening.
 
 The display zone and last view/date are stored per account in `localStorage` (no event content). The
 server ticker is independent of page lifetime. Dense ranges stop paging at 600 summaries and point at
