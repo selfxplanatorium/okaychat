@@ -29,6 +29,7 @@ import { currentCursor, decodeCursor, eventVisible, eventWakeGeneration, latestE
 import { applyChannelActivity, applyChannelTyping, registerChannelActivity, type ChannelActivityStream } from "./activity.js";
 import { activityRequestSchema, parseActivity, readActivityBody, typingRequestSchema } from "./activity-schema.js";
 import { chargeAccountActivityRate } from "./activity-rate.js";
+import { activityNow } from "./activity-clock.js";
 import { CHANNEL_ACTIVITY_LIMITS } from "../../shared/channel-activity.js";
 import { buildSnapshot, prepareChannelPrompt, resolveChannelBinding, storedBinding, trimSnapshot } from "./ai.js";
 import { channelSummary, directoryEntry, inviteSummary, projectMessages, unreadCounts, type ChannelMessageRow } from "./projections.js";
@@ -535,9 +536,9 @@ export const channelRoutes = new Hono<AppEnv>()
             // A commit between the scan and the waiter registration is not lost: it bumps the
             // generation synchronously, so this iteration scans again instead of sleeping.
             if (eventWakeGeneration() !== generation) continue;
+            // `nextDueAt` is monotonic activity time, the heartbeat is wall time: compare each to its own clock.
             const due = ephemeral?.nextDueAt() ?? null;
-            const deadline = Math.min(heartbeatAt, due ?? Number.POSITIVE_INFINITY);
-            const waitMs = Math.max(0, deadline - Date.now());
+            const waitMs = Math.max(0, Math.min(heartbeatAt - Date.now(), due === null ? Number.POSITIVE_INFINITY : due - activityNow()));
             if (waitMs <= 0) continue;
             await waitForChannelWork(waitMs, signal, ephemeral);
           }
