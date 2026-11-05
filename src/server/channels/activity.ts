@@ -811,6 +811,13 @@ function sweep(): void {
     lastHousekeeping = now;
     for (const [key, entry] of preferences) if (now - entry.at > CACHE_IDLE) preferences.delete(key);
     for (const [key, entry] of features) if (now - entry.at > CACHE_IDLE) features.delete(key);
+    // Drop caches and remembered states for users/rooms with nothing live, so long churn cannot grow them.
+    for (const [channelId, entry] of rosters) {
+      if (now - entry.at > CACHE_IDLE && !channelWatchers.get(channelId)?.size) rosters.delete(channelId);
+    }
+    for (const userId of lastPresence.keys()) {
+      if (!byUser.get(userId)?.size && !graceByUser.get(userId)?.size) lastPresence.delete(userId);
+    }
     pruneActivityRates();
   }
   maybeStopSweep();

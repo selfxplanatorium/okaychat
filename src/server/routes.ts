@@ -228,6 +228,11 @@ const api = new Hono<AppEnv>()
     if (parsed.data.projectId && !getProject(userId, parsed.data.projectId)) return c.json({ error: "Project not found" }, 404);
     // Attachment ids are checked live (own or shared-to-this-viewer) and again on every tool call. A
     // collection bound to another project cannot be attached through a forged request.
+    // A selected assistant freezes its instructions and tool policy; a model or knowledge change must name
+    // the revision it is based on, so two tabs cannot silently combine into one configuration. Checked
+    // before any attachment write, so a stale 409 cannot still install durable restrictions.
+    const configChange = parsed.data.modelRef !== undefined || parsed.data.knowledgeIds !== undefined;
+    if (configChange && thread.assistant) assertAssistantRevision(userId, thread.id, parsed.data.assistantRevision);
     const projectId = parsed.data.projectId === undefined ? thread.projectId : parsed.data.projectId;
     let knowledgeIds = parsed.data.knowledgeIds;
     let transition: "ordinary" | "restricted" | null = null;
@@ -259,10 +264,6 @@ const api = new Hono<AppEnv>()
         }
       }
     }
-    // A selected assistant freezes its instructions and tool policy; a model or knowledge change must name
-    // the revision it is based on, so two tabs cannot silently combine into one configuration.
-    const configChange = parsed.data.modelRef !== undefined || parsed.data.knowledgeIds !== undefined;
-    if (configChange && thread.assistant) assertAssistantRevision(userId, thread.id, parsed.data.assistantRevision);
     const { knowledgeIds: _ids, acceptSharedRestrictions: _ack, ...patch } = parsed.data;
     updateThread(userId, c.req.param("id"), patch);
     if (configChange && thread.assistant) bumpAssistantRevision(thread.id);

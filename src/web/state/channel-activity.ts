@@ -82,6 +82,8 @@ export class ChannelActivityController {
   private lastFrameAt = 0;
   private lastBytesAt = 0;
   private lastTypingSentAt = 0;
+  /** Typing entries expire on their own lease: a missed clearing frame must not leave a name on screen. */
+  private typingDeadlines: Record<string, Record<string, number>> = {};
   private lastInputAt = 0;
   private inputSinceLastTyping = false;
   private typingActive = false;
@@ -312,7 +314,18 @@ export class ChannelActivityController {
   }
 
   private clearFrames(): void {
+    this.typingDeadlines = {};
     this.setView({ synchronized: false, presence: {}, typing: {} });
+  }
+
+  private typingView(): Record<string, readonly string[]> {
+    const now = this.deps.now();
+    const view: Record<string, readonly string[]> = {};
+    for (const [scope, entries] of Object.entries(this.typingDeadlines)) {
+      const live = Object.entries(entries).filter(([, until]) => until > now).map(([userId]) => userId).sort();
+      if (live.length) view[scope] = live;
+    }
+    return view;
   }
 
   private stopTyping(scope?: Scope): void {
@@ -495,24 +508,25 @@ export class ChannelActivityController {
     if (frame.kind === "snapshot") {
       const presence: Record<string, ChannelPresenceState> = {};
       for (const entry of frame.presence) if (isChannelPresenceState(entry.state)) presence[entry.userId] = entry.state;
-      const typing: Record<string, readonly string[]> = {};
+      const now = this.deps.now();
+      this.typingDeadlines = {};
       for (const entry of frame.typing) {
         if (entry.rootId !== null && entry.rootId !== watch.rootId) continue;
         const key = entry.rootId ?? "";
-        const list = [...(typing[key] ?? []), entry.userId];
-        typing[key] = list.sort();
+        (this.typingDeadlines[key] ??= {})[entry.userId] = now + entry.remainingMs;
       }
-      this.setView({ synchronized: true, presence, typing });
+      this.setView({ synchronized: true, presence, typing: this.typingView() });
       return;
     }
     const presence = { ...this.view.presence };
     for (const entry of frame.presence) if (isChannelPresenceState(entry.state)) presence[entry.userId] = entry.state;
-    const typing = { ...this.view.typing };
+    const now = this.deps.now();
     for (const scope of frame.typingScopes) {
       if (scope.rootId !== null && scope.rootId !== watch.rootId) continue;
-      typing[scope.rootId ?? ""] = scope.items.map((item) => item.userId).sort();
+      const key = scope.rootId ?? "";
+      this.typingDeadlines[key] = Object.fromEntries(scope.items.map((item) => [item.userId, now + item.remainingMs]));
     }
-    this.setView({ synchronized: true, presence, typing });
+    this.setView({ synchronized: true, presence, typing: this.typingView() });
   }
 
   private tick(): void {
@@ -531,6 +545,10 @@ export class ChannelActivityController {
       this.reconnect();
     }
     if (this.typingActive && now - this.lastInputAt >= CHANNEL_ACTIVITY_LIMITS.typingLeaseMs) this.stopTyping();
+    // Drop names whose lease passed even if the clearing frame was lost.
+    const before = JSON.stringify(this.view.typing);
+    const pruned = this.typingView();
+    if (JSON.stringify(pruned) !== before) this.setView({ typing: pruned });
     this.tickTimer = this.deps.schedule(() => this.tick(), 1_000);
   }
 
