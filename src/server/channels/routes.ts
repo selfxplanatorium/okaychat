@@ -723,14 +723,12 @@ export const channelRoutes = new Hono<AppEnv>()
     const body = parse(deleteMessageSchema, await readBody(c, CHANNEL_LIMITS.requestBytes));
     const row = db.prepare("SELECT kind FROM channel_messages WHERE channel_id = ? AND id = ?").get(channel.id, c.req.param("messageId")) as { kind: "human" | "ai" } | undefined;
     if (!row) throw notFound();
-    if (row.kind === "ai") {
-      const run = db.prepare("SELECT id FROM channel_ai_runs WHERE message_id = ?").get(c.req.param("messageId")) as { id: string } | undefined;
-      if (run) cancelChannelRun(run.id);
-      throw new AppError({ code: "forbidden", message: "Stop the reply instead of deleting it." });
-    }
-    cancelRunsForSource(channel.id, c.req.param("messageId"));
+    // Stopping a reply is the cancel route's decision (requester or moderator), never a side effect here.
+    if (row.kind === "ai") throw new AppError({ code: "forbidden", message: "Stop the reply instead of deleting it." });
     const moderator = member.role === "owner" || member.role === "moderator";
     deleteHumanMessage(userId, channel.id, c.req.param("messageId"), body.revision, { moderator, reason: body.reason ?? "" });
+    // Only an authorized, committed tombstone stops replies to its source.
+    cancelRunsForSource(channel.id, c.req.param("messageId"));
     return json(c, { ok: true });
   })
   .put("/:id/messages/:messageId/reactions/:emoji", (c) => {

@@ -177,3 +177,57 @@ test("event polling advances through visible invalidations and hides other rooms
   const alice = (await (await call(`/channels/changes?cursor=${encodeURIComponent(aliceCursor)}`)).json()) as { events: Array<{ event: { channelId?: string } }> };
   assert.ok(alice.events.some((frame) => frame.event.channelId === roomId));
 });
+
+test("a plain member cannot stop someone else's reply by deleting messages", async () => {
+  const { tx } = await import("../db.js");
+  const { channelRow } = await import("./access.js");
+  const { createRunInTx, runRow } = await import("./store.js");
+  // Carol owns the room; Alice is a plain member.
+  const { body } = await createRoom({ name: "Runs", visibility: "public" }, "carol");
+  const roomId = body.channel.id;
+  for (const user of ["bob", "alice"]) assert.equal((await call(`/channels/${roomId}/join`, { method: "POST", json: {}, user })).status, 200);
+  const source = (await (await call(`/channels/${roomId}/messages`, {
+    method: "POST",
+    json: { clientId: crypto.randomUUID(), body: "Question" },
+    user: "bob",
+  })).json()) as { message: { id: string; seq: number; revision: number } };
+  const run = tx(() =>
+    createRunInTx("bob", channelRow(roomId)!, { messageId: source.message.id, seq: source.message.seq }, {
+      clientId: crypto.randomUUID(),
+      requestHash: "h",
+      modelRef: "test/model",
+      configJson: "{}",
+      inputEnc: "x",
+      reservedBytes: 0,
+    }),
+  );
+  const del = (messageId: string, revision: number, user: string) =>
+    call(`/channels/${roomId}/messages/${messageId}`, { method: "DELETE", json: { revision }, user });
+
+  assert.equal((await del(source.message.id, source.message.revision, "alice")).status, 403);
+  assert.equal(runRow(run.runId)!.state, "queued");
+  assert.equal((await del(run.messageId, 1, "alice")).status, 403);
+  assert.equal(runRow(run.runId)!.state, "queued");
+  assert.equal((await call(`/channels/${roomId}/ai-runs/${run.runId}/cancel`, { method: "POST", json: {}, user: "alice" })).status, 403);
+  assert.equal(runRow(run.runId)!.state, "queued");
+
+  // The author's own tombstone still stops replies to it.
+  assert.equal((await del(source.message.id, source.message.revision, "bob")).status, 200);
+  assert.equal(runRow(run.runId)!.state, "cancelled");
+});
+
+test("an administrator can transfer room ownership", async () => {
+  const { body } = await createRoom({ name: "Handover", visibility: "public" }, "bob");
+  const roomId = body.channel.id;
+  assert.equal((await call(`/channels/${roomId}/join`, { method: "POST", json: {}, user: "carol" })).status, 200);
+  const { revision } = ((await (await call(`/channels/${roomId}`, { user: "bob" })).json()) as { channel: { revision: number } }).channel;
+  const moved = await call(`/admin/channels/${roomId}/moderate`, {
+    method: "POST",
+    json: { action: "transfer", targetId: "carol", revision, reason: "owner left" },
+    user: "root",
+  });
+  assert.equal(moved.status, 200);
+  const roles = db.prepare("SELECT user_id, role FROM channel_members WHERE channel_id = ? ORDER BY user_id").all(roomId) as Array<{ user_id: string; role: string }>;
+  assert.deepEqual(roles.map((row) => [row.user_id, row.role]), [["bob", "moderator"], ["carol", "owner"]]);
+  assert.equal((db.prepare("SELECT owner_id FROM channels WHERE id = ?").get(roomId) as { owner_id: string }).owner_id, "carol");
+});
