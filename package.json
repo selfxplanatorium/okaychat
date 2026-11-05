@@ -14,7 +14,8 @@
     "build": "vite build && node scripts/compress-web.mjs && tsc -p tsconfig.server.json",
     "start": "node dist/server/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.server.json",
-    "test": "node --test --import tsx 'src/**/*.test.ts'"
+    "test": "node --test --import tsx 'src/**/*.test.ts'",
+    "perf:sql": "node scripts/perf/sql.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.82",

@@ -94,17 +94,32 @@ function compact(catalog: Catalog): Catalog {
 
 let memory: { data: Catalog; fetchedAt: number } | null = null;
 let inflight: Promise<Catalog> | null = null;
+let diskLoad: Promise<void> | null = null;
+// Background refresh failures back off instead of retrying models.dev from every request.
+const RETRY_DELAYS_MS = [5_000, 15_000, 60_000, 5 * 60_000] as const;
+let refreshFailures = 0;
+let retryAt = 0;
+
+/** Read by tests; there is no HTTP surface for it. */
+export const catalogLoadStats = { diskLoads: 0, networkRefreshes: 0, failures: 0 };
 
 function refresh(): Promise<Catalog> {
   inflight ??= (async () => {
+    catalogLoadStats.networkRefreshes += 1;
     try {
       const res = await fetch(SOURCE, { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(15_000) });
       if (!res.ok) throw new Error(`models.dev ${res.status}`);
       const data = compact((await res.json()) as Catalog);
       memory = { data, fetchedAt: Date.now() };
-      await writeFile(CACHE_FILE, JSON.stringify(memory));
+      refreshFailures = 0;
+      retryAt = 0;
+      // A failed disk copy does not invalidate the fresh in-memory one; the next refresh rewrites it.
+      await writeFile(CACHE_FILE, JSON.stringify(memory)).catch(() => {});
       return data;
     } catch (error) {
+      catalogLoadStats.failures += 1;
+      retryAt = Date.now() + RETRY_DELAYS_MS[Math.min(refreshFailures, RETRY_DELAYS_MS.length - 1)]!;
+      refreshFailures += 1;
       // A stale catalog beats no catalog.
       if (memory) return memory.data;
       throw error;
@@ -115,19 +130,29 @@ function refresh(): Promise<Catalog> {
   return inflight;
 }
 
-async function load(): Promise<Catalog> {
-  if (!memory) {
+/** One disk read even when many cold requests arrive together; cleared after it settles so a failed read can retry. */
+function loadFromDisk(): Promise<void> {
+  diskLoad ??= (async () => {
+    catalogLoadStats.diskLoads += 1;
     try {
       const cached = JSON.parse(await readFile(CACHE_FILE, "utf8")) as { data: Catalog; fetchedAt: number };
       // Copies written before compaction still hold every field.
       memory = { data: compact(cached.data), fetchedAt: cached.fetchedAt };
     } catch {
-      // No disk cache yet.
+      // No usable disk cache yet.
     }
-  }
+  })().finally(() => {
+    diskLoad = null;
+  });
+  return diskLoad;
+}
+
+async function load(): Promise<Catalog> {
+  if (!memory) await loadFromDisk();
   if (!memory) return refresh();
-  // Requests never wait on models.dev once a copy exists; an expired one is refreshed behind them.
-  if (Date.now() - memory.fetchedAt >= TTL_MS) void refresh().catch(() => {});
+  // Requests never wait on models.dev once a copy exists; an expired one is refreshed behind them, and a
+  // recent failure waits out its backoff instead of repeating the request.
+  if (Date.now() - memory.fetchedAt >= TTL_MS && Date.now() >= retryAt) void refresh().catch(() => {});
   return memory.data;
 }
 

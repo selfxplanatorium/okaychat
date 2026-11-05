@@ -15,7 +15,7 @@ Liberation is metric-compatible with Arial, Times New Roman, and Courier New, so
 ## Where the list lives
 
 - `src/web/theme/bundled-fonts.ts`: the picker list and the monospace flag.
-- `src/web/fonts/bundled.css`: `@font-face` rules for Liberation. Vite emits the TTFs as hashed assets, loaded only when used.
+- `src/web/fonts/bundled.css`: `@font-face` rules for Liberation. Vite emits the TTFs as hashed assets, loaded only when used. Every declaration uses `font-display: swap`, so a slow font file cannot hide text at startup.
 - `src/web/main.tsx`: imports the Fontsource packages and the Liberation CSS.
 - `src/web/theme/fonts.ts`: maps the picker labels Onest and Golos Text to Fontsource's actual CSS families (`Onest Variable` and `Golos Text Variable`). The default stack also lives in `theme.css`; keep both defaults aligned. An empty interface font preference uses Onest; explicit font choices stay unchanged.
 

@@ -315,6 +315,9 @@ test("migration adds the edit columns and leaves existing rows unedited", () => 
       db.exec("INSERT INTO users (id,email,name,password_hash,role,created_at) VALUES ('old','old@example.test','Old','unused','user',1)");
       db.exec("INSERT INTO threads (id,user_id,created_at,updated_at) VALUES ('t','old',1,1)");
       db.prepare("INSERT INTO messages (id,thread_id,format,content,bytes,created_at) VALUES ('m','t','ai-sdk/v6',?,10,1)").run(JSON.stringify({ role: "assistant", parts: [{ type: "text", text: "Old reply" }] }));
+      // The later search-index artifacts must go before rewriting messages, or their triggers fire against a missing table.
+      db.exec("DROP TRIGGER messages_fts_insert; DROP TRIGGER messages_fts_update; DROP TRIGGER messages_fts_delete");
+      db.exec("DROP TABLE message_search_keys; DROP INDEX messages_thread_time");
       db.exec("ALTER TABLE messages DROP COLUMN edited_at");
       db.exec("ALTER TABLE messages DROP COLUMN original_enc");
       // Recreate schema 32, before reply editing (33), writing drafts (34), and media (35).

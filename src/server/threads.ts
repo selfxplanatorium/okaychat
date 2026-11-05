@@ -19,7 +19,6 @@ interface ThreadRow {
   status: "regular" | "archived";
   model_ref: string | null;
   project_id: string | null;
-  compaction_json: string | null;
   memory_disabled: number;
   pinned: number;
   knowledge_ids: string | null;
@@ -31,8 +30,14 @@ interface ThreadRow {
   updated_at: number;
 }
 
-const SELECT_THREADS = `SELECT t.*, o.title AS branched_title, o.id IS NOT NULL AS branched_exists FROM threads t
-  LEFT JOIN threads o ON o.id = t.branched_from AND o.user_id = t.user_id`;
+// The sidebar reads every chat, so its rows must not carry compaction JSON: a long chat can hold a large
+// trim summary that only getThread needs. `t.*` also breaks when a column is added for another feature.
+const THREAD_COLUMNS = `t.id, t.title, t.status, t.model_ref, t.project_id, t.memory_disabled, t.pinned,
+  t.knowledge_ids, t.branched_from, t.created_at, t.updated_at`;
+const BRANCH_JOIN = `LEFT JOIN threads o ON o.id = t.branched_from AND o.user_id = t.user_id`;
+const BRANCH_COLUMNS = "o.title AS branched_title, o.id IS NOT NULL AS branched_exists";
+const SELECT_THREADS = `SELECT ${THREAD_COLUMNS}, ${BRANCH_COLUMNS} FROM threads t ${BRANCH_JOIN}`;
+const SELECT_THREAD = `SELECT ${THREAD_COLUMNS}, t.compaction_json, ${BRANCH_COLUMNS} FROM threads t ${BRANCH_JOIN}`;
 
 const parseIds = (value: string | null): string[] => {
   if (!value) return [];
@@ -70,10 +75,16 @@ export function listThreads(userId: string, projectId?: string | null, status?: 
 }
 
 export function getThread(userId: string, id: string): (ThreadSummary & { compaction: CompactionState | null }) | null {
-  const row = db.prepare(`${SELECT_THREADS} WHERE t.user_id = ? AND t.id = ?`).get(userId, id) as unknown as ThreadRow | undefined;
+  const row = db.prepare(`${SELECT_THREAD} WHERE t.user_id = ? AND t.id = ?`).get(userId, id) as unknown as
+    | (ThreadRow & { compaction_json: string | null })
+    | undefined;
   if (!row) return null;
   return { ...toSummary(row), compaction: row.compaction_json ? (JSON.parse(row.compaction_json) as CompactionState) : null };
 }
+
+/** Ownership only. History routes do not need the summary, compaction JSON, or the fork join. */
+const ownsThread = (userId: string, id: string): boolean =>
+  db.prepare("SELECT 1 FROM threads WHERE user_id = ? AND id = ?").get(userId, id) !== undefined;
 
 /** Idempotent: the client may call initialize more than once for the same id. */
 export function ensureThread(userId: string, id: string, projectId: string | null = null): ThreadSummary {
@@ -154,9 +165,10 @@ export function ancestry<T extends { id: string; parent_id: string | null }>(byI
   const seen = new Set<string>();
   for (let row = start; row && !seen.has(row.id); row = row.parent_id ? byId.get(row.parent_id) : undefined) {
     seen.add(row.id);
-    out.unshift(row);
+    out.push(row);
   }
-  return out;
+  // Walking ends at the oldest ancestor, so one reverse replaces an unshift on every step.
+  return out.reverse();
 }
 
 export function branchThread(userId: string, sourceId: string, messageId: string, id: string, modelRef?: string): ThreadSummary {
@@ -270,7 +282,7 @@ export interface MessageRow {
 }
 
 export function listMessages(userId: string, threadId: string): MessageRow[] {
-  if (!getThread(userId, threadId)) return [];
+  if (!ownsThread(userId, threadId)) return [];
   const rows = db
     .prepare("SELECT id, parent_id, format, content FROM messages WHERE thread_id = ? ORDER BY created_at, rowid")
     .all(threadId) as Array<{ id: string; parent_id: string | null; format: string; content: string }>;
@@ -282,7 +294,7 @@ export function listMessages(userId: string, threadId: string): MessageRow[] {
  * parsing and re-serializing every message (inline attachments can be megabytes) doubled the work and memory.
  */
 export function listMessagesJson(userId: string, threadId: string): string {
-  if (!getThread(userId, threadId)) return "[]";
+  if (!ownsThread(userId, threadId)) return "[]";
   const rows = db
     .prepare("SELECT id, parent_id, format, content, edited_at FROM messages WHERE thread_id = ? ORDER BY created_at, rowid")
     .all(threadId) as Array<{ id: string; parent_id: string | null; format: string; content: string; edited_at: number | null }>;
@@ -294,8 +306,12 @@ export function listMessagesJson(userId: string, threadId: string): string {
 export function appendMessage(userId: string, threadId: string, row: MessageRow) {
   return tx(() => {
     ensureThread(userId, threadId);
-    const previous = db.prepare("SELECT content, bytes, edited_at, original_enc FROM messages WHERE thread_id = ? AND id = ?").get(threadId, row.id) as { content: string; bytes: number; edited_at: number | null; original_enc: string | null } | undefined;
-    if (row.parent_id !== null && createsCycle(threadId, row.id, row.parent_id)) {
+    const previous = db.prepare("SELECT content, bytes, parent_id, format, edited_at, original_enc FROM messages WHERE thread_id = ? AND id = ?").get(threadId, row.id) as
+      | { content: string; bytes: number; parent_id: string | null; format: string; edited_at: number | null; original_enc: string | null }
+      | undefined;
+    // The stored parent is immutable unless this row is genuinely re-parented, and the stored graph has no
+    // cycle, so an unchanged parent needs no walk. A brand-new row still walks from its parent.
+    if (row.parent_id !== null && previous?.parent_id !== row.parent_id && createsCycle(threadId, row.id, row.parent_id)) {
       throw new HTTPException(400, { message: "A message cannot be its own ancestor." });
     }
     // Inline images (user attachments, provider image output) become owned references before anything is
@@ -325,6 +341,12 @@ export function appendMessage(userId: string, threadId: string, row: MessageRow)
       // A re-sent identical edited row is not news: keep its stored bytes and do not bump the chat's activity.
       return { ...row, content: JSON.parse(previous.content) as unknown };
     }
+    if (previous && previous.content === json && previous.parent_id === row.parent_id && previous.format === row.format) {
+      // Assistant turns are persisted step by step, and a reconnecting tab replays what it already sent.
+      // normalizeImages above has already charged or mapped any actually new bytes, so an unchanged row can
+      // return its stored content without an UPSERT, a search-index write, or a sidebar activity bump.
+      return { ...row, content: JSON.parse(previous.content) as unknown };
+    }
     if (previous?.content !== json) {
       storeInlineAttachments(db, userId, threadId, content, (size) => { assertStorage(userId, size); });
       assertStorage(userId, bytes - (previous?.bytes ?? 0));
@@ -340,14 +362,22 @@ export function appendMessage(userId: string, threadId: string, row: MessageRow)
 }
 
 function createsCycle(threadId: string, id: string, parentId: string): boolean {
-  const parent = db.prepare("SELECT parent_id FROM messages WHERE thread_id = ? AND id = ?");
-  const seen = new Set<string>();
-  for (let current: string | null = parentId; current !== null && !seen.has(current); ) {
-    if (current === id) return true;
-    seen.add(current);
-    current = (parent.get(threadId, current) as { parent_id: string | null } | undefined)?.parent_id ?? null;
-  }
-  return false;
+  // A direct self-parent is a cycle even before either row exists.
+  if (parentId === id) return true;
+  // One statement for the whole walk instead of a prepared lookup per ancestor. UNION dedupes, so a
+  // pre-existing cycle in the stored graph terminates the recursion too, and the starting row is scoped
+  // to this thread, so the walk never crosses into another chat.
+  const found = db
+    .prepare(
+      `WITH RECURSIVE chain(id, parent_id) AS (
+         SELECT id, parent_id FROM messages WHERE thread_id = ? AND id = ?
+         UNION
+         SELECT m.id, m.parent_id FROM messages m JOIN chain c ON m.thread_id = ? AND m.id = c.parent_id
+       )
+       SELECT 1 AS found FROM chain WHERE id = ? LIMIT 1`,
+    )
+    .get(threadId, parentId, threadId, id);
+  return found !== undefined;
 }
 
 /** The branch the user last extended: newest message and its ancestors, oldest first. */

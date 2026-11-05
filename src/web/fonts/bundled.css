@@ -1,13 +1,13 @@
 /* Liberation (SIL OFL 1.1, see LIBERATION-OFL.txt). Metric-compatible with Arial, Times New Roman, and Courier New. */
-@font-face { font-family: "Liberation Sans"; font-style: normal; font-weight: 400; src: url("./LiberationSans_Regular.ttf") format("truetype"); }
-@font-face { font-family: "Liberation Sans"; font-style: normal; font-weight: 700; src: url("./LiberationSans_Bold.ttf") format("truetype"); }
-@font-face { font-family: "Liberation Sans"; font-style: italic; font-weight: 400; src: url("./LiberationSans_Italic.ttf") format("truetype"); }
-@font-face { font-family: "Liberation Sans"; font-style: italic; font-weight: 700; src: url("./LiberationSans_BoldItalic.ttf") format("truetype"); }
-@font-face { font-family: "Liberation Serif"; font-style: normal; font-weight: 400; src: url("./LiberationSerif_Regular.ttf") format("truetype"); }
-@font-face { font-family: "Liberation Serif"; font-style: normal; font-weight: 700; src: url("./LiberationSerif_Bold.ttf") format("truetype"); }
-@font-face { font-family: "Liberation Serif"; font-style: italic; font-weight: 400; src: url("./LiberationSerif_Italic.ttf") format("truetype"); }
-@font-face { font-family: "Liberation Serif"; font-style: italic; font-weight: 700; src: url("./LiberationSerif_BoldItalic.ttf") format("truetype"); }
-@font-face { font-family: "Liberation Mono"; font-style: normal; font-weight: 400; src: url("./LiberationMono_Regular.ttf") format("truetype"); }
-@font-face { font-family: "Liberation Mono"; font-style: normal; font-weight: 700; src: url("./LiberationMono_Bold.ttf") format("truetype"); }
-@font-face { font-family: "Liberation Mono"; font-style: italic; font-weight: 400; src: url("./LiberationMono_Italic.ttf") format("truetype"); }
-@font-face { font-family: "Liberation Mono"; font-style: italic; font-weight: 700; src: url("./LiberationMono_BoldItalic.ttf") format("truetype"); }
+@font-face { font-family: "Liberation Sans"; font-style: normal; font-weight: 400; src: url("./LiberationSans_Regular.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "Liberation Sans"; font-style: normal; font-weight: 700; src: url("./LiberationSans_Bold.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "Liberation Sans"; font-style: italic; font-weight: 400; src: url("./LiberationSans_Italic.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "Liberation Sans"; font-style: italic; font-weight: 700; src: url("./LiberationSans_BoldItalic.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "Liberation Serif"; font-style: normal; font-weight: 400; src: url("./LiberationSerif_Regular.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "Liberation Serif"; font-style: normal; font-weight: 700; src: url("./LiberationSerif_Bold.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "Liberation Serif"; font-style: italic; font-weight: 400; src: url("./LiberationSerif_Italic.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "Liberation Serif"; font-style: italic; font-weight: 700; src: url("./LiberationSerif_BoldItalic.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "Liberation Mono"; font-style: normal; font-weight: 400; src: url("./LiberationMono_Regular.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "Liberation Mono"; font-style: normal; font-weight: 700; src: url("./LiberationMono_Bold.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "Liberation Mono"; font-style: italic; font-weight: 400; src: url("./LiberationMono_Italic.ttf") format("truetype"); font-display: swap; }
+@font-face { font-family: "Liberation Mono"; font-style: italic; font-weight: 700; src: url("./LiberationMono_BoldItalic.ttf") format("truetype"); font-display: swap; }
