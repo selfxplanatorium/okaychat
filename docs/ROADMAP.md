@@ -210,6 +210,25 @@ reloads, translating team channel messages (`channel_translations`, owner-paid),
 a translation ("reading mode"), translating artifacts/attachments/whole chats, read-aloud of a translation,
 server-side source-language detection, and per-message language memory.
 
+## Pass 14: French, Italian, European Portuguese (built)
+
+- **Shipping registry**: `src/shared/ui-locales.ts` lists each language with its autonym, direction, and
+  coverage policy; `locale-registry.ts` binds the glob-discovered chunks to those rows and throws when a
+  file and row disagree. Adding a language is one row plus one `i18n/locales/<tag>.ts` file.
+- **New locales**: `fr`, `it`, and `pt-PT` ship complete for the core namespaces plus channels, room
+  archives, knowledge, custom tools, evaluations, and notifications (1,839 entries each), with real plural
+  categories and reviewed terminology. A validator now rejects a French singular that spells out "1",
+  because French selects the singular for zero as well.
+- **Picker**: languages appear under their own names in every UI language; a valid stored tag this build
+  does not ship stays selectable and is labelled "(not installed)" instead of showing a bare code.
+- **Tests**: a registry test, per-locale formatter assertions against real `Intl`, placeholder and plural
+  shape checks, and a language-registry contract replace the earlier hardcoded de/es lists. Everything
+  outside the coverage contract still falls back to English per key.
+
+Deferred: a fluent native-speaker review for the three new locales, visual checks of long labels at narrow
+widths, full coverage of the remaining optional namespaces (`keyboard`, `admin`, `providers`, `mcp`, …),
+switching language without a reload, further locales, and RTL.
+
 ## Known gaps
 
 - Stream replay is kept in server memory for 15 minutes after the last update. Reload recovery works; pending generations do not survive a server restart.
