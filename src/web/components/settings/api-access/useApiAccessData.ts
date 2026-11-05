@@ -34,9 +34,11 @@ export interface ApiAccessData {
   requests: ApiRequestSummary[];
   requestsCursor: string | null;
   requestsBefore: string[];
+  requestsError: boolean;
   audit: ApiKeyAuditRow[];
   auditCursor: number | null;
   auditBefore: number[];
+  auditError: boolean;
   setDays: (days: ApiUsageDays) => void;
   setGroupBy: (groupBy: ApiUsageResponse["groupBy"]) => void;
   setKeyFilter: (keyId: string | null) => void;
@@ -65,10 +67,16 @@ export function useApiAccessData(): ApiAccessData {
   const [requests, setRequests] = useState<ApiRequestSummary[]>([]);
   const [requestsCursor, setRequestsCursor] = useState<string | null>(null);
   const [requestsBefore, setRequestsBefore] = useState<string[]>([]);
+  const [requestsError, setRequestsError] = useState(false);
   const [audit, setAudit] = useState<ApiKeyAuditRow[]>([]);
   const [auditCursor, setAuditCursor] = useState<number | null>(null);
   const [auditBefore, setAuditBefore] = useState<number[]>([]);
+  const [auditError, setAuditError] = useState(false);
   const generation = useRef(0);
+  // Each list also has its own token: a filter or page change must not be overwritten by an older answer,
+  // even while both answers belong to the same account.
+  const requestsToken = useRef(0);
+  const auditToken = useRef(0);
   const controllers = useRef(new Set<AbortController>());
 
   const request = useCallback(<T,>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
@@ -98,14 +106,17 @@ export function useApiAccessData(): ApiAccessData {
     const query = new URLSearchParams({ limit: "50" });
     if (keyFilter) query.set("keyId", keyFilter);
     if (before) query.set("before", before);
+    const token = ++requestsToken.current;
     try {
       const page = await request<ApiRequestPage>(`/api-keys/requests?${query}`);
-      if (generation.current !== gen) return;
+      if (generation.current !== gen || requestsToken.current !== token) return;
       setRequests(page.rows);
       setRequestsCursor(page.nextCursor);
+      setRequestsError(false);
     } catch {
-      if (generation.current !== gen) return;
-      setRequests([]);
+      if (generation.current !== gen || requestsToken.current !== token) return;
+      // Keep the rows already on screen; an empty table would claim there is no activity.
+      setRequestsError(true);
       setRequestsCursor(null);
     }
   }, [keyFilter, request]);
@@ -113,14 +124,16 @@ export function useApiAccessData(): ApiAccessData {
   const loadAudit = useCallback(async (gen: number, before?: number) => {
     const query = new URLSearchParams({ limit: "50" });
     if (before !== undefined) query.set("before", String(before));
+    const token = ++auditToken.current;
     try {
       const page = await request<ApiKeyAuditPage>(`/api-keys/audit?${query}`);
-      if (generation.current !== gen) return;
+      if (generation.current !== gen || auditToken.current !== token) return;
       setAudit(page.rows);
       setAuditCursor(page.nextCursor);
+      setAuditError(false);
     } catch {
-      if (generation.current !== gen) return;
-      setAudit([]);
+      if (generation.current !== gen || auditToken.current !== token) return;
+      setAuditError(true);
       setAuditCursor(null);
     }
   }, [request]);
@@ -165,7 +178,9 @@ export function useApiAccessData(): ApiAccessData {
     setRequests([]);
     setAudit([]);
     setRequestsBefore([]);
+    setRequestsError(false);
     setAuditBefore([]);
+    setAuditError(false);
     setKeyFilter(null);
     setError(null);
     setLoading(true);
@@ -289,9 +304,11 @@ export function useApiAccessData(): ApiAccessData {
     keyFilter,
     requests,
     requestsCursor,
+    requestsError,
     requestsBefore,
     audit,
     auditCursor,
+    auditError,
     auditBefore,
     setDays,
     setGroupBy,
