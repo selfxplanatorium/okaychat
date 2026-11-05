@@ -43,6 +43,30 @@ test("quota failures block image, native PDF, text, and binary sends instead of 
   }
 });
 
+test("the document adapter accepts presentations, OpenDocument text, and EPUB files", () => {
+  const accepted = new DocumentAttachmentAdapter().accept.split(",");
+  for (const type of [".pptx", ".ppsx", ".odt", ".epub"]) assert.ok(accepted.includes(type), type);
+});
+
+test("a presentation attachment routes to the document adapter and is extracted", async (t) => {
+  const calls: Array<{ url: string; body: FormData }> = [];
+  t.mock.method(globalThis, "fetch", async (url: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ url: String(url), body: init?.body as FormData });
+    return Response.json({ text: "## Slide 1\nDeck text", pages: 1, fileId: "upl_deck" });
+  });
+  const adapter = new CompositeAttachmentAdapter([new DocumentAttachmentAdapter(() => false), new BinaryAttachmentAdapter(() => false)]);
+  const attachment = await adapter.add({
+    file: new File(["bytes"], "deck.pptx", { type: "application/vnd.openxmlformats-officedocument.presentationml.presentation" }),
+  });
+  const sent = await adapter.send(attachment as Parameters<typeof adapter.send>[0]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]!.url, "/api/files/extract");
+  assert.ok(calls[0]!.body instanceof FormData);
+  assert.equal((calls[0]!.body.get("file") as File).name, "deck.pptx");
+  assert.match(JSON.stringify(sent), /Deck text/);
+  assert.match(JSON.stringify(sent), /upl_deck/);
+});
+
 test("temporary image and text sends never call storage or add file_id markers", async (t) => {
   t.mock.method(globalThis, "fetch", async () => { throw new Error("Temporary sends must not call storage"); });
   for (const adapter of [new StoredImageAttachmentAdapter(() => true), new CodeAttachmentAdapter(() => true)]) {

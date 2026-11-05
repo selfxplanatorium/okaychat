@@ -51,6 +51,7 @@ RUN python3 /tmp/exec-view.py && rm /tmp/exec-view.py
 COPY --from=seccomp /src/inner.bpf /opt/sandbox/inner.bpf
 COPY TOOLS.md /opt/sandbox/TOOLS.md
 COPY runner.py /opt/sandbox/runner.py
+COPY --chmod=755 ocr_image.py /opt/sandbox/ocr_image.py
 
 ENV SANDBOX_ROOT=/work \
     SANDBOX_PORT=8080 \

@@ -1,11 +1,14 @@
 import { bodyLimit } from "hono/body-limit";
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { Project, ProjectFile } from "../shared/types.js";
 import type { AppEnv } from "./auth.js";
 import { newId } from "./crypto.js";
 import { assertStorage } from "./quota.js";
 import { db, tx } from "./db.js";
+import { redactSecrets } from "./errors.js";
+import { ExtractionError } from "./extraction/index.js";
 import { extract, MAX_BYTES, storeUpload } from "./files.js";
 import { wrapUntrusted } from "./prompt-injection.js";
 
@@ -111,9 +114,16 @@ export const projectRoutes = new Hono<AppEnv>()
     const bytes = new Uint8Array(await file.arrayBuffer());
     let text: string;
     try {
-      text = (await extract(file.name, file.type, bytes)).text;
+      const result = await extract(file.name, file.type, bytes);
+      // Project files have no OCR path; a scan or an image would only store a placeholder.
+      if (result.needsOcr || !result.text.trim()) {
+        return c.json({ error: `Could not read ${file.name}: this file has no readable text. Add it to a knowledge collection so OCR can read it, or provide a text version.` }, 422);
+      }
+      text = result.text;
     } catch (error) {
-      return c.json({ error: `Could not read ${file.name}: ${(error as Error).message}` }, 422);
+      if (error instanceof ExtractionError || error instanceof HTTPException) return c.json({ error: `Could not read ${file.name}: ${error.message}` }, 422);
+      console.error("[projects] extract failed", redactSecrets(String((error as Error)?.message ?? error)).slice(0, 500));
+      return c.json({ error: `Could not read ${file.name}. It may be damaged or use an unsupported format.` }, 422);
     }
     // Read the live state after the awaits above: a concurrent upload or delete changes both.
     const current = getProject(c.get("user").id, project.id);

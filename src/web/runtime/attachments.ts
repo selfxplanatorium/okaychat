@@ -53,12 +53,12 @@ export class StoredImageAttachmentAdapter extends SimpleImageAttachmentAdapter {
 
 /**
  * PDFs go as files: models that read PDFs see the pages, and the server extracts text for the rest.
- * Word files are always converted to text on the server.
+ * Office, OpenDocument, and EPUB files are always converted to text on the server.
  */
 export class DocumentAttachmentAdapter implements AttachmentAdapter {
   constructor(private readonly temporary: () => boolean = () => false) {}
   accept =
-    "application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    "application/pdf,.pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation,.ppsx,application/vnd.openxmlformats-officedocument.presentationml.slideshow,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.xlsm,application/vnd.ms-excel.sheet.macroEnabled.12,.odt,application/vnd.oasis.opendocument.text,.epub,application/epub+zip";
 
   async add({ file }: { file: File }) {
     return {

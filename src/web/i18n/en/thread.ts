@@ -3,6 +3,7 @@ export default {
   assistantSaid: "Assistant said",
   assistantWorking: "Assistant is working",
   attachmentFailed: "{label}, upload failed",
+  attachmentHint: "PDF, DOCX, PPTX, XLSX, EPUB, images, or text. Up to 25 MB.",
   attachmentOfType: "{type} attachment {name}",
   attachmentUploading: "{label}, uploading",
   audio: "Audio",

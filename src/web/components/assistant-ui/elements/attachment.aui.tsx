@@ -357,11 +357,18 @@ export const ComposerAttachments: FC = () => {
 };
 
 export const ComposerAddAttachment: FC<{ className?: string }> = ({ className }) => {
+  // The hint names the accepted types and size; aria-label stays the short action name.
+  const tooltip = (
+    <>
+      <span className="block">{t("thread.addAttachment")}</span>
+      <span className="text-muted-foreground block">{t("thread.attachmentHint")}</span>
+    </>
+  );
   return (
     <ComposerPrimitive.AddAttachment
       render={
         <TooltipIconButton
-          tooltip={t("thread.addAttachment")}
+          tooltip={tooltip}
           command="composer.attach"
           side="bottom"
           variant="ghost"

@@ -339,10 +339,13 @@ export function MobileComposerMenu() {
             </MenuItem>
           )}
           {!agent && (
-            <ComposerPrimitive.AddAttachment render={<MenuItem />}>
-              <PaperclipIcon />
-              {t("composer.attach")}
-            </ComposerPrimitive.AddAttachment>
+            <>
+              <ComposerPrimitive.AddAttachment render={<MenuItem />}>
+                <PaperclipIcon />
+                {t("composer.attach")}
+              </ComposerPrimitive.AddAttachment>
+              <p className="text-muted-foreground px-2 pb-1 text-[11px]">{t("thread.attachmentHint")}</p>
+            </>
           )}
         </MenuContent>
       </Menu>

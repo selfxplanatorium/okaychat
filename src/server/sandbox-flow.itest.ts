@@ -154,3 +154,28 @@ test("stopping the chat cancels the run in the sandbox", async () => {
   const after = await runCode({ userId: USER, threadId: THREAD, language: "bash", code: "pgrep -c sleep || true" });
   assert.equal(after.stdout.trim(), "0");
 });
+
+const OCR_FIXTURES = String.raw`
+from PIL import Image, ImageDraw, ImageFont
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfgen import canvas
+font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 96)
+img = Image.new("RGB", (1600, 300), "white")
+ImageDraw.Draw(img).text((40, 90), "QUASAR OCR CHECK", fill="black", font=font)
+img.save("ocr.png")
+c = canvas.Canvas("scan.pdf", pagesize=(1600, 300)); c.drawImage(ImageReader(img), 0, 0, 1600, 300); c.showPage(); c.save()
+`;
+
+test("knowledge OCR reads a raster image and an image-only PDF through the fixed /ocr route", async () => {
+  const { readSandboxFile } = await import("./media/store.js");
+  const { ocrExtract } = await import("./ocr.js");
+  const result = await runCode({ userId: USER, threadId: THREAD, language: "python", code: OCR_FIXTURES, timeoutS: 120 });
+  assert.equal(result.exitCode, 0, result.stderr);
+  const file = (name: string) => readSandboxFile(USER, result.files.find((f) => f.path === name)!.fileId!)!.data;
+  const png = await ocrExtract({ userId: USER, sourceId: "kns_ocr", kind: "image", data: file("ocr.png") });
+  assert.match(png, /OCR/i, png);
+  const pdf = await ocrExtract({ userId: USER, sourceId: "kns_ocr", kind: "pdf", data: file("scan.pdf") });
+  assert.match(pdf, /OCR/i, pdf);
+  // The first call deleted its workspace; the same source id gets a fresh one.
+  assert.match(await ocrExtract({ userId: USER, sourceId: "kns_ocr", kind: "image", data: file("ocr.png") }), /OCR/i);
+});

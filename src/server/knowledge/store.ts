@@ -4,6 +4,7 @@ import type {
   KnowledgeCollectionCapability,
   KnowledgeCollectionStatus,
   KnowledgeEmbeddingSetting,
+  KnowledgeExtraction,
   KnowledgeOwnedCollection,
   KnowledgeSource,
   KnowledgeSourceKind,
@@ -74,6 +75,7 @@ export interface SourceRow {
   error: string | null;
   chunk_count: number;
   generation: number;
+  extraction: KnowledgeExtraction | null;
   created_at: number;
   updated_at: number;
 }
@@ -102,6 +104,7 @@ export const sourceOf = (row: SourceRow): KnowledgeSource => ({
   progress: row.progress,
   error: row.error,
   chunkCount: row.chunk_count,
+  extraction: row.extraction ?? null,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -425,14 +428,14 @@ export function createSource(userId: string, collectionId: string, input: Source
 }
 
 /** Stores extraction output, charging only the growth. Returns false when the job was superseded. */
-export function setSourceText(userId: string, sourceId: string, generation: number, text: string): boolean {
+export function setSourceText(userId: string, sourceId: string, generation: number, text: string, extraction: KnowledgeExtraction | null): boolean {
   return tx(() => {
     const row = sourceRow(userId, sourceId);
     if (!row || row.generation !== generation) return false;
     const bytes = Buffer.byteLength(text);
     assertStorage(userId, bytes - row.text_bytes);
-    db.prepare("UPDATE knowledge_sources SET text = ?, text_bytes = ?, status = 'embedding', progress = 0.55, error = NULL, updated_at = ? WHERE user_id = ? AND id = ? AND generation = ?")
-      .run(text, bytes, Date.now(), userId, sourceId, generation);
+    db.prepare("UPDATE knowledge_sources SET text = ?, text_bytes = ?, extraction = ?, status = 'embedding', progress = 0.55, error = NULL, updated_at = ? WHERE user_id = ? AND id = ? AND generation = ?")
+      .run(text, bytes, extraction, Date.now(), userId, sourceId, generation);
     return true;
   });
 }

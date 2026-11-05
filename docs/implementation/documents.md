@@ -23,6 +23,10 @@ HTML for PDF/DOCX, workbook JSON for XLSX — and `artifacts.data` holds the bui
 returns metadata (`size`) without the bytes; the web panel fetches
 `/api/threads/:id/artifacts/:id/file` and, for spreadsheets, `/preview`.
 
+Attachment, project-file, and knowledge text extraction is a separate path (`src/server/extraction/`,
+`docs/implementation/extraction.md`). PPTX artifacts still go through `import_document` for a PDF conversion, and
+`read_document` does not gain a PPTX reader from it.
+
 ## Formats
 
 ### PDF

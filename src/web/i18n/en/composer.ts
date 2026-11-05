@@ -143,7 +143,7 @@ export default {
   exportFailed: "Could not export the chat.",
   appearanceSyncFailed: "Appearance is saved on this device. Sync will retry when you reconnect or return to the app.",
   fileTooLarge: "File is larger than {size}",
-  imageUnsupported: "{name} is not a PNG, JPEG, WebP, GIF, or AVIF image. Attach it as a file instead.",
+  imageUnsupported: "{name} is not a PNG, JPEG, WebP, GIF, or AVIF image. Attach the original file, or add it to a knowledge collection to read it with OCR.",
   audioTooLarge: "Audio files are limited to {size}",
   transcribeFailed: "Could not transcribe {name}: {reason}",
   notSynced: "Chat is not synced with the server yet.",

@@ -160,7 +160,8 @@ and passed on 2026-10-25 (Linux amd64 host above). `test/integration/sandbox_it.
 runs `src/server/sandbox-flow.itest.ts` against the dev-topology containers: outputs stored and charged once,
 `import_document` of DOCX, XLSX, PDF, and PPTX (converted) outputs with `view_artifact` screenshots, a retry that
 does not store a second copy, ownership and quota refusals that store nothing, a 60 MB output reported as too
-large while the small one is kept, turn pruning, and Stop cancelling a run.
+large while the small one is kept, turn pruning, Stop cancelling a run, and knowledge OCR of a Pillow PNG and an
+image-only reportlab PDF through `/ocr`, twice for one source id (the app deletes the workspace in between).
 
 ### Controlled cross-chat isolation
 
@@ -236,6 +237,23 @@ on stdin and the PDF in the run's private `/tmp` (never listed as an output), an
 `view_artifact` then renders pages in the browser worker as for any artifact. Conversion needs the sandbox but not
 the per-user code-execution switch, since no model code runs.
 
+## Knowledge OCR
+
+`POST /workspaces/:ws/ocr?job=` reads text for knowledge ingestion (`src/server/ocr.ts`,
+`docs/implementation/extraction.md`). The body is the raw file (25 MiB max, 413 above); there is no file name,
+and the kind comes from the bytes: `%PDF-` runs `ocrmypdf --skip-text --optimize 0 --jobs 2 -l "$OCR_LANGS"
+--sidecar /tmp/out.txt`, anything else runs the trusted helper `/opt/sandbox/ocr_image.py` (Pillow plus
+pillow-heif: first frame only, flattened onto white, 40 MP cap, then `tesseract … --psm 3`). Both are fixed
+commands in the same per-run jail as `run_code`, with the input on stdin and every file in the run's private
+`/tmp` under a fixed name. The answer is `text/plain; charset=utf-8`; more than 4 MiB of text is a 413, a
+missing sidecar a 422 with the stderr tail (the app logs it and shows a fixed message), a timeout or cancel a 422
+`OCR timed out after …`/409. A full runner answers **429**, not 503: a busy sandbox is this request's problem
+and must not mark the service down. Languages come from `SANDBOX_OCR_LANGS` (default `eng+ita`, validated as
+up to four installed three-letter packs, otherwise `eng`); the time limit from `SANDBOX_OCR_TIMEOUT` (120 s; the
+helper's own Tesseract limit is 10 s shorter). The app uses one workspace per knowledge source
+(`sha256("ocr:" + user + ":" + source)`), sends the job's cancel on abort, and deletes the workspace after every
+call so its uid is released. Like `/convert`, OCR needs the sandbox but not the per-user code-execution switch.
+
 ## Runner API
 
 All routes except `/health` need `Authorization: Bearer <token>`. `ws` is `[a-f0-9]{16,64}`, `job` is `[A-Za-z0-9_-]{8,64}`.
@@ -246,12 +264,13 @@ All routes except `/health` need `Authorization: Bearer <token>`. `ws` is `[a-f0
 | `POST /workspaces/:ws/run` | `{ language, code, timeout, job? }` → `{ exitCode, stdout, stderr, stopped, durationMs, files, deleted }` |
 | `POST /workspaces/:ws/cancel` | `{ job? }`: cancel that job, or all of the workspace's jobs |
 | `POST /workspaces/:ws/convert?name=&job=` | Body: a presentation (50 MB max) → `application/pdf` |
+| `POST /workspaces/:ws/ocr?job=` | Body: an image or scanned PDF (25 MB max) → `text/plain` (4 MB max); 429 when busy |
 | `GET /workspaces/:ws/files` | List files (hidden: `.okaychat`, `.cache`) |
 | `GET /workspaces/:ws/files?path=` | Download, 50 MB max |
 | `PUT /workspaces/:ws/files?path=` | Upload, 50 MB max |
 | `DELETE /workspaces/:ws` | Delete the workspace |
 
-Runner env: `SANDBOX_MAX_TIMEOUT` (300), `SANDBOX_MEMORY_MB` (2048, per-process address space), `SANDBOX_WORKSPACE_MB` (1024), `SANDBOX_MAX_PROCS` (64), `SANDBOX_CONCURRENCY` (4), `SANDBOX_IDLE_MINUTES` (30), `SANDBOX_CONVERT_TIMEOUT` (120).
+Runner env: `SANDBOX_MAX_TIMEOUT` (300), `SANDBOX_MEMORY_MB` (2048, per-process address space), `SANDBOX_WORKSPACE_MB` (1024), `SANDBOX_MAX_PROCS` (64), `SANDBOX_CONCURRENCY` (4), `SANDBOX_IDLE_MINUTES` (30), `SANDBOX_CONVERT_TIMEOUT` (120), `SANDBOX_OCR_TIMEOUT` (120), `SANDBOX_OCR_LANGS` (`eng+ita`).
 
 Limits are per process (address space, CPU time, file size, descriptors) or per workspace (processes, size). The
 only aggregate memory and CPU bound is the container's (2 GB, 2 CPUs), shared by all concurrent runs; a run can
