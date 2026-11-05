@@ -195,7 +195,7 @@ export function AssistantPresetEditor({
         <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
           <label className="flex flex-col gap-1 text-sm">
             <span className="font-medium">{t("assistants.name")}</span>
-            <Input value={draft.name} maxLength={80} onChange={(event) => setDraft((current) => ({ ...current, name: event.currentTarget.value }))} autoFocus />
+            <Input value={draft.name} maxLength={80} onChange={(event) => { const name = event.currentTarget.value; setDraft((current) => ({ ...current, name })); }} autoFocus />
           </label>
           <label className="flex flex-col gap-1 text-sm">
             <span className="font-medium">{t("assistants.icon")}</span>
@@ -209,7 +209,7 @@ export function AssistantPresetEditor({
         </div>
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium">{t("assistants.description")}</span>
-          <Input value={draft.description} maxLength={240} onChange={(event) => setDraft((current) => ({ ...current, description: event.currentTarget.value }))} />
+          <Input value={draft.description} maxLength={240} onChange={(event) => { const description = event.currentTarget.value; setDraft((current) => ({ ...current, description })); }} />
         </label>
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium">{t("assistants.model")}</span>
