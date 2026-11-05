@@ -37,4 +37,5 @@ export const settingsPatch = z.object({
   subagents: z.boolean().optional(),
   codeExecution: z.boolean().optional(),
   editAssistantMessages: z.boolean().optional(),
+  notifications: z.object({ browser: z.boolean(), scheduleSuccess: z.boolean() }).strict().optional(),
 });

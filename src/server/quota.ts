@@ -101,6 +101,9 @@ export function storageUsedSql(user: string): string {
       FROM generation_runs WHERE thread_id IN (SELECT id FROM threads WHERE user_id = ${user})
     UNION ALL SELECT COALESCE(SUM(length(CAST(comment_enc AS BLOB))), 0)
       FROM message_feedback WHERE thread_id IN (SELECT id FROM threads WHERE user_id = ${user})
+    -- Frozen share snapshots are stored user content; live links hold no bytes of their own.
+    UNION ALL SELECT COALESCE(SUM(COALESCE(length(CAST(snapshot_json AS BLOB)), 0) + COALESCE(length(CAST(snapshot_assets_json AS BLOB)), 0)), 0)
+      FROM shares WHERE user_id = ${user}
   )), 0)`;
 }
 

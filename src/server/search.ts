@@ -27,7 +27,7 @@ export function searchMessages(userId: string, query: string, projectId?: string
     .prepare(
       `SELECT f.thread_id AS threadId, f.message_id AS messageId, t.title, snippet(messages_fts, 0, '${OPEN}', '${CLOSE}', '…', 12) AS snippet
        FROM messages_fts f JOIN threads t ON t.id = f.thread_id
-       WHERE messages_fts MATCH ? AND t.user_id = ? ${projectId ? "AND t.project_id = ?" : ""}
+       WHERE messages_fts MATCH ? AND t.user_id = ? AND t.compare_group_id IS NULL ${projectId ? "AND t.project_id = ?" : ""}
        ORDER BY rank LIMIT 100`,
     )
     .all(...[fts, userId, ...(projectId ? [projectId] : [])]) as unknown as SearchHit[];

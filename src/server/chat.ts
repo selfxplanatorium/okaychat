@@ -61,6 +61,7 @@ import { getSettings, subagentModelRefs } from "./settings.js";
 import { noteProviderOutcome, serviceUnavailableFromText, turnServiceStates } from "./services.js";
 import { branchMessages, currentBranch, ensureThread, getThread, isTemporaryThread, setCompaction, updateThread, userText } from "./threads.js";
 import { markBusy, threadBusy } from "./thread-runs.js";
+import { isCompareThread, persistCompareReply, persistCompareUserMessage } from "./compare.js";
 import { withStoredEdits } from "./message-edits.js";
 import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "./usage.js";
 import { assistantAllowsDelegation, assistantAllowsFamily, assistantAllowsResearch, filterAssistantTools } from "./assistant-policy.js";
@@ -853,6 +854,38 @@ export const chatRoutes = new Hono<AppEnv>()
         return createUIMessageStreamResponse({ stream: releasing(stream, releaseTurn, c.req.raw.signal), headers: { "Cache-Control": "no-store" } });
       } catch (error) {
         releaseTurn();
+        return errorJson(c, chatRouteError(error, parsed.data.config.modelName));
+      }
+    }
+    // A comparison pane is a hidden full chat: its user message and reply are stored here, while the
+    // turn itself is the normal pipeline (tools, permissions, usage, compaction, cancellation).
+    if (isCompareThread(user.id, parsed.data.id)) {
+      const lastUser = parsed.data.messages.at(-1) as UIMessage | undefined;
+      if (!lastUser || lastUser.role !== "user") {
+        releaseTurn();
+        return c.json({ error: "A comparison needs a user message." }, 400);
+      }
+      const release = markBusy(parsed.data.id, releaseTurn);
+      try {
+        persistCompareUserMessage(user.id, parsed.data.id, lastUser, (parsed.data.messages.at(-2) as UIMessage | undefined)?.id);
+        const stream = await turnStream({
+          userId: user.id,
+          threadId: parsed.data.id,
+          modelRef: parsed.data.config.modelName,
+          effort: parsed.data.config.reasoningEffort as ReasoningEffort | undefined,
+          webSearch: parsed.data.config.webSearch,
+          uiMessages: parsed.data.messages as UIMessage[],
+          // Panes have no approval UI and nobody watching for an elicitation.
+          interactive: false,
+          unattended: true,
+          // No resumable copy: leaving the page stops the pane.
+          signal: c.req.raw.signal,
+        });
+        const [live, tap] = stream.tee();
+        persistCompareReply(user.id, parsed.data.id, lastUser.id, tap, c.req.raw.signal);
+        return createUIMessageStreamResponse({ stream: releasing(live, release, c.req.raw.signal), headers: { "Cache-Control": "no-store" } });
+      } catch (error) {
+        release();
         return errorJson(c, chatRouteError(error, parsed.data.config.modelName));
       }
     }

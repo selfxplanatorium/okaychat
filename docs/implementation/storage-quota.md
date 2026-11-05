@@ -88,3 +88,12 @@ n8n definitions charge name/description/avatar/config ciphertext to the owner; e
 - Archive staging is disk-bounded separately (512 MiB global, 256 MiB/job, 30 minutes) and is not charged to
   the account. Final imported messages, uploads/media, artifacts, and inactive assistant settings count
   through the normal sums when confirmed.
+
+## Wave 3 additions
+
+- A frozen share snapshot charges `snapshot_json` plus `snapshot_assets_json` bytes to the link's owner.
+  Switching the link back to live, refreshing it, or revoking it frees those bytes; a refresh charges
+  only the net growth.
+- Tags, tag filter presets, notification rows, and comparison group/pane metadata are not charged.
+  Comparison pane threads and their messages count exactly like normal chats; deleting the group frees
+  them.

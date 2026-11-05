@@ -21,6 +21,7 @@ export default {
   knowledge: "Knowledge",
   plugins: "Plugins",
   projects: "Projects",
+  compare: "Compare models",
   account: "Account",
   logOut: "Log out",
   allChats: "All chats",

@@ -1,7 +1,7 @@
 // okaychat service worker. Makes the app installable and keeps the shell
 // available on a flaky connection. Never touches /api: chat streams, auth, and
 // user data always go to the network.
-const SHELL_CACHE = "okaychat-shell-v3";
+const SHELL_CACHE = "okaychat-shell-v4";
 const ASSET_CACHE = "okaychat-assets-v1";
 // Hashed assets are immutable, but a browser can open many builds' chunks over time. The cache is bounded
 // so a long-lived install cannot grow without limit; entries are pruned in insertion order (FIFO).
@@ -100,5 +100,26 @@ self.addEventListener("fetch", (event) => {
       if (hit) event.waitUntil(network);
       return hit ?? network;
     }),
+  );
+});
+
+// A system notification opens the app: focus an existing window on the same origin and navigate it to
+// the notice's target, or open a new one. The target is always an app path from the server.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const data = event.notification.data || {};
+  const target = typeof data.url === "string" && data.url.startsWith("/") && !data.url.startsWith("//") ? data.url : "/";
+  event.waitUntil(
+    (async () => {
+      const url = new URL(target, self.location.origin);
+      const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      const existing = windows.find((client) => new URL(client.url).origin === self.location.origin);
+      if (existing) {
+        await existing.focus();
+        if ("navigate" in existing) await existing.navigate(url.href).catch(() => {});
+        return;
+      }
+      await self.clients.openWindow(url.href);
+    })(),
   );
 });

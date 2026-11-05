@@ -14,6 +14,7 @@ import { getProject } from "./projects.js";
 import { describeBoundaryError } from "./provider-errors.js";
 import { appendMessage, currentBranch, ensureThread, getThread, updateThread } from "./threads.js";
 import { assertFeature, assertModelAllowed, featureAllowed } from "./permissions/guard.js";
+import { notify } from "./notifications.js";
 
 // Scheduled prompts run on the server with nobody watching: append the prompt to the schedule's thread (or a new
 // one per run), run one turn, and persist both messages in the client's history format so the thread opens normally.
@@ -125,8 +126,9 @@ export async function runSchedule(row: Row, reserved?: () => void): Promise<void
     row.id,
   );
   let releaseThread: (() => void) | undefined;
+  // The failure notice names the chat the run landed in, when it still exists.
+  let threadId = row.thread_mode === "same" ? row.thread_id : null;
   try {
-    let threadId = row.thread_mode === "same" ? row.thread_id : null;
     if (threadId && !getThread(row.user_id, threadId)) {
       // A chat the user picked is theirs to delete; recreating it would surprise them.
       if (row.thread_attached) {
@@ -170,9 +172,43 @@ export async function runSchedule(row: Row, reserved?: () => void): Promise<void
       failed ? "Empty response" : null,
       row.id,
     );
+    // A notice explains the run to an account that had no tab open; it never carries the prompt or reply.
+    const stored = threadId ? getThread(row.user_id, threadId) : null;
+    try {
+      notify({
+        userId: row.user_id,
+        kind: "schedule",
+        level: failed ? "error" : "success",
+        titleKey: failed ? "schedule.error" : "schedule.ok",
+        bodyKey: failed ? "schedule.errorBody" : "schedule.okBody",
+        params: failed
+          ? { title: row.title, error: "The model returned nothing." }
+          : { title: row.title, thread: stored?.title ?? "" },
+        threadId: stored ? threadId : null,
+        actionPath: stored ? `/c/${threadId}` : "/scheduled",
+        sourceKey: `schedule:${row.id}:${startedAt}`,
+      });
+    } catch {
+      // A notice must never fail a run.
+    }
   } catch (error) {
     const failure = describeBoundaryError(error, { log: true, kind: "background", model: row.model_ref });
     db.prepare("UPDATE schedules SET last_run_at = ?, last_status = 'error', last_error = ? WHERE id = ?").run(startedAt, failure.message.slice(0, 500), row.id);
+    try {
+      notify({
+        userId: row.user_id,
+        kind: "schedule",
+        level: "error",
+        titleKey: "schedule.error",
+        bodyKey: "schedule.errorBody",
+        params: { title: row.title, error: failure.message.slice(0, 200) },
+        threadId: threadId && getThread(row.user_id, threadId) ? threadId : null,
+        actionPath: threadId && getThread(row.user_id, threadId) ? `/c/${threadId}` : "/scheduled",
+        sourceKey: `schedule:${row.id}:${startedAt}`,
+      });
+    } catch {
+      // A notice must never fail a run.
+    }
   } finally {
     releaseThread?.();
     running.delete(row.id);
@@ -182,12 +218,28 @@ export async function runSchedule(row: Row, reserved?: () => void): Promise<void
 
 /** A permission failure leaves a normal record and the next regular due time, never an immediate retry. */
 function recordSkipped(row: Row, message: string) {
+  const next = nextRun(JSON.parse(row.spec_json) as ScheduleSpec, Date.now());
   db.prepare("UPDATE schedules SET last_run_at = ?, last_status = 'error', last_error = ?, next_run_at = ? WHERE id = ?").run(
     Date.now(),
     message,
-    nextRun(JSON.parse(row.spec_json) as ScheduleSpec, Date.now()),
+    next,
     row.id,
   );
+  // The reason explains an outage, not a model result, so this stays a notice even with the feature off.
+  try {
+    notify({
+      userId: row.user_id,
+      kind: "schedule",
+      level: "error",
+      titleKey: "schedule.skipped",
+      bodyKey: "schedule.skippedBody",
+      params: { title: row.title, reason: message },
+      actionPath: "/scheduled",
+      sourceKey: `schedule:${row.id}:skip:${next ?? Date.now()}`,
+    });
+  } catch {
+    // A notice must never fail a run.
+  }
 }
 
 const withoutId = ({ id: _id, ...rest }: UIMessage) => rest;

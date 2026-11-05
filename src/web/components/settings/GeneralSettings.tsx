@@ -2,7 +2,7 @@ import { Loader2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { REASONING_EFFORTS } from "@shared/reasoning";
 import { isAgentTarget } from "@shared/n8n-agents";
-import { DEFAULT_USER_SETTINGS, SIDEBAR_ITEMS, type ChatTargetInfo } from "@shared/types";
+import { DEFAULT_USER_SETTINGS, SIDEBAR_ITEMS, type ChatTargetInfo, type NotificationSettings } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select } from "@/components/ui/select";
@@ -29,6 +29,7 @@ const SIDEBAR_LABELS = {
   knowledge: "general.sidebarKnowledge",
   plugins: "general.sidebarPlugins",
   projects: "general.sidebarProjects",
+  compare: "general.sidebarCompare",
 } as const;
 
 export function GeneralSettings() {
@@ -38,6 +39,9 @@ export function GeneralSettings() {
   const [confirmEditReplies, setConfirmEditReplies] = useState(false);
   const [savingEditSetting, setSavingEditSetting] = useState(false);
   const [editSettingError, setEditSettingError] = useState<string | null>(null);
+  const [savingNotifications, setSavingNotifications] = useState(false);
+  const [notificationError, setNotificationError] = useState<string | null>(null);
+  const [notificationBlocked, setNotificationBlocked] = useState(false);
   const sandboxStatus = useServices((s) => s.statuses?.find((status) => status.id === "sandbox"));
   const sandbox = sandboxStatus ? { configured: sandboxStatus.state !== "unconfigured", reachable: sandboxStatus.state === "up" || sandboxStatus.state === "degraded", refuses: sandboxStatus.reasonKey === "refuses" } : null;
   useEffect(() => setPrompt(settings?.systemPrompt ?? ""), [settings?.systemPrompt]);
@@ -47,6 +51,34 @@ export function GeneralSettings() {
     setConfirmEditReplies(false);
   };
   const editRepliesOn = settings.editAssistantMessages === true;
+  const notifications: NotificationSettings = settings.notifications ?? DEFAULT_USER_SETTINGS.notifications ?? { browser: false, scheduleSuccess: false };
+
+  const saveNotifications = async (next: NotificationSettings) => {
+    const previous = { ...notifications };
+    setSavingNotifications(true);
+    setNotificationError(null);
+    try {
+      await update({ notifications: next });
+    } catch {
+      // `updateSettings` patches optimistically; a rejected save must not look applied.
+      useData.setState((s) => ({ settings: s.settings ? { ...s.settings, notifications: previous } : s.settings }));
+      setNotificationError(t("general.notificationsFailed"));
+    } finally {
+      setSavingNotifications(false);
+    }
+  };
+
+  const toggleBrowserNotifications = async (checked: boolean) => {
+    setNotificationBlocked(false);
+    if (!checked) return saveNotifications({ browser: false, scheduleSuccess: false });
+    // The request runs in the switch's own handler, which browsers require for a permission prompt.
+    const permission = typeof Notification === "undefined" ? "denied" : await Notification.requestPermission();
+    if (permission !== "granted") {
+      setNotificationBlocked(true);
+      return saveNotifications({ browser: false, scheduleSuccess: false });
+    }
+    return saveNotifications({ ...notifications, browser: true });
+  };
 
   const saveEditSetting = async (next: boolean) => {
     if (savingEditSetting) return;
@@ -179,6 +211,35 @@ export function GeneralSettings() {
         {editSettingError && !confirmEditReplies && (
           <p role="alert" className="text-destructive px-4 pb-3 text-xs">{editSettingError}</p>
         )}
+      </SettingsSection>
+
+      <SettingsSection title={t("general.notificationsTitle")} description={t("general.notificationsDeviceNote")}>
+        <SettingsRow
+          label={t("general.browserNotifications")}
+          description={t("general.browserNotificationsDescription")}
+          control={
+            <Switch
+              aria-label={t("general.browserNotifications")}
+              checked={notifications.browser}
+              disabled={savingNotifications}
+              onCheckedChange={(checked) => void toggleBrowserNotifications(checked)}
+            />
+          }
+        />
+        <SettingsRow
+          label={t("general.scheduleSuccessNotify")}
+          description={t("general.scheduleSuccessNotifyDescription")}
+          control={
+            <Switch
+              aria-label={t("general.scheduleSuccessNotify")}
+              checked={notifications.scheduleSuccess}
+              disabled={savingNotifications || !notifications.browser}
+              onCheckedChange={(scheduleSuccess) => void saveNotifications({ ...notifications, scheduleSuccess })}
+            />
+          }
+        />
+        {notificationBlocked && <p role="alert" className="text-destructive px-4 pb-3 text-xs">{t("general.browserBlocked")}</p>}
+        {notificationError && <p role="alert" className="text-destructive px-4 pb-3 text-xs">{notificationError}</p>}
       </SettingsSection>
 
       <SettingsSection title={t("general.toolsTitle")}>

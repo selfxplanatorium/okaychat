@@ -13,7 +13,7 @@ writeFileSync(path.join(dataDir, "models-dev.json"), JSON.stringify({ data: {}, 
 const { db } = await import("./db.js");
 const { sha256 } = await import("./crypto.js");
 const { api } = await import("./routes.js");
-const { appendMessage, getThread } = await import("./threads.js");
+const { appendMessage, getThread, listThreads } = await import("./threads.js");
 const { startTestWorker } = await import("../browser/test-worker.js");
 const worker = await startTestWorker();
 
@@ -184,4 +184,32 @@ test("message list returns stored JSON unchanged and hides other users' threads"
     { id: "m2", parent_id: "m1", format: "ai-sdk/v6", content: { role: "assistant", parts: [] } },
   ]);
   assert.deepEqual(await (await call("/threads/t1/messages", { user: "bob" })).json(), []);
+});
+
+test("tags round-trip, never move the chat's activity, and copy to a fork", async () => {
+  store("t1", "m1", null, "user", [{ type: "text", text: "hello" }]);
+  const activity = getThread("alice", "t1")!.updatedAt;
+  assert.equal((await patch("t1", { tags: ["Release Notes", "release notes", "bad/slash"] })).status, 400, "invalid text is refused, not silently dropped");
+  assert.equal((await patch("t1", { tags: ["Release Notes", "release notes"] })).status, 200);
+  const tagged = getThread("alice", "t1")!;
+  assert.deepEqual(tagged.tags, ["release notes"]);
+  assert.equal(tagged.updatedAt, activity, "tagging is metadata, not message activity");
+  assert.deepEqual((await patch("t1", { tags: [] })).status, 200);
+  assert.deepEqual(getThread("alice", "t1")!.tags, []);
+
+  await patch("t1", { tags: ["release"] });
+  const branch = (await (await call("/threads/t1/branch", { method: "POST", json: { messageId: "m1" } })).json()) as { id: string };
+  assert.deepEqual(getThread("alice", branch.id)!.tags, ["release"]);
+  // The fork's labels are its own.
+  await patch(branch.id, { tags: ["fork"] });
+  assert.deepEqual(getThread("alice", "t1")!.tags, ["release"]);
+});
+
+test("hidden comparison panes stay out of the sidebar and cannot be tagged", async () => {
+  db.prepare("INSERT INTO comparison_groups (id, user_id, title, prompt, created_at, updated_at) VALUES ('g1', 'alice', 'Compare', 'Prompt', 1, 1)").run();
+  db.prepare("UPDATE threads SET compare_group_id = 'g1' WHERE id = 't1'").run();
+  assert.deepEqual((await ids("/threads")).includes("t1"), false);
+  assert.deepEqual(listThreads("alice", undefined, undefined, { comparisonGroupId: "g1" }).map((thread) => thread.id), ["t1"]);
+  assert.equal((await patch("t1", { tags: ["nope"] })).status, 400);
+  assert.equal(getThread("alice", "t1")!.compareGroupId, "g1");
 });

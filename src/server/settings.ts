@@ -16,6 +16,7 @@ export function getSettings(userId: string): UserSettings {
   if (settings.sidebarItems !== undefined && !validSidebarItems(settings.sidebarItems)) delete settings.sidebarItems;
   if (settings.imageServices !== undefined && !validImageServices(settings.imageServices)) delete settings.imageServices;
   if (settings.speech !== undefined && !validSpeechSettings(settings.speech)) delete settings.speech;
+  if (settings.notifications !== undefined && !validNotificationSettings(settings.notifications)) delete settings.notifications;
   return settings;
 }
 
@@ -36,6 +37,9 @@ export function updateSettings(userId: string, patch: Partial<UserSettings>): Us
   }
   if (Object.hasOwn(patch, "defaultReasoningEffort") && !REASONING_EFFORTS.includes(patch.defaultReasoningEffort!)) {
     throw new HTTPException(400, { message: "defaultReasoningEffort must be a known reasoning level" });
+  }
+  if (Object.hasOwn(patch, "notifications") && !validNotificationSettings(patch.notifications)) {
+    throw new HTTPException(400, { message: "notifications must set browser and scheduleSuccess to true or false" });
   }
   const current = getSettings(userId);
   const next = { ...current, ...patch, instructionsRevision: current.instructionsRevision };
@@ -59,6 +63,12 @@ export function subagentModelRefs(settings: UserSettings, chatModel: string): st
 
 function validSidebarItems(value: unknown): boolean {
   return Array.isArray(value) && value.every((item) => SIDEBAR_ITEMS.includes(item)) && new Set(value).size === value.length;
+}
+
+function validNotificationSettings(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const { browser, scheduleSuccess, ...rest } = value as { browser?: unknown; scheduleSuccess?: unknown };
+  return Object.keys(rest).length === 0 && typeof browser === "boolean" && typeof scheduleSuccess === "boolean";
 }
 
 function validImageServices(value: unknown): boolean {

@@ -30,6 +30,7 @@ import {
   SearchIcon,
   ShareIcon,
   SparklesIcon,
+  TagIcon,
   TextCursorIcon,
   Trash2Icon,
   XIcon,
@@ -71,13 +72,17 @@ import {
   Menu,
   MenuContent,
   MenuItem,
+  MenuLabel,
   MenuSeparator,
   MenuSubmenuRoot,
   MenuSubmenuTrigger,
   MenuTrigger,
 } from "@/components/ui/menu";
+import { matchesTagFilter } from "@shared/tags";
+import { useTagFilter } from "@/state/tag-filter";
+import { TagEditorDialog } from "@/components/tags/TagEditorDialog";
 
-type BatchVerb = "pin" | "unpin" | "move" | "archive" | "delete";
+type BatchVerb = "pin" | "unpin" | "move" | "archive" | "delete" | "tags";
 
 const withReason = (message: string, error: unknown) =>
   error instanceof Error && error.message ? t("sidebar.withReason", { message, reason: error.message }) : message;
@@ -92,6 +97,7 @@ function batchFailure(verb: BatchVerb, failed: number, total: number) {
     case "move": return all ? t("sidebar.moveFailedAll") : t("sidebar.moveFailedSome", p);
     case "archive": return all ? t("sidebar.archiveFailedAll") : t("sidebar.archiveFailedSome", p);
     case "delete": return all ? t("sidebar.deleteFailedAll") : t("sidebar.deleteFailedSome", p);
+    case "tags": return t("tags.tagSaveFailed");
   }
 }
 
@@ -256,6 +262,8 @@ export const useThreadListGroups = (searchQuery = "") => {
   const threadIds = useAuiState((s) => s.threads.threadIds);
   const threadItems = useAuiState((s) => s.threads.threadItems);
   const activeProject = useData((s) => s.activeProject);
+  const selectedTags = useTagFilter((s) => s.filter.tags);
+  const tagMatch = useTagFilter((s) => s.filter.match);
 
   const query = searchQuery.trim().toLowerCase();
   const startOfToday = useStartOfToday();
@@ -269,10 +277,12 @@ export const useThreadListGroups = (searchQuery = "") => {
       .map((id, index) => ({ id, index }))
       .filter(({ id }) => {
         const projectId = custom(id)?.projectId;
+        const tags = custom(id)?.tags ?? [];
         return (
           !isTemporaryChat(itemsById.get(id)?.remoteId) &&
           // A chat created here has no custom metadata yet and belongs to this project.
           (!activeProject || projectId === undefined || projectId === activeProject) &&
+          matchesTagFilter(tags, { tags: selectedTags, match: tagMatch }) &&
           (!query ||
             (itemsById.get(id)?.title || t("common.newChat")).toLowerCase().includes(query))
         );
@@ -317,7 +327,7 @@ export const useThreadListGroups = (searchQuery = "") => {
       }
     }
     return { threadIds, filteredIndices, groups: result };
-  }, [threadIds, threadItems, activeProject, query, startOfToday]);
+  }, [threadIds, threadItems, activeProject, query, startOfToday, selectedTags, tagMatch]);
 };
 
 /**
@@ -483,6 +493,7 @@ const ThreadListItemGroups: FC<{ searchQuery?: string }> = ({
   const { threadIds, filteredIndices, groups } =
     useThreadListGroups(searchQuery);
   const query = searchQuery.trim();
+  const filteringTags = useTagFilter((s) => s.filter.tags.length > 0);
   const scope = useRef<HTMLDivElement>(null);
   useFlip(scope, [groups, filteredIndices]);
 
@@ -501,13 +512,13 @@ const ThreadListItemGroups: FC<{ searchQuery?: string }> = ({
     : filteredIndices.map((index) => ({ key: threadIds[index]!, index })), [groups, filteredIndices, threadIds]);
 
   // Message matches render below, so an empty title match is not a dead end.
-  if (query && filteredIndices.length === 0) {
+  if ((query || filteringTags) && filteredIndices.length === 0) {
     return (
       <div
         data-slot="aui_thread-list-empty"
         className="text-muted-foreground animate-fade-in px-2.5 py-2 text-sm"
       >
-        {t("sidebar.noTitlesMatch")}
+        {query ? t("sidebar.noTitlesMatch") : t("tags.noTaggedChats")}
       </div>
     );
   }
@@ -598,6 +609,27 @@ const ThreadListSkeleton: FC = () => {
   );
 };
 
+/** Up to two chips on a fine pointer; touch rows show one icon and the count instead. */
+const ThreadListItemTags: FC = () => {
+  const tags = (useAuiState((s) => s.threadListItem.custom) as Partial<ThreadCustom> | undefined)?.tags ?? [];
+  if (!tags.length) return null;
+  return (
+    <>
+      <span className="pointer-coarse:hidden ms-1.5 flex shrink-0 items-center gap-1">
+        {tags.slice(0, 2).map((tag) => (
+          <span key={tag} data-slot="aui-thread-list-item-tag" className="bg-sidebar-row-hover text-sidebar-muted-foreground max-w-[4.5rem] truncate rounded px-1 py-0.5 text-[10px] leading-none">
+            #{tag}
+          </span>
+        ))}
+      </span>
+      <span aria-label={t("tags.tags")} className="hidden pointer-coarse:inline-flex ms-1 shrink-0 items-center gap-0.5 text-[10px] text-sidebar-muted-foreground">
+        <TagIcon aria-hidden className="size-3" />
+        {tags.length}
+      </span>
+    </>
+  );
+};
+
 export const ThreadListItem: FC = () => {
   const aui = useAui();
   const id = useAuiState((s) => s.threadListItem.id);
@@ -647,6 +679,7 @@ export const ThreadListItem: FC = () => {
           )}
           <ThreadListItemBranchIcon />
           <ThreadListItemTitle fallback={t("common.newChat")} />
+          <ThreadListItemTags />
         </button>
       ) : isRenaming ? (
         <ThreadListItemRename
@@ -675,6 +708,7 @@ export const ThreadListItem: FC = () => {
           )}
           <ThreadListItemBranchIcon />
           <ThreadListItemTitle fallback={t("common.newChat")} />
+          <ThreadListItemTags />
           {isRunning && <span className="sr-only">{t("sidebar.running")}</span>}
         </TooltipTrigger>
       )}
@@ -886,6 +920,7 @@ const ThreadListItemMenu: FC<{
   const projects = useData((s) => s.projects);
   const activeProject = useData((s) => s.activeProject);
   const [sharing, setSharing] = useState(false);
+  const [tagEditor, setTagEditor] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [rowError, setRowError] = useState<string | null>(null);
   // PDF export renders on the server, so it is the one export that needs the browser worker.
@@ -898,10 +933,22 @@ const ThreadListItemMenu: FC<{
   const projectId =
     custom && "projectId" in custom ? (custom.projectId ?? null) : activeProject;
   const pinned = custom?.pinned === true;
+  const rowTags = custom?.tags ?? [];
+  const tagLibrary = useTagFilter((s) => s.tags);
+  const loadTags = useTagFilter((s) => s.load);
+  const refreshTags = useTagFilter((s) => s.refreshTags);
+  const accountId = useData((s) => s.me?.id);
+  useEffect(() => {
+    if (accountId) void loadTags(accountId);
+  }, [accountId, loadTags]);
   const update = (change: Partial<ThreadCustom>) =>
     Promise.resolve()
       .then(() => aui.threadListItem.updateCustom({ ...custom, ...change }))
       .catch(() => {});
+  const toggleTag = (tag: string) => {
+    const next = rowTags.includes(tag) ? rowTags.filter((item) => item !== tag) : [...rowTags, tag];
+    void update({ tags: next }).then(() => void refreshTags());
+  };
 
   const busyWhile = async (failure: string, task: () => Promise<void>) => {
     onBusy(true);
@@ -955,6 +1002,12 @@ const ThreadListItemMenu: FC<{
       row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: rect.left + 16, clientY: rect.bottom }));
     });
   }, isMain && !disabled);
+  useCommand("chat.tags", () => {
+    if (!remoteId) return false;
+    reveal();
+    requestAnimationFrame(withFocus(() => setTagEditor(true)));
+    return true;
+  }, isMain && !disabled && !!remoteId);
 
   return (
     <>
@@ -982,6 +1035,26 @@ const ThreadListItemMenu: FC<{
             {pinned ? <PinOffIcon /> : <PinIcon />}
             {pinned ? t("sidebar.unpin") : t("sidebar.pin")}
           </MenuItem>
+          <MenuSubmenuRoot>
+            <MenuSubmenuTrigger disabled={!remoteId}>
+              <TagIcon />
+              <span className="flex-1">{t("tags.tags")}</span>
+              <ChevronRightIcon className="text-muted-foreground ms-auto" />
+            </MenuSubmenuTrigger>
+            <MenuContent side="right" align="start" className="max-h-[min(24rem,var(--available-height))] max-w-[calc(100vw-1rem)]">
+              {tagLibrary.length > 0 && <MenuLabel>{t("tags.tags")}</MenuLabel>}
+              {tagLibrary.map((item) => (
+                <MenuItem key={item.tag} closeOnClick={false} onClick={() => toggleTag(item.tag)}>
+                  <CheckIcon className={cn("size-4", rowTags.includes(item.tag) ? "opacity-100" : "opacity-0")} />
+                  <span className="min-w-0 flex-1 truncate">#{item.tag}</span>
+                </MenuItem>
+              ))}
+              <MenuSeparator />
+              <MenuItem onClick={withFocus(() => setTagEditor(true))}>
+                <PlusIcon /> {t("tags.newTag")}
+              </MenuItem>
+            </MenuContent>
+          </MenuSubmenuRoot>
           <MenuItem disabled={!remoteId} onClick={withFocus(() => setSharing(true))}>
             <ShareIcon /> {t("sidebar.share")}
           </MenuItem>
@@ -1052,6 +1125,18 @@ const ThreadListItemMenu: FC<{
       {rowError && <p role="alert" className="text-destructive px-3 pb-1 text-xs break-words">{rowError}</p>}
 
       {remoteId && (
+        <TagEditorDialog
+          open={tagEditor}
+          onOpenChange={setTagEditor}
+          threads={[{ id: remoteId, tags: rowTags, custom: { ...(custom ?? {}) } }]}
+          onSave={async (updates) => {
+            for (const entry of updates) await aui.threadListItem.updateCustom(entry.custom as Partial<ThreadCustom>);
+            await refreshTags();
+          }}
+        />
+      )}
+
+      {remoteId && (
         <Dialog open={sharing} onOpenChange={setSharing}>
           <DialogContent className="gap-3 sm:max-w-sm">
             <DialogTitle className="truncate pe-6 text-base">{title || t("common.newChat")}</DialogTitle>
@@ -1090,6 +1175,8 @@ export const ThreadSelectionBar: FC<{ scope: RefObject<HTMLElement | null> }> = 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [tagEditor, setTagEditor] = useState(false);
+  const refreshTags = useTagFilter((s) => s.refreshTags);
   // What the delete dialog names, frozen on open so its closing fade does not show the emptied selection.
   const [deleting, setDeleting] = useState<{ count: number; title: string | null | undefined }>({ count: 0, title: null });
   const { selectAll, clear, exit } = useThreadSelection.getState();
@@ -1179,7 +1266,7 @@ export const ThreadSelectionBar: FC<{ scope: RefObject<HTMLElement | null> }> = 
           {error}
         </p>
       )}
-      <div className="grid grid-cols-4 gap-0.5">
+      <div className="grid grid-cols-5 gap-0.5">
         <button
           type="button"
           disabled={busy || count === 0}
@@ -1216,6 +1303,14 @@ export const ThreadSelectionBar: FC<{ scope: RefObject<HTMLElement | null> }> = 
           type="button"
           disabled={busy || count === 0}
           className={actionClass}
+          onClick={() => setTagEditor(true)}
+        >
+          <TagIcon /> {t("tags.tags")}
+        </button>
+        <button
+          type="button"
+          disabled={busy || count === 0}
+          className={actionClass}
           onClick={() => run("archive", (id) => item(id).archive(), true)}
         >
           <ArchiveIcon /> {t("sidebar.archive")}
@@ -1234,6 +1329,16 @@ export const ThreadSelectionBar: FC<{ scope: RefObject<HTMLElement | null> }> = 
       </div>
     </div>
     )}
+    <TagEditorDialog
+      open={tagEditor && active}
+      onOpenChange={setTagEditor}
+      threads={[...ids].map((id) => ({ id, tags: custom(id)?.tags ?? [], custom: { ...(custom(id) ?? {}) } }))}
+      onSave={async (updates) => {
+        const byId = new Map(updates.map((entry) => [entry.id, entry.custom]));
+        await apply("tags", (id) => item(id).updateCustom(byId.get(id) as Partial<ThreadCustom>), false);
+        await refreshTags();
+      }}
+    />
     {/* Outside the bar, which unmounts when selection ends, so the dialog can fade out. */}
     <DeleteChatDialog
       open={confirmDelete}

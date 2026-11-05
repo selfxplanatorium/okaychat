@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { LibraryIcon } from "lucide-react";
 import { KnowledgePage } from "@/components/knowledge/KnowledgePage";
+import { ComparePage } from "@/components/compare/ComparePage";
 import { LibraryPage } from "@/components/library/LibraryPage";
 import { McpSettings } from "@/components/settings/McpSettings";
 import { N8nAgentsSettings } from "@/components/settings/N8nAgentsSettings";
@@ -53,6 +54,7 @@ export function NavigationPage({ page }: { page: string }) {
   if (page === "plugins") return <PluginsPage />;
   if (page === "library") return <LibraryPage />;
   if (page === "knowledge") return <KnowledgePage />;
+  if (page === "compare") return <ComparePage />;
   return (
     <SettingsPage title={t("shell.navigation")}>
       <div className="flex flex-col items-center py-16 text-center">

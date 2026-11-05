@@ -94,6 +94,23 @@ All four are private account data beside messages or the prompt library. None en
 - **Performance pass**: FTS row addressing and trigger repair, a history time index, scoped model resolution, bounded live-model caches, and a repeatable benchmark. See `docs/implementation/performance.md`.
 - **Official ChatGPT sign-in**: the SIWC desktop-helper flow for chat, independent of the Codex CLI image connection, behind a default-off deployment flag until the live release checks pass. See `docs/implementation/codex-chat.md`.
 
+## Pass 7: sharing, tags, notices, comparison (built)
+
+- **Share links v2**: several links per chat, live or frozen snapshots, expiry, optional password with
+  a scoped HMAC cookie, per-link view counts, an account-wide manager, and a revoke that ends every
+  cookie. See `docs/implementation/share-links.md`.
+- **Thread tags**: flat private labels, sidebar filtering that ANDs with project and search, and saved
+  filter presets synced per account. See `docs/implementation/thread-tags.md`.
+- **Notification center**: durable, deduped notices for scheduled runs and archive jobs, unread state,
+  and opt-in system notifications through the service worker (no Web Push). See
+  `docs/implementation/notifications.md`.
+- **Model comparison**: `/compare` with 2–3 panes, each a hidden real chat running the normal turn
+  pipeline and persisted server-side, with promote-to-chat and 30-day retention. See
+  `docs/implementation/model-comparison.md`.
+
+Deferred: share slugs/QR/analytics/watermarks, tag hierarchy/colors/automation, Web Push and quiet
+hours, more than three panes or pane-side tools/artifacts, comparison judging and export.
+
 ## Known gaps
 
 - Stream replay is kept in server memory for 15 minutes after the last update. Reload recovery works; pending generations do not survive a server restart.

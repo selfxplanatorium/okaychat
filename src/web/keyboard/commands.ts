@@ -42,6 +42,8 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "error.copyDetails", labelKey: "keyboard.cmdErrorCopyDetails", group: "General", keys: [] },
   { id: "services.checkAgain", labelKey: "keyboard.cmdServicesCheck", group: "General", keys: [] },
   { id: "services.dismissNotice", labelKey: "keyboard.cmdServicesDismiss", group: "General", keys: [] },
+  { id: "notifications.open", labelKey: "keyboard.cmdNotificationsOpen", group: "General", keys: [] },
+  { id: "notifications.markAllRead", labelKey: "keyboard.cmdNotificationsMarkAll", group: "General", keys: [] },
 
   { id: "nav.newChat", labelKey: "keyboard.cmdNavNewChat", group: "Navigation", keys: ["Alt+Shift+N"] },
   { id: "nav.temporaryChat", labelKey: "keyboard.cmdNavTemporaryChat", group: "Navigation", keys: ["Alt+Shift+G"] },
@@ -58,6 +60,8 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "nav.projectFilter", labelKey: "keyboard.cmdNavProjectFilter", group: "Navigation", keys: [] },
   { id: "nav.createProject", labelKey: "keyboard.cmdNavCreateProject", group: "Navigation", keys: [] },
   { id: "nav.createSchedule", labelKey: "keyboard.cmdNavCreateSchedule", group: "Navigation", keys: [] },
+  { id: "nav.compare", labelKey: "keyboard.cmdNavCompare", group: "Navigation", keys: [] },
+  { id: "tags.filter", labelKey: "keyboard.cmdTagsFilter", group: "Navigation", keys: [] },
 
   { id: "chat.focusComposer", labelKey: "keyboard.cmdChatFocusComposer", group: "Chat", keys: ["Alt+Shift+I"] },
   { id: "chat.focusMessages", labelKey: "keyboard.cmdChatFocusMessages", group: "Chat", keys: ["Alt+Shift+J"] },
@@ -71,6 +75,8 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "chat.options", labelKey: "keyboard.cmdChatOptions", group: "Chat", keys: [] },
   { id: "chat.bookmarks", labelKey: "keyboard.cmdChatBookmarks", group: "Chat", keys: [] },
   { id: "chat.share", labelKey: "keyboard.cmdChatShare", group: "Chat", keys: [] },
+  { id: "share.manage", labelKey: "keyboard.cmdShareManage", group: "Chat", keys: [] },
+  { id: "chat.tags", labelKey: "keyboard.cmdChatTags", group: "Chat", keys: [] },
   { id: "chat.menu", labelKey: "keyboard.cmdChatMenu", group: "Chat", keys: [] },
   { id: "chat.rename", labelKey: "keyboard.cmdChatRename", group: "Chat", keys: ["F2"] },
   { id: "chat.pin", labelKey: "keyboard.cmdChatPin", group: "Chat", keys: [] },
