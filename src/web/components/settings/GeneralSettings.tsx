@@ -11,7 +11,7 @@ import { EffortIcon } from "../chat/EffortIcon";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { t } from "@/i18n";
-import { compareText, formatLanguageName, formatPercent } from "@/i18n/format";
+import { compareText, formatLanguageName, formatNativeLanguageName, formatPercent } from "@/i18n/format";
 import { saveLocalePreference } from "@/i18n/account-locale";
 import { shippedLocales } from "@/i18n/locales";
 import { useServices } from "@/state/services";
@@ -60,15 +60,16 @@ export function GeneralSettings() {
   const sandbox = sandboxStatus ? { configured: sandboxStatus.state !== "unconfigured", reachable: sandboxStatus.state === "up" || sandboxStatus.state === "degraded", refuses: sandboxStatus.reasonKey === "refuses" } : null;
   useEffect(() => setPrompt(settings?.systemPrompt ?? ""), [settings?.systemPrompt]);
   if (!settings) return null;
-  // English first ("Use browser language"), then every shipped language by its own name in this language.
+  // "Use browser language" first, then every shipped language by its autonym ("Deutsch", "Français"), so a
+  // reader can find their language whatever the current UI language is; sorted for the current UI language.
   const shipped = shippedLocales();
   const languageChoices = [
     { value: "", label: t("general.languageBrowser") },
     ...shipped
-      .map((tag) => ({ value: tag, label: formatLanguageName(tag) }))
+      .map((tag) => ({ value: tag, label: formatNativeLanguageName(tag) }))
       .sort((a, b) => compareText(a.label, b.label)),
     // A valid stored tag this build does not ship (for example de-AT) still has a readable name.
-    ...(language && !shipped.includes(language) ? [{ value: language, label: formatLanguageName(language) }] : []),
+    ...(language && !shipped.includes(language) ? [{ value: language, label: formatNativeLanguageName(language) }] : []),
   ];
   const translationChoices = [
     { value: "", label: t("general.translateIntoUi") },

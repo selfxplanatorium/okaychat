@@ -2,12 +2,16 @@
 export const LOCALE_TAG = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/;
 export const MAX_LOCALE_TAG = 35;
 
-/** Canonical form (`de-at` → `de-AT`), or null when the tag is malformed or unknown to ICU. */
+/**
+ * Canonical form (`de-at` → `de-AT`), or null when the tag is malformed. Validity is structural: ICU
+ * canonicalizes any well-formed tag, including languages it has no data for, so a valid result does not
+ * mean the runtime or the UI supports that language.
+ */
 export function canonicalLocaleTag(value: string): string | null {
   // Length first: `getCanonicalLocales` accepts long private-use tags, and the limits above are ours.
   if (value.length > MAX_LOCALE_TAG || !LOCALE_TAG.test(value)) return null;
   try {
-    // Node 22 and current browsers ship full ICU, so this rejects nonsense rather than guessing.
+    // Throws on tags that pass the shape check but are not well-formed BCP 47 (for example a repeated variant).
     return Intl.getCanonicalLocales(value)[0] ?? null;
   } catch {
     return null;

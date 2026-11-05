@@ -1,3 +1,4 @@
+import { uiLocaleRow } from "@shared/ui-locales";
 import { t } from "./index";
 import { currentLocale } from "./locale";
 
@@ -73,6 +74,28 @@ export const formatLanguageName = (tag: string): string => {
     // An unknown or malformed tag must still label its option; the tag itself is the honest fallback.
     return tag;
   }
+};
+
+const autonyms = new Map<string, string>();
+
+/**
+ * A language's name in that language ("Deutsch", "Français"), the same in every UI language, for the UI
+ * language picker. Shipped tags use the reviewed registry name; any other tag asks `Intl` in its own language
+ * and falls back to the tag. Kept apart from `cached`, whose entries are per UI language.
+ */
+export const formatNativeLanguageName = (tag: string): string => {
+  const row = uiLocaleRow(tag);
+  if (row && row.tag === tag) return row.nativeName;
+  let name = autonyms.get(tag);
+  if (name === undefined) {
+    try {
+      name = new Intl.DisplayNames([tag], { type: "language" }).of(tag) ?? tag;
+    } catch {
+      name = tag;
+    }
+    autonyms.set(tag, name);
+  }
+  return name;
 };
 
 /** Capitalizes the first character for the UI language, leaving the rest of the text alone. */

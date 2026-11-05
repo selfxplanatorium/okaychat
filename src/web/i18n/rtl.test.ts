@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { UI_LOCALES } from "@shared/ui-locales";
+import { textDirection } from "./index.js";
 
 // RTL readiness ratchet. Logical properties (`ms-*`, `ps-*`, `start-*`, `text-start`) flip with `dir`,
 // physical ones (`ml-*`, `left-*`, `text-left`) do not. Every new UI file joins this list.
@@ -43,4 +45,16 @@ test("translation UI uses logical direction properties", () => {
     }
   }
   assert.deepEqual(offenders, []);
+});
+
+test("direction resolution is script-aware and not forced to ltr", () => {
+  assert.equal(textDirection("ar"), "rtl");
+  assert.equal(textDirection("he-IL"), "rtl");
+  const info = new Intl.Locale("az-Arab") as Intl.Locale & { getTextInfo?: () => { direction?: string } };
+  if (typeof info.getTextInfo === "function") {
+    assert.equal(textDirection("az-Arab"), "rtl");
+    assert.equal(textDirection("az-Latn"), "ltr");
+  }
+  // No RTL language ships yet; every registered row resolves ltr through the same resolver.
+  for (const row of UI_LOCALES) assert.equal(textDirection(row.tag), "ltr");
 });

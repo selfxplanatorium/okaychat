@@ -44,3 +44,12 @@ test("web code formats and compares through the i18n helpers", () => {
   });
   assert.deepEqual(offenders, []);
 });
+
+test("inside i18n, only the lookup and the formatters call locale APIs directly", () => {
+  // `index.ts` owns plural rules, number interpolation, and direction; `format.ts` owns presentation. The
+  // registry, loaders, account mirror, and `<Trans>` stay free of direct locale APIs.
+  const dir = join(webRoot, "i18n");
+  const files = readdirSync(dir).filter((name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name));
+  const users = files.filter((name) => FORBIDDEN.some((needle) => readFileSync(join(dir, name), "utf8").includes(needle)));
+  assert.deepEqual(users.sort(), ["format.ts", "index.ts"]);
+});

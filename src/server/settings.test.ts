@@ -151,3 +151,42 @@ test("activity indicator preferences default, validate strictly and survive unre
   assert.deepEqual(getSettings("alice").channelActivity, { sharePresence: false, shareTyping: true });
   assert.deepEqual(getSettings("bob").channelActivity, { sharePresence: true, shareTyping: true });
 });
+
+test("UI and translation languages accept any valid tag, store it canonical, and are read back canonical", async () => {
+  const patch = (body: unknown) => app.request("http://app/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  for (const [input, canonical] of [["FR-fr", "fr-FR"], ["IT-it", "it-IT"], ["pt-pt", "pt-PT"], ["fr", "fr"], ["it-IT", "it-IT"], ["pt", "pt"], ["pt-BR", "pt-BR"], ["nl-BE", "nl-BE"]] as const) {
+    const response = await patch({ locale: input });
+    assert.equal(response.status, 200, input);
+    assert.equal(((await response.json()) as UserSettings).locale, canonical);
+    assert.equal(getSettings("alice").locale, canonical);
+  }
+  // A stored regional choice stays regional; shipping pt-PT does not rewrite pt-BR.
+  updateSettings("alice", { locale: "pt-BR" });
+  assert.equal(getSettings("alice").locale, "pt-BR");
+  // Omission leaves the value alone, null clears it.
+  updateSettings("alice", { translationTarget: "IT-ch" });
+  assert.equal(getSettings("alice").locale, "pt-BR");
+  assert.equal(getSettings("alice").translationTarget, "it-CH");
+  updateSettings("alice", { locale: null });
+  assert.equal(getSettings("alice").locale, null);
+  assert.equal(getSettings("alice").translationTarget, "it-CH");
+  for (const bad of ["pt_PT", "x", "en-", `en-${"a".repeat(40)}`, "de-1996-1996"]) {
+    assert.equal((await patch({ locale: bad })).status, 400, bad);
+    assert.equal((await patch({ translationTarget: bad })).status, 400, bad);
+  }
+  assert.equal(getSettings("alice").translationTarget, "it-CH");
+});
+
+test("reading settings canonicalizes valid legacy language tags and drops invalid ones without rewriting the row", () => {
+  const stored = { locale: "pt-pt", translationTarget: "FR-ca" };
+  db.prepare("INSERT INTO user_settings VALUES (?, ?)").run("alice", JSON.stringify(stored));
+  const read = getSettings("alice");
+  assert.equal(read.locale, "pt-PT");
+  assert.equal(read.translationTarget, "fr-CA");
+  const row = db.prepare("SELECT json FROM user_settings WHERE user_id = ?").get("alice") as { json: string };
+  assert.deepEqual({ locale: JSON.parse(row.json).locale, translationTarget: JSON.parse(row.json).translationTarget }, stored);
+  db.prepare("UPDATE user_settings SET json = ? WHERE user_id = ?").run(JSON.stringify({ locale: "pt_PT", translationTarget: 42 }), "alice");
+  const dropped = getSettings("alice");
+  assert.equal(dropped.locale ?? null, null);
+  assert.equal(dropped.translationTarget ?? null, null);
+});
