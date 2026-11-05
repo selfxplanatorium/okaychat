@@ -102,4 +102,3 @@ test("thread labels and merges never move a cursor backwards or drop loaded repl
   assert.equal(merged.readSeq, 3, "a page with an older cursor never lowers the read position");
   assert.equal(merged.root?.id, "root");
 });
-
