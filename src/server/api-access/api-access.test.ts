@@ -160,6 +160,12 @@ test("authentication accepts only a live bearer token, never a cookie", async ()
   assert.equal(unauthorized.headers.get("www-authenticate"), 'Bearer realm="okaychat"');
   assert.equal(unauthorized.headers.get("cache-control"), "no-store");
   assert.equal(unauthorized.headers.get("x-request-id")?.startsWith("areq_"), true);
+  // Percent-encoded spellings route to the same handlers, so they must hit the same authentication.
+  assert.equal((await inference.request("http://app/v1/%6Dodels")).status, 401);
+  const encoded = await inference.request("http://app/v1/chat/%63ompletions", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  assert.equal(encoded.status, 401);
+  assert.equal(encoded.headers.get("x-request-id")?.startsWith("apr_"), true);
+  assert.equal((await inference.request("http://app/v1/%6Dodels", { headers: bearer(body.secret) })).status, 200);
 
   // Expiry is exclusive and computed at authentication time.
   const expiring = await create("alice", { label: "Expiring", expiresAt: Date.now() + 60_000 });
