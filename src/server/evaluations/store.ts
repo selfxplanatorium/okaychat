@@ -207,7 +207,11 @@ export function deleteDataset(userId: string, id: string): void {
     const row = datasetRow(userId, id);
     if (!row) throw notFound("Dataset");
     const active = (
-      db.prepare("SELECT COUNT(*) AS n FROM evaluation_runs WHERE dataset_id = ? AND state IN ('queued', 'running', 'cancelling')").get(id) as { n: number }
+      db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM evaluation_runs WHERE dataset_id = ? AND (state IN ('queued', 'running', 'cancelling') OR judge_state IN ('queued', 'running'))",
+        )
+        .get(id) as { n: number }
     ).n;
     if (active > 0) throw conflict("Stop that run first.");
     db.prepare("DELETE FROM evaluation_datasets WHERE id = ?").run(id);

@@ -366,6 +366,23 @@ async function startJudge(runId: string): Promise<void> {
     return;
   }
   setRunJudgeState(runId, "running");
+  try {
+    await judgeAll(runId, userId, config, setup, controller);
+  } catch {
+    if (runById(runId)?.judge_state === "running") setRunJudgeState(runId, "failed");
+  } finally {
+    active.delete(runId);
+    pump();
+  }
+}
+
+async function judgeAll(
+  runId: string,
+  userId: string,
+  config: NonNullable<ReturnType<typeof runJudgeConfig>>,
+  setup: Awaited<ReturnType<typeof handleFor>>,
+  controller: AbortController,
+): Promise<void> {
   let spent = judgeScoreCost(runId);
   let done = 0;
   let failed = 0;
@@ -397,6 +414,17 @@ async function startJudge(runId: string): Promise<void> {
       signal: controller.signal,
     });
     if (!verdict.ok) {
+      if (verdict.usage) {
+        recordUsage({
+          userId,
+          providerId: setup.model.providerId,
+          modelId: setup.model.id,
+          kind: "evaluation_judge",
+          usage: verdict.usage,
+          cost: verdict.cost ?? 0,
+        });
+        spent += verdict.cost ?? 0;
+      }
       if (verdict.error.code === "aborted" && controller.signal.aborted) {
         cancelled = true;
         break;
@@ -433,8 +461,6 @@ async function startJudge(runId: string): Promise<void> {
       cancelled ? "cancelled" : denied || (failed > 0 && failed >= targets.length && targets.length > 0) ? "failed" : "done",
     );
   }
-  active.delete(runId);
-  pump();
 }
 
 /** Read-only helper for tests and diagnostics: which runs this process is executing. */
