@@ -39,7 +39,16 @@ const SYNC_KEY = "okaychat:locale-sync";
  * written before reloading, and the next load sees it and stops.
  */
 export function applyAccountLocale(userId: string, account: string | null): boolean {
-  if (!localeDiffers(account, readStored())) return false;
+  if (!localeDiffers(account, readStored())) {
+    // This device already matches the account again; drop the reload guard so a later account change can
+    // mirror here instead of being mistaken for the reload we already did.
+    try {
+      sessionStorage.removeItem(SYNC_KEY);
+    } catch {
+      // Without session storage there is no guard to clear.
+    }
+    return false;
+  }
   const marker = `${userId}:${account ?? "browser"}`;
   try {
     if (sessionStorage.getItem(SYNC_KEY) === marker) return false;

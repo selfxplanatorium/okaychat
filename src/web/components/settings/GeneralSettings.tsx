@@ -59,11 +59,14 @@ export function GeneralSettings() {
   useEffect(() => setPrompt(settings?.systemPrompt ?? ""), [settings?.systemPrompt]);
   if (!settings) return null;
   // English first ("Use browser language"), then every shipped language by its own name in this language.
+  const shipped = shippedLocales();
   const languageChoices = [
     { value: "", label: t("general.languageBrowser") },
-    ...shippedLocales()
+    ...shipped
       .map((tag) => ({ value: tag, label: formatLanguageName(tag) }))
       .sort((a, b) => compareText(a.label, b.label)),
+    // A valid stored tag this build does not ship (for example de-AT) still has a readable name.
+    ...(language && !shipped.includes(language) ? [{ value: language, label: formatLanguageName(language) }] : []),
   ];
   const translationChoices = [
     { value: "", label: t("general.translateIntoUi") },
@@ -118,6 +121,17 @@ export function GeneralSettings() {
       setLanguage(previous);
       setSavingLanguage(false);
       setLanguageError(t("general.languageFailed", { error: error instanceof Error ? error.message : t("common.somethingWentWrong") }));
+    }
+  };
+
+  const saveTranslationTarget = async (value: string | null) => {
+    const previous = settings.translationTarget ?? null;
+    setTranslationError(null);
+    try {
+      await update({ translationTarget: value });
+    } catch (error) {
+      useData.setState((s) => ({ settings: s.settings ? { ...s.settings, translationTarget: previous } : s.settings }));
+      setTranslationError(t("general.translateMessagesFailed", { error: error instanceof Error ? error.message : t("common.somethingWentWrong") }));
     }
   };
 
@@ -295,7 +309,7 @@ export function GeneralSettings() {
               className="w-full md:w-80"
               value={settings.translationTarget ?? ""}
               disabled={settings.translateMessages === false}
-              onValueChange={(value) => void update({ translationTarget: value || null })}
+              onValueChange={(value) => void saveTranslationTarget(value || null)}
               options={translationChoices}
             />
           }

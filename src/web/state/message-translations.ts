@@ -3,6 +3,7 @@ import type { MessageTranslation, MessageTranslationList, TranslateMessageInput 
 import { currentLocale } from "@/i18n";
 import { ApiError, api } from "@/lib/api";
 import { useData } from "@/state/data";
+import { getActiveModel } from "@/state/data";
 
 // Per-message translations, in memory only and keyed by account. The server owns the text; this store is a
 // read cache for the open page, so nothing is written to local storage. A reply can show one language at a
@@ -164,7 +165,13 @@ export async function translateMessage(
     messages: { ...s.messages, [key]: { ...entry(key), status: "translating", error: null } },
   }));
   try {
-    const input: TranslateMessageInput = options.refresh ? { refresh: true } : {};
+    // The server falls back to the utility model, then this request, then the chat; sending the chat model
+    // keeps Translate enabled exactly when the server has something to call. An agent is not a model.
+    const active = getActiveModel(threadId)?.ref;
+    const input: TranslateMessageInput = {
+      ...(options.refresh ? { refresh: true } : {}),
+      ...(active && !active.startsWith("n8n/") ? { modelRef: active } : {}),
+    };
     const translation = await api<MessageTranslation>(`${path(threadId, messageId)}/${encodeURIComponent(lang)}`, {
       method: "PUT",
       json: input,
