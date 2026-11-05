@@ -25,6 +25,10 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       db.exec("DROP INDEX messages_thread_time");
       for (const table of ["evaluation_scores", "evaluation_results", "evaluation_runs", "evaluation_cases", "evaluation_datasets", "chatgpt_login_attempts", "chatgpt_registrations", "chatgpt_hosts", "chatgpt_controls", "saved_prompts", "message_bookmarks", "message_feedback", "assistant_presets", "generation_segments", "generation_runs", "archive_jobs", "provider_model_grants", "provider_model_policies", "knowledge_chunks_fts", "knowledge_chunks", "knowledge_sources", "knowledge_collections", "share_groups", "share_users", "share_audiences", "user_group_members", "user_groups", "n8n_agent_sessions", "n8n_agent_runs", "n8n_agents", "permission_leases", "permission_rate_windows", "permission_audit", "user_model_instructions", "prompt_rules", "permission_policies", "permission_state", "notifications", "tag_filter_presets", "thread_tags", "comparison_panes", "comparison_groups"]) db.exec("DROP TABLE " + table);
       db.exec("DROP TABLE channel_messages_fts; DROP TABLE channel_search_keys; DROP TABLE channel_events; DROP TABLE channel_event_state; DROP TABLE channel_rate_windows; DROP TABLE channel_moderation_audit; DROP TABLE channel_create_keys; DROP TABLE channel_ai_runs; DROP TABLE channel_reactions; DROP TABLE channel_mentions; DROP TABLE channel_messages; DROP TABLE channel_exclusions; DROP TABLE channel_invites; DROP TABLE channel_members; DROP TABLE channel_groups; DROP TABLE channels");
+      db.exec("DROP TABLE api_requests; DROP TABLE api_rate_windows; DROP TABLE api_key_audit; DROP TABLE api_telemetry_floors; DROP TABLE api_keys");
+      db.exec("DROP INDEX IF EXISTS usage_api_request; DROP INDEX IF EXISTS usage_api_key_time");
+      db.exec("ALTER TABLE usage DROP COLUMN api_key_id");
+      db.exec("ALTER TABLE usage DROP COLUMN api_request_id");
       db.exec("DROP INDEX IF EXISTS usage_channel_run");
       db.exec("ALTER TABLE usage DROP COLUMN channel_id");
       db.exec("ALTER TABLE usage DROP COLUMN channel_run_id");
@@ -68,7 +72,7 @@ test("integrated migrations are repeatable and backfill legacy generated image s
           oldPromptCount: db.prepare("SELECT count(*) AS n FROM server_settings WHERE key='prompt:anonymous'").get().n,
           original: JSON.parse(db.prepare("SELECT content FROM messages WHERE id='m1'").get().content).parts[0].url,
           users: db.prepare("SELECT count(*) AS n FROM users").get().n,
-          integratedTables: ["provider_model_policies", "provider_model_grants", "email_accounts", "knowledge_collections", "knowledge_sources", "knowledge_chunks", "knowledge_chunks_fts", "email_drafts", "media", "image_threads", "saved_prompts", "message_bookmarks", "message_feedback", "shares", "thread_tags", "tag_filter_presets", "notifications", "comparison_groups", "comparison_panes", "message_search_keys", "evaluation_datasets", "evaluation_cases", "evaluation_runs", "evaluation_results", "evaluation_scores"].map(table => db.prepare("SELECT count(*) AS n FROM " + table).get().n),
+          integratedTables: ["provider_model_policies", "provider_model_grants", "email_accounts", "knowledge_collections", "knowledge_sources", "knowledge_chunks", "knowledge_chunks_fts", "email_drafts", "media", "image_threads", "saved_prompts", "message_bookmarks", "message_feedback", "shares", "thread_tags", "tag_filter_presets", "notifications", "comparison_groups", "comparison_panes", "message_search_keys", "evaluation_datasets", "evaluation_cases", "evaluation_runs", "evaluation_results", "evaluation_scores", "api_keys", "api_requests", "api_key_audit", "api_rate_windows", "api_telemetry_floors"].map(table => db.prepare("SELECT count(*) AS n FROM " + table).get().n),
           evaluationActiveIndex: db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='evaluation_runs_active'").get()?.sql ?? null,
           evaluationScoreForeignKeys: db.prepare("PRAGMA foreign_key_list(evaluation_scores)").all(),
           edits: db.prepare("SELECT edited_at, original_enc FROM messages WHERE id = 'm1'").get(),
@@ -76,13 +80,13 @@ test("integrated migrations are repeatable and backfill legacy generated image s
           foreignKeys: db.prepare("PRAGMA foreign_key_check").all()
         })); db.exec("DELETE FROM uploads"); db.close();`));
       // The version only grows with appended migrations; the FTS addressing migration is version 36.
-      assert.ok(result.version >= 43, `user_version ${result.version}`);
+      assert.ok(result.version >= 45, `user_version ${result.version}`);
       const { version: _version, ...state } = result as Record<string, unknown>;
       assert.match(String((state as { evaluationActiveIndex: string }).evaluationActiveIndex), /UNIQUE INDEX evaluation_runs_active/);
       assert.deepEqual((state as { evaluationScoreForeignKeys: Array<{ table: string; from: string; to: string }> }).evaluationScoreForeignKeys.map((key) => [key.table, key.from, key.to]), [["evaluation_results", "run_id", "run_id"], ["evaluation_results", "case_id", "case_id"]]);
       delete (state as Record<string, unknown>).evaluationActiveIndex;
       delete (state as Record<string, unknown>).evaluationScoreForeignKeys;
-      assert.deepEqual(state, { image: 42, skills: 0, sandbox: 0, users: 1, uploads: i === 0 ? 1 : 0, temporaryPrompt: "Keep this temporary chat out of history.", oldPromptCount: 0, original: "data:image/png;base64,bGVnYWN5LWZpbGU=", integratedTables: [...Array(19).fill(0), 1, ...Array(5).fill(0)], edits: { edited_at: null, original_enc: null }, foreignKeys: [] });
+      assert.deepEqual(state, { image: 42, skills: 0, sandbox: 0, users: 1, uploads: i === 0 ? 1 : 0, temporaryPrompt: "Keep this temporary chat out of history.", oldPromptCount: 0, original: "data:image/png;base64,bGVnYWN5LWZpbGU=", integratedTables: [...Array(19).fill(0), 1, ...Array(10).fill(0)], edits: { edited_at: null, original_enc: null }, foreignKeys: [] });
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
@@ -138,6 +142,8 @@ test('n8n migration preserves selected audiences and rolls back schema and versi
     db.exec('DROP TABLE saved_prompts; DROP TABLE message_bookmarks; DROP TABLE message_feedback');
     db.exec('DROP TABLE evaluation_scores; DROP TABLE evaluation_results; DROP TABLE evaluation_runs; DROP TABLE evaluation_cases; DROP TABLE evaluation_datasets');
     for (const table of ['channel_messages_fts', 'channel_search_keys', 'channel_events', 'channel_event_state', 'channel_rate_windows', 'channel_moderation_audit', 'channel_create_keys', 'channel_ai_runs', 'channel_reactions', 'channel_mentions', 'channel_messages', 'channel_exclusions', 'channel_invites', 'channel_members', 'channel_groups', 'channels', 'notifications', 'tag_filter_presets', 'thread_tags', 'comparison_panes', 'comparison_groups']) db.exec('DROP TABLE ' + table);
+    db.exec('DROP TABLE api_requests; DROP TABLE api_rate_windows; DROP TABLE api_key_audit; DROP TABLE api_telemetry_floors; DROP TABLE api_keys');
+    db.exec('DROP INDEX IF EXISTS usage_api_request; DROP INDEX IF EXISTS usage_api_key_time; ALTER TABLE usage DROP COLUMN api_key_id; ALTER TABLE usage DROP COLUMN api_request_id');
     db.exec('DROP INDEX IF EXISTS usage_channel_run; ALTER TABLE usage DROP COLUMN channel_id; ALTER TABLE usage DROP COLUMN channel_run_id');
     for (const index of ['shares_user_time', 'shares_thread', 'shares_expiry', 'threads_compare']) db.exec('DROP INDEX ' + index);
     db.exec('ALTER TABLE threads DROP COLUMN compare_group_id');
@@ -215,6 +221,35 @@ test("channels migration rolls back cleanly, keeps notifications intact, and mai
     assert.equal(result.rejected, true);
     assert.deepEqual(result.fks, []);
     assert.deepEqual(result.usageColumns.sort(), ["channel_id", "channel_run_id"]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("api access migration rolls back cleanly and creates its own tables", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "okaychat-api-migration-"));
+  const base = { ...process.env, OKAYCHAT_DATA_DIR: directory, OKAYCHAT_SECRET: "migration-tests-secret-not-for-production" };
+  const dbUrl = new URL("./db.ts", import.meta.url).href;
+  const run = (code: string, env: Record<string, string | undefined> = {}) =>
+    execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", code], { env: { ...base, ...env }, encoding: "utf8" });
+  try {
+    // A failure after the API DDL rolls the whole migration back with its version.
+    assert.throws(() => run(`await import(${JSON.stringify(dbUrl)});`, { OKAYCHAT_TEST_FAIL_MIGRATION: "api-access" }));
+    const result = JSON.parse(run(`const { db } = await import(${JSON.stringify(dbUrl)});
+      const tables = ["api_keys", "api_requests", "api_key_audit", "api_rate_windows", "api_telemetry_floors"]
+        .map((table) => db.prepare("SELECT count(*) AS n FROM " + table).get().n);
+      console.log(JSON.stringify({
+        version: db.prepare("PRAGMA user_version").get().user_version,
+        tables,
+        apiColumns: db.prepare("PRAGMA table_info(usage)").all().filter((column) => String(column.name).startsWith("api_")).map((column) => column.name).sort(),
+        fks: db.prepare("PRAGMA foreign_key_check").all(),
+        keyCheck: db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='api_keys'").get().sql,
+      })); db.close();`));
+    assert.ok(result.version >= 45, `user_version ${result.version}`);
+    assert.deepEqual(result.tables, [0, 0, 0, 0, 0]);
+    assert.deepEqual(result.apiColumns, ["api_key_id", "api_request_id"]);
+    assert.deepEqual(result.fks, []);
+    assert.match(String(result.keyCheck), /secret_hash BLOB NOT NULL CHECK\(length\(secret_hash\) = 32\)/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

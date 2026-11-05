@@ -139,6 +139,9 @@ export function storageUsedSql(user: string): string {
             THEN MAX(0, 65536 - length(CAST(m.body AS BLOB))) ELSE 0 END), 0)
       FROM channel_ai_runs r JOIN channels c ON c.id = r.channel_id JOIN channel_messages m ON m.id = r.message_id
       WHERE c.owner_id = ${user}
+    -- API key metadata reserves a fixed 1 KiB per retained row. Requests, audit, rate, and usage rows are
+    -- bounded operational metadata, excluded like the other operational counters.
+    UNION ALL SELECT COUNT(*) * 1024 FROM api_keys WHERE user_id = ${user}
   )), 0)`;
 }
 

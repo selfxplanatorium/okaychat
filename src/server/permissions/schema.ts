@@ -87,7 +87,7 @@ export function changeDestination(change: Change): string {
  * Parses JSON and rejects duplicate object keys, which JSON.parse silently resolves to the last value.
  * Bounded by the input length; strings and escapes follow RFC 8259.
  */
-export function parseStrictJson(text: string): unknown {
+export function parseStrictJson(text: string, maxDepth = 64): unknown {
   let index = 0;
   const fail = (message: string): never => {
     throw new PolicyInputError(`${message} at position ${index}`);
@@ -110,7 +110,7 @@ export function parseStrictJson(text: string): unknown {
     return fail("Unterminated string");
   };
   const parseValue = (depth: number): unknown => {
-    if (depth > 64) fail("Nested too deeply");
+    if (depth > maxDepth) fail("Nested too deeply");
     ws();
     const char = text[index];
     if (char === "{") {

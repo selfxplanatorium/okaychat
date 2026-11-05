@@ -1471,6 +1471,80 @@ const migrations: Array<string | (() => void)> = [
     db.prepare("INSERT INTO channel_event_state (singleton, epoch, floor_id) VALUES (1, ?, 0)").run(newId("chev"));
     if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "channels") throw new Error("Injected migration failure");
   },
+  // External API access (docs/implementation/api-access.md). Credentials are hashed, never recoverable;
+  // requests, rate windows, audit, and telemetry floors are bounded operational metadata, not user content.
+  () => {
+    db.exec(`
+    CREATE TABLE api_keys (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      prefix TEXT NOT NULL UNIQUE CHECK(length(prefix) = 27),
+      secret_hash BLOB NOT NULL CHECK(length(secret_hash) = 32),
+      label TEXT NOT NULL CHECK(length(CAST(label AS BLOB)) BETWEEN 1 AND 320),
+      scopes INTEGER NOT NULL CHECK(scopes IN (1,2,3)),
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER CHECK(expires_at IS NULL OR expires_at > created_at),
+      last_used_at INTEGER,
+      revoked_at INTEGER
+    );
+    CREATE INDEX api_keys_owner ON api_keys(user_id, created_at DESC, id DESC);
+
+    CREATE TABLE api_rate_windows (
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      key_id TEXT NOT NULL,
+      window_start INTEGER NOT NULL,
+      used INTEGER NOT NULL CHECK(used >= 0),
+      PRIMARY KEY(user_id, key_id, window_start)
+    );
+
+    CREATE TABLE api_requests (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      key_id TEXT NOT NULL,
+      model_ref TEXT NOT NULL CHECK(length(CAST(model_ref AS BLOB)) <= 1200),
+      stream INTEGER NOT NULL CHECK(stream IN (0,1)),
+      started_at INTEGER NOT NULL,
+      dispatched_at INTEGER,
+      finished_at INTEGER,
+      state TEXT NOT NULL CHECK(state IN ('admitted','running','succeeded','failed','cancelled','interrupted')),
+      http_status INTEGER,
+      error_code TEXT,
+      finish_reason TEXT CHECK(finish_reason IS NULL OR finish_reason IN ('stop','length','content_filter')),
+      usage_state TEXT NOT NULL DEFAULT 'unknown' CHECK(usage_state IN ('unknown','reported')),
+      input_tokens INTEGER NOT NULL DEFAULT 0 CHECK(input_tokens >= 0),
+      output_tokens INTEGER NOT NULL DEFAULT 0 CHECK(output_tokens >= 0),
+      reasoning_tokens INTEGER NOT NULL DEFAULT 0 CHECK(reasoning_tokens >= 0),
+      cache_read_tokens INTEGER NOT NULL DEFAULT 0 CHECK(cache_read_tokens >= 0),
+      cache_write_tokens INTEGER NOT NULL DEFAULT 0 CHECK(cache_write_tokens >= 0),
+      cost REAL NOT NULL DEFAULT 0 CHECK(cost >= 0),
+      usage_recorded INTEGER NOT NULL DEFAULT 0 CHECK(usage_recorded IN (0,1))
+    );
+    CREATE INDEX api_requests_owner ON api_requests(user_id, started_at DESC, id DESC);
+    CREATE INDEX api_requests_key ON api_requests(user_id, key_id, started_at DESC, id DESC);
+
+    CREATE TABLE api_key_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      key_id TEXT NOT NULL,
+      event TEXT NOT NULL CHECK(event IN ('created','revoked','password_revoked','expired')),
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX api_key_audit_owner ON api_key_audit(user_id, id DESC);
+    CREATE UNIQUE INDEX api_key_expired_once ON api_key_audit(key_id, event) WHERE event = 'expired';
+
+    CREATE TABLE api_telemetry_floors (
+      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      since_at INTEGER NOT NULL
+    );
+
+    ALTER TABLE usage ADD COLUMN api_key_id TEXT;
+    ALTER TABLE usage ADD COLUMN api_request_id TEXT;
+    CREATE UNIQUE INDEX usage_api_request ON usage(api_request_id) WHERE api_request_id IS NOT NULL;
+    CREATE INDEX usage_api_key_time ON usage(user_id, api_key_id, created_at)
+      WHERE api_key_id IS NOT NULL;
+    `);
+    if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "api-access") throw new Error("Injected migration failure");
+  },
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

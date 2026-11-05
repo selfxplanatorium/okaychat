@@ -17,6 +17,7 @@ import { AppError } from "./errors.js";
 import { modelAccessMessage, sharedModelAccess } from "./entitlements.js";
 import { publicFetch } from "./public-fetch.js";
 import { createRetryingFetch, type RetryingFetchOptions } from "./retry.js";
+import { withResponseBounds } from "./response-bounds.js";
 import { openaiToolSchemas } from "./openai-schema.js";
 import { createOllamaModel } from "./ollama-model.js";
 
@@ -70,6 +71,11 @@ export interface CreateModelOptions {
    * private chat prompt assembly.
    */
   guard?: () => void;
+  /**
+   * External API only: byte and record bounds for the provider response body. The app's own chat calls
+   * leave this unset. See docs/implementation/api-access.md.
+   */
+  responseBounds?: { maxBytes: number; maxRecordBytes: number };
 }
 
 export function createModel(info: ModelInfo, conn: Connection, opts: CreateModelOptions): ModelHandle {
@@ -114,7 +120,10 @@ function createRawModel(info: ModelInfo, conn: Connection, opts: CreateModelOpti
   const baseURL = info.baseURL;
   // All provider retries happen here, before a response body is consumed. Every caller disables the
   // SDK's own retry (maxRetries: 0), so delays never compound. See docs/implementation/errors.md.
-  const fetch = createRetryingFetch({ ...(opts.retry ?? {}), onRetry: opts.onRetry, beforeAttempt, fetchImpl: conn.guarded ? publicFetch : undefined });
+  const fetch = withResponseBounds(
+    createRetryingFetch({ ...(opts.retry ?? {}), onRetry: opts.onRetry, beforeAttempt, fetchImpl: conn.guarded ? publicFetch : undefined }),
+    opts.responseBounds ?? { maxBytes: Infinity, maxRecordBytes: Infinity },
+  );
   // OpenAI-style caches are partitioned by prompt_cache_key: a per-chat key made every new chat start cold.
   const cacheKey = affinity;
   const effort = opts.effort && info.reasoning && (!info.reasoningEfforts || info.reasoningEfforts.includes(opts.effort)) ? opts.effort : undefined;

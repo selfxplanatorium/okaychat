@@ -6,6 +6,7 @@ export default {
   sectionMemory: "Memory",
   sectionEmail: "Email",
   sectionProviders: "Providers",
+  sectionApiAccess: "API access",
   sectionMcp: "MCP servers",
   sectionProjects: "Projects",
   sectionScheduled: "Scheduled",

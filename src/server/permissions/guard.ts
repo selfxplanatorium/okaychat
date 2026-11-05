@@ -27,6 +27,7 @@ export const FEATURE_NAMES: Record<FeatureKey, string> = {
   skills: "skills",
   evaluations: "evaluations",
   channels: "team channels",
+  apiAccess: "external API access",
 };
 
 export interface Actor {

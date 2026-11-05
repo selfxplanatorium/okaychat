@@ -109,3 +109,17 @@ enveloped with `channel_history`/`channel_metadata`. Room AI has no tools, MCP, 
 projects, files, RAG, or account instructions, and uses a reduced binding that never lends the owner's
 provider key. Active runs recheck access before retries and checkpoints. Admin inspection is a separate
 audited route and does not fabricate membership. See `docs/implementation/channels.md`.
+
+## External API access
+
+`/v1` is a separate authentication surface. A bearer credential never sets `user` or `session`, so it cannot
+reach `/api`, admin routes, or key management; a session cookie alone never authenticates `/v1`. Tokens are
+stored only as a domain-separated SHA-256, compared with `timingSafeEqual` (unknown selectors use a fixed
+dummy digest), and shown once at creation. The pre-auth gate uses the transport socket address only, never
+forwarded headers. Admission and a one-second mid-call poll recheck key liveness, both `apiAccess` layers,
+the model policy, and a fingerprint of the selected connection; local revoke notifications abort active
+readers immediately. Request bodies, provider bytes/records, generated text, buffered JSON, and SSE are
+bounded, and the provider transport is cancelled on overflow. Only `apiSystem` is resolved: chat prompts,
+personal instructions, memory, projects, tools, and account data are never read, and caller history is not
+enveloped because it is the caller's own request. No transcript, token, IP, user agent, or provider prose is
+stored. See `docs/implementation/api-access.md`.

@@ -1,6 +1,6 @@
 /// <reference types="node" />
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { SETTINGS_ANCHOR_PREFIX, SETTINGS_DESTINATIONS, settingsHref, focusSettingAnchor, type SettingsDestination } from "./settings-link.js";
@@ -16,13 +16,22 @@ test("settings links name their section and carry anchors as a focus query", () 
 });
 
 test("every anchor in the helper exists as a focusable row in its settings page", () => {
-  const source = readFileSync(join(import.meta.dirname, "..", "components", "settings", "GeneralSettings.tsx"), "utf8");
+  const apiAccessDir = join(import.meta.dirname, "..", "components", "settings", "api-access");
+  const apiAccessSource = readdirSync(apiAccessDir)
+    .filter((name) => name.endsWith(".tsx"))
+    .map((name) => readFileSync(join(apiAccessDir, name), "utf8"))
+    .join("\n");
+  const files: Record<string, string> = {
+    general: readFileSync(join(import.meta.dirname, "..", "components", "settings", "GeneralSettings.tsx"), "utf8"),
+    apiAccess: apiAccessSource,
+  };
   for (const destination of Object.values(SETTINGS_DESTINATIONS) as SettingsDestination[]) {
     if (!destination.anchor) continue;
-    assert.equal(destination.section, "general", `${destination.anchor} needs a file mapping in this test`);
+    const source = files[destination.section];
+    assert.ok(source, `${destination.anchor} needs a file mapping in this test`);
     assert.ok(
       source.includes(`id="${SETTINGS_ANCHOR_PREFIX}${destination.anchor}"`),
-      `GeneralSettings.tsx must render id="${SETTINGS_ANCHOR_PREFIX}${destination.anchor}"`,
+      `${destination.section} must render id="${SETTINGS_ANCHOR_PREFIX}${destination.anchor}"`,
     );
   }
 });

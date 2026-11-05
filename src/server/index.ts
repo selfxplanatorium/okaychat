@@ -28,6 +28,8 @@ import { initChannelWorker } from "./channels/worker.js";
 import { startChannelMaintenance } from "./channels/maintenance.js";
 import { speechToken, speechWorkerConfigured } from "./speech/worker.js";
 import { voiceWebSocketServer } from "./voice/routes.js";
+import { inferenceRoutes } from "./api-access/routes.js";
+import { initApiAccess, startApiMaintenance } from "./api-access/maintenance.js";
 
 const app = new Hono();
 // Capability-bearing OAuth requests and query strings never enter the request logger.
@@ -60,6 +62,9 @@ app.route("/api/mcp/oauth/callback", mcpOAuthCallback);
 app.route("/api/public/shares", publicShareRoutes);
 app.route("/api/chatgpt/helper", chatgptHelperRoutes);
 app.route("/api", api);
+// The external API is deliberately outside both the `/api` body limit and its CSRF middleware: bearer
+// authentication replaces cookies, and `/v1` has its own bounded body reader and error envelope.
+app.route("/v1", inferenceRoutes);
 
 // Production: serve the built SPA. In dev, Vite serves it and proxies /api here.
 const webDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../web");
@@ -100,6 +105,9 @@ serve({ fetch: app.fetch, port: env.port, hostname: env.host, websocket: { serve
   startMemoryWorker();
   startRecordingPurge();
   startCompareMaintenance();
+  // External API receipts from a previous process are interrupted, never resumed or billed again.
+  initApiAccess();
+  startApiMaintenance();
   // Channel AI work never resumes: open rows become interrupted, keeping their last checkpoint.
   initChannelWorker();
   startChannelMaintenance();

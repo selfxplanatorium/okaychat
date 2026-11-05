@@ -117,3 +117,10 @@ the current room owner. Body bytes are counted once; an open run only tops the r
 Transfer checks the target owner's full limit before changing `owner_id`. Events, rate windows, members,
 read cursors, reactions, audit rows, notices, and FTS copies are bounded operational metadata and are not
 charged. See `docs/implementation/channels.md`.
+
+## External API keys
+
+Each retained `api_keys` row reserves exactly 1,024 bytes. Requests, audit, rate windows, and the `api`
+usage ledger are bounded operational metadata and are not charged. Revoking or editing a key cannot grow
+the reservation, so it works when storage is full; pruning a tombstone frees 1 KiB. Generation writes no
+transcript or files, so an API call does not require spare content storage.

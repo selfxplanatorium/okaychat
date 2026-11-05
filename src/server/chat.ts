@@ -84,6 +84,7 @@ import {
 import { validateSampling, type ResolvedRunConfig, type SamplingSettings } from "../shared/assistant-presets.js";
 import type { GenerationSummary } from "../shared/generation.js";
 import type { FinishReason } from "../shared/generation.js";
+import { MAX_ACTIVE_TURNS, reserveTurn } from "./turn-slots.js";
 
 // AssistantChatTransport sends the thread's remote id as `id` and model context as `config`, `system`, and `tools`.
 // After an automatic trim the context must fall below this share of the threshold, or it is summarized too.
@@ -800,23 +801,8 @@ const resumable = createResumableStreamContext({
 const runs = new Map<string, { userId: string; controller: AbortController }>();
 
 // Each turn can fan out into sub-agents, browser renders, and sandbox runs, possibly on a server-wide key.
-const MAX_ACTIVE_TURNS = 4;
-const activeTurns = new Map<string, number>();
-
-/** Reserves a turn slot for the user, or returns null when all are taken. The release runs once. */
-export function reserveTurn(userId: string): (() => void) | null {
-  const count = activeTurns.get(userId) ?? 0;
-  if (count >= MAX_ACTIVE_TURNS) return null;
-  activeTurns.set(userId, count + 1);
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    const left = (activeTurns.get(userId) ?? 1) - 1;
-    if (left > 0) activeTurns.set(userId, left);
-    else activeTurns.delete(userId);
-  };
-}
+// The counter lives in turn-slots.ts so the external API shares the same hard ceiling.
+export { MAX_ACTIVE_TURNS, reserveTurn };
 
 // Threads with an interactive turn streaming or a scheduled run writing (shared with thread-runs.ts). A scheduled
 // run also waits for an interactive one, because the client stores that turn only when it ends.

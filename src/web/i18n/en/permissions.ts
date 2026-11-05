@@ -136,6 +136,8 @@ export default {
   featureEvaluationsHelp: "Allows private datasets and runs in the evaluation workspace. Every case and every judge verdict is a model request billed to the account.",
   featureChannels: "Team channels",
   featureChannelsHelp: "Allows shared rooms, membership, room search, and explicitly requested room AI replies. It is independent of sharing, schedules, and MCP.",
+  featureApiAccess: "External API access",
+  featureApiAccessHelp: "Allows creating API keys and using the external OpenAI-compatible endpoint with this account's models and provider keys. Every API reply is billed to the account and stored in its usage ledger.",
   limitMaxStepsLabel: "Agent steps per reply",
   limitMaxStepsHelp: "Counts tool-capable invocations; the final no-tools answer still happens. Effective value is the minimum of the request, policy, and application maximum.",
   limitMaxSearchesLabel: "Searches per reply",

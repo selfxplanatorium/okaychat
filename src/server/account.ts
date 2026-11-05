@@ -9,7 +9,8 @@ import { errorJson } from "./errors.js";
 import { QuotaError } from "./quota.js";
 import { chargeReplacement, getMedia, mediaPath, putMedia, releaseMedia } from "./media/store.js";
 import { MediaProcessingError, normalizeAvatar, serveImage } from "./media/variants.js";
-import { tx } from "./db.js";
+import { tx, afterCommit } from "./db.js";
+import { notifyAllRevoked, revokeAllApiKeys } from "./api-access/keys.js";
 
 export const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 const MAX_IMAGE_PIXELS = 16_777_216;
@@ -89,10 +90,17 @@ export const accountRoutes = new Hono<AppEnv>()
     forgiveFailure(key);
     const nextHash = await hashPassword(parsed.data.next);
     // Another change that finished meanwhile wins; this request verified a password that is gone.
-    const changed = db.prepare("UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?").run(nextHash, id, row.password_hash);
-    if (!changed.changes) return c.json({ error: "Your password was just changed. Sign in again." }, 409);
-    // Every other device signs in again with the new password.
-    db.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?").run(id, c.get("session"));
+    // Key revocation commits with the password and session update, so recovery is never partial.
+    const outcome = tx(() => {
+      const changed = db.prepare("UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?").run(nextHash, id, row.password_hash);
+      if (!changed.changes) return null;
+      // Every other device signs in again with the new password.
+      db.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?").run(id, c.get("session"));
+      revokeAllApiKeys(id, "password_revoked");
+      afterCommit(() => notifyAllRevoked(id));
+      return true;
+    });
+    if (outcome === null) return c.json({ error: "Your password was just changed. Sign in again." }, 409);
     return c.json({ ok: true });
   })
   .post("/sessions/revoke-others", (c) => {

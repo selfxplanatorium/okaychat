@@ -13,6 +13,7 @@ const SETTINGS_SECTIONS: Array<{ id: string; labelKey: PlainMessageKey; icon: Co
   { id: "memory", labelKey: "settings.sectionMemory", icon: BrainIcon },
   { id: "email", labelKey: "settings.sectionEmail", icon: MailIcon },
   { id: "providers", labelKey: "settings.sectionProviders", icon: KeyRoundIcon },
+  { id: "apiAccess", labelKey: "settings.sectionApiAccess", icon: KeyRoundIcon },
   { id: "mcp", labelKey: "settings.sectionMcp", icon: BlocksIcon },
   { id: "agents", labelKey: "settings.sectionAgents", icon: WorkflowIcon },
   { id: "projects", labelKey: "settings.sectionProjects", icon: FolderIcon },
