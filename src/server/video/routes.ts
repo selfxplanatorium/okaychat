@@ -1,3 +1,7 @@
+import { VIDEO_SERVICES } from "../../shared/video.js";
+import { getSettings } from "../settings.js";
+import { saveConnection, deleteConnection } from "../catalog/providers.js";
+import { videoServiceStatuses } from "./services.js";
 import { z } from "zod";
 import { retryVideo, canRetryVideo } from "./retry.js";
 import { handleAppError } from "../errors.js";
@@ -13,6 +17,26 @@ import { videoFileResponse } from './files.js';
 
 const subscriptions=new Map<string,number>();
 export const videoRoutes=new Hono<AppEnv>()
+  .get('/video-services',c=>{const user=c.get('user').id;assertFeature(user,'videos');return c.json({services:videoServiceStatuses(user,getSettings(user).videoServices??{})});})
+  .get('/video-services/:id/models',c=>{
+    assertFeature(c.get('user').id,'videos');
+    const def=VIDEO_SERVICES.find(s=>s.id===c.req.param('id'));if(!def)throw new AppError({code:'not_found'});
+    return c.json({models:def.models,live:false,source:'curated',verifiedAt:def.verifiedAt});
+  })
+  .put('/video-services/:id/key',async c=>{
+    const user=c.get('user').id;assertFeature(user,'videos');
+    if(c.req.param('id')!=='replicate')throw new AppError({code:'not_found'});
+    const input=z.object({apiKey:z.string().trim().min(1).refine(v=>Buffer.byteLength(v)<=8192)}).strict().safeParse(await videoRouteJson(c.req.raw,50*1024));
+    if(!input.success)throw new AppError({code:'validation'});
+    saveConnection(user,'image-replicate',{apiKey:input.data.apiKey,enabled:true});
+    return c.json({services:videoServiceStatuses(user,getSettings(user).videoServices??{})});
+  })
+  .delete('/video-services/:id/key',c=>{
+    const user=c.get('user').id;assertFeature(user,'videos');
+    if(c.req.param('id')!=='replicate')throw new AppError({code:'not_found'});
+    deleteConnection(user,'image-replicate');
+    return c.json({services:videoServiceStatuses(user,getSettings(user).videoServices??{})});
+  })
   .get('/video-jobs/:id',c=>{assertFeature(c.get('user').id,'videos');const row=ownJob(c.get('user').id,c.req.param('id'));return c.json({...videoJobView(row),canRetry:canRetryVideo(row)});})
   .get('/threads/:threadId/video-jobs',c=>{
     const userId=c.get('user').id;assertFeature(userId,'videos');

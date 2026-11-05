@@ -1,3 +1,4 @@
+import { VideoMessageDetails } from "./VideoMessageDetails";
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { BotIcon, ChevronDownIcon, Loader2Icon, RotateCcwIcon, ScissorsIcon, ShrinkIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
@@ -305,6 +306,7 @@ export function MessageMeta() {
   const models = useData((s) => s.models);
   const threadId = useCurrentThreadId();
   const messageId = useAuiState((s) => s.message.id);
+  const hasVideo = useAuiState((s) => s.message.parts.some(part => part.type === "tool-call" && part.toolName === "generate_video"));
   const edited = useMessageEdits((s) => (threadId ? s.editedAt[editKey(threadId, messageId)] !== undefined : false));
   const meta = metadataOf(raw);
   const name = meta.agent?.name ?? meta.provenance?.name ?? models.find((m) => m.ref === meta.modelRef)?.name ?? meta.modelRef?.split("/").pop();
@@ -387,6 +389,7 @@ export function MessageMeta() {
           <p className="text-muted-foreground mt-2 text-xs">{t("messageDetails.totalsHelp")}</p>
           <p className="text-muted-foreground mt-1 text-xs">{t("messageDetails.cacheHelp")}</p>
           {edited && <p className="text-muted-foreground mt-2 text-xs">{t("messageDetails.originalGeneration")}</p>}
+          {hasVideo && <VideoMessageDetails threadId={threadId ?? null} messageId={messageId} open={open} onNavigate={()=>setOpen(false)} />}
         </PopoverContent>
       </Popover>
     </div>

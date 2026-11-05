@@ -1,6 +1,6 @@
-# Video generation foundation
+# Video generation
 
-The durable worker and authenticated status/file routes are implemented. There is still **no settings toggle or Library integration**; the inline player is implemented. Importing modules performs no provider work;
+The durable worker and authenticated status/file routes are implemented. Settings → General → Video generation, inline playback and the Library video filter are implemented. Importing modules performs no provider work;
 `index.ts` explicitly recovers leases, starts the worker/maintenance, and stops timers on shutdown.
 Paid admission is available only through the guarded interactive tool and direct owned retry.
 
@@ -11,7 +11,7 @@ and versioned USD list prices. Models are curated: xAI `grok-imagine-video-1.5-l
 `grok-imagine-video-1.5`, and Replicate `google/veo-3.1-fast`. The subset is 4/6/8 seconds,
 720p/1080p, landscape/portrait, with audio. Replicate starting images require 8 seconds.
 xAI Lite 1080p is upscaled. Estimates use output seconds plus one starting-image input charge;
-they are not invoices. Settings default to disabled and persist through the strict settings API; there is no settings UI toggle yet.
+they are not invoices. Settings default to disabled and persist through the strict settings API; services stay disabled until the account explicitly enables them.
 
 Private credentials reuse `xai` and `image-replicate` through `getOwnConnection`. The latter ID is
 historical and must not be renamed. Disabled or missing private keys never fall back to shared keys.
@@ -66,7 +66,7 @@ replacement. Revalidate availability before enabling the feature.
 
 `video/core.test.ts` uses fake providers, hand-authored MP4 containers, mocked private DNS and local
 streams. `storage-migrations.test.ts` checks rollback/reopen and rewinds older schema fixtures with
-video tables/columns removed. No test calls a vendor. Worker crash/cancel/unknown-billing recovery, ownership routes, quota/accounting and client status tests are implemented. The full reference-normalization matrix and remaining settings/Library UI tests are still required.
+video tables/columns removed. No test calls a vendor. Worker crash/cancel/unknown-billing recovery, ownership routes, quota/accounting and client status tests are implemented. Service/key and Library ownership/filter/pagination tests are implemented; the full reference-normalization matrix is the remaining acceptance phase.
 No dependencies, binaries, container services or raster/image execution behavior were changed.
 
 ## Worker and recovery
@@ -106,8 +106,7 @@ Acceptance is `{version:1,jobId,accepted:true,state:'queued',service,model}`; mo
 says started. Replaying a call returns the original receipt even after preferences change. Explicit
 Stop cancels only jobs attached to that LLM receipt; transport disconnects do not cancel video work.
 Direct retry checks expected revision and policy, keeps the original receipt/config, creates one
-child per parent, and never changes service/model/parameters. UI confirmation is still required before
-exposing this paid action. Settings API validates a strict opt-in map; no settings toggle is shipped yet.
+child per parent, and never changes service/model/parameters. The inline UI confirms the possible additional charge before retry. Settings API validates a strict opt-in map.
 
 Completed same-account video references survive forks. Pending jobs are not copied. Public shares
 show only an inert tool record. Markdown/PDF exports describe an omitted video; native archives redact
@@ -116,7 +115,7 @@ Output publication uses a same-filesystem exclusive hard link followed by stagin
 an overwriting rename, so an obsolete lease cannot replace a newer immutable final file. Parent fsync
 and the outcome/file/usage transaction retain the same recovery boundary.
 
-## Inline card (phase 4 started)
+## Inline card
 
 `VideoToolCard` renders the native local player with controls/playsInline/preload=metadata and no
 autoplay, plus stage, elapsed time, bounded attempt details, safe errors, cancellation and a confirmed
@@ -130,6 +129,24 @@ session cache, and refreshes via GET on reconnect. Sign-out clears it. Pure clie
 ordering, visibility, account switching, slot limits, offline status, and malformed snapshots.
 Usage totals now label known subtotals and unknown video-charge counts without changing token meters.
 
-Still deferred: Video settings UI and service/key management routes, Library video union/filter/preview,
-full translated video-card copy (the typed English namespace currently falls back normally), and media
-attempt links in message details. No browser playback/manual provider acceptance has been performed.
+## Settings, Library and message details
+
+Settings → General lists both services with explicit opt-in, curated models, duration/aspect/resolution
+defaults, per-second/per-clip estimates, audio/upscale/reference notes and cancellation billing limits.
+xAI links to the private Providers connection. Replicate uses the existing `image-replicate` key and
+warns that changes/removal affect images too. Shared-only, disabled, noncanonical-endpoint and retired
+model states withhold generation; a retired stored model remains visible until explicitly corrected.
+Settings writes never mutate image service preferences. Reads/writes are account-scoped and stale
+responses cannot overwrite a newer account or selection.
+
+Library videos are completed local files only: one `video:<id>` row, no pending jobs, thumbnails or
+preloading grid players. Chat/project filtering checks every surviving owned reference, without duplicate
+rows. Origin metadata falls back to a surviving chat. All four keyset sorts are unchanged. Preview uses
+the same native player; downloads are ordinary authenticated local links. Confirmed global deletion
+removes all references and bytes and historical cards show unavailable. Opaque video uploads stay `other`.
+Message Details links media attempts back to the originating card, with separate charges; it never adds
+them to LLM generation metadata. Card details also open that panel.
+
+The `video` namespace is required in all shipped locales, as are its permission and assistant-family
+labels. English, German, Spanish, French, Italian and European Portuguese have explicit entries.
+No browser playback or live provider acceptance has been performed.

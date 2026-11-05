@@ -603,7 +603,7 @@ export interface SharedThread {
 }
 
 /** Library entries grouped by what the browser can do with them. */
-export type LibraryKind = "image" | "document" | "pdf" | "spreadsheet" | "code" | "other";
+export type LibraryKind = "video" | "image" | "document" | "pdf" | "spreadsheet" | "code" | "other";
 /** How the item entered the library: attached by the user or produced by the agent. */
 export type LibrarySource = "uploaded" | "generated";
 export type LibrarySort = "newest" | "oldest" | "name" | "size";
@@ -625,6 +625,9 @@ export interface LibraryItem {
   previewUrl: string | null;
   /** Small grid thumbnail for raster images (server-made, bounded); absent when none can be made. */
   thumbUrl?: string;
+  durationMs?: number;
+  hasAudio?: boolean;
+  posterUrl?: null;
   /** Pixel size of raster images, when known, so the grid and preview can reserve space. */
   width?: number;
   height?: number;

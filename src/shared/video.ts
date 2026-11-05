@@ -103,3 +103,17 @@ export function isVideoSettings(value:unknown):value is VideoSettings {
   }
   return true;
 }
+
+/** Preserve a retired model identifier for an honest unavailable status, while sanitizing stored shapes. */
+export function readStoredVideoSettings(value:unknown):VideoSettings {
+  const result:VideoSettings={};
+  if(!value||typeof value!=="object"||Array.isArray(value))return result;
+  for(const def of VIDEO_SERVICES){
+    const raw=(value as Record<string,unknown>)[def.id];
+    if(!raw||typeof raw!=="object"||Array.isArray(raw))continue;
+    const entry=raw as Record<string,unknown>;
+    if(entry.enabled!==undefined&&typeof entry.enabled!=="boolean"||entry.model!==undefined&&(typeof entry.model!=="string"||entry.model.length<1||entry.model.length>200)||entry.durationSeconds!==undefined&&![4,6,8].includes(Number(entry.durationSeconds))||entry.durationSeconds!==undefined&&typeof entry.durationSeconds!=="number"||entry.aspectRatio!==undefined&&!['16:9','9:16'].includes(String(entry.aspectRatio))||entry.size!==undefined&&!['720p','1080p'].includes(String(entry.size)))continue;
+    result[def.id]={...(entry.enabled!==undefined?{enabled:entry.enabled as boolean}:{}),...(entry.model!==undefined?{model:entry.model as string}:{}),...(entry.durationSeconds!==undefined?{durationSeconds:entry.durationSeconds as VideoDuration}:{}),...(entry.aspectRatio!==undefined?{aspectRatio:entry.aspectRatio as VideoAspect}:{}),...(entry.size!==undefined?{size:entry.size as VideoSize}:{})};
+  }
+  return result;
+}

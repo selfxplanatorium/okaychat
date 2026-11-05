@@ -1,12 +1,14 @@
+import { VideoPlayer } from "./VideoPlayer";
+import { runCommand } from "@/keyboard/registry";
 import { useAuiState, type ToolCallMessagePartProps } from '@assistant-ui/react';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { DownloadIcon, VideoIcon } from 'lucide-react';
-import type { VideoJobView, VideoOutput } from '@shared/video';
+import { VideoIcon } from 'lucide-react';
+import type { VideoJobView } from '@shared/video';
 import type { ErrorCode } from '@shared/errors';
 import { ERROR_CODES } from '@shared/errors';
 import { t, type PlainMessageKey } from '@/i18n';
 import { formatCost, formatDuration, formatNumber } from '@/i18n/format';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { api } from '@/lib/api';
 import { presentError } from '@/lib/error-presentation';
@@ -19,17 +21,6 @@ const stages:Record<VideoJobView['stage'],PlainMessageKey>={accepted:"video.acce
 const safeId=(value:unknown):value is string=>typeof value==='string'&&/^vid_[A-Za-z0-9_-]{1,100}$/.test(value);
 const costLabel=(job:VideoJobView)=>job.cost.state==='unknown'&&!videoActive(job)?t("video.chargeUnknown"):t(job.cost.state==='reported'?"video.reported":"video.estimated",{cost:formatCost((job.cost.settledMicrousd??job.cost.estimatedMicrousd)/1e6)});
 
-export function VideoPlayer({output}:{output:VideoOutput}) {
-  const [failed,setFailed]=useState(false);
-  const src=`/api/videos/${encodeURIComponent(output.id)}/file`;
-  return <div className="min-w-0 space-y-2">
-    {failed?<p className="text-muted-foreground py-6 text-sm" role="status">{t("video.previewUnavailable")}</p>:<video aria-label={t("video.player")} controls playsInline preload="metadata" className="bg-muted max-h-[70svh] w-full rounded-xl" style={{aspectRatio:`${output.width} / ${output.height}`}} src={src} onError={()=>setFailed(true)} />}
-    <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-      <span>{formatDuration(output.durationMs/1000)}</span><span>{t("video.dimensions",{width:formatNumber(output.width),height:formatNumber(output.height)})}</span><span>{t(output.hasAudio?"video.audio":"video.silent")}</span>
-    </div>
-    <a className={buttonVariants({variant:'outline',className:'min-h-11'})} href={`${src}?download=1`}><DownloadIcon aria-hidden />{t("video.download")}</a>
-  </div>;
-}
 
 /** Current status is separate from immutable tool results. Visibility, not reply age, owns network work. */
 export function VideoToolCard(props:ToolCallMessagePartProps) {
@@ -88,7 +79,7 @@ export function VideoToolCard(props:ToolCallMessagePartProps) {
   const active=!!job&&videoActive(job);
   const history=job ? [...(attempts&&attempts.owner===userId?attempts.jobs:[]).filter(item=>item.id!==job.id),job].sort((a,b)=>a.attempt-b.attempt) : [];
   const label=job?t(stages[job.stage]??"video.error"):snapshot.missing?t("video.unavailable"):props.status?.type==='incomplete'?t("video.error"):t("video.preparing");
-  return <div ref={root} role="group" aria-label={t("video.title")}>
+  return <div ref={root} data-video-tool-call={props.toolCallId} tabIndex={-1} className="scroll-mt-8 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring" role="group" aria-label={t("video.title")}>
     <ToolShell icon={<VideoIcon className="size-4" />} label={label} running={active||!job&&props.status?.type==='running'} defaultOpen failure={props.status?.type==='incomplete'&&!job?t("video.error"):undefined}>
       <div className="max-w-xl min-w-0 space-y-3 rounded-xl bg-muted/30 p-3 sm:p-4">
         <p className="sr-only" aria-live="polite">{label}</p>
@@ -106,7 +97,7 @@ export function VideoToolCard(props:ToolCallMessagePartProps) {
           {job?.canRetry&&<Button variant="outline" className="min-h-11" disabled={busy} onClick={()=>setConfirm(true)}>{t("video.retry")}</Button>}
           {snapshot.stale&&id&&<Button variant="ghost" className="min-h-11" onClick={()=>void videoJobs.refresh(id)}>{t("video.refresh")}</Button>}
         </div>
-        {job&&<details className="text-muted-foreground text-xs"><summary className="min-h-11 cursor-pointer py-3">{t("video.details")}</summary><ol className="space-y-2">{history.map(item=><li key={item.id}>{t("video.attempt",{attempt:formatNumber(item.attempt+1)})} · {t(stages[item.stage]??"video.error")} · {costLabel(item)}</li>)}</ol></details>}
+        {job&&<details className="text-muted-foreground text-xs"><summary className="min-h-11 cursor-pointer py-3">{t("video.details")}</summary><ol className="space-y-2">{history.map(item=><li key={item.id}>{t("video.attempt",{attempt:formatNumber(item.attempt+1)})} · {t(stages[item.stage]??"video.error")} · {costLabel(item)}</li>)}</ol><Button variant="ghost" className="mt-2 min-h-11" onClick={()=>runCommand("message.details")}>{t("video.messageDetails")}</Button></details>}
       </div>
     </ToolShell>
     <Dialog open={confirm} onOpenChange={open=>{if(!busy)setConfirm(open);}}><DialogContent><DialogHeader><DialogTitle>{t("video.retryTitle")}</DialogTitle><DialogDescription>{t("video.retryDescription",{cost:formatCost((job?.cost.estimatedMicrousd??0)/1e6)})}</DialogDescription></DialogHeader><DialogFooter><Button variant="ghost" className="min-h-11" disabled={busy} onClick={()=>setConfirm(false)}>{t("common.cancel")}</Button><Button className="min-h-11" disabled={busy||!job?.canRetry} onClick={()=>void act(true)}>{t("video.retryConfirm")}</Button></DialogFooter></DialogContent></Dialog>

@@ -9,6 +9,10 @@ import { textDirection } from "./index.js";
 // RTL readiness ratchet. Logical properties (`ms-*`, `ps-*`, `start-*`, `text-start`) flip with `dir`,
 // physical ones (`ml-*`, `left-*`, `text-left`) do not. Every new UI file joins this list.
 const RTL_CHECKED_FILES = [
+  "components/chat/VideoPlayer.tsx",
+  "components/chat/VideoToolCard.tsx",
+  "components/chat/VideoMessageDetails.tsx",
+  "components/settings/VideoServicesSettings.tsx",
   "components/chat/MessageTranslation.tsx",
   "components/chat/TranslationDialog.tsx",
   "components/channels/ChannelPresenceDot.tsx",

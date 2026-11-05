@@ -25,7 +25,7 @@ test("every anchor in the helper exists as a focusable row in its settings page"
     .map((name) => readFileSync(join(apiAccessDir, name), "utf8"))
     .join("\n");
   const files: Record<string, string> = {
-    general: readFileSync(join(import.meta.dirname, "..", "components", "settings", "GeneralSettings.tsx"), "utf8"),
+    general: ["GeneralSettings.tsx", "VideoServicesSettings.tsx"].map(file => readFileSync(join(import.meta.dirname, "..", "components", "settings", file), "utf8")).join("\n"),
     apiAccess: apiAccessSource,
   };
   for (const destination of Object.values(SETTINGS_DESTINATIONS) as SettingsDestination[]) {

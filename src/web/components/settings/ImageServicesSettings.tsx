@@ -59,6 +59,7 @@ export function ImageServicesSettings() {
 }
 
 function Credential({ service: s }: { service: ImageServiceStatus }) {
+  if (s.id === "replicate") return <>{t("video.sharedImageKey")}</>;
   if (s.credential === "codex") return <>{t("providers.imageCodex")}</>;
   if (s.shared) return <>{t("providers.imageShared")}</>;
   if (s.credential === "own") return <>{s.connected ? t("providers.imageOwnSaved") : t("providers.imageOwnNeeded")}</>;

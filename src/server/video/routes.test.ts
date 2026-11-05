@@ -41,3 +41,38 @@ test('retry/cancel reject malformed or extra JSON fields with a safe validation 
     assert.equal(response.status,400);const wire=await response.json() as {code:string};assert.equal(wire.code,'validation');
   }
 });
+
+test('service management is curated, private, bounded, and reuses the image credential without leaking keys',async()=>{
+  const {getOwnConnection}=await import('../catalog/providers.js');
+  const {updateSettings,getSettings}=await import('../settings.js');
+  updateSettings('vroute',{videoServices:{xai:{enabled:true}}});
+  const get=async(path:string)=>app.request(path,{headers});
+  const list=await get('/video-services');assert.equal(list.status,200);
+  const payload=await list.json() as {services:Array<{id:string;enabled:boolean;requiresOwnKey:boolean;unavailableReason:string|null}>};
+  assert.equal(payload.services.find(s=>s.id==='xai')!.enabled,true);
+  const models=await (await get('/video-services/replicate/models')).json() as {live:boolean;source:string;models:Array<{id:string}>};
+  assert.equal(models.live,false);assert.equal(models.source,'curated');assert.deepEqual(models.models.map(m=>m.id),['google/veo-3.1-fast']);
+  const key='private-key-not-for-response';
+  const saved=await app.request('/video-services/replicate/key',{method:'PUT',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({apiKey:key})});
+  assert.equal(saved.status,200);assert.equal((await saved.text()).includes(key),false);assert.equal(getOwnConnection('vroute','image-replicate')!.apiKey,key);
+  assert.equal(getSettings('vroute').imageServices,undefined);
+  assert.equal((await app.request('/video-services/xai/key',{method:'PUT',headers:{...headers,'Content-Type':'application/json'},body:'{"apiKey":"forbidden"}'})).status,404);
+  assert.equal((await app.request('/video-services/replicate/key',{method:'PUT',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({apiKey:'x'.repeat(8193)})})).status,400);
+  await app.request('/video-services/replicate/key',{method:'DELETE',headers:{...headers,'Sec-Fetch-Site':'same-origin'}});assert.equal(getOwnConnection('vroute','image-replicate'),undefined);
+  saveConnection(null,'image-replicate',{apiKey:'shared-only',enabled:true});
+  const shared=await (await get('/video-services')).json() as typeof payload;assert.equal(shared.services.find(s=>s.id==='replicate')!.requiresOwnKey,true);
+  saveConnection('vroute','xai',{apiKey:'test',baseURL:'https://custom.example.test/v1',enabled:true});
+  const unsupported=await (await get('/video-services')).json() as typeof payload;
+  assert.equal(unsupported.services.find(s=>s.id==='xai')!.unavailableReason,'unsupported_endpoint');assert.equal(unsupported.services.find(s=>s.id==='xai')!.enabled,false);
+});
+
+test('stored retired model remains visible as unavailable and strict settings writes reject it',async()=>{
+  const {getSettings,updateSettings}=await import('../settings.js');
+  db.prepare("UPDATE user_settings SET json=? WHERE user_id='vroute'").run(JSON.stringify({videoServices:{xai:{enabled:true,model:'retired-model'}}}));
+  assert.equal(getSettings('vroute').videoServices!.xai!.model,'retired-model');
+  // Restore the canonical key to isolate model unavailability from endpoint status.
+  db.prepare("UPDATE provider_connections SET base_url=NULL WHERE user_id='vroute' AND provider_id='xai'").run();
+  const body=await (await app.request('/video-services',{headers})).json() as {services:Array<{id:string;model:string;enabled:boolean;unavailableReason:string|null}>};
+  assert.equal(body.services[0]!.model,'retired-model');assert.equal(body.services[0]!.enabled,false);assert.equal(body.services[0]!.unavailableReason,'unsupported_parameters');
+  assert.throws(()=>updateSettings('vroute',{videoServices:{xai:{model:'retired-model'}}}));
+});

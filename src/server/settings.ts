@@ -1,4 +1,4 @@
-import { isVideoSettings } from "../shared/video.js";
+import { isVideoSettings, readStoredVideoSettings } from "../shared/video.js";
 import { canonicalLocaleTag } from "../shared/locale-tag.js";
 import { REASONING_EFFORTS } from "../shared/reasoning.js";
 import { imageServiceDef } from "../shared/image-services.js";
@@ -27,7 +27,7 @@ export function getSettings(userId: string): UserSettings {
       "INSERT INTO user_settings (user_id, json) VALUES (?, ?) ON CONFLICT (user_id) DO UPDATE SET json = excluded.json",
     ).run(userId, JSON.stringify(settings));
   }
-  if (settings.videoServices !== undefined && !isVideoSettings(settings.videoServices)) delete settings.videoServices;
+  if (settings.videoServices !== undefined) settings.videoServices = readStoredVideoSettings(settings.videoServices);
   if (settings.imageServices !== undefined && !validImageServices(settings.imageServices)) delete settings.imageServices;
   if (settings.speech !== undefined && !validSpeechSettings(settings.speech)) delete settings.speech;
   if (settings.notifications !== undefined && !validNotificationSettings(settings.notifications)) delete settings.notifications;

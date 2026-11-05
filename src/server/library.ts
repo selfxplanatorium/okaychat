@@ -1,3 +1,4 @@
+import { deleteVideoFile } from "./video/files.js";
 import { zipSync, strToU8 } from "fflate";
 import { Hono } from "hono";
 import type { ArtifactKind, LibraryItem, LibraryKind, LibraryPage, LibrarySort } from "../shared/types.js";
@@ -54,19 +55,30 @@ interface RawRow {
   height: number | null;
   /** 1 when server-made variants exist for this row (file-backed raster). */
   variants: number;
+  durationMs: number | null;
+  hasAudio: number | null;
 }
 
+const VIDEO_THREAD = `(SELECT t.id FROM video_threads r JOIN threads t ON t.id=r.thread_id AND t.user_id=v.user_id
+  WHERE r.video_id=v.id ORDER BY (t.id=v.origin_thread_id) DESC,t.updated_at DESC,t.id DESC LIMIT 1)`;
 const SOURCES = `
+  SELECT 'video:' || v.id AS key,v.label AS name,'video' AS kind,v.mime,v.size,v.created_at,
+    'generated' AS source,t.id AS threadId,t.title AS threadTitle,t.project_id AS projectId,NULL AS artifactKind,
+    v.width,v.height,0 AS variants,v.duration_ms AS durationMs,v.has_audio AS hasAudio
+  FROM videos v JOIN video_jobs j ON j.id=v.job_id AND j.user_id=v.user_id AND j.state='succeeded'
+    JOIN threads t ON t.id=${VIDEO_THREAD} AND t.user_id=v.user_id
+  WHERE v.user_id=@userId
+  UNION ALL
   SELECT 'image:' || i.id AS key, i.prompt AS name, 'image' AS kind, i.mime AS mime, i.size AS size, i.created_at,
          'generated' AS source, i.thread_id AS threadId, t.title AS threadTitle, t.project_id AS projectId, NULL AS artifactKind,
-         i.width AS width, i.height AS height, 1 AS variants
+         i.width AS width, i.height AS height, 1 AS variants, NULL AS durationMs, NULL AS hasAudio
   FROM images i LEFT JOIN threads t ON t.id = i.thread_id AND t.user_id = i.user_id
   WHERE i.user_id = @userId
   UNION ALL
   SELECT 'upload:' || u.id AS key, u.name AS name, ${UPLOAD_KIND} AS kind, u.mime AS mime, coalesce(um.size, length(u.data)) AS size, u.created_at,
          'uploaded' AS source, ut.id AS threadId, ut.title AS threadTitle, coalesce(ut.project_id, (SELECT pf.project_id FROM project_files pf JOIN projects p ON p.id = pf.project_id
            WHERE pf.upload_id = u.id AND p.user_id = u.user_id LIMIT 1)) AS projectId, NULL AS artifactKind,
-         um.width AS width, um.height AS height, um.id IS NOT NULL AS variants
+         um.width AS width, um.height AS height, um.id IS NOT NULL AS variants, NULL AS durationMs, NULL AS hasAudio
   FROM uploads u LEFT JOIN threads ut ON ut.id = coalesce(u.thread_id, ${UPLOAD_THREAD}) AND ut.user_id = u.user_id
     LEFT JOIN media um ON um.id = u.media_id AND um.user_id = u.user_id
   WHERE u.user_id = @userId
@@ -75,7 +87,7 @@ const SOURCES = `
   SELECT 'artifact:' || a.thread_id || '/' || a.id AS key, a.title AS name, ${ARTIFACT_KIND} AS kind, ${ARTIFACT_MIME} AS mime,
          length(CAST(a.content AS BLOB)) + a.size AS size, a.created_at,
          'generated' AS source, t.id AS threadId, t.title AS threadTitle, t.project_id AS projectId, a.kind AS artifactKind,
-         NULL AS width, NULL AS height, 0 AS variants
+         NULL AS width, NULL AS height, 0 AS variants, NULL AS durationMs, NULL AS hasAudio
   FROM artifacts a JOIN threads t ON t.id = a.thread_id
   WHERE t.user_id = @userId
     AND a.version = (SELECT max(v.version) FROM artifacts v WHERE v.thread_id = a.thread_id AND v.id = a.id)
@@ -84,7 +96,7 @@ const SOURCES = `
          ${UPLOAD_KIND.replaceAll("u.mime", "s.mime").replaceAll("u.name", "s.path")} AS kind, s.mime AS mime,
          s.size AS size, s.created_at, 'generated' AS source,
          t.id AS threadId, t.title AS threadTitle, t.project_id AS projectId, NULL AS artifactKind,
-         sm.width AS width, sm.height AS height, sm.id IS NOT NULL AS variants
+         sm.width AS width, sm.height AS height, sm.id IS NOT NULL AS variants, NULL AS durationMs, NULL AS hasAudio
   FROM sandbox_files s JOIN threads t ON t.id = s.thread_id AND t.user_id = s.user_id
     LEFT JOIN media sm ON sm.id = s.media_id AND sm.user_id = s.user_id
   WHERE s.user_id = @userId
@@ -94,7 +106,7 @@ const SOURCES = `
            coalesce((SELECT sum(length(CAST(f.name || f.content AS BLOB))) FROM skill_files f WHERE f.skill_id = sk.id), 0) AS size,
          sk.updated_at AS created_at, CASE sk.origin WHEN 'conversation' THEN 'generated' ELSE 'uploaded' END AS source,
          NULL AS threadId, NULL AS threadTitle, NULL AS projectId, NULL AS artifactKind,
-         NULL AS width, NULL AS height, 0 AS variants
+         NULL AS width, NULL AS height, 0 AS variants, NULL AS durationMs, NULL AS hasAudio
   FROM skills sk WHERE sk.user_id = @userId`;
 
 interface Cursor {
@@ -144,7 +156,10 @@ async function toItems(userId: string, rows: RawRow[]): Promise<LibraryItem[]> {
       ...(r.width && r.height ? { width: r.width, height: r.height } : {}),
     };
     const sized = (url: string, variant: "thumb" | "large") => `${url}${url.includes("?") ? "&" : "?"}variant=${variant}`;
-    if (prefix === "skill") {
+    if (prefix === "video") {
+      const url=`/api/videos/${encodeURIComponent(id)}/file`;
+      items.push({...base,previewUrl:url,downloadUrl:`${url}?download=1`,posterUrl:null,durationMs:r.durationMs!,hasAudio:!!r.hasAudio,deletable:true});
+    } else if (prefix === "skill") {
       const url = `/api/library/skill/${encodeURIComponent(id)}`;
       items.push({ ...base, previewUrl: `${url}/preview`, downloadUrl: `${url}/file`, deletable: true });
     } else if (prefix === "image") {
@@ -205,8 +220,8 @@ function listRows(userId: string, opts: ListOptions): { rows: RawRow[]; nextCurs
   const named: Record<string, string | number | null> = { userId };
   if (opts.kind) where.push("kind = @kind"), (named.kind = opts.kind);
   if (opts.source) where.push("source = @source"), (named.source = opts.source);
-  if (opts.threadId) where.push("threadId = @threadId"), (named.threadId = opts.threadId);
-  if (opts.projectId) where.push("projectId = @projectId"), (named.projectId = opts.projectId);
+  if (opts.threadId) where.push("(threadId = @threadId OR (kind='video' AND EXISTS (SELECT 1 FROM video_threads vr JOIN threads vt ON vt.id=vr.thread_id AND vt.user_id=@userId WHERE vr.video_id=substr(key,7) AND vt.id=@threadId)))"), (named.threadId = opts.threadId);
+  if (opts.projectId) where.push("(projectId = @projectId OR (kind='video' AND EXISTS (SELECT 1 FROM video_threads vr JOIN threads vt ON vt.id=vr.thread_id AND vt.user_id=@userId WHERE vr.video_id=substr(key,7) AND vt.project_id=@projectId)))"), (named.projectId = opts.projectId);
   if (opts.q) {
     // Percent, underscore, and backslash escaped so a name search matches literally.
     where.push("name LIKE @q ESCAPE '\\'");
@@ -231,7 +246,7 @@ function listRows(userId: string, opts: ListOptions): { rows: RawRow[]; nextCurs
 
   const rows = db
     .prepare(
-      `SELECT key, name, kind, mime, size, created_at, source, threadId, threadTitle, projectId, artifactKind, width, height, variants FROM (${SOURCES})
+      `SELECT key, name, kind, mime, size, created_at, source, threadId, threadTitle, projectId, artifactKind, width, height, variants, durationMs, hasAudio FROM (${SOURCES})
        WHERE ${where.join(" AND ")} ORDER BY ${ORDER_BY[sort]} LIMIT ${limit + 1}`,
     )
     .all(named) as unknown as RawRow[];
@@ -251,7 +266,8 @@ export async function listLibrary(userId: string, opts: ListOptions): Promise<Li
  * Deleting from the Library removes the file for good: originals and previews go, and quota is released.
  * Chats that showed it keep their text and show the image as unavailable; nothing recreates it.
  */
-export async function deleteLibraryItem(userId: string, prefix: "image" | "upload" | "sandbox" | "skill", id: string): Promise<boolean> {
+export async function deleteLibraryItem(userId: string, prefix: "video" | "image" | "upload" | "sandbox" | "skill", id: string): Promise<boolean> {
+  if (prefix === "video") return deleteVideoFile(userId,id);
   if (prefix === "image") return deleteImage(userId, id);
   if (prefix === "skill") { deleteSkill(userId, id); return true; }
   if (prefix === "sandbox") {
@@ -272,7 +288,7 @@ export const libraryRoutes = new Hono<AppEnv>()
     const number = (v: string | undefined) => (v && Number.isFinite(Number(v)) ? Number(v) : undefined);
     return c.json(
       await listLibrary(c.get("user").id, {
-        kind: (["image", "document", "pdf", "spreadsheet", "code", "other"] as const).includes(q.kind as LibraryKind) ? (q.kind as LibraryKind) : undefined,
+        kind: (["video", "image", "document", "pdf", "spreadsheet", "code", "other"] as const).includes(q.kind as LibraryKind) ? (q.kind as LibraryKind) : undefined,
         source: q.source === "uploaded" || q.source === "generated" ? q.source : undefined,
         threadId: q.thread || undefined,
         projectId: q.project || undefined,
@@ -315,6 +331,8 @@ export const libraryRoutes = new Hono<AppEnv>()
   })
   .delete("/library/sandbox/:id", async (c) =>
     (await deleteLibraryItem(c.get("user").id, "sandbox", c.req.param("id"))) ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404))
+  .delete("/library/video/:id", async (c) =>
+    (await deleteLibraryItem(c.get("user").id, "video", c.req.param("id"))) ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404))
   .delete("/library/image/:id", async (c) =>
     (await deleteLibraryItem(c.get("user").id, "image", c.req.param("id"))) ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404))
   .delete("/library/upload/:id", async (c) => {
