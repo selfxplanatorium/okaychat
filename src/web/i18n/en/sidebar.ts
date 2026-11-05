@@ -24,6 +24,8 @@ export default {
   channels: "Channels",
   compare: "Compare models",
   evaluations: "Evaluations",
+  notes: "Notes",
+  calendar: "Calendar",
   account: "Account",
   logOut: "Log out",
   allChats: "All chats",

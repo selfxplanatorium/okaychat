@@ -27,6 +27,8 @@ export const FEATURE_KEYS = [
   "evaluations",
   "channels",
   "customTools",
+  "notes",
+  "calendar",
 ] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 

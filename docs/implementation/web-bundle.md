@@ -2,6 +2,10 @@
 
 The production bundle uses Vite and Rolldown with explicit route and library boundaries.
 
+`/notes`, `/notes/:id`, and `/calendar` are dedicated `preloadable()` routes inside the authenticated
+shell. They are not part of the sign-in entry, not eager imports into `NavigationPage`, and not the
+chat fallback. The notes preview reuses the lazy Markdown/math/Mermaid path.
+
 ## Loading
 
 `App.tsx` loads only authentication, shared primitives, and the appearance engine.

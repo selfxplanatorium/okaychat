@@ -6,6 +6,7 @@ import { formatBytes } from "@/i18n/format";
 import { cn } from "@/lib/utils";
 import { useArtifactPanel } from "@/state/artifacts";
 import { useCurrentThreadId } from "@/state/thread-meta";
+import { SaveArtifactNoteButton } from "@/components/notes/SaveNoteMenuItem";
 
 const ICONS: Record<ArtifactKind, typeof CodeIcon> = {
   html: AppWindowIcon,
@@ -62,20 +63,23 @@ export function ArtifactCard({ args, result, status, action }: { args: unknown; 
         : t(action === "create" ? "artifacts.created" : "artifacts.updated", { version: r?.version ?? "" });
 
   return (
-    <button
-      data-command="artifact.open"
-      type="button"
-      disabled={running || !r?.id || !threadId}
-      onClick={() => r && threadId && show(threadId, r.id, r.version)}
-      className="shell-artifact-card hover:bg-muted/60 animate-rise-in my-2 flex w-full max-w-md items-center gap-3 rounded-xl border px-3 py-2.5 text-left hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:shadow-none"
-    >
-      <span className="bg-muted flex size-9 shrink-0 items-center justify-center rounded-lg">
-        {running ? <Loader2Icon className="size-4 animate-spin" /> : failed ? <TriangleAlertIcon className="text-warning size-4" /> : <Icon className="size-4" />}
-      </span>
-      <span className="min-w-0">
-        <span className={cn("block truncate text-sm font-medium", running && "shimmer")}>{title}</span>
-        <span className="text-muted-foreground line-clamp-2 text-xs">{detail}</span>
-      </span>
-    </button>
+    <div className="my-2 flex w-full max-w-md flex-col gap-1">
+      <button
+        data-command="artifact.open"
+        type="button"
+        disabled={running || !r?.id || !threadId}
+        onClick={() => r && threadId && show(threadId, r.id, r.version)}
+        className="shell-artifact-card hover:bg-muted/60 animate-rise-in flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:shadow-none"
+      >
+        <span className="bg-muted flex size-9 shrink-0 items-center justify-center rounded-lg">
+          {running ? <Loader2Icon className="size-4 animate-spin" /> : failed ? <TriangleAlertIcon className="text-warning size-4" /> : <Icon className="size-4" />}
+        </span>
+        <span className="min-w-0">
+          <span className={cn("block truncate text-sm font-medium", running && "shimmer")}>{title}</span>
+          <span className="text-muted-foreground line-clamp-2 text-xs">{detail}</span>
+        </span>
+      </button>
+      {r?.kind === "markdown" && !running && <SaveArtifactNoteButton threadId={threadId} artifactId={r.id} version={r.version} kind={r.kind} />}
+    </div>
   );
 }

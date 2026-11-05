@@ -35,6 +35,7 @@ export interface NotificationInput {
   threadId?: string | null;
   channelId?: string | null;
   channelMessageId?: string | null;
+  calendarEventId?: string | null;
   actionPath?: string | null;
   sourceKey?: string | null;
 }
@@ -49,6 +50,7 @@ interface Row {
   thread_id: string | null;
   channel_id: string | null;
   channel_message_id: string | null;
+  calendar_event_id: string | null;
   action_path: string | null;
   read_at: number | null;
   created_at: number;
@@ -64,6 +66,7 @@ const toNotification = (row: Row): AppNotification => ({
   threadId: row.thread_id,
   channelId: row.channel_id,
   channelMessageId: row.channel_message_id,
+  calendarEventId: row.calendar_event_id,
   actionPath: row.action_path,
   readAt: row.read_at,
   createdAt: row.created_at,
@@ -85,8 +88,8 @@ export function notify(input: NotificationInput): void {
   const now = Date.now();
   tx(() => {
     db.prepare(
-      `INSERT OR IGNORE INTO notifications (id, user_id, kind, level, title_key, body_key, params_json, thread_id, channel_id, channel_message_id, action_path, source_key, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO notifications (id, user_id, kind, level, title_key, body_key, params_json, thread_id, channel_id, channel_message_id, calendar_event_id, action_path, source_key, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       newId("ntf"),
       input.userId,
@@ -98,6 +101,7 @@ export function notify(input: NotificationInput): void {
       input.threadId ?? null,
       input.channelId ?? null,
       input.channelMessageId ?? null,
+      input.calendarEventId ?? null,
       safeActionPath(input.actionPath),
       input.sourceKey ?? null,
       now,
@@ -161,11 +165,38 @@ export function channelNoticeVisible(userId: string, notificationId: string): bo
     .get(notificationId, userId);
 }
 
+/**
+ * SQL condition on `notifications n`: a calendar notice is visible only while the account may still use
+ * calendar and the event it points at is still owned by the same user. Composed with the channel
+ * predicate, never replacing it, so room ACLs keep their current rules.
+ */
+export function calendarNoticeVisibleSql(calendarEnabled: boolean): string {
+  if (!calendarEnabled) return "(n.kind <> 'calendar')";
+  return `(n.kind <> 'calendar' OR EXISTS (
+    SELECT 1 FROM calendar_events e WHERE e.id = n.calendar_event_id AND e.user_id = n.user_id
+  ))`;
+}
+
+/** Both feature-dependent predicates, parameterized as constants. */
+export function noticeVisibleSql(channelEnabled: boolean, calendarEnabled: boolean): string {
+  return `(${channelNoticeVisibleSql(channelEnabled)}) AND (${calendarNoticeVisibleSql(calendarEnabled)})`;
+}
+
+function visiblePredicate(userId: string): string {
+  return noticeVisibleSql(featureAllowed(userId, "channels"), featureAllowed(userId, "calendar"));
+}
+
+/** True while a notice is still visible to its recipient under every source's rules. */
+export function noticeVisible(userId: string, notificationId: string): boolean {
+  return !!db
+    .prepare(`SELECT 1 FROM notifications n WHERE n.id = ? AND n.user_id = ? AND ${visiblePredicate(userId)}`)
+    .get(notificationId, userId);
+}
+
 export function unreadCount(userId: string): number {
-  const enabled = featureAllowed(userId, "channels");
   return (
     db
-      .prepare(`SELECT COUNT(*) AS n FROM notifications n WHERE n.user_id = ? AND n.read_at IS NULL AND ${channelNoticeVisibleSql(enabled)}`)
+      .prepare(`SELECT COUNT(*) AS n FROM notifications n WHERE n.user_id = ? AND n.read_at IS NULL AND ${visiblePredicate(userId)}`)
       .get(userId) as { n: number }
   ).n;
 }
@@ -176,7 +207,7 @@ export function listNotifications(
 ): { items: AppNotification[]; unread: number; nextCursor: string | null } {
   const limit = Math.min(PAGE_LIMIT, Math.max(1, opts.limit ?? PAGE_LIMIT));
   const before = parseCursor(opts.before);
-  const visible = channelNoticeVisibleSql(featureAllowed(userId, "channels"));
+  const visible = visiblePredicate(userId);
   const rows = (before
     ? db
         .prepare(
@@ -196,13 +227,13 @@ export function listNotifications(
 }
 
 export function markRead(userId: string, id: string): number {
-  if (!channelNoticeVisible(userId, id)) return unreadCount(userId);
+  if (!noticeVisible(userId, id)) return unreadCount(userId);
   db.prepare("UPDATE notifications SET read_at = ? WHERE id = ? AND user_id = ? AND read_at IS NULL").run(Date.now(), id, userId);
   return unreadCount(userId);
 }
 
 export function markUnread(userId: string, id: string): number {
-  if (!channelNoticeVisible(userId, id)) return unreadCount(userId);
+  if (!noticeVisible(userId, id)) return unreadCount(userId);
   db.prepare("UPDATE notifications SET read_at = NULL WHERE id = ? AND user_id = ?").run(id, userId);
   return unreadCount(userId);
 }
@@ -213,7 +244,7 @@ export function markAllRead(userId: string): number {
 }
 
 export function dismiss(userId: string, id: string): number {
-  if (!channelNoticeVisible(userId, id)) return unreadCount(userId);
+  if (!noticeVisible(userId, id)) return unreadCount(userId);
   db.prepare("DELETE FROM notifications WHERE id = ? AND user_id = ?").run(id, userId);
   return unreadCount(userId);
 }

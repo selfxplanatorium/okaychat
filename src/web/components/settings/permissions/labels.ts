@@ -51,6 +51,8 @@ export const FEATURE_LABEL: Record<FeatureKey, PlainMessageKey> = {
   evaluations: "permissions.featureEvaluationsLabel",
   channels: "permissions.featureChannels",
   customTools: "permissions.featureCustomTools",
+  notes: "permissions.featureNotesLabel",
+  calendar: "permissions.featureCalendarLabel",
 };
 
 export const FEATURE_HELP: Record<FeatureKey, PlainMessageKey> = {
@@ -74,6 +76,8 @@ export const FEATURE_HELP: Record<FeatureKey, PlainMessageKey> = {
   evaluations: "permissions.featureEvaluationsHelp",
   channels: "permissions.featureChannelsHelp",
   customTools: "permissions.featureCustomToolsHelp",
+  notes: "permissions.featureNotesHelp",
+  calendar: "permissions.featureCalendarHelp",
 };
 
 export const LIMIT_LABEL: Record<LimitKey, PlainMessageKey> = {

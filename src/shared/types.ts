@@ -165,7 +165,7 @@ export interface OllamaPullProgress {
 
 export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
-export const SIDEBAR_ITEMS = ["newChat", "scheduled", "library", "knowledge", "plugins", "projects", "channels", "compare", "evaluations"] as const;
+export const SIDEBAR_ITEMS = ["newChat", "scheduled", "notes", "calendar", "library", "knowledge", "plugins", "projects", "channels", "compare", "evaluations"] as const;
 export type SidebarItem = (typeof SIDEBAR_ITEMS)[number];
 
 /** Account intent for durable notices. The in-app center always works; browser popups are opt-in. */

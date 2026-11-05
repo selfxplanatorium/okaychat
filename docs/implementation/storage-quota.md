@@ -3,6 +3,11 @@
 Each account has one limit: `OKAYCHAT_STORAGE_LIMIT` bytes (default 1 GiB), overridden by nullable
 `users.storage_limit` through the admin API/UI. `GET /api/storage` returns `{ used, limit, defaultLimit }`.
 
+Notes count their stored title and body bytes; calendar events count title, description, location, and
+URL bytes. Tags, FTS copies, source pointers, reminder ledger rows, zones, offsets, and hashes are
+bounded metadata and are not charged. Creates charge the full payload, edits charge net growth in the
+same transaction, and deletes/shrinks work over quota.
+
 ## Accounting
 
 `src/server/quota.ts` computes usage from the owning account's rows:

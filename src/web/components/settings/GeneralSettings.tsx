@@ -25,6 +25,8 @@ const toolModels = (m: ChatTargetInfo) => !isAgentTarget(m) && m.toolCall;
 const SIDEBAR_LABELS = {
   newChat: "general.sidebarNewChat",
   scheduled: "general.sidebarScheduled",
+  notes: "general.sidebarNotes",
+  calendar: "general.sidebarCalendar",
   library: "general.sidebarLibrary",
   knowledge: "general.sidebarKnowledge",
   plugins: "general.sidebarPlugins",

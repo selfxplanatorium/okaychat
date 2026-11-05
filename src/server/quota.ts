@@ -149,6 +149,12 @@ export function storageUsedSql(user: string): string {
       FROM custom_tools WHERE user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(${CUSTOM_LIMITS.resultReservation}), 0)
       FROM custom_tool_runs WHERE user_id = ${user}
+    -- Notes and calendar events are ordinary account text; only their visible text columns count.
+    UNION ALL SELECT COALESCE(SUM(length(CAST(title AS BLOB)) + length(CAST(body AS BLOB))), 0)
+      FROM notes WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(length(CAST(title AS BLOB)) + length(CAST(description AS BLOB))
+      + length(CAST(location AS BLOB)) + length(CAST(url AS BLOB))), 0)
+      FROM calendar_events WHERE user_id = ${user}
   )), 0)`;
 }
 

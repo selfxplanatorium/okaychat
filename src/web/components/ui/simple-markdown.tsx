@@ -9,6 +9,7 @@ import { InlineMath, MathBlock } from "./math";
 import { MermaidDiagram } from "./mermaid-diagram";
 import { cn } from "@/lib/utils";
 import { isKnowledgeHref } from "@/lib/knowledge-citation";
+import { markdownImageSource } from "@/lib/markdown-image-policy";
 
 // Markdown outside a message part (artifact previews, sub-agent reports). Message text uses MarkdownText,
 // which needs the assistant-ui part context.
@@ -39,10 +40,19 @@ const components = {
 
 const remarkPlugins = [remarkGfm, remarkMath];
 
-export function SimpleMarkdown({ children, className }: { children: string; className?: string }) {
+/** Standalone notes deny app-owned image routes: a copied note never gains a new media grant. */
+function InertAppImage({ src, alt }: React.ComponentProps<"img">) {
+  const source = markdownImageSource(typeof src === "string" ? src : undefined);
+  if (source.kind === "app") return <span className="text-muted-foreground">{alt?.trim() || "image"}</span>;
+  return <ProtectedMarkdownImage src={src} alt={alt} />;
+}
+
+const noteComponents = { ...components, img: InertAppImage };
+
+export function SimpleMarkdown({ children, className, imagePolicy = "all" }: { children: string; className?: string; imagePolicy?: "all" | "remote" }) {
   return (
     <div className={cn(MARKDOWN_CLASSES, className)}>
-      <Markdown remarkPlugins={remarkPlugins} components={components}>
+      <Markdown remarkPlugins={remarkPlugins} components={imagePolicy === "remote" ? noteComponents : components}>
         {preprocessMarkdown(children)}
       </Markdown>
     </div>

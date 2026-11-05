@@ -4,6 +4,11 @@ Server semantics live in `src/server/permissions/` and `src/shared/permissions.t
 specification this worktree implements. This page documents the shipped admin/user surfaces and the
 deliberate limits of the first pass.
 
+`notes` and `calendar` are ordinary feature keys with default `true` and no dependencies. Their routes
+and stores resolve the all-model account decision (`modelRef = null`); a model-specific grant never
+unlocks either workspace, and the reminder ticker rechecks `calendar` at delivery time. Denial keeps
+stored content and its quota charge so an administrator can re-enable the feature for cleanup.
+
 ## Routes
 
 `permissionRoutes` is mounted at `/api` by `src/server/routes.ts`. Admin routes require a live admin role

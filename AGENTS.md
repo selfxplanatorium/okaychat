@@ -47,6 +47,8 @@ src/server/
   n8n/                Webhook chat targets: encrypted definitions, public-only single POST transport, bounded parser, remote sessions and honest request counters
   research.ts         Deep research: plan → collect (web-only workers) → review loop before the reply, its tool definition and findings
   channels/           Team channels: access, synchronous store, REST, resumable events, search, notifications, AI binding/worker, maintenance
+  notes/              Personal notes: revision CAS, idempotent creates, flat tags, FTS list/search, message/artifact source copies
+  calendar/           Personal calendar: timed/all-day stores, range/search, authoritative time resolve, reminder ledger, 30 s ticker
   appearance.ts       Validated per-user appearance API (preferences + custom themes inside user_settings)
   account.ts          Account display name and private profile pictures (re-encoded WebP in the media store)
   memory.ts           Encrypted account/project memories, BM25 retrieval, summaries in the prompt, past-chat search, model tools, import/export
@@ -99,10 +101,12 @@ src/web/
   components/genui    Generative UI catalog (render_spec components) and widget toolkit
   components/settings Settings pages (EmailSettings.tsx is the account wizard); theme/ holds the T3Code theme library, editor panel, color picker, inspector
   components/custom-tools  Plugins → Custom tools workspace: list, editor, schema builder, secret headers, test/review/result cards
+  components/notes    Notes workspace, autosaving editor, safe preview, conflict/outbox recovery, source actions, composer handoff
+  components/calendar Calendar workspace, agenda/month/week, explicit-save event dialog, zone and fold/gap fields, reminder offsets
   components/share    Public share page and share button
   theme/              T3Code theme engine port (see its README); bundled-fonts.ts lists the shipped font families; depth.css holds the depth utilities
   fonts/              Bundled Liberation TTFs and their CSS (see docs/implementation/bundled-fonts.md)
-  state/              zustand stores (data, appearance, fonts, thread meta); appearance-sync.ts handles account cache and outbox
+  state/              zustand stores (data, appearance, fonts, thread meta, notes, calendar, note-chat-handoff); appearance-sync.ts handles account cache and outbox
   speech/             Read-aloud and dictation adapters, recorder, Markdown-to-speech text, composer voice effects
   speech/call/        Voice call state machine, VAD, sentence chunker, jitter/AudioWorklets, controller, Realtime adapter, call view
   i18n/               t(), English catalog per area (en/), locale-aware formatters (format.ts), <Trans>, future locales/
@@ -113,6 +117,7 @@ sandbox/              Code sandbox container: runner.py (stdlib HTTP service, bu
 docker/               SearXNG settings, browser worker entrypoint and firewall
 test/integration/     Real-container suites (sandbox isolation, worker egress, tools); run.sh builds `:it` images and an isolated compose project
 src/shared/types.ts   Types shared by both sides
+src/shared/notes.ts, calendar.ts, calendar-time.ts  Note/event contracts, limits, and pure date/zone arithmetic
 src/shared/appearance.ts  Appearance schema and shared types
 docs/                 Reusable documentation (see below)
 ```
@@ -155,6 +160,8 @@ docs/                 Reusable documentation (see below)
 - `docs/implementation/saved-prompts.md`: personal templates, the variable grammar, the combined picker, slash insertion, revision conflicts, and quota.
 - `docs/implementation/share-links.md`: several links per chat, live vs frozen, expiry, passwords and the unlock cookie, asset allowlists, view counts, quota.
 - `docs/implementation/thread-tags.md`: flat tag rules, storage, filter semantics, presets, copy-on-branch.
+- `docs/implementation/notes.md`: note storage, CAS/idempotency, tags, FTS search, source copies, autosave/outbox, composer handoff.
+- `docs/implementation/calendar.md`: time model and resolver, all-day bounds, range API, reminder ledger/ticker, notices, views.
 - `docs/implementation/notifications.md`: creation points, source-key dedupe, retention, polling, browser permission, the no-Web-Push limit, service-worker clicks.
 - `docs/implementation/model-comparison.md`: hidden pane threads, why `/api/chat` is reused, server persistence, promotion, caps and retention.
 - `docs/implementation/message-annotations.md`: private bookmarks and feedback, the persistence gate, the jump contract, comment encryption, conflicts, and the changed-reply notice.
@@ -249,6 +256,8 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 - Deep research (`research.ts`, composer toggle `state/chat-research.ts`, sent as `config.deepResearch`) runs inside `turnStream()` before the chat model, only when the request ends with a user message. It writes the reply's `start` chunk and a `tool-deep_research` part itself, then merges the model stream with `sendStart: false`; the chat model writes the report from the findings as the synthetic tool result. Workers get only `web_search`/`web_fetch` built in `research.ts` (never `delegate_task` or `readOnlyTools`). Research spends the reply's `SearchBudget` and `StepBudget`; its output's `steps`/`searches` are added back by the continuation counters. The `deep_research` tool is listed only from a chat's first research turn on, to keep other chats' tool block. See `docs/implementation/deep-research.md`.
 - `maxSteps` (default 20) and `maxSearches` (default 5) are independent. A turn and all its delegates share ONE `SearchBudget` and the same built-in web tools object; create it before constructing either tool set. Browser-tool continuations recover search counts from current-turn tool history. Page reads do not consume search queries.
 
+- Notes (`src/server/notes/`, `docs/implementation/notes.md`) and calendar (`src/server/calendar/`) are private account workspaces, never chat rows. Both are feature-guarded on every route and again in every store function; they never enter prompts, memory, knowledge, project context, shares, archives, or message search. Notes/event text is ordinary unencrypted account text. Notes autosave through one captured CAS payload at a time and keep a plaintext per-account outbox; events use explicit save. `sourceAvailable` on a note is a live owned-row lookup, not an access grant. Note-to-chat is a single-use account-bound handoff into a new composer only. The calendar reminder ledger is the durable terminal state, separate from notices: a dismissed notice never re-arms it, delivery marks the ledger in the same transaction as `notify`, and the ticker starts only from `index.ts` (never on import). All-day bounds use the first valid minute of each local date; `/api/calendar/resolve-time` is authoritative for gaps/folds and is rate-limited in-process. See `docs/implementation/notes.md` and `docs/implementation/calendar.md`.
+- The `notes` and `calendar` feature keys default true, have no dependencies, and resolve with `modelRef = null` for routes and the ticker. The sidebar default list includes both; an explicit stored `sidebarItems` array is preserved exactly. `/notes`, `/notes/:id`, and `/calendar` are dedicated lazy routes, never the chat fallback.
 - All web UI text comes from `t("namespace.key")` (`src/web/i18n/`); the English files in `i18n/en/` are the source catalog, one namespace per area. Never hardcode visible text, aria labels, placeholders, or web-side error messages, and never build sentences from translated fragments (use `{placeholders}`, plural entries, or `<Trans>`). Numbers, dates, sizes, costs, and lists go through `i18n/format.ts`, not `toLocaleString`/`toFixed`. Keys are literal in code (the test fails on unused keys), and `t()` never runs at module top level: store a `PlainMessageKey` and call `t()` at render. Model-facing text, server error messages, and proper names stay English. See `docs/implementation/i18n.md`.
 
 - Startup requests start in parallel from `App.tsx` once `/auth/status` returns a user. A new startup request belongs there (`prefetch` + `takePrefetched`), not in a mount effect, or it adds a round trip. Lazy routes use `preloadable()`, not bare `React.lazy`, which holds its fallback for up to 300 ms. See `docs/implementation/web-bundle.md`.

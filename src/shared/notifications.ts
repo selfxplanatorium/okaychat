@@ -3,7 +3,7 @@
  * so a notice can never carry a prompt, model output, provider body, or another account's text.
  */
 
-export const NOTIFICATION_KINDS = ["schedule", "import", "export", "channel"] as const;
+export const NOTIFICATION_KINDS = ["schedule", "import", "export", "channel", "calendar"] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
 export const NOTIFICATION_LEVELS = ["info", "success", "error"] as const;
@@ -21,6 +21,7 @@ export const NOTIFICATION_TITLE_KEYS = [
   "channel.mention",
   "channel.message",
   "channel.aiFinished",
+  "calendar.reminder",
 ] as const;
 export type NotificationTitleKey = (typeof NOTIFICATION_TITLE_KEYS)[number];
 
@@ -34,6 +35,7 @@ export const NOTIFICATION_BODY_KEYS = [
   "import.failedBody",
   "channel.openRoom",
   "channel.openMessage",
+  "calendar.openEvent",
 ] as const;
 export type NotificationBodyKey = (typeof NOTIFICATION_BODY_KEYS)[number];
 
@@ -49,6 +51,8 @@ export interface AppNotification {
   /** The room whose ACL governs this notice; null for private-chat notices. */
   channelId?: string | null;
   channelMessageId?: string | null;
+  /** The calendar event a reminder notice opens; null for every other kind. */
+  calendarEventId?: string | null;
   /** An app path the notice opens, or null. Always a same-origin path. */
   actionPath: string | null;
   readAt: number | null;

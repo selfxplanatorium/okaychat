@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useLocation } from "wouter";
-import { BellIcon, CalendarClockIcon, DownloadIcon, InfoIcon, MessagesSquareIcon, UploadIcon } from "lucide-react";
+import { BellIcon, CalendarClockIcon, CalendarDaysIcon, DownloadIcon, InfoIcon, MessagesSquareIcon, UploadIcon } from "lucide-react";
 import type { AppNotification } from "@shared/notifications";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -30,6 +30,7 @@ const KIND_ICONS = {
   import: UploadIcon,
   export: DownloadIcon,
   channel: MessagesSquareIcon,
+  calendar: CalendarDaysIcon,
 } as const;
 
 function NotificationRow({ item }: { item: AppNotification }) {

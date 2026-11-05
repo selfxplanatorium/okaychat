@@ -28,6 +28,8 @@ export const FEATURE_NAMES: Record<FeatureKey, string> = {
   evaluations: "evaluations",
   channels: "team channels",
   customTools: "custom tools",
+  notes: "notes",
+  calendar: "calendar",
 };
 
 export interface Actor {

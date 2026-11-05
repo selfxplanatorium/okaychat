@@ -27,6 +27,7 @@ import { startCompareMaintenance } from "./compare.js";
 import { initChannelWorker } from "./channels/worker.js";
 import { startChannelMaintenance } from "./channels/maintenance.js";
 import { initCustomTools, startCustomToolMaintenance } from "./custom-tools/maintenance.js";
+import { startCalendarMaintenance } from "./calendar/maintenance.js";
 import { speechToken, speechWorkerConfigured } from "./speech/worker.js";
 import { voiceWebSocketServer } from "./voice/routes.js";
 
@@ -104,6 +105,8 @@ serve({ fetch: app.fetch, port: env.port, hostname: env.host, websocket: { serve
   // Channel AI work never resumes: open rows become interrupted, keeping their last checkpoint.
   initChannelWorker();
   startChannelMaintenance();
+  // Calendar reminders: one catch-up batch, then every 30 seconds. Never on import.
+  startCalendarMaintenance();
   // Moves legacy image BLOBs/inline chat images to files in small steps, then collects orphaned media.
   startMediaMaintenance();
   initCustomTools();

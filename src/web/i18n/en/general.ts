@@ -4,6 +4,8 @@ export default {
   sidebarDescription: "Choose the shortcuts shown above your chats. Search and settings are always available.",
   sidebarNewChat: "New chat",
   sidebarScheduled: "Scheduled",
+  sidebarNotes: "Notes",
+  sidebarCalendar: "Calendar",
   sidebarLibrary: "Library",
   sidebarKnowledge: "Knowledge",
   sidebarPlugins: "Plugins",

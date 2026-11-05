@@ -7,7 +7,7 @@ import { SIDEBAR_ITEMS } from "@shared/types";
 import { useChatPrivacyStore } from "@/state/chat-privacy";
 import { KnowledgeControl } from "@/components/knowledge/KnowledgeSelector";
 import { ChatSearch } from "./ChatSearch";
-import { CalendarClockIcon, BookOpenIcon, FlaskConicalIcon, FolderIcon, GitCompareArrowsIcon, LibraryIcon, LogOutIcon, MessagesSquareIcon, PanelLeftIcon, PlusIcon, PuzzleIcon, SearchIcon, SettingsIcon, SquarePenIcon, UserRoundIcon } from "lucide-react";
+import { CalendarClockIcon, CalendarDaysIcon, BookOpenIcon, FlaskConicalIcon, FolderIcon, GitCompareArrowsIcon, LibraryIcon, LogOutIcon, MessagesSquareIcon, NotebookPenIcon, PanelLeftIcon, PlusIcon, PuzzleIcon, SearchIcon, SettingsIcon, SquarePenIcon, UserRoundIcon } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { ThreadList, ThreadSelectionBar } from "@/components/assistant-ui/elements/thread-list.aui";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
@@ -103,6 +103,8 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
               }}><SquarePenIcon className="size-4 shrink-0" /> {t("common.newChat")}</button>}
               {([
                 { id: "scheduled", label: "sidebar.scheduled", href: "/scheduled", icon: CalendarClockIcon, create: { command: "nav.createSchedule", label: "ux.newScheduleQuick", href: "/scheduled?new=1" } },
+                { id: "notes", label: "sidebar.notes", href: "/notes", icon: NotebookPenIcon, create: { command: "notes.create", label: "notes.new", href: "/notes?new=1" } },
+                { id: "calendar", label: "sidebar.calendar", href: "/calendar", icon: CalendarDaysIcon, create: { command: "calendar.create", label: "calendar.new", href: "/calendar?new=1" } },
                 { id: "library", label: "sidebar.library", href: "/library", icon: LibraryIcon },
                 { id: "knowledge", label: "sidebar.knowledge", href: "/knowledge", icon: BookOpenIcon },
                 { id: "plugins", label: "sidebar.plugins", href: "/plugins", icon: PuzzleIcon },
@@ -114,7 +116,7 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
                 <div key={item.id} className="flex items-center gap-0.5">
                   <Link
                     href={item.href}
-                    aria-current={(item.id === "channels" ? location === "/channels" || location.startsWith("/channels/") : location === item.href) ? "page" : undefined}
+                    aria-current={(item.id === "channels" ? location === "/channels" || location.startsWith("/channels/") : item.id === "notes" ? location.startsWith("/notes") : item.id === "calendar" ? location.startsWith("/calendar") : location === item.href) ? "page" : undefined}
                     className={cn(rowClass, "min-w-0 flex-1")}
                     // Start the Library's first page while the pointer heads for the click, so it opens with data.
                     {...(item.id === "library" ? { onPointerEnter: prefetchLibrary, onFocus: prefetchLibrary, onPointerDown: prefetchLibrary } : {})}

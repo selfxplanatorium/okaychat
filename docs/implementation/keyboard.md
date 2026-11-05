@@ -17,6 +17,16 @@ Every feature can be used without a pointer. Three layers make that work:
 | `src/web/components/settings/KeyboardSettings.tsx` | Settings → Keyboard: recorder, conflicts, send key, single-key switch |
 | `src/web/keyboard/keys.test.ts` | Matching across layouts, browser conflicts, and a check that no default clashes |
 
+## Notes and calendar
+
+`nav.notes` and `nav.calendar` register in the shell regardless of whether the sidebar shortcut is
+visible. `notes.*`, `message.saveNote`, `artifact.saveNote`, and `calendar.*` use empty default
+bindings, so adding them never creates a browser conflict; users can assign combos in Settings →
+Keyboard. Context commands register only while their page, message menu, artifact card, or dialog is
+mounted. The calendar month grid keeps one roving day tab stop: arrows move by day/week, Home/End by
+week, PageUp/PageDown by month, Enter opens the day agenda, and Space opens a new event for that day.
+Textareas in the note editor and event dialog keep normal Enter/Tab editing.
+
 ## Combo format
 
 `Mod+Shift+K`, `Alt+Shift+ArrowUp`, `?`, `F2`. Modifiers in the order `Mod`, `Ctrl`, `Alt`, `Shift`. `Mod` is ⌘ on Apple devices and Ctrl elsewhere; `Ctrl` is only the real Control key on a Mac. `Plus` stands for the + key.

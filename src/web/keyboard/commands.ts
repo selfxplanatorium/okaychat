@@ -7,7 +7,7 @@ import { normalizeCombo } from "./keys";
  * Ctrl/⌘+Shift+letter is almost entirely taken by browsers (see `browserConflict`), plus single keys
  * for message navigation, which only fire outside text fields. Ctrl+Alt is avoided: it is AltGr on Windows.
  */
-export type CommandGroup = "General" | "Navigation" | "Chat" | "Composer" | "Messages" | "Settings";
+export type CommandGroup = "General" | "Navigation" | "Chat" | "Composer" | "Messages" | "Notes" | "Calendar" | "Settings";
 
 export interface CommandDef {
   id: string;
@@ -81,6 +81,8 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "channels.stopAi", labelKey: "keyboard.cmdChannelsStopAi", group: "Messages", keys: [] },
   { id: "nav.compare", labelKey: "keyboard.cmdNavCompare", group: "Navigation", keys: [] },
   { id: "nav.evaluations", labelKey: "keyboard.cmdNavEvaluations", group: "Navigation", keys: [] },
+  { id: "nav.notes", labelKey: "keyboard.cmdNavNotes", group: "Navigation", keys: [] },
+  { id: "nav.calendar", labelKey: "keyboard.cmdNavCalendar", group: "Navigation", keys: [] },
   { id: "evaluations.stopRun", labelKey: "keyboard.cmdEvaluationsStop", group: "Chat", keys: [] },
   { id: "evaluations.refreshRun", labelKey: "keyboard.cmdEvaluationsRefresh", group: "Chat", keys: [] },
   { id: "tags.filter", labelKey: "keyboard.cmdTagsFilter", group: "Navigation", keys: [] },
@@ -114,6 +116,33 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "chat.exportArchive", labelKey: "keyboard.cmdChatExportArchive", group: "Chat", keys: [] },
   { id: "chat.voiceCall", labelKey: "keyboard.cmdChatVoiceCall", group: "Chat", keys: [] },
   { id: "chat.resetAgentSession", labelKey: "keyboard.cmdChatResetAgentSession", group: "Chat", keys: [] },
+  { id: "message.saveNote", labelKey: "keyboard.cmdMessageSaveNote", group: "Messages", keys: [] },
+  { id: "artifact.saveNote", labelKey: "keyboard.cmdArtifactSaveNote", group: "Messages", keys: [] },
+
+  { id: "notes.create", labelKey: "keyboard.cmdNotesCreate", group: "Notes", keys: [] },
+  { id: "notes.search", labelKey: "keyboard.cmdNotesSearch", group: "Notes", keys: [] },
+  { id: "notes.preview", labelKey: "keyboard.cmdNotesPreview", group: "Notes", keys: [] },
+  { id: "notes.favorite", labelKey: "keyboard.cmdNotesFavorite", group: "Notes", keys: [] },
+  { id: "notes.pin", labelKey: "keyboard.cmdNotesPin", group: "Notes", keys: [] },
+  { id: "notes.tags", labelKey: "keyboard.cmdNotesTags", group: "Notes", keys: [] },
+  { id: "notes.project", labelKey: "keyboard.cmdNotesProject", group: "Notes", keys: [] },
+  { id: "notes.toChat", labelKey: "keyboard.cmdNotesToChat", group: "Notes", keys: [] },
+  { id: "notes.delete", labelKey: "keyboard.cmdNotesDelete", group: "Notes", keys: [] },
+  { id: "notes.retrySave", labelKey: "keyboard.cmdNotesRetrySave", group: "Notes", keys: [] },
+  { id: "notes.copyLocal", labelKey: "keyboard.cmdNotesCopyLocal", group: "Notes", keys: [] },
+
+  { id: "calendar.create", labelKey: "keyboard.cmdCalendarCreate", group: "Calendar", keys: [] },
+  { id: "calendar.search", labelKey: "keyboard.cmdCalendarSearch", group: "Calendar", keys: [] },
+  { id: "calendar.today", labelKey: "keyboard.cmdCalendarToday", group: "Calendar", keys: [] },
+  { id: "calendar.previous", labelKey: "keyboard.cmdCalendarPrevious", group: "Calendar", keys: [] },
+  { id: "calendar.next", labelKey: "keyboard.cmdCalendarNext", group: "Calendar", keys: [] },
+  { id: "calendar.agenda", labelKey: "keyboard.cmdCalendarAgenda", group: "Calendar", keys: [] },
+  { id: "calendar.month", labelKey: "keyboard.cmdCalendarMonth", group: "Calendar", keys: [] },
+  { id: "calendar.week", labelKey: "keyboard.cmdCalendarWeek", group: "Calendar", keys: [] },
+  { id: "calendar.zone", labelKey: "keyboard.cmdCalendarZone", group: "Calendar", keys: [] },
+  { id: "calendar.save", labelKey: "keyboard.cmdCalendarSave", group: "Calendar", keys: [] },
+  { id: "calendar.delete", labelKey: "keyboard.cmdCalendarDelete", group: "Calendar", keys: [] },
+  { id: "calendar.copyLocal", labelKey: "keyboard.cmdCalendarCopyLocal", group: "Calendar", keys: [] },
 
   { id: "composer.model", labelKey: "keyboard.cmdComposerModel", group: "Composer", keys: ["Alt+Shift+M"] },
   { id: "composer.assistant", labelKey: "keyboard.cmdComposerAssistant", group: "Composer", keys: [] },
@@ -210,11 +239,12 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "call.refresh", labelKey: "keyboard.cmdCallRefresh", group: "Chat", keys: [], scope: "global" },
 ];
 
-export const COMMAND_GROUPS: readonly CommandGroup[] = ["General", "Navigation", "Chat", "Composer", "Messages", "Settings"];
+export const COMMAND_GROUPS: readonly CommandGroup[] = ["General", "Navigation", "Chat", "Composer", "Messages", "Notes", "Calendar", "Settings"];
 
 const GROUP_LABELS = {
   General: "keyboard.groupGeneral", Navigation: "keyboard.groupNavigation", Chat: "keyboard.groupChat",
-  Composer: "keyboard.groupComposer", Messages: "keyboard.groupMessages", Settings: "keyboard.groupSettings",
+  Composer: "keyboard.groupComposer", Messages: "keyboard.groupMessages", Notes: "keyboard.groupNotes",
+  Calendar: "keyboard.groupCalendar", Settings: "keyboard.groupSettings",
 } as const satisfies Record<CommandGroup, PlainMessageKey>;
 
 export const commandLabel = (c: CommandDef) => t(c.labelKey);
