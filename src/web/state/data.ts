@@ -5,6 +5,9 @@ import { api, prefetch } from "@/lib/api";
 import { setLibraryAccount } from "./library-cache";
 import { clearMessageEdits } from "./message-edits";
 import { setAnnotationsAccount } from "./message-annotations";
+import { applyAccountLocale } from "@/i18n/account-locale";
+import { setTranslationsAccount } from "./message-translations";
+import { closeTranslationDialog } from "./translation-dialog";
 import { setSavedPromptsAccount } from "./saved-prompts";
 import { closePromptPicker } from "./prompt-picker";
 import { closeFeedback } from "./feedback-dialog";
@@ -94,6 +97,8 @@ export const useData = create<DataState>((set, get) => ({
     ]);
     const active = get().activeProject;
     set({ me, settings, providers, models, mcp, projects, storage, loaded: true, ...(active && !projects.some((p) => p.id === active) ? { activeProject: null } : {}) });
+    // The account language wins over a browser guess made before the API answered; this reloads at most once.
+    applyAccountLocale(me.id, settings.locale ?? null);
   },
   refreshProviders: async () => {
     const [providers, models] = await Promise.all([api<ProviderInfo[]>("/providers"), api<ChatTargetInfo[]>("/models")]);
@@ -234,9 +239,11 @@ export function preloadData(userId: string) {
     // Private prompts and annotations belong to the account that fetched them, never the next session.
     setSavedPromptsAccount(userId);
     setAnnotationsAccount(userId);
+    setTranslationsAccount(userId);
     closePromptPicker();
     closeFeedback();
     closeBookmarks();
+    closeTranslationDialog();
     useMessageJump.getState().clear();
   }
   // The service registry is optional data: it starts alongside the rest and never holds up the chat.

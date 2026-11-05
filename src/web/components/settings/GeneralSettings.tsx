@@ -1,6 +1,7 @@
 import { Loader2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { REASONING_EFFORTS } from "@shared/reasoning";
+import { TRANSLATION_LANGUAGES } from "@shared/locale-tag";
 import { isAgentTarget } from "@shared/n8n-agents";
 import { DEFAULT_USER_SETTINGS, SIDEBAR_ITEMS, type ChatTargetInfo, type NotificationSettings } from "@shared/types";
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,9 @@ import { EffortIcon } from "../chat/EffortIcon";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { t } from "@/i18n";
-import { formatPercent } from "@/i18n/format";
+import { compareText, formatLanguageName, formatPercent } from "@/i18n/format";
+import { saveLocalePreference } from "@/i18n/account-locale";
+import { shippedLocales } from "@/i18n/locales";
 import { useServices } from "@/state/services";
 import { ServiceAvailability } from "@/components/ServiceAvailability";
 import { useData } from "@/state/data";
@@ -43,6 +46,11 @@ export function GeneralSettings() {
   const [confirmEditReplies, setConfirmEditReplies] = useState(false);
   const [savingEditSetting, setSavingEditSetting] = useState(false);
   const [editSettingError, setEditSettingError] = useState<string | null>(null);
+  const [language, setLanguage] = useState(settings?.locale ?? "");
+  const [savingLanguage, setSavingLanguage] = useState(false);
+  const [languageError, setLanguageError] = useState<string | null>(null);
+  const [savingTranslation, setSavingTranslation] = useState(false);
+  const [translationError, setTranslationError] = useState<string | null>(null);
   const [savingNotifications, setSavingNotifications] = useState(false);
   const [notificationError, setNotificationError] = useState<string | null>(null);
   const [notificationBlocked, setNotificationBlocked] = useState(false);
@@ -50,6 +58,19 @@ export function GeneralSettings() {
   const sandbox = sandboxStatus ? { configured: sandboxStatus.state !== "unconfigured", reachable: sandboxStatus.state === "up" || sandboxStatus.state === "degraded", refuses: sandboxStatus.reasonKey === "refuses" } : null;
   useEffect(() => setPrompt(settings?.systemPrompt ?? ""), [settings?.systemPrompt]);
   if (!settings) return null;
+  // English first ("Use browser language"), then every shipped language by its own name in this language.
+  const languageChoices = [
+    { value: "", label: t("general.languageBrowser") },
+    ...shippedLocales()
+      .map((tag) => ({ value: tag, label: formatLanguageName(tag) }))
+      .sort((a, b) => compareText(a.label, b.label)),
+  ];
+  const translationChoices = [
+    { value: "", label: t("general.translateIntoUi") },
+    ...[...TRANSLATION_LANGUAGES]
+      .map((tag) => ({ value: tag, label: formatLanguageName(tag) }))
+      .sort((a, b) => compareText(a.label, b.label)),
+  ];
   const closeEditConfirm = () => {
     setEditSettingError(null);
     setConfirmEditReplies(false);
@@ -84,6 +105,38 @@ export function GeneralSettings() {
     return saveNotifications({ ...notifications, browser: true });
   };
 
+  const saveLanguage = async (next: string) => {
+    if (savingLanguage) return;
+    const previous = language;
+    setLanguage(next);
+    setSavingLanguage(true);
+    setLanguageError(null);
+    try {
+      // Success reloads the page with the new chunk; only a failure returns here.
+      await saveLocalePreference(next || null);
+    } catch (error) {
+      setLanguage(previous);
+      setSavingLanguage(false);
+      setLanguageError(t("general.languageFailed", { error: error instanceof Error ? error.message : t("common.somethingWentWrong") }));
+    }
+  };
+
+  const saveTranslationSetting = async (next: boolean) => {
+    if (savingTranslation) return;
+    const previous = settings.translateMessages !== false;
+    setSavingTranslation(true);
+    setTranslationError(null);
+    try {
+      await update({ translateMessages: next });
+    } catch (error) {
+      // `updateSettings` applies its patch before the request; a rejected save must not look like it worked.
+      useData.setState((s) => ({ settings: s.settings ? { ...s.settings, translateMessages: previous } : s.settings }));
+      setTranslationError(t("general.translateMessagesFailed", { error: error instanceof Error ? error.message : t("common.somethingWentWrong") }));
+    } finally {
+      setSavingTranslation(false);
+    }
+  };
+
   const saveEditSetting = async (next: boolean) => {
     if (savingEditSetting) return;
     const previous = editRepliesOn;
@@ -103,6 +156,30 @@ export function GeneralSettings() {
 
   return (
     <SettingsPage title={t("general.title")}>
+      <SettingsSection title={t("general.languageTitle")} description={t("general.languageDescription")}>
+        <SettingsRow
+          id="setting-language"
+          label={t("general.languageLabel")}
+          description={
+            <>
+              <span className="block">{t("general.languageDescription")}</span>
+              <span className="mt-1 block">{t("general.languageNote")}</span>
+            </>
+          }
+          control={
+            <Select
+              aria-label={t("general.languageLabel")}
+              className="w-full md:w-80"
+              value={language}
+              disabled={savingLanguage}
+              onValueChange={(value) => void saveLanguage(value)}
+              options={languageChoices}
+            />
+          }
+        />
+        {languageError && <p role="alert" className="text-destructive px-4 pb-3 text-xs">{languageError}</p>}
+      </SettingsSection>
+
       <SettingsSection title={t("general.sidebarTitle")} description={t("general.sidebarDescription")}>
         {SIDEBAR_ITEMS.map((item) => (
           <SettingsRow
@@ -192,6 +269,38 @@ export function GeneralSettings() {
           reset={settings.maxSearches !== DEFAULT_USER_SETTINGS.maxSearches ? () => update({ maxSearches: DEFAULT_USER_SETTINGS.maxSearches }) : null}
           control={<SettingsSlider label={t("general.maxWebSearches")} value={settings.maxSearches} min={0} max={50} step={1} onChange={(v) => update({ maxSearches: v })} />}
         />
+      </SettingsSection>
+
+      <SettingsSection title={t("general.translationTitle")}>
+        <SettingsRow
+          id="setting-translate-messages"
+          label={t("general.translateMessages")}
+          description={t("general.translateMessagesDescription")}
+          control={
+            <Switch
+              aria-label={t("general.translateMessages")}
+              checked={settings.translateMessages !== false}
+              disabled={savingTranslation}
+              onCheckedChange={(checked) => void saveTranslationSetting(checked)}
+            />
+          }
+        />
+        <SettingsRow
+          id="setting-translation-target"
+          label={t("general.translateInto")}
+          description={t("general.translateIntoDescription")}
+          control={
+            <Select
+              aria-label={t("general.translateInto")}
+              className="w-full md:w-80"
+              value={settings.translationTarget ?? ""}
+              disabled={settings.translateMessages === false}
+              onValueChange={(value) => void update({ translationTarget: value || null })}
+              options={translationChoices}
+            />
+          }
+        />
+        {translationError && <p role="alert" className="text-destructive px-4 pb-3 text-xs">{translationError}</p>}
       </SettingsSection>
 
       <SettingsSection title={t("general.editingTitle")}>

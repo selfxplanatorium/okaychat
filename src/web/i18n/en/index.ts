@@ -46,6 +46,7 @@ import skills from "./skills";
 import tags from "./tags";
 import speech from "./speech";
 import thread from "./thread";
+import translation from "./translation";
 import tools from "./tools";
 import ui from "./ui";
 import usage from "./usage";
@@ -100,6 +101,7 @@ export const en = {
   tags,
   speech,
   thread,
+  translation,
   tools,
   ui,
   usage,

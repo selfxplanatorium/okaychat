@@ -70,3 +70,5 @@ Commands: `message.editReply` (Y while a message has focus, also in the message 
 - Tool outputs, reasoning, files, and sources are never editable.
 - Editing a reply does not regenerate it, create a branch, or change its model metadata or usage. Usage and cost stay attached to the original generation.
 - A compacted summary always describes the text that was summarized; reply editing cannot rewrite the summary.
+
+Editing a reply changes its text parts, so the hash a translation was cached under no longer matches: the next Translate is a cache miss and regenerates the translation, and Undo regenerates again. See `message-translation.md`.

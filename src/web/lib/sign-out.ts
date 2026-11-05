@@ -6,6 +6,8 @@ import { clearMessageEdits } from "@/state/message-edits";
 import { useN8nAgents } from "@/state/n8n-agents";
 import { clearStoredMessages } from "@/runtime/message-persistence";
 import { setAnnotationsAccount } from "@/state/message-annotations";
+import { setTranslationsAccount } from "@/state/message-translations";
+import { closeTranslationDialog } from "@/state/translation-dialog";
 import { setSavedPromptsAccount } from "@/state/saved-prompts";
 import { closePromptPicker } from "@/state/prompt-picker";
 import { closeFeedback } from "@/state/feedback-dialog";
@@ -24,6 +26,8 @@ export async function signOut() {
   clearStoredMessages();
   setSavedPromptsAccount(null);
   setAnnotationsAccount(null);
+  setTranslationsAccount(null);
+  closeTranslationDialog();
   closePromptPicker();
   closeFeedback();
   closeBookmarks();

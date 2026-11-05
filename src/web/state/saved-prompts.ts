@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { SavedPrompt, SavedPromptWrite } from "@shared/saved-prompts";
 import { api } from "@/lib/api";
+import { compareText } from "@/i18n/format";
 
 // The account's saved prompts, in memory only. Loaded on first use of the picker or slash menu, never at startup.
 // An account generation revokes late answers for a previous account; a mutation epoch keeps a GET that started
@@ -22,7 +23,8 @@ let generation = 0;
 let mutations = 0;
 let inflight: Promise<void> | null = null;
 
-const byName = (a: SavedPrompt, b: SavedPrompt) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+const idOrder = (a: SavedPrompt, b: SavedPrompt) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+const byName = (a: SavedPrompt, b: SavedPrompt) => compareText(a.name, b.name) || idOrder(a, b);
 
 /** Called when the signed-in account is known or changes (null on sign-out). */
 export function setSavedPromptsAccount(userId: string | null) {

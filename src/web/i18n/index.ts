@@ -44,7 +44,7 @@ export type Translation = {
 };
 
 export const SOURCE_LOCALE = "en";
-const STORAGE_KEY = "okaychat:locale";
+export const LOCALE_STORAGE_KEY = "okaychat:locale";
 
 let overrides: Translation = {};
 const sourcePlurals = new Intl.PluralRules(SOURCE_LOCALE);
@@ -101,7 +101,7 @@ export function matchLocale(preferred: readonly string[], available: readonly st
 
 const stored = () => {
   try {
-    return localStorage.getItem(STORAGE_KEY);
+    return localStorage.getItem(LOCALE_STORAGE_KEY);
   } catch {
     return null;
   }
@@ -149,11 +149,15 @@ export function textDirection(tag: string): "ltr" | "rtl" {
   return /^(ar|fa|he|ps|ur|yi|dv|ckb|sd|ug)(-|$)/i.test(tag) ? "rtl" : "ltr";
 }
 
-/** Stores the user's language choice (`null` follows the browser) and reloads, since text is read once per page. */
+/**
+ * Stores the device language choice (`null` follows the browser) and reloads, since text is read once per
+ * page. `account-locale.ts` is the only caller that should save an account language; components use it so
+ * the server value is written first.
+ */
 export function setLocale(tag: string | null) {
   try {
-    if (tag) localStorage.setItem(STORAGE_KEY, tag);
-    else localStorage.removeItem(STORAGE_KEY);
+    if (tag) localStorage.setItem(LOCALE_STORAGE_KEY, tag);
+    else localStorage.removeItem(LOCALE_STORAGE_KEY);
   } catch {
     // Without storage the browser language keeps applying.
   }

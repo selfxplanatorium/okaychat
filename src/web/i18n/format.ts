@@ -5,8 +5,13 @@ import { currentLocale } from "./locale";
  * Locale-aware formatting. Use these instead of `toLocaleString()`, `toFixed()` in visible text, or
  * hand-built date strings, so numbers, dates, and lists follow the UI language.
  */
-const cache = new Map<string, Intl.NumberFormat | Intl.DateTimeFormat | Intl.RelativeTimeFormat | Intl.ListFormat | Intl.Collator>();
-function cached<T extends Intl.NumberFormat | Intl.DateTimeFormat | Intl.RelativeTimeFormat | Intl.ListFormat | Intl.Collator>(
+const cache = new Map<
+  string,
+  Intl.NumberFormat | Intl.DateTimeFormat | Intl.RelativeTimeFormat | Intl.ListFormat | Intl.Collator | Intl.DisplayNames
+>();
+function cached<
+  T extends Intl.NumberFormat | Intl.DateTimeFormat | Intl.RelativeTimeFormat | Intl.ListFormat | Intl.Collator | Intl.DisplayNames,
+>(
   kind: string,
   options: object | undefined,
   make: (locale: string) => T,
@@ -59,6 +64,22 @@ export const formatList = (items: readonly string[], options: Intl.ListFormatOpt
 /** Sorts text the way the UI language does. */
 export const compareText = (a: string, b: string, options?: Intl.CollatorOptions) =>
   cached("collator", options, (locale) => new Intl.Collator(locale, options)).compare(a, b);
+
+/** The language's own name in the UI language ("German", "Deutsch"), falling back to the tag. */
+export const formatLanguageName = (tag: string): string => {
+  try {
+    return cached("language", { type: "language" }, (locale) => new Intl.DisplayNames([locale], { type: "language" })).of(tag) ?? tag;
+  } catch {
+    // An unknown or malformed tag must still label its option; the tag itself is the honest fallback.
+    return tag;
+  }
+};
+
+/** Capitalizes the first character for the UI language, leaving the rest of the text alone. */
+export const formatSentenceCase = (text: string): string => {
+  const first = text.charAt(0);
+  return first ? first.toLocaleUpperCase(currentLocale()) + text.slice(1) : text;
+};
 
 const decimals = (n: number, digits: number) => formatNumber(n, { maximumFractionDigits: digits, minimumFractionDigits: 0 });
 

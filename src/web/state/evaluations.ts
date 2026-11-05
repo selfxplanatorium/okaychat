@@ -84,7 +84,7 @@ const messageOf = (error: unknown) => (error instanceof Error && error.message ?
 const conflictOf = (error: unknown) => (error as { status?: number })?.status === 409;
 
 const mergeSummary = (list: EvalDatasetSummary[], next: EvalDatasetSummary): EvalDatasetSummary[] =>
-  [next, ...list.filter((item) => item.id !== next.id)].sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
+  [next, ...list.filter((item) => item.id !== next.id)].sort((a, b) => b.updatedAt - a.updatedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
 const initial = {
   datasets: [] as EvalDatasetSummary[],

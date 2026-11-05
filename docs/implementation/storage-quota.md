@@ -21,6 +21,7 @@ same transaction, and deletes/shrinks work over quota.
 - Raster image originals in the file-backed media store (`media.size`), once per account however many uploads, run outputs, forks, or the avatar point at them. Their previews in `media-cache/` are a regenerable cache and do not count (see `media.md`).
 - Saved prompt text: UTF-8 bytes of `saved_prompts.name`, `shortcut`, and `body`. Prompt edits charge net growth; bookmarks and annotation metadata are not charged.
 - The encrypted comment of private answer feedback (`message_feedback.comment_enc`). A removed rating clears the ciphertext and frees its bytes; the tombstone row itself is bounded fixed metadata and is excluded.
+- Stored message translations (`message_translations.translated`), UTF-8 bytes only: `lang`, hashes, and timestamps are bounded metadata. Deleting a language frees its bytes on the next `storageUsed`; deleting the chat cascades them. See `message-translation.md`.
 - Message JSON (`messages.bytes`), without inline `data:` URLs, which are charged once as uploads, plus the encrypted first original of an edited assistant reply (`messages.original_enc`). The original is retained after Undo. Branching charges the copied message and original. Existing rows are backfilled by a migration.
 
 Settings, provider/MCP credentials, skill-source credentials, editable email drafts (`email_drafts`,

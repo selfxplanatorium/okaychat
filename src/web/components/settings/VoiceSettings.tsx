@@ -25,10 +25,10 @@ import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
-import { currentLocale, t } from "@/i18n";
+import { t } from "@/i18n";
 import { settingsHref } from "@/lib/settings-link";
 import { ServiceAvailability } from "@/components/ServiceAvailability";
-import { formatBytes, formatNumber } from "@/i18n/format";
+import { formatBytes, formatLanguageName, formatNumber } from "@/i18n/format";
 import { Trans } from "@/i18n/react";
 import { cn } from "@/lib/utils";
 import { browserDictationSupported } from "@/speech/adapters";
@@ -47,10 +47,9 @@ const LANGUAGE_CODES: Array<[value: string, name: string]> = [
 ];
 
 function languageOptions() {
-  const names = new Intl.DisplayNames(currentLocale(), { type: "language" });
   return [
     { value: "", label: t("voice.detectAutomatically") },
-    ...LANGUAGE_CODES.map(([value, name]) => ({ value, label: names.of(name) ?? value })),
+    ...LANGUAGE_CODES.map(([value, name]) => ({ value, label: formatLanguageName(name) })),
   ];
 }
 

@@ -133,6 +133,8 @@ export default {
   cmdMessageBranch: "Branch from message",
   cmdMessageMore: "More message actions",
   cmdMessageBookmark: "Bookmark or unbookmark message",
+  cmdMessageTranslate: "Translate message",
+  cmdMessageTranslateChoose: "Choose translation language",
   cmdMessageFeedback: "Give feedback on reply",
   cmdMessageDetails: "Show reply details",
   cmdMessageExit: "Back to the message box",

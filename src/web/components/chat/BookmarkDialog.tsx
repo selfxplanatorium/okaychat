@@ -75,8 +75,8 @@ export function BookmarkDialog() {
       excerpt: excerptOf(message),
     }));
   const otherBranches = Object.keys(annotations.bookmarks).filter((id) => !ids.has(id)).length;
-  const term = query.trim().toLocaleLowerCase();
-  const visible = (term ? rows.filter((row) => row.excerpt.toLocaleLowerCase().includes(term)) : rows).slice(0, 100);
+  const term = query.trim().toLowerCase();
+  const visible = (term ? rows.filter((row) => row.excerpt.toLowerCase().includes(term)) : rows).slice(0, 100);
 
   const remove = async (messageId: string, index: number) => {
     setRemoving(messageId);

@@ -42,7 +42,18 @@ export function costOf(cost: ModelCost | undefined, usage: TokenUsage): number {
   );
 }
 
-export type UsageKind = "chat" | "compaction" | "title" | "subagent" | "memory" | "research" | "evaluation" | "evaluation_judge" | "channel" | "api";
+export type UsageKind =
+  | "chat"
+  | "compaction"
+  | "title"
+  | "subagent"
+  | "memory"
+  | "research"
+  | "evaluation"
+  | "evaluation_judge"
+  | "channel"
+  | "api"
+  | "translation";
 
 export function recordUsage(entry: {
   userId: string;
