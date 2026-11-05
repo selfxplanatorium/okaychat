@@ -13,6 +13,8 @@ import { promptText } from "../prompts.js";
 import { assertPublicHost, publicFetch } from "../public-fetch.js";
 import { adminSpeech } from "./config.js";
 import { speechWorkerConfigured, workerSpeak, workerTranscribe } from "./worker.js";
+import { assertFeature } from "../permissions/guard.js";
+import { reserveOperation } from "../permissions/limits.js";
 
 // Speech to text and text to speech through every supported engine. Audio and text pass through memory only;
 // nothing here writes to disk. Provider errors are reduced to a short message without the response body.
@@ -116,6 +118,17 @@ export function uploadName(rec: Recording): string {
 }
 
 export async function transcribe(userId: string, rec: Recording, options: SttOptions, signal?: AbortSignal): Promise<{ text: string; language?: string }> {
+  // Voice covers both local and cloud paths. Nothing reaches a worker or provider when denied.
+  assertFeature(userId, "voice");
+  const lease = reserveOperation({ userId }, "speech.transcribe");
+  try {
+    return await transcribeWork(userId, rec, options, signal);
+  } finally {
+    lease.release();
+  }
+}
+
+async function transcribeWork(userId: string, rec: Recording, options: SttOptions, signal?: AbortSignal): Promise<{ text: string; language?: string }> {
   const def = sttEngineDef(options.engine);
   if (!def || def.credential.type === "browser") throw new HTTPException(400, { message: "This engine runs in the browser." });
   const model = options.model || def.models[0] || "";
@@ -202,6 +215,16 @@ export interface Speech {
 }
 
 export async function synthesize(userId: string, text: string, options: TtsOptions, signal?: AbortSignal): Promise<Speech> {
+  assertFeature(userId, "voice");
+  const lease = reserveOperation({ userId }, "speech.synthesize");
+  try {
+    return await synthesizeWork(userId, text, options, signal);
+  } finally {
+    lease.release();
+  }
+}
+
+async function synthesizeWork(userId: string, text: string, options: TtsOptions, signal?: AbortSignal): Promise<Speech> {
   const def = ttsEngineDef(options.engine);
   if (!def || def.credential.type === "browser") throw new HTTPException(400, { message: "This engine runs in the browser." });
   const model = options.model || def.models[0] || "";

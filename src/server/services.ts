@@ -10,6 +10,7 @@ import {
 } from "../shared/services.js";
 import type { AppEnv } from "./auth.js";
 import { AppError } from "./errors.js";
+import { featureAllowed } from "./permissions/guard.js";
 
 // One registry of service probes. Sidecars (browser worker, speech worker, sandbox, SearXNG) are probed on
 // demand only: a result lives for SERVICE_TTL_MS, concurrent callers share one probe in flight, and there is no
@@ -373,13 +374,32 @@ async function accountStatuses(userId: string): Promise<ServiceStatus[]> {
   return out;
 }
 
+/** The sidecar sources this account can actually use. A disabled capability is never probed. */
+function usableSources(userId: string): ServiceSource[] {
+  const sources: ServiceSource[] = [];
+  // Rendering follows artifacts; Scrapling is web_fetch's fallback.
+  if (featureAllowed(userId, "artifacts") || featureAllowed(userId, "webFetch")) sources.push("browser");
+  if (featureAllowed(userId, "voice")) sources.push("speech");
+  if (featureAllowed(userId, "code")) sources.push("sandbox");
+  if (featureAllowed(userId, "webSearch")) sources.push("searxng");
+  return sources;
+}
+
 /** Every entry for one account: shared sidecars from the cache or one probe, then that account's own entries. */
 export async function servicesFor(userId: string, force = false): Promise<ServiceStatus[]> {
+  const usable = usableSources(userId);
   const [sidecars, account] = await Promise.all([
-    Promise.all(SOURCES.map((source) => sourceStatus(source, force))),
+    Promise.all(usable.map((source) => sourceStatus(source, force))),
     accountStatuses(userId).catch(() => [] as ServiceStatus[]),
   ]);
   const byId = new Map(sidecars.flatMap((entry) => entry.statuses).map((status) => [status.id, status]));
+  // A capability the account may not use reports a local "not configured here" status, never a probe or
+  // an outage: an admin Allow is what changes it, not a service restart.
+  const at = Date.now();
+  for (const source of SOURCES) {
+    if (usable.includes(source)) continue;
+    for (const id of SOURCE_IDS[source]) byId.set(id, { id, state: "unconfigured", reasonKey: "notConfigured", checkedAt: at });
+  }
   return [...SERVICE_IDS.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : [])), ...account];
 }
 

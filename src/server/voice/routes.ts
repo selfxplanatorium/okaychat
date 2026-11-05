@@ -7,6 +7,8 @@ import { voiceAvailability, workerBackends } from "./backend.js";
 import { CallRegistry, CallSession, type CallSocket } from "./session.js";
 import { callLimits, StartLimiter } from "./limits.js";
 import { MiniWebSocket, MiniWebSocketServer } from "./ws.js";
+import { featureAllowed } from "../permissions/guard.js";
+import { holdLease, reserveOperation } from "../permissions/limits.js";
 
 // `/api/voice` availability and `/api/voice/call`, the one WebSocket a voice call uses. See
 // docs/implementation/voice-calls.md. The socket is authenticated by the session cookie before the upgrade,
@@ -89,6 +91,8 @@ export const voiceRoutes = new Hono<AppEnv>()
     if (!voiceOriginAllowed(c.req.header("origin"), `${proto}://${host}`, publicOrigin(), c.req.header("sec-fetch-site"))) {
       return c.text("Forbidden", 403);
     }
+    // No upgrade, no signalling, and no worker warm when voice is not allowed for this account.
+    if (!featureAllowed(c.get("user").id, "voice")) return c.text("Voice is disabled for this account.", 403);
     await next();
   })
   .get(
@@ -115,6 +119,9 @@ export const voiceRoutes = new Hono<AppEnv>()
             starts,
             threadOwned: (userId, threadId) => threadId.startsWith("tmp_") || !!getThread(userId, threadId),
             stillSignedIn: () => sessionAlive(sessionHash),
+            featureAllowed: (userId) => featureAllowed(userId, "voice"),
+            // One operation lease for the session; released when the call ends or the socket closes.
+            admit: () => holdLease(reserveOperation({ userId: user.id }, "voice.session")),
             maxRecordingSeconds: () => adminSpeech().maxRecordingSeconds,
             onUsage: (usage) => {
               // Counters only: never audio, text, or a secret. Chat model usage is recorded by /api/chat.

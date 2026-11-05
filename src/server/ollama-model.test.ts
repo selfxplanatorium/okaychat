@@ -132,6 +132,8 @@ process.env.OKAYCHAT_SECRET = "ollama-model-test-secret-only-not-for-production"
 writeFileSync(path.join(dataDir, "models-dev.json"), JSON.stringify({ data: {}, fetchedAt: Date.now() }));
 const { createOllamaModel } = await import("./ollama-model.js");
 const { createModel } = await import("./llm.js");
+const { db } = await import("./db.js");
+db.exec("INSERT INTO users (id,email,name,password_hash,role,created_at) VALUES ('alice','alice@test.invalid','Alice','unused','user',1)");
 const { forgetOllamaModels } = await import("./catalog/ollama.js");
 
 after(() => {

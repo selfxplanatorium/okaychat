@@ -217,6 +217,11 @@ export interface UserSettings {
   speech?: SpeechSettings;
   /** The user may rewrite the text of finished assistant replies. Off by default. */
   editAssistantMessages?: boolean;
+  /**
+   * Server-maintained revision of the account's personal instructions (systemPrompt and per-model rules),
+   * for compare-and-set. Never accepted from a settings patch.
+   */
+  instructionsRevision?: number;
 }
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {

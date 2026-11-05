@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { InjectionReport, ModelInfo, TokenUsage } from "../../shared/types.js";
 import { resolveModel } from "../catalog/providers.js";
 import { createModel } from "../llm.js";
+import { assertFeature, type Actor } from "../permissions/guard.js";
 import { promptText } from "../prompts.js";
 import { scanForInjection, wrapUntrusted } from "../prompt-injection.js";
 import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "../usage.js";
@@ -30,7 +31,7 @@ export interface SubagentProgress {
  * @param allowed Models the main model may pick, first is the default.
  * @param subTools Tools the sub-agent may use. Must not need approval: nobody is there to answer.
  */
-export function subagentTools(opts: { userId: string; threadId: string; allowed: ModelInfo[]; subTools: ToolSet; maxSteps?: number; searchBudget?: SearchBudget; signal?: AbortSignal }): ToolSet {
+export function subagentTools(opts: { userId: string; threadId: string; allowed: ModelInfo[]; subTools: ToolSet; maxSteps?: number; searchBudget?: SearchBudget; signal?: AbortSignal; parentFeatures?: Actor["parentFeatures"] }): ToolSet {
   const refs = opts.allowed.map((m) => m.ref) as [string, ...string[]];
   const list = opts.allowed.map((m) => `\`${m.ref}\` (${m.name}${m.context ? `, ${Math.round(m.context / 1000)}k context` : ""})`).join(", ");
   return {
@@ -41,6 +42,10 @@ export function subagentTools(opts: { userId: string; threadId: string; allowed:
         model: z.enum(refs).optional().describe(`Default \`${refs[0]}\``),
       }),
       execute: async function* ({ task, model: ref }, { toolCallId }): AsyncGenerator<SubagentProgress> {
+        // Delegation is rechecked against the model actually chosen, so neither a revoke nor a switch to an
+        // allowed model can restore a feature the parent turn lost. The parent constraints (when supplied by
+        // the chat layer) still apply to the child.
+        assertFeature({ userId: opts.userId, modelRef: ref ?? refs[0], ...(opts.parentFeatures ? { parentFeatures: opts.parentFeatures } : {}) }, "delegation");
         const { model, conn } = await resolveModel(opts.userId, ref ?? refs[0]);
         const handle = createModel(model, conn, { userId: opts.userId });
         let usage = ZERO_USAGE;

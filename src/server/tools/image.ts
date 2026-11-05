@@ -24,6 +24,8 @@ import { tx } from "../db.js";
 import { getMedia, mediaPath, removeVariants } from "../media/store.js";
 import { sniffRaster, type RasterMime } from "../media/sniff.js";
 import { inspectRaster, MediaProcessingError, serveImage } from "../media/variants.js";
+import { assertFeature } from "../permissions/guard.js";
+import { reserveOperation } from "../permissions/limits.js";
 
 // Image generation through one of several services: the user's own ChatGPT plan (by running `codex exec`
 // as a relay that only calls Codex's built-in image tool), or an image API reached with the user's key.
@@ -255,13 +257,20 @@ export function referencePaths(userId: string, ids: string[]): string[] {
 }
 
 export async function generateImage(opts: { userId: string; threadId: string; service: ImageService; prompt: string; references: string[]; signal?: AbortSignal }): Promise<GeneratedImage> {
-  const references = referencePaths(opts.userId, opts.references);
-  const buf = opts.service.def.credential === "codex"
-    ? await generateWithCodex(opts.userId, opts.prompt, references, opts.signal)
-    : await generateWithApi(opts.service, opts.prompt, references, opts.signal);
-  const stored = await storeImage(opts.userId, opts.threadId, buf, opts.prompt);
-  if (!stored) throw new Error(`${opts.service.def.name} did not return a PNG, JPEG, WebP, GIF, or AVIF image.`);
-  return { ...stored, service: opts.service.def.name, model: opts.service.model };
+  // Image generation is a policy decision, not just a credential one: own keys and Codex do not bypass it.
+  assertFeature(opts.userId, "images");
+  const lease = reserveOperation({ userId: opts.userId }, "image.generate");
+  try {
+    const references = referencePaths(opts.userId, opts.references);
+    const buf = opts.service.def.credential === "codex"
+      ? await generateWithCodex(opts.userId, opts.prompt, references, opts.signal)
+      : await generateWithApi(opts.service, opts.prompt, references, opts.signal);
+    const stored = await storeImage(opts.userId, opts.threadId, buf, opts.prompt);
+    if (!stored) throw new Error(`${opts.service.def.name} did not return a PNG, JPEG, WebP, GIF, or AVIF image.`);
+    return { ...stored, service: opts.service.def.name, model: opts.service.model };
+  } finally {
+    lease.release();
+  }
 }
 
 /**
@@ -368,6 +377,7 @@ export const imageRoutes = new Hono<AppEnv>()
   })
   .get("/image-services", (c) => c.json(imageServiceStatuses(c.get("user").id)))
   .get("/image-services/:id/models", async (c) => {
+    assertFeature(c.get("user").id, "images");
     const def = imageServiceDef(c.req.param("id"));
     if (!def || def.credential === "codex") return c.json({ error: "Not found" }, 404);
     const conn = connectionFor(c.get("user").id, def);

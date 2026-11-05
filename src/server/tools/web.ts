@@ -8,6 +8,8 @@ import { injectionMetadata, scanForInjection, wrapUntrusted } from "../prompt-in
 import { scraplingFetch } from "./scrapling.js";
 import { SearchBudget } from "./search-budget.js";
 import { assertServiceAvailable } from "../services.js";
+import { assertFeature, type Actor } from "../permissions/guard.js";
+import { reserveOperation } from "../permissions/limits.js";
 
 // Free web access with no keys: SearXNG sidecar when configured, Brave's public HTML results otherwise.
 // DuckDuckGo's HTML endpoint often returns a bot wall; only its Lite endpoint is a fallback.
@@ -194,8 +196,15 @@ export async function webFetch(url: string, signal?: AbortSignal): Promise<{ tit
 }
 
 /** Built-in tools every chat gets when the model supports tool calls. `search: false` keeps page reading. */
-export function webTools(opts: { searchBudget?: SearchBudget; search?: boolean } = {}): ToolSet {
+export function webTools(opts: { searchBudget?: SearchBudget; search?: boolean; actor?: Actor } = {}): ToolSet {
   const searchBudget = opts.searchBudget ?? new SearchBudget(DEFAULT_USER_SETTINGS.maxSearches);
+  // The chat layer already prunes denied tools; this is the service-level check for direct callers and a
+  // recheck on execution, so a revoke during a turn is honoured. The operation charge is per query/read.
+  const guard = (feature: "webSearch" | "webFetch") => {
+    if (!opts.actor) return null;
+    assertFeature(opts.actor, feature);
+    return reserveOperation(opts.actor, feature === "webSearch" ? "web.search" : "web.fetch");
+  };
   const web_search = tool({
     description:
       `Search the web. Returns titles, URLs, and snippets. Use targeted queries for facts that need verification; stop once you have enough evidence. At most ${searchBudget.limit} search queries are allowed for the entire reply, shared with sub-agents. Follow up with web_fetch to read a result; reading pages does not count toward this limit.`,
@@ -207,9 +216,14 @@ export function webTools(opts: { searchBudget?: SearchBudget; search?: boolean }
       if (!searchBudget.reserve()) {
         throw new Error(`The web search limit (${searchBudget.limit} queries per reply) has been reached. Answer using the evidence already collected; you may still read known URLs with web_fetch.`);
       }
-      const found = await webSearch(query, limit ?? 8, abortSignal);
-      const injection = scanForInjection([query, ...found.results.flatMap((r) => [r.title, r.url, r.snippet])].join("\n"));
-      return { ...found, ...(injectionMetadata(injection) ? { injection: injectionMetadata(injection) } : {}) };
+      const lease = guard("webSearch");
+      try {
+        const found = await webSearch(query, limit ?? 8, abortSignal);
+        const injection = scanForInjection([query, ...found.results.flatMap((r) => [r.title, r.url, r.snippet])].join("\n"));
+        return { ...found, ...(injectionMetadata(injection) ? { injection: injectionMetadata(injection) } : {}) };
+      } finally {
+        lease?.release();
+      }
     },
     // UI keeps titles/URLs/snippets; the model sees the same content spotlighted as data.
     toModelOutput: ({ input, output }) => ({
@@ -230,11 +244,16 @@ export function webTools(opts: { searchBudget?: SearchBudget; search?: boolean }
         page: z.number().int().min(1).optional().describe("1-based page of the content, default 1"),
       }),
       execute: async ({ url, page = 1 }, { abortSignal }) => {
-        const { title, content, via } = await webFetch(url, abortSignal);
-        const pages = Math.max(1, Math.ceil(content.length / PAGE_CHARS));
-        const slice = content.slice((page - 1) * PAGE_CHARS, page * PAGE_CHARS);
-        const injection = scanForInjection(`${title}\n${url}\n${slice}`);
-        return { title, url, page, pages, via, content: slice, ...(injectionMetadata(injection) ? { injection: injectionMetadata(injection) } : {}) };
+        const lease = guard("webFetch");
+        try {
+          const { title, content, via } = await webFetch(url, abortSignal);
+          const pages = Math.max(1, Math.ceil(content.length / PAGE_CHARS));
+          const slice = content.slice((page - 1) * PAGE_CHARS, page * PAGE_CHARS);
+          const injection = scanForInjection(`${title}\n${url}\n${slice}`);
+          return { title, url, page, pages, via, content: slice, ...(injectionMetadata(injection) ? { injection: injectionMetadata(injection) } : {}) };
+        } finally {
+          lease?.release();
+        }
       },
       // The UI still pages the raw content; the model gets provenance and a quoted body.
       toModelOutput: ({ output }) => ({

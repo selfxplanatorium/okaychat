@@ -21,6 +21,9 @@ import { publicFetch } from "../public-fetch.js";
 import { approvalRiskReason, externalMetadataFlag, injectionMetadata, riskMetadata, scanForInjection, wrapUntrusted, type UntrustedSource } from "../prompt-injection.js";
 import { storeImage, type StoredImage } from "../tools/image.js";
 import { MAX_TOOL_IMAGES_PER_TURN, type ToolImage } from "../tools/screenshots.js";
+import { assertFeature, featureAllowed } from "../permissions/guard.js";
+import { reserveOperation } from "../permissions/limits.js";
+import { onPermissionChange } from "../permissions/audit.js";
 import { StoredOAuthProvider } from "./oauth.js";
 import { getAudience } from "../groups.js";
 import { getVisibleServer, visibleServers, type McpServerRecord } from "./store.js";
@@ -386,17 +389,28 @@ async function ensure(server: McpServerRecord, force = false): Promise<Entry> {
   }
   const stale = Date.now() - entry.listedAt > TOOL_LIST_TTL_MS;
   if (force || !entry.client || entry.status !== "connected") {
-    entry.connecting = connect(server, entry).finally(() => (entry.connecting = undefined));
-    await entry.connecting;
+    // Connecting and discovering is one charged attempt, whatever the protocol's internal call count.
+    const lease = reserveOperation({ userId: server.userId }, "mcp.connect");
+    try {
+      entry.connecting = connect(server, entry).finally(() => (entry.connecting = undefined));
+      await entry.connecting;
+    } finally {
+      lease.release();
+    }
   } else if (stale) {
-    entry.connecting = listAll(entry.client)
-      .then((tools) => {
-        entry.tools = tools;
-        entry.listedAt = Date.now();
-      })
-      .catch(() => connect(server, entry))
-      .finally(() => (entry.connecting = undefined));
-    await entry.connecting;
+    const lease = reserveOperation({ userId: server.userId }, "mcp.connect");
+    try {
+      entry.connecting = listAll(entry.client)
+        .then((tools) => {
+          entry.tools = tools;
+          entry.listedAt = Date.now();
+        })
+        .catch(() => connect(server, entry))
+        .finally(() => (entry.connecting = undefined));
+      await entry.connecting;
+    } finally {
+      lease.release();
+    }
   }
   return entry;
 }
@@ -438,6 +452,7 @@ export function serverInfo(server: McpServerRecord): McpServerInfo & { authoriza
 }
 
 export async function testServer(userId: string, serverId: string) {
+  assertFeature(userId, "mcp");
   const server = getVisibleServer(userId, serverId);
   if (!server) throw new Error("MCP server not found");
   await ensure(server, true);
@@ -633,7 +648,7 @@ const MAX_LISTED_RESOURCES = 200;
  * Resources are read-only context a server offers (files, records, schemas). One pair of tools covers every
  * server that has them, so the tool block stays small. Reads go through the same image handling as tool results.
  */
-function resourceTools(servers: McpServerRecord[], opts: McpTurnOptions): ToolSet {
+function resourceTools(userId: string, servers: McpServerRecord[], opts: McpTurnOptions): ToolSet {
   if (!servers.length) return {};
   const names = servers.map((s) => s.name) as [string, ...string[]];
   const byName = (name: string) => servers.find((s) => s.name === name)!;
@@ -643,6 +658,7 @@ function resourceTools(servers: McpServerRecord[], opts: McpTurnOptions): ToolSe
       description: `List the resources (files, records, documents) an MCP server offers, and URI templates for resources it can produce. Servers with resources: ${names.join(", ")}. Read one with mcp_read_resource.`,
       inputSchema: z.object({ server: serverParam, cursor: z.string().optional().describe("nextCursor from a previous call") }),
       execute: async ({ server, cursor }, { abortSignal }) => {
+        assertFeature(userId, "mcp");
         const text = await listResourcesText(byName(server), cursor, abortSignal);
         const injection = scanForInjection(text);
         return { text, ...(injectionMetadata(injection) ? { injection } : {}) };
@@ -654,6 +670,7 @@ function resourceTools(servers: McpServerRecord[], opts: McpTurnOptions): ToolSe
       description: "Read one MCP resource by URI, from mcp_list_resources or a filled-in URI template.",
       inputSchema: z.object({ server: serverParam, uri: z.string().min(1).max(2000) }),
       execute: async ({ server, uri }, { abortSignal, toolCallId }) => {
+        assertFeature(userId, "mcp");
         const record = byName(server);
         const result = await withClient(record, (client, timeout) => client.readResource({ uri, options: { timeout, signal: abortSignal } }), abortSignal);
         const content: ContentPart[] = result.contents.map((c) => {
@@ -693,11 +710,13 @@ async function listResourcesText(server: McpServerRecord, cursor: string | undef
 
 /** Prompts from every enabled server that offers them. Servers that fail are skipped. */
 export async function listPrompts(userId: string): Promise<McpPromptInfo[]> {
+  assertFeature(userId, "mcp");
   const servers = visibleServers(userId).filter((s) => s.enabled);
   const lists = await Promise.all(
     servers.map(async (server) => {
       const entry = await ensure(server);
       if (entry.status !== "connected" || !entry.capabilities.prompts || !entry.client) return [];
+      const lease = reserveOperation({ userId }, "mcp.call");
       try {
         const client = entry.client;
         const raw = await paginate(async (cursor) => {
@@ -707,6 +726,8 @@ export async function listPrompts(userId: string): Promise<McpPromptInfo[]> {
         return raw.slice(0, 500).map((p) => ({ serverId: server.id, server: server.name, name: p.name, title: p.title, description: p.description, arguments: p.arguments ?? [] }));
       } catch {
         return [];
+      } finally {
+        lease.release();
       }
     }),
   );
@@ -715,6 +736,7 @@ export async function listPrompts(userId: string): Promise<McpPromptInfo[]> {
 
 /** A prompt's messages as text for the composer. Images and binary resources become notes. */
 export async function getPromptText(userId: string, serverId: string, name: string, args: Record<string, string>): Promise<string> {
+  assertFeature(userId, "mcp");
   const server = getVisibleServer(userId, serverId);
   if (!server?.enabled) throw new Error("MCP server not found");
   const result = await withClient(server, (client, timeout) => client.experimental_getPrompt({ name, arguments: args, options: { timeout } }));
@@ -743,6 +765,7 @@ async function appServer(userId: string, serverId: string) {
 
 /** The HTML for an app card. Only `ui://` resources, read on the user's own connection. */
 export async function readAppResource(userId: string, serverId: string, uri: string): Promise<MCPAppResource> {
+  assertFeature(userId, "mcp");
   if (!uri.startsWith("ui://")) throw new Error("Not an MCP App resource");
   const server = await appServer(userId, serverId);
   return withClient(server, (client, timeout) => readMCPAppResource({ client, uri, options: { timeout } }));
@@ -753,6 +776,7 @@ export async function readAppResource(userId: string, serverId: string, uri: str
  * server lets apps call; tools that would ask before running need the user's confirmation here too.
  */
 export async function callToolFromApp(userId: string, serverId: string, name: string, args: Record<string, unknown>, confirmed: boolean): Promise<ToolOutput> {
+  assertFeature(userId, "mcp");
   const server = await appServer(userId, serverId);
   const entry = await ensure(server);
   const raw = entry.tools.find((t) => t.name === name);
@@ -771,6 +795,7 @@ export async function callToolFromApp(userId: string, serverId: string, name: st
 }
 
 export async function readResourceFromApp(userId: string, serverId: string, uri: string) {
+  assertFeature(userId, "mcp");
   const server = await appServer(userId, serverId);
   return withClient(server, (client, timeout) => client.readResource({ uri, options: { timeout } }));
 }
@@ -785,6 +810,8 @@ export interface McpToolBundle {
 
 /** Tools from every enabled server for this user, ready for streamText. Sorted so the prompt prefix stays cacheable. */
 export async function toolsForUser(userId: string, opts: McpTurnOptions = {}): Promise<McpToolBundle> {
+  // A denied feature means no new connection, no discovery, and no tools. Spreads nothing to the model.
+  if (!featureAllowed(userId, "mcp")) return { tools: {}, subTools: {}, instructions: [], servers: [] };
   const servers = visibleServers(userId).filter((s) => s.enabled);
   const ready = await Promise.all(servers.map(async (s) => ({ server: s, entry: await ensure(s) })));
   const tools: ToolSet = {};
@@ -806,6 +833,8 @@ export async function toolsForUser(userId: string, opts: McpTurnOptions = {}): P
         : {}),
       needsApproval: needsApproval(server, raw),
       execute: (args, { abortSignal, toolCallId }) => {
+        // Live feature check: a revoke during a turn closes this tool even though the set was already built.
+        assertFeature(userId, "mcp");
         // The tool set is built once per turn; sharing, the server switch, a disabled tool, or a config
         // change can revoke it meanwhile, and a captured record would reconnect with the old secrets.
         const live = getVisibleServer(userId, server.id);
@@ -845,7 +874,7 @@ export async function toolsForUser(userId: string, opts: McpTurnOptions = {}): P
       if (!needsApproval(server, raw) && !isDestructive(raw)) subTools[name] = build(server, raw, false);
     }
   }
-  const resources = resourceTools(ready.filter(({ entry }) => entry.status === "connected" && entry.capabilities.resources).map(({ server }) => server), opts);
+  const resources = resourceTools(userId, ready.filter(({ entry }) => entry.status === "connected" && entry.capabilities.resources).map(({ server }) => server), opts);
   Object.assign(tools, resources);
   Object.assign(subTools, resources);
   return {
@@ -887,6 +916,21 @@ async function withClient<T>(
   abortSignal?: AbortSignal,
   replayable = true,
 ): Promise<T> {
+  // One tool, resource, or prompt invocation is one charged operation, before the transport is touched.
+  const lease = reserveOperation({ userId: server.userId }, "mcp.call");
+  try {
+    return await withClientWork(server, run, abortSignal, replayable);
+  } finally {
+    lease.release();
+  }
+}
+
+async function withClientWork<T>(
+  server: McpServerRecord,
+  run: (client: MCPClient, timeout: number, entry: Entry) => Promise<T>,
+  abortSignal?: AbortSignal,
+  replayable = true,
+): Promise<T> {
   const timeout = server.config.timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS;
   const attempt = async () => {
     const entry = await ensure(server);
@@ -910,6 +954,15 @@ function describeMcpError(error: unknown, timeout: number): string {
   if (MCPClientError.isInstance(error) && /timed out/i.test(error.message)) return `Tool timed out after ${timeout / 1000}s`;
   return describeError(error);
 }
+
+// A revoke closes cached sessions for that account, so no retained handle can be reused; a later allow
+// reconnects on demand. The listener is bounded by the number of live entries.
+onPermissionChange(() => {
+  for (const entry of [...entries.values()]) {
+    if (featureAllowed(entry.userId, "mcp")) continue;
+    void disconnectServer(entry.userId, entry.serverId);
+  }
+});
 
 // Close idle clients so stdio children and HTTP sessions do not pile up.
 setInterval(() => {

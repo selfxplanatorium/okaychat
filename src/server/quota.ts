@@ -84,6 +84,8 @@ export function storageUsedSql(user: string): string {
       FROM n8n_agents WHERE owner_id = ${user}
     UNION ALL SELECT COALESCE(SUM(length(CAST(session_enc AS BLOB)) + length(CAST(history_hash AS BLOB))), 0)
       FROM n8n_agent_sessions WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(length(CAST(text AS BLOB))), 0) FROM user_model_instructions WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(length(CAST(custom_instructions AS BLOB))), 0) FROM threads WHERE user_id = ${user}
   )), 0)`;
 }
 

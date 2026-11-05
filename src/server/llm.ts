@@ -1,3 +1,6 @@
+import { reserveOperation } from "./permissions/limits.js";
+import { modelPolicy } from "./permissions/model.js";
+import { assertModelAllowed } from "./permissions/guard.js";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
@@ -65,6 +68,19 @@ export interface CreateModelOptions {
 
 export function createModel(info: ModelInfo, conn: Connection, opts: CreateModelOptions): ModelHandle {
   if (info.ref.startsWith("n8n/")) throw new AppError({ code: "validation", message: "Agents cannot be used as language models." });
+  const check = () => {
+    assertModelAllowed(opts.userId, info.ref);
+    if (conn.shared) {
+      const access = sharedModelAccess(opts.userId, info.providerId);
+      if (!access.visible || (!access.all && !access.ids.has(info.id))) throw new AppError({ code: "forbidden", message: modelAccessMessage(info.ref) });
+    }
+  };
+  check();
+  const handle = createRawModel(info, conn, opts);
+  return { ...handle, model: wrapLanguageModel({ model: handle.model as Parameters<typeof wrapLanguageModel>[0]["model"], middleware: modelPolicy(opts.userId, info, check) }) };
+}
+
+function createRawModel(info: ModelInfo, conn: Connection, opts: CreateModelOptions): ModelHandle {
   // Recheck the live policy here, not only where the model was listed: a turn can run after an admin
   // revoked access, and a caller can hand over an earlier model/connection pair. Nothing reaches the
   // provider before this passes.
@@ -75,13 +91,22 @@ export function createModel(info: ModelInfo, conn: Connection, opts: CreateModel
       throw new AppError({ code: "forbidden", message: modelAccessMessage(info.ref) });
     }
   }
+  const beforeAttempt = (attempt: number) => {
+    assertModelAllowed(opts.userId, info.ref);
+    if (conn.shared) {
+      const access = sharedModelAccess(opts.userId, info.providerId);
+      if (!access.visible || (!access.all && !access.ids.has(info.id))) throw new AppError({ code: "forbidden", message: modelAccessMessage(info.ref) });
+    }
+    // The dispatch middleware reserved attempt one and holds its lease throughout the call.
+    if (attempt > 1) reserveOperation({ userId: opts.userId, modelRef: info.ref }, "llm.call", { hold: false });
+  };
   const affinity = cacheAffinity(opts.userId);
   const headers = affinityHeaders(info.providerId, affinity);
   const apiKey = conn.apiKey ?? "not-needed";
   const baseURL = info.baseURL;
   // All provider retries happen here, before a response body is consumed. Every caller disables the
   // SDK's own retry (maxRetries: 0), so delays never compound. See docs/implementation/errors.md.
-  const fetch = createRetryingFetch({ ...(opts.retry ?? {}), onRetry: opts.onRetry, fetchImpl: conn.guarded ? publicFetch : undefined });
+  const fetch = createRetryingFetch({ ...(opts.retry ?? {}), onRetry: opts.onRetry, beforeAttempt, fetchImpl: conn.guarded ? publicFetch : undefined });
   // OpenAI-style caches are partitioned by prompt_cache_key: a per-chat key made every new chat start cold.
   const cacheKey = affinity;
   const effort = opts.effort && info.reasoning && (!info.reasoningEfforts || info.reasoningEfforts.includes(opts.effort)) ? opts.effort : undefined;
@@ -91,7 +116,7 @@ export function createModel(info: ModelInfo, conn: Connection, opts: CreateModel
     case "openai-responses": {
       const chatgpt = info.providerId === CHATGPT;
       const provider = createOpenAI(chatgpt
-        ? { apiKey: "chatgpt-login", baseURL, headers, fetch: createRetryingFetch({ ...(opts.retry ?? {}), onRetry: opts.onRetry, fetchImpl: chatgptFetch(opts.userId) }) }
+        ? { apiKey: "chatgpt-login", baseURL, headers, fetch: createRetryingFetch({ ...(opts.retry ?? {}), onRetry: opts.onRetry, beforeAttempt, fetchImpl: chatgptFetch(opts.userId) }) }
         : { apiKey, baseURL, headers, fetch });
       const openai: Record<string, JSONValue> = { ...(chatgpt ? {} : { promptCacheKey: cacheKey }), store: false };
       if (effort) {
@@ -140,7 +165,8 @@ export function createModel(info: ModelInfo, conn: Connection, opts: CreateModel
       // Native /api/chat: no OpenAI JSON, no cache fields. The daemon manages its own prompt cache.
       // Effort reaches native `think` here because /api/chat has no provider options object; the
       // context window is sent as num_ctx so runtime and advertised context agree.
-      const context = Number.isInteger(info.context) && info.context > 0 ? info.context : undefined;
+      const cap = assertModelAllowed(opts.userId, info.ref).limits.contextTokens;
+      const context = Number.isInteger(info.context) && info.context > 0 ? Math.min(info.context, cap ?? Infinity) : undefined;
       return {
         model: createOllamaModel({
           id: info.id,

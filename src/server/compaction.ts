@@ -3,7 +3,7 @@ import { convertToModelMessages, generateText, isToolUIPart, type ModelMessage, 
 import type { AssistantMetadata, CompactionState, ModelInfo } from "../shared/types.js";
 import type { Connection } from "./catalog/providers.js";
 import { createModel } from "./llm.js";
-import { promptText } from "./prompts.js";
+import { resolvePrompt } from "./prompt-policy.js";
 import { wrapUntrusted } from "./prompt-injection.js";
 import { costOf, normalizeUsage, recordUsage } from "./usage.js";
 import { adaptPdfParts } from "./pdf-parts.js";
@@ -186,7 +186,7 @@ export async function compact(opts: {
     providerOptions: handle.providerOptions,
     // llm.ts owns retries at the fetch boundary; the SDK must not add a second, compounded policy.
     maxRetries: 0,
-    messages: [...history, { role: "user", content: promptText("compaction") }],
+    messages: [...history, { role: "user", content: resolvePrompt("compaction", { userId: opts.userId, modelRef: opts.model.ref }) }],
     maxOutputTokens: Math.min(8_000, opts.model.maxOutput),
     abortSignal: opts.signal,
   });

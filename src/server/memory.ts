@@ -10,6 +10,7 @@ import { db, tx } from "./db.js";
 import { assertStorage } from "./quota.js";
 import { refreshSummary } from "./memory-learn.js";
 import { promptText } from "./prompts.js";
+import { assertFeature, featureAllowed } from "./permissions/guard.js";
 import { riskMetadata, scanForInjection, wrapUntrusted } from "./prompt-injection.js";
 import { attachmentName, currentBranch, getThread } from "./threads.js";
 
@@ -54,6 +55,9 @@ export function listMemories(userId: string, scope?: string | null): MemoryEntry
 function contentHash(content: string) { return sha256(content.normalize("NFKC").toLowerCase().replace(/\s+/g, " ")); }
 
 export function saveMemory(userId: string, input: { content: string; scope?: string | null }, source: Source, id?: string): { entry: MemoryEntry; duplicate: boolean } {
+  // A denied account cannot create or update facts, by tool, import, or background review. Deletion and
+  // export remain available.
+  assertFeature(userId, "memory");
   const content = contentSchema.parse(input.content);
   const existing = id ? db.prepare("SELECT * FROM memories WHERE user_id = ? AND id = ?").get(userId, id) as MemoryRow | undefined : undefined;
   if (id && !existing) invalid("Memory not found", 404);
@@ -310,7 +314,7 @@ export function transcriptText(messages: UIMessage[], { assistantMax = 1500, max
 /** Temporary personalization can read eligible global facts, but never obtains a mutation tool. */
 export function temporaryMemory(userId: string, query: string): { context: string; summary?: string; instructions?: string; tools: ToolSet } {
   const preferences = memoryPreferences(userId);
-  if (!preferences.enabled) return { context: "", tools: {} };
+  if (!preferences.enabled || !featureAllowed(userId, "memory")) return { context: "", tools: {} };
   const accessible = () => {
     const current = memoryPreferences(userId);
     return current.enabled && current.revision === preferences.revision ? listMemories(userId, null) : [];
@@ -417,7 +421,8 @@ function recallTools(userId: string, threadId: string, scope: string | null, all
 export function conversationMemory(userId: string, threadId: string, query: string): { context: string; facts?: MemoryEntry[]; instructions?: string; summary?: string; tools: ToolSet } {
   const preferences = memoryPreferences(userId);
   const thread = getThread(userId, threadId);
-  if (!preferences.enabled || !thread || thread.memoryDisabled) return { context: "", tools: {} };
+  // Denied memory means no retrieval, no injection, and no tools, including for a chat that had it before.
+  if (!preferences.enabled || !thread || thread.memoryDisabled || !featureAllowed(userId, "memory")) return { context: "", tools: {} };
   const scope = thread.projectId;
   // The revision these tools were offered under. A correction made by these tools bumps it too and moves
   // this forward, so the rest of the turn may keep correcting; any other change still revokes them.
@@ -425,7 +430,7 @@ export function conversationMemory(userId: string, threadId: string, query: stri
   const allowed = () => {
     const current = memoryPreferences(userId);
     const currentThread = getThread(userId, threadId);
-    return current.enabled && current.revision === revision && !!currentThread && currentThread.projectId === scope && !currentThread.memoryDisabled;
+    return current.enabled && current.revision === revision && !!currentThread && currentThread.projectId === scope && !currentThread.memoryDisabled && featureAllowed(userId, "memory");
   };
   const accessible = () => allowed() ? listMemories(userId, scope) : [];
   const canWrite = () => { if (!allowed()) invalid("Memory settings changed. Continue without writing memory until the next reply.", 409); };
@@ -493,6 +498,7 @@ export const memoryRoutes = new Hono<AppEnv>()
   .get("/preferences", (c) => c.json(memoryPreferences(c.get("user").id)))
   .get("/", (c) => c.json({ preferences: memoryPreferences(c.get("user").id), entries: listMemories(c.get("user").id), summaries: listSummaries(c.get("user").id) }))
   .post("/summaries/refresh", async (c) => {
+    assertFeature(c.get("user").id, "memory");
     const parsed = z.object({ scope: z.string().min(1).max(200).nullable() }).safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "Invalid memory scope" }, 400);
     const userId = c.get("user").id;
@@ -516,6 +522,7 @@ export const memoryRoutes = new Hono<AppEnv>()
     return c.json(previewMemoryImport(c.get("user").id, parsed.data.text));
   })
   .post("/import", async (c) => {
+    assertFeature(c.get("user").id, "memory");
     const parsed = importInput.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "Choose 1–500 memories of up to 2,000 characters each." }, 400);
     const result = tx(() => {
@@ -534,11 +541,13 @@ export const memoryRoutes = new Hono<AppEnv>()
       { "Content-Type": text ? "text/plain; charset=utf-8" : "application/json" });
   })
   .post("/", async (c) => {
+    assertFeature(c.get("user").id, "memory");
     const parsed = entryInput.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "A memory must be 1–2,000 characters." }, 400);
     return c.json(saveMemory(c.get("user").id, parsed.data, "manual").entry);
   })
   .patch("/:id", async (c) => {
+    assertFeature(c.get("user").id, "memory");
     const parsed = z.object({ content: contentSchema }).safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "A memory must be 1–2,000 characters." }, 400);
     const userId = c.get("user").id;

@@ -324,10 +324,13 @@ test("migration adds the edit columns and leaves existing rows unedited", () => 
       // A fixed historical version stays valid when future migrations are appended.
       db.exec("ALTER TABLE email_drafts DROP COLUMN kind");
       db.exec("DROP TABLE image_threads; DROP TABLE media; DROP INDEX uploads_media; DROP INDEX sandbox_files_media");
+      for (const table of ["uploads", "sandbox_files", "user_avatars"]) db.exec("ALTER TABLE " + table + " DROP COLUMN media_id");
       // Tables added by later migrations must be absent before the historical replay.
       db.exec("DROP TABLE IF EXISTS chatgpt_login_attempts; DROP TABLE IF EXISTS chatgpt_registrations; DROP TABLE IF EXISTS chatgpt_controls; DROP TABLE IF EXISTS chatgpt_hosts");
-      for (const table of ["uploads", "sandbox_files", "user_avatars"]) db.exec("ALTER TABLE " + table + " DROP COLUMN media_id");
-      db.exec("DROP TABLE n8n_agent_sessions; DROP TABLE n8n_agent_runs; DROP TABLE n8n_agents");
+      for (const table of ["n8n_agent_sessions", "n8n_agent_runs", "n8n_agents", "permission_leases", "permission_rate_windows", "permission_audit", "user_model_instructions", "prompt_rules", "permission_policies", "permission_state"]) db.exec("DROP TABLE " + table);
+      db.exec("DROP INDEX user_groups_prompt_order");
+      db.exec("ALTER TABLE user_groups DROP COLUMN prompt_order");
+      for (const column of ["custom_instructions", "instructions_revision"]) db.exec("ALTER TABLE threads DROP COLUMN " + column);
       db.exec("PRAGMA user_version = 32");
       db.close();`);
     const result = JSON.parse(run(`const { db } = await import(${JSON.stringify(dbUrl)});

@@ -23,7 +23,8 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       db.exec("DROP TRIGGER messages_fts_insert; DROP TRIGGER messages_fts_update; DROP TRIGGER messages_fts_delete");
       db.exec("DROP TABLE message_search_keys");
       db.exec("DROP INDEX messages_thread_time");
-      for (const table of ["chatgpt_login_attempts", "chatgpt_registrations", "chatgpt_hosts", "chatgpt_controls", "provider_model_grants", "provider_model_policies", "knowledge_chunks_fts", "knowledge_chunks", "knowledge_sources", "knowledge_collections", "share_groups", "share_users", "share_audiences", "user_group_members", "user_groups", "n8n_agent_sessions", "n8n_agent_runs", "n8n_agents"]) db.exec("DROP TABLE " + table);
+      for (const table of ["chatgpt_login_attempts", "chatgpt_registrations", "chatgpt_hosts", "chatgpt_controls", "provider_model_grants", "provider_model_policies", "knowledge_chunks_fts", "knowledge_chunks", "knowledge_sources", "knowledge_collections", "share_groups", "share_users", "share_audiences", "user_group_members", "user_groups", "n8n_agent_sessions", "n8n_agent_runs", "n8n_agents", "permission_leases", "permission_rate_windows", "permission_audit", "user_model_instructions", "prompt_rules", "permission_policies", "permission_state"]) db.exec("DROP TABLE " + table);
+      for (const column of ["custom_instructions", "instructions_revision"]) db.exec("ALTER TABLE threads DROP COLUMN " + column);
       db.exec("ALTER TABLE threads DROP COLUMN knowledge_ids");
       db.exec("DROP TABLE image_threads");
       db.exec("DROP TABLE media");
@@ -87,7 +88,14 @@ test('n8n migration preserves selected audiences and rolls back schema and versi
     db.exec("INSERT INTO share_users VALUES ('provider','p','u')");
     db.exec("INSERT INTO share_groups VALUES ('mcp','m','g')");
     db.exec('DROP TABLE n8n_agent_sessions; DROP TABLE n8n_agent_runs; DROP TABLE n8n_agents');
-    db.exec('PRAGMA user_version = ' + (version - 1));
+    db.exec('DROP TABLE permission_leases; DROP TABLE permission_rate_windows; DROP TABLE permission_audit; DROP TABLE user_model_instructions; DROP TABLE prompt_rules; DROP TABLE permission_policies; DROP TABLE permission_state');
+    db.exec('DROP INDEX user_groups_prompt_order');
+    db.exec('ALTER TABLE user_groups DROP COLUMN prompt_order');
+    db.exec('ALTER TABLE threads DROP COLUMN custom_instructions');
+    db.exec('ALTER TABLE threads DROP COLUMN instructions_revision');
+    // Migration 39 is n8n agents and 40 is granular permissions. Versions are append-only, so
+    // replaying from 38 exercises the n8n migration and everything appended after it.
+    db.exec('PRAGMA user_version = 38');
     console.log(version); db.close();`;
   try {
     const tail = Number(run(setup).trim());
@@ -99,7 +107,7 @@ test('n8n migration preserves selected audiences and rolls back schema and versi
       const file = fs.readdirSync(${JSON.stringify(directory)}).find(name => /\.(db|sqlite)$/.test(name));
       const db = new DatabaseSync(${JSON.stringify(directory)} + '/' + file);
       console.log(JSON.stringify({version:db.prepare('PRAGMA user_version').get().user_version,tables:db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'n8n_%' OR name LIKE '%_new'").all()})); db.close();`));
-    assert.equal(result.version, tail - 1);
+    assert.equal(result.version, 38, 'the failed n8n migration leaves the pre-n8n version');
     assert.deepEqual(result.tables, []);
     for (let i = 0; i < 2; i++) {
       const state = JSON.parse(run(`const { db } = await import(${JSON.stringify(dbUrl)});

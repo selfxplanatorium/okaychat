@@ -13,6 +13,7 @@ import { assertStorage } from "./quota.js";
 import { getSettings } from "./settings.js";
 import { currentBranch, getThread } from "./threads.js";
 import { costOf, normalizeUsage, recordUsage } from "./usage.js";
+import { assertFeature, featureAllowed } from "./permissions/guard.js";
 
 // Background memory work, off the reply's critical path (Letta's "sleep-time" agent, ChatGPT's and
 // Claude's asynchronous memory generation). Two jobs:
@@ -48,6 +49,8 @@ async function backgroundModel(userId: string, preferred?: string | null) {
 }
 
 async function complete(userId: string, prompt: string, opts: { threadId?: string; preferred?: string | null; maxOutputTokens: number }): Promise<string> {
+  // Extraction and summarization are memory work: no provider call once the account loses it.
+  assertFeature(userId, "memory");
   const { model, conn } = await backgroundModel(userId, opts.preferred);
   const handle = createModel(model, conn, { userId });
   // A deadline: the worker runs one job at a time for every account, so a stalled response must not hold it.
@@ -83,6 +86,7 @@ interface ReviewState { user_id: string; id: string; updated_at: number; memory_
  * Returns the applied operations, or null when the chat is not eligible.
  */
 export async function reviewThread(userId: string, threadId: string): Promise<MemoryOperation[] | null> {
+  if (!featureAllowed(userId, "memory")) return null;
   const preferences = memoryPreferences(userId);
   const thread = getThread(userId, threadId);
   const state = db.prepare("SELECT user_id, id, updated_at, memory_cursor, model_ref FROM threads WHERE user_id = ? AND id = ?").get(userId, threadId) as ReviewState | undefined;
@@ -134,6 +138,7 @@ export async function reviewThread(userId: string, threadId: string): Promise<Me
 
 /** Rewrites one scope's summary from its facts. Without facts (or with a deleted project) the summary is removed. */
 export async function refreshSummary(userId: string, scope: string, { force = false } = {}): Promise<void> {
+  if (!featureAllowed(userId, "memory")) return;
   const preferences = memoryPreferences(userId);
   const project = scope ? db.prepare("SELECT name FROM projects WHERE id = ? AND user_id = ?").get(scope, userId) as { name: string } | undefined : undefined;
   const facts = listMemories(userId, scope || null).filter((e) => (e.scope ?? "") === scope);
