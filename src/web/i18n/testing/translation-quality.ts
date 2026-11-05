@@ -65,8 +65,9 @@ export function englishProseLeft(tag: string, translation: unknown, source: Reco
     const residual = text.replace(/\{[^}]*\}/g, " ").replace(/[·—×/]/g, " ").trim();
     return /\s/.test(residual) && /[a-z]{4,}/.test(residual);
   };
+  const same = (a: string, b: string) => a.replace(/\s+/g, " ").trim() === b.replace(/\s+/g, " ").trim();
   const check = (id: string, english: string, value: string, form?: string) => {
-    if (english !== value || !prose(english)) return;
+    if (!same(english, value) || !prose(english)) return;
     if ((accepted[id] ?? []).includes(english)) return;
     problems.push(`${tag}: ${form ? `${id}.${form}` : id} is still English`);
   };
@@ -81,8 +82,10 @@ export function englishProseLeft(tag: string, translation: unknown, source: Reco
         continue;
       }
       if (!value || typeof value !== "object" || typeof english !== "object" || english === null) continue;
-      for (const [form, text] of Object.entries(english as Record<string, unknown>)) {
-        const translatedForm = (value as Record<string, unknown>)[form];
+      // Forms English lacks (`many` in fr/it/pt-PT) are compared with English `other`.
+      const englishForms = english as Record<string, unknown>;
+      for (const [form, translatedForm] of Object.entries(value as Record<string, unknown>)) {
+        const text = englishForms[form] ?? englishForms.other;
         if (typeof text === "string" && typeof translatedForm === "string") check(id, text, translatedForm, form);
       }
     }

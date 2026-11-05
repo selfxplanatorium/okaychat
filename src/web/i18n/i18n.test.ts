@@ -198,12 +198,27 @@ test("the English-left gate checks plural forms and binds exemptions to the revi
     englishProseLeft("fr", { demo: { items: { one: "un élément sélectionné", other: "{count} items selected" } } }, pluralSource),
     ["fr: demo.items.other is still English"],
   );
+  // A form English lacks is compared with English `other`, and whitespace does not hide a leftover.
+  assert.deepEqual(
+    englishProseLeft("fr", { demo: { items: { one: "un élément sélectionné", many: "{count} items selected", other: "{count} éléments sélectionnés" } } }, pluralSource),
+    ["fr: demo.items.many is still English"],
+  );
+  assert.deepEqual(
+    englishProseLeft("fr", { demo: { items: { one: "one item selected ", other: "{count} éléments sélectionnés" } } }, pluralSource),
+    ["fr: demo.items.one is still English"],
+  );
   // A reviewed key is exempt only for the exact reviewed English text, not for whatever replaces it.
   const changedSource = { apiAccess: { paramModel: "a changed English sentence" } };
   assert.deepEqual(
     englishProseLeft("fr", { apiAccess: { paramModel: "a changed English sentence" } }, changedSource),
     ["fr: apiAccess.paramModel is still English"],
   );
+});
+
+test("French puts a no-break space before high punctuation and inside guillemets", async () => {
+  const texts = (value: unknown): string[] => (typeof value === "string" ? [value] : Object.values(value as Record<string, unknown>).flatMap(texts));
+  const plain = texts(await loadChunk("fr")).filter((text) => / [?!;:%»]|« /.test(text));
+  assert.deepEqual(plain, []);
 });
 
 test("translated plural entries pick the active language's category for representative counts", async () => {
