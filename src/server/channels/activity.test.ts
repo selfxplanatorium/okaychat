@@ -94,6 +94,7 @@ beforeEach(() => {
 });
 
 after(() => {
+  activity.resetChannelActivity();
   setActivityClock(null);
   db.close();
   rmSync(dataDir, { recursive: true, force: true });
@@ -215,6 +216,24 @@ test("a deleted session ends the connection without grace and a stale seq cannot
   advance(CHANNEL_COALESCE);
   assert.equal(presenceOf(take(watcher)!, "bob"), "offline");
   assert.equal(activity.channelActivityState().connections, 1);
+});
+
+test("logout after disconnect revokes retained grace before its deadline", () => {
+  const channelId = makeChannel(["alice", "bob"]);
+  const watcher = register("alice");
+  const bob = register("bob");
+  watch("alice", watcher, channelId);
+  watch("bob", bob, channelId);
+  take(watcher);
+  bob.release();
+  assert.equal(activity.channelActivityState().grace, 1);
+
+  db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(HASH("bob"));
+  advance(CHANNEL_COALESCE);
+  // Projection must not expose revoked grace even before the periodic sweep.
+  assert.equal(presenceOf(take(watcher)!, "bob"), "offline");
+  activity.sweepChannelActivity();
+  assert.equal(activity.channelActivityState().grace, 0);
 });
 
 test("two tabs typing the same scope aggregate once; stopping one keeps the other", () => {

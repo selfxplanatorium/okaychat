@@ -173,6 +173,8 @@ function presenceOf(conn: Connection, now: number): "online" | "away" | null {
 
 function gracePresence(entry: Grace, now: number): "online" | "away" | null {
   if (now >= entry.expiresAt || now >= entry.validUntil) return null;
+  // Logout can happen after the stream has already closed, with no live connection to revoke.
+  if (!sessionAlive(entry.sessionHash) || !featureOn(entry.userId)) return null;
   return entry.state;
 }
 
@@ -771,7 +773,7 @@ function sweep(): void {
   const now = activityNow();
   let changedSubjects = false;
   for (const entry of [...grace.values()]) {
-    if (now >= entry.expiresAt || now >= entry.validUntil) {
+    if (now >= entry.expiresAt || now >= entry.validUntil || !sessionAlive(entry.sessionHash) || !featureOn(entry.userId)) {
       removeGrace(entry);
       changedSubjects = true;
     }
