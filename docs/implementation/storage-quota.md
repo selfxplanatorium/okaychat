@@ -14,6 +14,7 @@ same transaction, and deletes/shrinks work over quota.
 
 - Persistent original attachment bytes in `uploads`, including images, text/code, binary files, and project attachments.
 - Every artifact version: UTF-8 source bytes plus built document bytes.
+- Generated video originals (`videos.size`) and `video_jobs.reservation_bytes`: 64 MiB output + 256 KiB starting frame + 32 KiB receipt at admission, replaced by actual bytes at success. Cleanup failure keeps reservations/rows charged; terminal receipts retain 32 KiB.
 - Generated images (`images.size`, backed by files on disk; MIME comes from the stored image metadata); pre-quota images are stat'ed at startup to backfill their size.
 - Durable `sandbox_files.data`; scratch workspaces are outside account storage.
 - Uploaded fonts, account avatar, encrypted memory bytes (facts and summaries), and extracted project-file text.

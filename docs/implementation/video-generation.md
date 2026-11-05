@@ -38,8 +38,7 @@ CDN descriptors only accept HTTPS `vidgen.x.ai`, `replicate.delivery`, or a prop
 latter, without userinfo, fragment, or nonstandard port. Downloads use `pinnedRequest` from
 `public-fetch.ts`: DNS is checked at connection time, private addresses refused, redirects never
 followed, no credentials forwarded. Downloads have a 60-second deadline, a 64 MiB decompressed-byte
-cap, exclusive 0600 output creation, incremental hashing, fsync, and cleanup on failure. The caller
-must create a private staging directory and perform atomic final persistence later. Owner-qualified local GET/HEAD supports one byte range and private cache validators; no vendor URL is served.
+cap, exclusive 0600 output creation, incremental hashing, fsync, and cleanup on failure. The worker creates private staging directories and publishes validated output atomically. Owner-qualified local GET/HEAD supports one byte range and private cache validators; no vendor URL is served.
 
 ## MP4 inspection
 
@@ -66,7 +65,7 @@ replacement. Revalidate availability before enabling the feature.
 
 `video/core.test.ts` uses fake providers, hand-authored MP4 containers, mocked private DNS and local
 streams. `storage-migrations.test.ts` checks rollback/reopen and rewinds older schema fixtures with
-video tables/columns removed. No test calls a vendor. Worker crash/cancel/unknown-billing recovery, ownership routes, quota/accounting and client status tests are implemented. Service/key and Library ownership/filter/pagination tests are implemented; the full reference-normalization matrix is the remaining acceptance phase.
+video tables/columns removed. No test calls a vendor. Worker crash/cancel/unknown-billing recovery, ownership routes, quota/accounting and client status tests are implemented. Service/key and Library ownership/filter/pagination tests are implemented; reference normalization/ownership/bounds/staging recovery is covered by `reference.test.ts`.
 No dependencies, binaries, container services or raster/image execution behavior were changed.
 
 ## Worker and recovery
@@ -91,7 +90,7 @@ SSE emits current snapshots, not an event replay log: five streams/account, a 60
 feature checks. Terminal snapshots close streams. Foreign/missing IDs match. No public submit route.
 The worker tests cover pre/post-submit crashes, unknown billing, ID/download/final-file recovery,
 lease replacement, local validation charges, five transient polls, deadlines and cancellation races.
-Retry authorization, confirmed UI retry, completed-reference fork retention and inert share/archive projections are implemented. Dedicated coverage of all reference-image edge cases and the remaining Library lifecycle remains upcoming.
+Retry authorization, confirmed UI retry, completed-reference fork retention and inert share/archive projections are implemented. Reference-image and Library lifecycle suites exercise these boundaries.
 
 ## Interactive tool boundary
 
@@ -134,7 +133,7 @@ Usage totals now label known subtotals and unknown video-charge counts without c
 Settings → General lists both services with explicit opt-in, curated models, duration/aspect/resolution
 defaults, per-second/per-clip estimates, audio/upscale/reference notes and cancellation billing limits.
 xAI links to the private Providers connection. Replicate uses the existing `image-replicate` key and
-warns that changes/removal affect images too. Shared-only, disabled, noncanonical-endpoint and retired
+warns that changes/removal affect images too. Existing shared image credentials remain labelled as shared in image settings and are not offered to video. Shared-only, disabled, noncanonical-endpoint and retired
 model states withhold generation; a retired stored model remains visible until explicitly corrected.
 Settings writes never mutate image service preferences. Reads/writes are account-scoped and stale
 responses cannot overwrite a newer account or selection.
@@ -150,3 +149,45 @@ them to LLM generation metadata. Card details also open that panel.
 The `video` namespace is required in all shipped locales, as are its permission and assistant-family
 labels. English, German, Spanish, French, Italian and European Portuguese have explicit entries.
 No browser playback or live provider acceptance has been performed.
+
+## Reference validation and acceptance
+
+`reference.test.ts` covers owned legacy BLOB and file-backed rasters; foreign, missing and forged media
+references; URL/path rejection; SVG/HTML, corruption and animation rejection; the 25 MiB/100 MP bounds;
+orientation and white alpha compositing; no upscaling and 1280-pixel output bounds; the 1% aspect
+constraint; the JPEG quality ladder/256 KiB ceiling; encrypted digest retention; upload deletion after
+submission; staging tampering; and terminal cleanup. All transport execution is fake and assertions
+include zero submissions/usage on invalid references. The shared sharp queue is reused; no video is
+decoded by sharp.
+
+Automated acceptance uses `npm run typecheck`, `npm test`, and `npm run build`, plus the video worker,
+provider/security/reference/Library/route/client suites and `storage-migrations.test.ts`. The latter
+rewinds earlier schemas, tests the video rollback seam, reopens twice, and checks foreign keys. Worker
+fixtures cover the pre-POST crash, ambiguous POST, saved ID, partial download, durable published-file
+adoption, cancellation/deletion races, expired leases, shutdown, uncertain billing, exact settlement
+and retained quota when cleanup fails. These tests perform no live vendor generation. UI source checks
+cover locale coverage, logical direction, settings anchors and client visibility/account/revision state.
+Container inspection fixtures establish structural acceptance only; browser playback and live account
+acceptance have not been performed or claimed.
+
+## Storage, backups and operating limits
+
+Back up the database and `videos/` together; include `video-staging/` when preserving in-flight jobs.
+Private files are stored beneath the configured data directory, with no additional Docker service.
+Run one app process per database. Keep the private key enabled and unchanged while jobs run. A request
+body is retained encrypted for 24 hours; terminal receipts normally retain 30 days and a completed video's
+minimal receipt remains while its file exists. Missing output is unavailable, never regenerated.
+Hourly maintenance retries failed cleanup; bytes/reservations stay charged until removal succeeds.
+
+The inspector is a deliberately narrow H.264/AAC MP4 container check, not full decoding or sanitization.
+Local cancellation, unknown submit outcomes, provider charges after local validation/storage failure,
+expiring provider outputs and list-price versus invoice differences remain explicit operating limits.
+
+## Deliberate deferrals
+
+Additional transports/model discovery, shared-key video policies, arbitrary endpoints/models,
+callbacks/webhooks, partial playable streaming, generic video uploads, longer clips/4K/square, multiple
+outputs/references, last-frame interpolation/editing/extension, audio controls, server thumbnails,
+transcoding/full decoding, public-share playback, archive byte round trips, completion notifications or
+extra LLM replies, invoice reconciliation, automatic paid resubmission, and multiple worker processes
+are outside this increment. No endpoint is silently replaced when a curated capability retires.

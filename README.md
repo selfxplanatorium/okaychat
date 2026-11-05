@@ -19,7 +19,7 @@
 ## Why okaychat
 
 - **Every model, one place.** OpenCode Go, your own ChatGPT plan, OpenCode Zen, a local Ollama, and any OpenAI-compatible, Anthropic, or Google endpoint. Per-chat model and reasoning controls, live context and cost metering, prompt caching, and automatic compaction.
-- **Tools that actually work.** MCP servers, web search, a real offline code sandbox, document editing, image generation, knowledge bases, memory, deep research, scheduled prompts, and voice — not a chat box with a prompt.
+- **Tools that actually work.** MCP servers, web search, a real offline code sandbox, document editing, image and video generation, knowledge bases, memory, deep research, scheduled prompts, and voice — not a chat box with a prompt.
 - **Built for several people.** Shared channels, accounts, groups, per-audience shared keys, per-model and per-user system prompts, granular feature and limit policies, storage quotas, and admin controls that do not require editing a config file.
 - **Private by default.** SQLite plus files on your disk. Credentials and memory are encrypted at rest. Outbound requests to user-chosen URLs are DNS-checked, every hop. Chromium runs in its own container, away from app data.
 - **Fast where it counts.** Streaming, reload recovery, a virtualized sidebar, a windowed message list, lazy routes, cached thread history, and a production bundle split so sign-in does not download the app.
@@ -105,6 +105,22 @@ The ChatGPT plan uses the official **Sign in with ChatGPT** flow for chat. Set `
 
 </td></tr>
 </table>
+
+### Video generation
+
+Enable a service in **Settings → General → Video generation**. xAI reuses your private Providers key;
+Replicate reuses your private image key. Shared keys and custom video endpoints are not supported.
+Services start disabled, with curated models and explicit duration, aspect ratio and resolution defaults.
+
+Ask for a 4, 6 or 8 second video at 720p or 1080p, optionally starting from one of your uploaded images.
+The chat card shows a durable job's status, a native player, download, cancellation and a confirmed paid
+retry. Completed videos also appear under **Library → Videos**. Jobs outlive browser disconnects;
+restart recovery resumes the same provider receipt and never automatically submits another paid attempt.
+
+Cancelled jobs and interrupted submissions may still be charged. Prices are versioned estimates, and a
+provider's successful generation can still fail local file validation. Public shares and chat archives
+omit video playback/bytes. See [video generation](docs/implementation/video-generation.md) for limits,
+billing, recovery and backup guidance. No additional container or dependency is needed.
 
 **More:** scheduled prompts, voice calls, read-aloud and dictation, image generation, email drafting and sending, a persistent file library, keyboard-first controls, an installable PWA, and a theme engine with light/dark/system modes plus liquid-glass surfaces.
 

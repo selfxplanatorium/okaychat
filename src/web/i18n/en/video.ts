@@ -14,7 +14,7 @@ export default {
   manageProviderKey: 'Manage your private key in Providers',
   sharedImageKey: 'Images and videos use the same private Replicate key. Changing or removing it affects both.',
   replicateKey: 'Private Replicate API key',
-  removeKey: 'Remove shared image/video key',
+  removeKey: 'Remove image/video key',
   model: 'Video model',
   duration: 'Default duration',
   aspect: 'Default aspect ratio',

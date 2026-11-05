@@ -6,6 +6,7 @@ existing stores; there is no duplicate catalog table.
 | Source | Store | Size | Association |
 | --- | --- | --- | --- |
 | Attachments (images, documents, text/code and arbitrary binary files) | `uploads.data`; raster images in the media store (`uploads.media_id`, see `media.md`) | Original bytes | Explicit thread for materialized inline attachments; otherwise the latest owning chat mentioning `file_id`; pinned originals also link through `project_files.upload_id` |
+| Generated videos | Private MP4 files + `videos` | Validated original bytes, no thumbnails | Completed jobs only; origin or surviving owned chat references, any-reference chat/project filtering |
 | Generated images | PNGs on disk + `images` | Stored `images.size` (legacy sizes backfilled at startup) | Owning thread and project |
 | Artifact/document | Latest `artifacts` version, selected explicitly by maximum version | UTF-8 source + built bytes | Owning thread and project |
 | `run_code` outputs | `sandbox_files.data`; raster images in the media store | Durable copied bytes | Owning thread and project |
@@ -32,7 +33,7 @@ cannot reappear at restart, and a stale resend of an already-referenced message 
 
 ## Filtering and pagination
 
-Kinds: `image`, `pdf`, `document`, `spreadsheet`, `code`, `other`. Filters: `kind`, `source`
+Kinds: `video`, `image`, `pdf`, `document`, `spreadsheet`, `code`, `other`. Filters: `kind`, `source`
 (`uploaded`/`generated`), `thread`, `project`, literal name search `q`, inclusive timestamps `from`/`to`.
 Sorts: `newest`, `oldest`, `name`, `size`. Page size defaults to 50 and is capped at 100.
 
@@ -66,8 +67,9 @@ with `hidden`, so switching sections never refetches behind a skeleton.
   previews retain their existing sandboxed frame/document renderers.
 - Skills have `/api/library/skill/:id/preview` (instructions and reference index) and `/file` (a ZIP
   containing SKILL.md plus references). These resolve account ownership before reading any files.
+- Generated videos use a placeholder grid tile and native player only in the preview. Private local range/HEAD downloads and global deletion use `/api/videos/:id/file` and `/api/library/video/:id`; arbitrary video uploads stay `other`. See `video-generation.md`.
 - Generated images and artifact documents use their existing owner-checked routes. Image MIME metadata is authoritative even when the stored filename ends in `.png`.
-- `DELETE /api/library/{upload|image|sandbox|skill}/:id` deletes owned data and frees quota. Skill deletion
+- `DELETE /api/library/{upload|image|video|sandbox|skill}/:id` deletes owned data and frees quota. Skill deletion
   includes its references. Artifact versions remain part of chat history and are removed with the chat.
 
 The lazy navigation page provides grid/list layouts, filters, debounced search, infinite pagination

@@ -43,6 +43,7 @@ Status as of 2026-11-05. Update this file when a feature ships or a plan changes
 | Documents | `create_document` / `edit_document` / `read_document` / `import_document` for PDF, Word, and Excel. HTML/CSS becomes a vector PDF through Chromium in the separate browser worker or a Word file through `docx`; a JSON workbook becomes XLSX through `exceljs`, with formulas evaluated and row/column inserts shifting references. Uploaded PDF/DOCX/XLSX files are imported and edited in place. Panel previews: browser PDF viewer, `docx-preview`, spreadsheet grid; source and download alongside. `view_artifact` returns a screenshot to vision models for layout checks | See `docs/implementation/documents.md`. PDF creation needs the browser worker; other formats work without Chromium |
 | Generative UI | `render_spec` (declarative components from our themed catalog: cards, tables, metrics, bars, forms) and `show_widget` / `edit_widget` (HTML/SVG in a null-origin sandbox with render reports for repair), via `generative-frame` | Tools run in the browser. See `docs/implementation/generative-ui.md`. Toggle in Settings → General |
 | Image generation | `generate_image` through the user's ChatGPT plan (Codex CLI) or image APIs: OpenAI, Gemini, xAI, Together (reusing chat provider keys), Black Forest Labs, fal, Replicate (image-only keys). Settings → General switches services on/off and picks the model; with several on, the assistant asks which to use. References for edits, images inline with download | See `docs/implementation/image-generation.md`, `docs/implementation/codex-images.md` |
+| Video generation | `generate_video` through private xAI or Replicate keys; explicit service opt-in, curated models/defaults and estimates in General settings, durable jobs, authenticated SSE status, inline native playback, cancel/confirmed paid retry, Library Videos filter and separate media charges in message details | 4/6/8 s, 720p/1080p, landscape/portrait, optional owned starting image. Unknown-billing recovery never reposts automatically. No shared keys, posters, public playback or archive bytes. See `docs/implementation/video-generation.md` |
 | Code execution | `run_code` runs Python and Bash in a separate `sandbox` container. One workspace per chat with its own uid, files persist between runs, attachments copied in by `file_id`, images inline and files downloadable. Each run jailed by bubblewrap with no network at all (own network, mount, IPC namespaces, inner seccomp filter), fails closed. Offline toolset: FFmpeg, LibreOffice, Pandoc, Tesseract/OCRmyPDF, poppler, qpdf, Ghostscript, Graphviz, librsvg, ExifTool, archives, scientific Python. Outputs can be imported for `view_artifact` (PPTX via LibreOffice) | See `docs/implementation/code-sandbox.md`. Toggle in Settings → General |
 | Keyboard | Every feature without a pointer: configurable shortcuts (Settings → Keyboard, synced per account), a command list that runs any command by name (Ctrl/⌘+/), message navigation (J/K, then C/E/R/B), arrow keys in the chat list and model picker, Enter or Ctrl/⌘+Enter to send | Defaults avoid browser shortcuts (Alt+Shift+letter). See `docs/implementation/keyboard.md` |
 | Mobile app | Installable PWA (manifest, maskable icons, offline shell), safe areas, touch-sized controls, swipe drawer, native-style settings rows | Install needs HTTPS. See `docs/implementation/mobile-pwa.md` |
@@ -231,7 +232,7 @@ switching language without a reload, further locales, and RTL.
 
 ## Known gaps
 
-- Stream replay is kept in server memory for 15 minutes after the last update. Reload recovery works; pending generations do not survive a server restart.
+- Stream replay is kept in server memory for 15 minutes after the last update. Reload recovery works; pending language-model turns do not survive a server restart. Video jobs have their own durable recovery ledger.
 
 - No public usage/limits API for OpenCode Go was found. Go windows show our own recorded spend, not the remaining quota.
 
@@ -249,3 +250,17 @@ The SIWC desktop helper, encrypted store, and transport are implemented behind a
   attachments/reactions/typing, edit-added mentions, payload templates, dual-key rotation, endpoint
   verification challenges, bulk retries, public replay, and a distributed worker. See
   `docs/implementation/outgoing-webhooks.md`.
+
+## Video generation increment (shipped)
+
+- Explicit per-service opt-in in General settings, private-key reuse, canonical-endpoint checks,
+  curated models/defaults and per-second/per-clip estimates; image settings remain independent.
+- Durable admission/reservations, leases, cancellation, unknown-billing and same-receipt recovery;
+  authenticated status/events/range downloads, inline player, Library filtering/deletion and media details.
+- English, German, Spanish, French, Italian and European Portuguese video copy is required by the
+  coverage contract. Fake providers, crash/cancel recovery, migration rewind and reference normalization
+  are tested without live generation calls.
+- Deferred: additional transports/models, shared-key entitlements, custom endpoints, callbacks,
+  longer/larger/multiple outputs, editing/extension, server thumbnails/transcoding/full decoding,
+  public-share playback, archive bytes, invoice reconciliation and multi-process workers. Live account
+  generation and browser playback are not part of the automated acceptance run.
