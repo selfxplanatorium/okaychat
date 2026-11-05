@@ -15,6 +15,8 @@ import { assertContent, assertDescription, assertName, assertReason, normalizeMe
 import { bindAttachments, removeChannelMedia } from "./attachments.js";
 import { recountThread } from "./thread-counts.js";
 import { resolveThreadPlacement } from "./threads.js";
+import { cancelChannelDeliveries, cancelTextDeliveriesForMessage } from "../outgoing-webhooks/store.js";
+import { emitChannelCreated, emitChannelDeleted, emitChannelEdited, emitChannelMention } from "../outgoing-webhooks/events.js";
 
 /** Synchronous channel transactions. Async orchestration (model calls, SSE) lives in routes/worker/events. */
 
@@ -223,6 +225,7 @@ export function archiveChannel(userId: string, channelId: string, revision: numb
     assertChannelRevision(channel, revision);
     chargeRate(userId, "membership");
     db.prepare("UPDATE channels SET archived_at = ? WHERE id = ?").run(archived ? Date.now() : null, channelId);
+    if (archived) cancelChannelDeliveries(channelId);
     const next = bumpRevision(channelId);
     audit(userId, channelId, archived ? "archive" : "unarchive", null, "");
     insertEvent({ channelId, kind: "channel.changed", entityId: channelId, version: next });
@@ -241,6 +244,7 @@ export function deleteChannel(userId: string, channelId: string, revision: numbe
     db.prepare("UPDATE channel_create_keys SET channel_id = NULL WHERE channel_id = ?").run(channelId);
     db.prepare("DELETE FROM channel_ai_runs WHERE channel_id = ?").run(channelId);
     db.prepare("DELETE FROM channels WHERE id = ?").run(channelId);
+    cancelChannelDeliveries(channelId);
     audit(userId, channelId, "delete", null, reason);
     // The room is gone, so the invalidation has no private metadata and reaches every client.
     insertSync();
@@ -267,6 +271,8 @@ export function transferOwner(userId: string, channelId: string, revision: numbe
     db.prepare("UPDATE channel_members SET role = 'moderator' WHERE channel_id = ? AND role = 'owner' AND user_id <> ?").run(channelId, targetId);
     db.prepare("UPDATE channel_members SET role = 'owner' WHERE channel_id = ? AND user_id = ?").run(channelId, targetId);
     db.prepare("UPDATE channels SET owner_id = ? WHERE id = ?").run(targetId, channelId);
+    // Ownership moved, so the previous owner's unsent exports for this room are no longer authorized.
+    cancelChannelDeliveries(channelId);
     // The payer of every stored attachment moves with the room; otherwise the old owner pays forever.
     db.prepare("UPDATE channel_attachments SET owner_id = ? WHERE channel_id = ?").run(targetId, channelId);
     const next = bumpRevision(channelId);
@@ -633,6 +639,26 @@ export function postHumanMessage(
     }
     insertEvent({ channelId, kind: "message.changed", entityId: id, version: 1, rootId: threadRoot });
     insertEvent({ channelId, kind: "channel.changed", entityId: channelId, version: channel.revision });
+    // Human posts are immediately complete. A room owner's own mention of themselves is not a mention
+    // event, and a DM never exports anything (the admission gate rechecks both).
+    if (channel.kind === "dm") {
+      afterCommit(() => clearChannelActivityAfterPost(channelId, threadRoot, userId));
+      return { value: { messageId: id, seq, runId, replay: false }, replay: false };
+    }
+    const data = {
+      userId: channel.owner_id,
+      channelId,
+      messageId: id,
+      messageSequence: seq,
+      revision: 1,
+      rootId: threadRoot,
+      kind: "human" as const,
+      text: body,
+    };
+    emitChannelCreated(data);
+    if (mentions.some((mention) => mention.userId === channel.owner_id) && userId !== channel.owner_id) {
+      emitChannelMention(data);
+    }
     afterCommit(() => clearChannelActivityAfterPost(channelId, threadRoot, userId));
     return { value: { messageId: id, seq, runId, replay: false }, replay: false };
   });
@@ -642,7 +668,7 @@ export function editHumanMessage(userId: string, channelId: string, messageId: s
   tx(() => {
     const channel = channelRow(channelId);
     const message = db.prepare("SELECT * FROM channel_messages WHERE channel_id = ? AND id = ?").get(channelId, messageId) as
-      | { id: string; author_id: string | null; kind: string; revision: number; deleted_at: number | null; body: string; thread_root: string | null }
+      | { id: string; author_id: string | null; kind: string; revision: number; deleted_at: number | null; body: string; thread_root: string | null; seq: number }
       | undefined;
     if (!channel || !message) throw notFound();
     if (message.kind !== "human" || message.author_id !== userId) throw new AppError({ code: "forbidden", message: "You can only edit your own messages." });
@@ -669,6 +695,20 @@ export function editHumanMessage(userId: string, channelId: string, messageId: s
     }
     const next = (db.prepare("SELECT revision FROM channel_messages WHERE id = ?").get(messageId) as { revision: number }).revision;
     insertEvent({ channelId, kind: "message.changed", entityId: messageId, version: next, rootId: message.thread_root });
+    if (channel.kind !== "dm") {
+      // A stale created/edit/mention body must not ship after this save, even when the text is unchanged.
+      cancelTextDeliveriesForMessage(channelId, messageId);
+      emitChannelEdited({
+        userId: channel.owner_id,
+        channelId,
+        messageId,
+        messageSequence: message.seq,
+        revision: next,
+        rootId: message.thread_root,
+        kind: "human",
+        text: body,
+      });
+    }
   });
 }
 
@@ -692,12 +732,13 @@ export function deleteHumanMessage(userId: string, channelId: string, messageId:
       db.prepare("DELETE FROM channel_reactions WHERE message_id = ?").run(id);
       db.prepare("UPDATE channel_attachments SET deleted_at = ? WHERE message_id = ? AND deleted_at IS NULL").run(now, id);
       purgeMessageNotices(channelId, id);
+      return (db.prepare("SELECT revision FROM channel_messages WHERE id = ?").get(id) as { revision: number }).revision;
     };
-    tombstone(messageId);
+    const rootRevision = tombstone(messageId);
     const replies = message.thread_root === null
-      ? (db.prepare("SELECT id FROM channel_messages WHERE channel_id = ? AND thread_root = ? AND deleted_at IS NULL").all(channelId, messageId) as Array<{ id: string }>)
+      ? (db.prepare("SELECT id, seq, kind FROM channel_messages WHERE channel_id = ? AND thread_root = ? AND deleted_at IS NULL ORDER BY seq").all(channelId, messageId) as Array<{ id: string; seq: number; kind: string }>)
       : [];
-    for (const reply of replies) tombstone(reply.id);
+    const replyRevisions = replies.map((reply) => ({ ...reply, revision: tombstone(reply.id) }));
     if (message.thread_root === null) {
       // The root is gone, so its chip and every thread notice go with it.
       db.prepare("DELETE FROM channel_thread_state WHERE root_id = ?").run(messageId);
@@ -705,13 +746,20 @@ export function deleteHumanMessage(userId: string, channelId: string, messageId:
     } else {
       recountThread(message.thread_root);
     }
-    const next = (db.prepare("SELECT revision FROM channel_messages WHERE id = ?").get(messageId) as { revision: number }).revision;
+    const next = rootRevision;
     if (channel.kind !== "dm") audit(userId, channelId, "deleteMessage", messageId, options.reason);
     insertEvent({ channelId, kind: "message.changed", entityId: messageId, version: next, rootId: message.thread_root });
+    if (channel.kind !== "dm") {
+      // A deletion scrubs every older unsent text copy first; the metadata-only tombstone stays eligible.
+      cancelTextDeliveriesForMessage(channelId, messageId);
+      emitChannelDeleted({ userId: channel.owner_id, channelId, messageId, messageSequence: message.seq, revision: next, rootId: message.thread_root, kind: "human" });
+    }
     // Each tombstoned reply invalidates its own panel; the root event alone would not converge an open thread.
-    for (const reply of replies) {
-      const version = (db.prepare("SELECT revision FROM channel_messages WHERE id = ?").get(reply.id) as { revision: number }).revision;
-      insertEvent({ channelId, kind: "message.changed", entityId: reply.id, version, rootId: messageId });
+    for (const reply of replyRevisions) {
+      insertEvent({ channelId, kind: "message.changed", entityId: reply.id, version: reply.revision, rootId: messageId });
+      if (channel.kind === "dm" || reply.kind !== "human") continue;
+      cancelTextDeliveriesForMessage(channelId, reply.id);
+      emitChannelDeleted({ userId: channel.owner_id, channelId, messageId: reply.id, messageSequence: reply.seq, revision: reply.revision, rootId: messageId, kind: "human" });
     }
     // Everyone composing in the deleted room line or thread line stops being shown as typing.
     afterCommit(() => {
@@ -937,6 +985,26 @@ export function settleRun(runId: string, settlement: RunSettlement): { messageId
     const seq = (db.prepare("SELECT seq FROM channel_messages WHERE id = ?").get(run.message_id) as { seq: number }).seq;
     insertEvent({ channelId: run.channel_id, kind: "message.changed", entityId: run.message_id, version: checkpointRevision(run.message_id) });
     insertEvent({ channelId: run.channel_id, kind: "channel.changed", entityId: run.channel_id });
+    if (settlement.state === "finished") {
+      const channel = channelRow(run.channel_id);
+      const message = db.prepare("SELECT seq, revision, thread_root, kind, body FROM channel_messages WHERE id = ?").get(run.message_id) as
+        | { seq: number; revision: number; thread_root: string | null; kind: string; body: string }
+        | undefined;
+      // Only a successful terminal settlement publishes an assistant message; checkpoints and partial
+      // failed/cancelled/interrupted replies stay private.
+      if (channel && channel.kind !== "dm" && message) {
+        emitChannelCreated({
+          userId: channel.owner_id,
+          channelId: run.channel_id,
+          messageId: run.message_id,
+          messageSequence: message.seq,
+          revision: message.revision,
+          rootId: message.thread_root,
+          kind: "assistant",
+          text: settlement.body ?? message.body,
+        });
+      }
+    }
     return { messageId: run.message_id, seq, channelId: run.channel_id, requesterId: run.requester_id };
   });
 }

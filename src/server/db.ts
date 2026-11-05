@@ -1949,6 +1949,115 @@ CREATE INDEX notifications_calendar ON notifications(calendar_event_id) WHERE ca
     const broken = db.prepare("PRAGMA foreign_key_check").all();
     if (broken.length) throw new Error(`Knowledge migration left ${broken.length} broken foreign keys`);
   },
+  // Outgoing event webhooks (docs/implementation/outgoing-webhooks.md): per-account private endpoints, a
+  // durable outbox, one consumable test preparation, and fixed-minute rate windows. Source ids in the
+  // outbox deliberately have no foreign keys: deleting a source must cancel/scrub an export, not recreate it.
+  () => {
+    db.exec(`
+    CREATE TABLE outgoing_webhook_endpoints (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      config_enc TEXT NOT NULL,
+      signing_secret_enc TEXT NOT NULL,
+      key_id TEXT NOT NULL,
+      subscriptions_json TEXT NOT NULL CHECK(json_valid(subscriptions_json)),
+      channel_ids_json TEXT NOT NULL CHECK(json_valid(channel_ids_json)),
+      include_message_text INTEGER NOT NULL DEFAULT 0 CHECK(include_message_text IN (0,1)),
+      enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0,1)),
+      revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+      next_sequence INTEGER NOT NULL DEFAULT 1 CHECK(next_sequence >= 1),
+      consecutive_failures INTEGER NOT NULL DEFAULT 0 CHECK(consecutive_failures >= 0),
+      failed_attempts INTEGER NOT NULL DEFAULT 0 CHECK(failed_attempts >= 0),
+      dropped_count INTEGER NOT NULL DEFAULT 0 CHECK(dropped_count >= 0),
+      last_drop_reason TEXT CHECK(last_drop_reason IN ('quota','capacity','rate','projection')),
+      last_drop_at INTEGER,
+      auto_disabled_at INTEGER,
+      last_delivery_id TEXT,
+      last_status TEXT CHECK(last_status IN ('succeeded','failed')),
+      last_http_status INTEGER CHECK(last_http_status BETWEEN 100 AND 599),
+      last_attempt_at INTEGER,
+      last_duration_ms INTEGER CHECK(last_duration_ms >= 0),
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(id,user_id)
+    );
+    CREATE INDEX outgoing_endpoints_owner ON outgoing_webhook_endpoints(user_id,id);
+
+    CREATE TABLE outgoing_webhook_deliveries (
+      id TEXT PRIMARY KEY,
+      endpoint_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      endpoint_revision INTEGER NOT NULL CHECK(endpoint_revision >= 1),
+      event_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      sequence INTEGER NOT NULL CHECK(sequence >= 1),
+      occurred_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      body_enc TEXT,
+      source_thread_id TEXT,
+      source_channel_id TEXT,
+      source_message_id TEXT,
+      source_root_id TEXT,
+      status TEXT NOT NULL CHECK(status IN ('queued','sending','backoff','succeeded','dead','cancelled')),
+      version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+      attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 10),
+      attempts_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(attempts_json)),
+      next_attempt_at INTEGER NOT NULL,
+      last_error_code TEXT,
+      last_http_status INTEGER CHECK(last_http_status BETWEEN 100 AND 599),
+      finished_at INTEGER,
+      is_test INTEGER NOT NULL DEFAULT 0 CHECK(is_test IN (0,1)),
+      FOREIGN KEY(endpoint_id,user_id) REFERENCES outgoing_webhook_endpoints(id,user_id) ON DELETE CASCADE,
+      UNIQUE(endpoint_id,event_id),
+      UNIQUE(endpoint_id,sequence)
+    );
+    CREATE INDEX outgoing_deliveries_due ON outgoing_webhook_deliveries(next_attempt_at,endpoint_id,sequence)
+      WHERE status IN ('queued','backoff');
+    CREATE INDEX outgoing_deliveries_owner ON outgoing_webhook_deliveries(user_id,created_at DESC,id DESC);
+    CREATE INDEX outgoing_deliveries_endpoint ON outgoing_webhook_deliveries(endpoint_id,created_at DESC,id DESC);
+    CREATE INDEX outgoing_deliveries_active ON outgoing_webhook_deliveries(user_id,endpoint_id,status)
+      WHERE status IN ('queued','sending','backoff');
+    CREATE INDEX outgoing_deliveries_terminal ON outgoing_webhook_deliveries(status,created_at,id);
+
+    CREATE TABLE outgoing_webhook_test_preparations (
+      id TEXT PRIMARY KEY,
+      endpoint_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      endpoint_revision INTEGER NOT NULL,
+      body_enc TEXT,
+      event_id TEXT NOT NULL,
+      delivery_id TEXT NOT NULL,
+      sequence INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      consumed_at INTEGER,
+      CHECK((consumed_at IS NULL AND body_enc IS NOT NULL) OR (consumed_at IS NOT NULL AND body_enc IS NULL)),
+      FOREIGN KEY(endpoint_id,user_id) REFERENCES outgoing_webhook_endpoints(id,user_id) ON DELETE CASCADE
+    );
+    CREATE UNIQUE INDEX outgoing_test_unconsumed ON outgoing_webhook_test_preparations(endpoint_id)
+      WHERE consumed_at IS NULL;
+    CREATE INDEX outgoing_tests_expiry ON outgoing_webhook_test_preparations(expires_at);
+
+    CREATE TABLE outgoing_webhook_rate_windows (
+      scope TEXT NOT NULL CHECK(scope IN ('admission','account_dispatch','endpoint_dispatch','test','management')),
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      bucket_id TEXT NOT NULL,
+      minute INTEGER NOT NULL,
+      count INTEGER NOT NULL CHECK(count >= 0),
+      PRIMARY KEY(scope,user_id,bucket_id,minute)
+    );
+
+    ALTER TABLE schedules ADD COLUMN webhook_invocation_id TEXT;
+    ALTER TABLE schedules ADD COLUMN webhook_started_at INTEGER;
+    `);
+    if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "outgoing-webhooks") throw new Error("Injected migration failure");
+    db.exec(`
+    CREATE INDEX outgoing_rate_windows_age ON outgoing_webhook_rate_windows(minute);
+    `);
+    const broken = db.prepare("PRAGMA foreign_key_check").all();
+    if (broken.length) throw new Error(`Outgoing webhooks migration left ${broken.length} broken foreign keys`);
+  },
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

@@ -33,6 +33,9 @@ import { speechToken, speechWorkerConfigured } from "./speech/worker.js";
 import { voiceWebSocketServer } from "./voice/routes.js";
 import { inferenceRoutes } from "./api-access/routes.js";
 import { initApiAccess, startApiMaintenance } from "./api-access/maintenance.js";
+import { startOutgoingWebhookMaintenance, stopOutgoingWebhookMaintenance } from "./outgoing-webhooks/maintenance.js";
+import { startOutgoingWebhookWorker, stopOutgoingWebhookWorker } from "./outgoing-webhooks/worker.js";
+import { reconcileScheduleInvocations } from "./schedules.js";
 
 const app = new Hono();
 // Capability-bearing OAuth requests and query strings never enter the request logger.
@@ -93,6 +96,12 @@ if (existsSync(webDir)) {
 // The first page load after a restart must not wait for the 6 MB catalog or the OpenCode Go model list.
 void warmCatalog().catch(() => {});
 
+/** Explicit shutdown for tests and embedders: stop claims, timer work, and abort active attempts. */
+export function stopOutgoingWebhooks(): void {
+  stopOutgoingWebhookWorker();
+  stopOutgoingWebhookMaintenance();
+}
+
 // `/api/voice/call` upgrades through this server; the codec lives in voice/ws.ts so no `ws` dependency is needed.
 serve({ fetch: app.fetch, port: env.port, hostname: env.host, websocket: { server: voiceWebSocketServer } }, (info) => {
   console.log(`okaychat listening on http://${env.host}:${info.port}`);
@@ -105,6 +114,11 @@ serve({ fetch: app.fetch, port: env.port, hostname: env.host, websocket: { serve
   // Archive jobs never resume across a restart: open work fails, prepared bytes expire, staging is swept.
   resetArchiveJobsAtStartup();
   startArchiveMaintenance();
+  // Outgoing webhooks start only after every source has reconciled its restart state, so an interrupted
+  // schedule or turn is admitted exactly once before the first delivery claim.
+  reconcileScheduleInvocations();
+  startOutgoingWebhookWorker();
+  startOutgoingWebhookMaintenance();
   startMemoryWorker();
   startRecordingPurge();
   startCompareMaintenance();
@@ -127,4 +141,12 @@ serve({ fetch: app.fetch, port: env.port, hostname: env.host, websocket: { serve
   // The worker reads this file; writing it at start lets the worker authenticate before the first request.
   if (speechWorkerConfigured()) speechToken();
   probeRenderer();
+  // Stop claims and abort active deliveries before the process leaves. An in-flight request may still
+  // complete remotely after this point; startup treats such a row as uncertain.
+  const shutdown = () => {
+    stopOutgoingWebhooks();
+    process.exit(0);
+  };
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
 });

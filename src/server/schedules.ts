@@ -8,7 +8,7 @@ import type { AppEnv } from "./auth.js";
 import { reserveTurn, turnStream } from "./chat.js";
 import { markBusy, threadBusy } from "./thread-runs.js";
 import { newId } from "./crypto.js";
-import { db } from "./db.js";
+import { db, tx } from "./db.js";
 import { AppError } from "./errors.js";
 import { getProject } from "./projects.js";
 import { describeBoundaryError } from "./provider-errors.js";
@@ -16,6 +16,9 @@ import { appendMessage, currentBranch, ensureThread, getThread, updateThread } f
 import { assertFeature, assertModelAllowed, featureAllowed } from "./permissions/guard.js";
 import { notify } from "./notifications.js";
 import { isRestrictedKnowledgeThread } from "./knowledge/thread-policy.js";
+import { emitScheduleCompleted, emitScheduleFailed } from "./outgoing-webhooks/events.js";
+import type { FailureCode } from "../shared/outgoing-webhooks.js";
+import { generationOf } from "../shared/generation.js";
 
 // Scheduled prompts run on the server with nobody watching: append the prompt to the schedule's thread (or a new
 // one per run), run one turn, and persist both messages in the client's history format so the thread opens normally.
@@ -41,6 +44,8 @@ interface Row {
   last_run_at: number | null;
   last_status: Schedule["lastStatus"];
   last_error: string | null;
+  webhook_invocation_id: string | null;
+  webhook_started_at: number | null;
 }
 
 const toSchedule = (r: Row): Schedule => ({
@@ -98,6 +103,8 @@ function wallTimeToUtc(timeZone: string, wall: number): number {
 }
 
 const running = new Set<string>();
+/** Flipped by `reconcileScheduleInvocations`; the module timer never runs before it. */
+let scheduleReconciled = false;
 
 /**
  * Runs one schedule. It takes one of the account's turn slots (the same limit as interactive chat)
@@ -127,10 +134,14 @@ export async function runSchedule(row: Row, reserved?: () => void): Promise<void
   if (!release) return;
   running.add(row.id);
   const startedAt = Date.now();
-  db.prepare("UPDATE schedules SET last_status = 'running', last_error = NULL, next_run_at = ? WHERE id = ?").run(
-    nextRun(JSON.parse(row.spec_json) as ScheduleSpec, startedAt),
-    row.id,
-  );
+  // A server-generated invocation id is the source identity for an outgoing schedule event. It is
+  // allocated only after slot and permission checks, and cleared in the same terminal transaction.
+  const invocationId = newId("srun");
+  db.prepare(
+    "UPDATE schedules SET last_status = 'running', last_error = NULL, next_run_at = ?, webhook_invocation_id = ?, webhook_started_at = ? WHERE id = ?",
+  ).run(nextRun(JSON.parse(row.spec_json) as ScheduleSpec, startedAt), invocationId, startedAt, row.id);
+  let runFailure: FailureCode = "run_error";
+  let terminal = false;
   let releaseThread: (() => void) | undefined;
   // The failure notice names the chat the run landed in, when it still exists.
   let threadId = row.thread_mode === "same" ? row.thread_id : null;
@@ -163,21 +174,60 @@ export async function runSchedule(row: Row, reserved?: () => void): Promise<void
       uiMessages: [...history, userMessage],
       // Nobody can answer an approval in a scheduled run, so a gated call is denied instead of waiting.
       unattended: true,
+      turnOrigin: "schedule",
       signal: AbortSignal.timeout(RUN_TIMEOUT_MS),
     });
     let assistant: UIMessage | undefined;
     for await (const message of readUIMessageStream({ stream })) assistant = message;
-    if (!assistant) throw new AppError({ code: "tool_failed", message: "The model returned nothing." });
-    const failed = assistant.parts.length === 0 || (agentMetadata(assistant)?.usageMode === "agent" && agentMetadata(assistant)?.agent?.outcome !== "ok");
+    if (!assistant) {
+      runFailure = "empty_response";
+      throw new AppError({ code: "tool_failed", message: "The model returned nothing." });
+    }
+    const agent = agentMetadata(assistant);
+    const receipt = generationOf(assistant.metadata);
+    const failed =
+      assistant.parts.length === 0 ||
+      (agent?.usageMode === "agent" && agent?.agent?.outcome !== "ok") ||
+      (receipt !== undefined && receipt.state !== "finished");
+    const text = visibleAnswerText(assistant);
+    if (failed) runFailure = text ? "run_error" : "empty_response";
     // appendMessage creates a missing thread; a chat deleted during the run must stay deleted.
-    if (!getThread(row.user_id, threadId)) throw new AppError({ code: "not_found", message: "Its chat was deleted while the run was replying." });
-    appendMessage(row.user_id, threadId, { id: assistant.id || generateId(), parent_id: userMessage.id, format: "ai-sdk/v6", content: withoutId(assistant) });
-    db.prepare("UPDATE schedules SET last_run_at = ?, last_status = ?, last_error = ? WHERE id = ?").run(
-      startedAt,
-      failed ? "error" : "ok",
-      failed ? "Empty response" : null,
-      row.id,
-    );
+    if (!getThread(row.user_id, threadId)) {
+      runFailure = "run_error";
+      throw new AppError({ code: "not_found", message: "Its chat was deleted while the run was replying." });
+    }
+    const assistantId = assistant.id || generateId();
+    const targetThreadId = threadId;
+    // Reply, terminal status, and the event admission share one transaction: a rollback leaves no event.
+    tx(() => {
+      appendMessage(row.user_id, targetThreadId, { id: assistantId, parent_id: userMessage.id, format: "ai-sdk/v6", content: withoutId(assistant) });
+      db.prepare(
+        "UPDATE schedules SET last_run_at = ?, last_status = ?, last_error = ?, webhook_invocation_id = NULL, webhook_started_at = NULL WHERE id = ?",
+      ).run(startedAt, failed ? "error" : "ok", failed ? (text ? "The run did not finish cleanly." : "Empty response") : null, row.id);
+      if (failed) {
+        emitScheduleFailed({
+          userId: row.user_id,
+          scheduleId: row.id,
+          invocationId,
+          startedAt,
+          threadId: targetThreadId,
+          assistantMessageId: assistantId,
+          failureCode: runFailure,
+        });
+      } else {
+        emitScheduleCompleted({
+          userId: row.user_id,
+          scheduleId: row.id,
+          invocationId,
+          startedAt,
+          threadId: targetThreadId,
+          assistantMessageId: assistantId,
+          text,
+        });
+      }
+    });
+    // A later notification/cleanup failure must not rewrite a completed run into a second terminal outcome.
+    terminal = true;
     // A notice explains the run to an account that had no tab open; it never carries the prompt or reply.
     const stored = threadId ? getThread(row.user_id, threadId) : null;
     try {
@@ -199,7 +249,28 @@ export async function runSchedule(row: Row, reserved?: () => void): Promise<void
     }
   } catch (error) {
     const failure = describeBoundaryError(error, { log: true, kind: "background", model: row.model_ref });
-    db.prepare("UPDATE schedules SET last_run_at = ?, last_status = 'error', last_error = ? WHERE id = ?").run(startedAt, failure.message.slice(0, 500), row.id);
+    const timedOut = [error, (error as { cause?: unknown }).cause].some(
+      (candidate) => candidate instanceof Error && (candidate.name === "TimeoutError" || candidate.name === "AbortError"),
+    );
+    if (runFailure === "run_error" && timedOut) runFailure = "timeout";
+    if (!terminal) {
+      // The failure status and its metadata-only event commit together; no prompt, error sentence, or
+      // partial answer is exported. A busy/due skip never reaches this point and emits nothing.
+      tx(() => {
+        db.prepare(
+          "UPDATE schedules SET last_run_at = ?, last_status = 'error', last_error = ?, webhook_invocation_id = NULL, webhook_started_at = NULL WHERE id = ?",
+        ).run(startedAt, failure.message.slice(0, 500), row.id);
+        emitScheduleFailed({
+          userId: row.user_id,
+          scheduleId: row.id,
+          invocationId,
+          startedAt,
+          threadId: threadId && getThread(row.user_id, threadId) ? threadId : null,
+          assistantMessageId: null,
+          failureCode: runFailure,
+        });
+      });
+    }
     try {
       notify({
         userId: row.user_id,
@@ -250,6 +321,13 @@ function recordSkipped(row: Row, message: string) {
 
 const withoutId = ({ id: _id, ...rest }: UIMessage) => rest;
 
+/** Visible answer text only: reasoning, tool calls, and file parts never leave as webhook text. */
+const visibleAnswerText = (message: UIMessage): string =>
+  message.parts
+    .filter((part): part is { type: "text"; text: string } => part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("\n");
+
 /** Distinguishes the chats of a "new chat per run" schedule: the date, plus the time when it can run more than daily. */
 function runLabel(row: Row, at: number): string {
   const spec = JSON.parse(row.spec_json) as ScheduleSpec;
@@ -261,7 +339,45 @@ function runLabel(row: Row, at: number): string {
 /** A run waits while someone is mid-turn in its chat, since that turn's messages are not stored yet. */
 const blocked = (row: Row) => row.thread_mode === "same" && !!row.thread_id && threadBusy(row.thread_id);
 
+/**
+ * Startup: a session that was running when the process died publishes one interrupted failure and
+ * clears its invocation in the same transaction. A legacy running row (no invocation id) emits nothing.
+ * Must run before the first scheduling tick.
+ */
+export function reconcileScheduleInvocations(): void {
+  const rows = db
+    .prepare(
+      `SELECT id, user_id, thread_id, webhook_invocation_id, webhook_started_at FROM schedules
+       WHERE webhook_invocation_id IS NOT NULL LIMIT 1000`,
+    )
+    .all() as Array<{ id: string; user_id: string; thread_id: string | null; webhook_invocation_id: string; webhook_started_at: number | null }>;
+  for (const row of rows) {
+    tx(() => {
+      const current = db
+        .prepare("SELECT webhook_invocation_id, webhook_started_at, thread_id FROM schedules WHERE id = ? AND user_id = ?")
+        .get(row.id, row.user_id) as { webhook_invocation_id: string | null; webhook_started_at: number | null; thread_id: string | null } | undefined;
+      if (!current?.webhook_invocation_id) return;
+      const startedAt = current.webhook_started_at ?? row.webhook_started_at ?? Date.now();
+      emitScheduleFailed({
+        userId: row.user_id,
+        scheduleId: row.id,
+        invocationId: current.webhook_invocation_id,
+        startedAt,
+        threadId: current.thread_id && getThread(row.user_id, current.thread_id) ? current.thread_id : null,
+        assistantMessageId: null,
+        failureCode: "interrupted",
+      });
+      db.prepare(
+        "UPDATE schedules SET last_run_at = ?, last_status = 'error', last_error = 'Interrupted by a server restart.', webhook_invocation_id = NULL, webhook_started_at = NULL WHERE id = ?",
+      ).run(startedAt, row.id);
+    });
+  }
+  scheduleReconciled = true;
+}
+
 async function tick() {
+  // Startup reconciliation must publish interrupted invocations before a new run can start.
+  if (!scheduleReconciled) return;
   const due = db.prepare("SELECT * FROM schedules WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?").all(Date.now()) as unknown as Row[];
   // One at a time keeps a burst of schedules from hammering a provider. Blocked runs stay due and retry next tick.
   for (const { id } of due) {

@@ -16,5 +16,6 @@ export default {
   sectionKeyboard: "Keyboard",
   sectionAdmin: "Admin",
   sectionAgents: "Agents",
+  sectionWebhooks: "Webhooks",
   sidebarChannels: "Channels",
 } as const;

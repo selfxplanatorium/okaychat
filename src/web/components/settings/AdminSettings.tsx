@@ -18,6 +18,7 @@ import { Checklist, invalidateDirectory, useDirectory } from "./Audience";
 import { PermissionsWorkspace } from "./permissions/PermissionsWorkspace";
 import { ProviderLists, ProviderScopeProvider } from "./ProvidersSettings";
 import { AdminVoiceSettings } from "./AdminVoiceSettings";
+import { AdminWebhooks } from "./AdminWebhooks";
 import { AgentManagement } from "@/components/agents/AgentManagement";
 import { AdminChannels } from "@/components/channels/AdminChannels";
 import { SettingsPage, SettingsRow, SettingsSection } from "./SettingsUI";
@@ -618,6 +619,7 @@ export function AdminSettings() {
       <SystemPrompts />
       <AgentManagement scope="shared" />
       <AdminVoiceSettings />
+      <AdminWebhooks />
       <h2 className="mt-2 text-sm font-medium">{t("admin.serverProviders")}</h2>
       <p className="text-muted-foreground -mt-2 text-xs">
         {t("admin.serverProvidersDescription")}

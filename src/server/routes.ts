@@ -39,6 +39,7 @@ import { messageTranslationRoutes } from "./message-translations.js";
 import { savedPromptRoutes } from "./saved-prompts.js";
 import { notesRoutes } from "./notes/routes.js";
 import { calendarRoutes } from "./calendar/routes.js";
+import { webhookRoutes } from "./outgoing-webhooks/routes.js";
 import { clearAudience, setAudience } from "./groups.js";
 import { getProject, projectRoutes } from "./projects.js";
 import { scheduleRoutes } from "./schedules.js";
@@ -312,6 +313,7 @@ const api = new Hono<AppEnv>()
   .route("/saved-prompts", savedPromptRoutes)
   .route("/notes", notesRoutes)
   .route("/calendar", calendarRoutes)
+  .route("/webhooks", webhookRoutes)
 
   // Usage
   .get("/usage", (c) => {

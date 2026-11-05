@@ -32,6 +32,7 @@ export const FEATURE_NAMES: Record<FeatureKey, string> = {
   calendar: "calendar",
   apiAccess: "external API access",
   translation: "message translation",
+  outgoingWebhooks: "outgoing webhooks",
 };
 
 export interface Actor {

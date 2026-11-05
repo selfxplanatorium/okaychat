@@ -14,6 +14,7 @@ export type SettingsSection =
   | "agents"
   | "projects"
   | "schedules"
+  | "webhooks"
   | "usage"
   | "voice"
   | "appearance"
@@ -55,6 +56,8 @@ export const SETTINGS_DESTINATIONS = {
   voice: { section: "voice" },
   mcp: { section: "mcp" },
   agents: { section: "agents" },
+  webhooks: { section: "webhooks" },
+  webhookDeliveries: { section: "webhooks" },
   admin: { section: "admin" },
   /** The granular permissions workspace; `view` selects a section inside it. */
   permissions: { section: "admin", query: { view: "people" } },

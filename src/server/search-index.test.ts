@@ -184,6 +184,9 @@ test("the FTS addressing migration rebuilds a populated index, survives two reop
       db.exec("DROP TRIGGER IF EXISTS knowledge_audience_cleanup; DROP TRIGGER IF EXISTS knowledge_shared_project_insert; DROP TRIGGER IF EXISTS knowledge_shared_project_update");
       db.exec("DROP TABLE IF EXISTS knowledge_thread_dependencies; DROP INDEX IF EXISTS knowledge_collections_visibility");
       for (const column of ["visibility", "access_revision", "embedding_connection_scope", "embedding_connection_created_at", "embedding_endpoint_hash"]) db.exec("ALTER TABLE knowledge_collections DROP COLUMN " + column);
+      db.exec("DROP TABLE IF EXISTS outgoing_webhook_deliveries; DROP TABLE IF EXISTS outgoing_webhook_test_preparations; DROP TABLE IF EXISTS outgoing_webhook_rate_windows; DROP TABLE IF EXISTS outgoing_webhook_endpoints");
+      db.exec("ALTER TABLE schedules DROP COLUMN webhook_invocation_id");
+      db.exec("ALTER TABLE schedules DROP COLUMN webhook_started_at");
       db.exec("PRAGMA user_version = 35");
       console.log(JSON.stringify({ version: db.prepare("PRAGMA user_version").get().user_version, fts: db.prepare("SELECT text FROM messages_fts ORDER BY rowid").all() }));
       db.close();

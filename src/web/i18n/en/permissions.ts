@@ -138,6 +138,8 @@ export default {
   featureNotesHelp: "Allows private notes, search, source copies and explicit insertion into a chat composer.",
   featureCalendarLabel: "Calendar",
   featureCalendarHelp: "Allows private events and reminder delivery. Due reminders are rechecked before delivery.",
+  featureOutgoingWebhooksLabel: "Outgoing webhooks",
+  featureOutgoingWebhooksHelp: "Allows private HTTPS endpoints that receive a curated event projection. The account's data is still gated by each source feature.",
   featureChannels: "Team channels",
   featureChannelsHelp: "Allows shared rooms, membership, room search, and explicitly requested room AI replies. It is independent of sharing, schedules, and MCP.",
   featureCustomTools: "Custom tools",

@@ -121,3 +121,7 @@ creates no notice, suppresses none, marks nothing read, and changes no unread co
 active must not hide a durable mention or DM. Nothing polls them: they ride the existing channel event
 stream and vanish on reconnect. Disabling desktop notifications and disabling activity indicators are
 different switches in different sections and neither implies the other.
+
+Outgoing webhooks are independent of notices and their preferences. A notice is best-effort, deduped,
+pruned, and suppressible; an admitted webhook delivery is a durable outbox row with its own retry,
+retention, and status. Neither reads or derives from the other.

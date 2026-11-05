@@ -31,6 +31,7 @@ export const FEATURE_KEYS = [
   "calendar",
   "apiAccess",
   "translation",
+  "outgoingWebhooks",
 ] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 

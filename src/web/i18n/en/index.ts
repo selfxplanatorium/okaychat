@@ -52,6 +52,7 @@ import ui from "./ui";
 import usage from "./usage";
 import ux from "./ux";
 import voice from "./voice";
+import webhooks from "./webhooks";
 
 export const en = {
   account,
@@ -107,4 +108,5 @@ export const en = {
   usage,
   ux,
   voice,
+  webhooks,
 };

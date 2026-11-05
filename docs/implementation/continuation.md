@@ -66,3 +66,9 @@ it.
 - Provider usage reported only on a terminal event and not through steps may be absent from a receipt;
   partial tokens are never invented.
 - Realtime voice calls keep their separate path and do not use presets or continuation.
+
+An interactive completed reply can also emit an outgoing webhook once, on the first guarded receipt
+transition to `finished` (see `docs/implementation/outgoing-webhooks.md`). A waiting tool/approval
+continuation is not completion; the resumed reply still emits one event. An explicit Continue is a new
+run and therefore a new event. Cancellation is silent, while startup interruption emits a metadata-only
+failure.

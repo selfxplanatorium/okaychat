@@ -78,3 +78,9 @@ messages, uploads, and artifacts.
 - The import review has no "Review imported assistant" screen yet; the settings are stored inactive.
 - Artifact HTML/JS links to old application URLs are not rewritten; the review warns that embedded links may
   require repair. Archives are plaintext and do not promise credential removal from transcript text.
+
+Archive outcomes can feed outgoing webhooks (see `docs/implementation/outgoing-webhooks.md`): an export
+emits when preparation reaches `ready`, and an import emits only when the selected chats and the job result
+commit (or an active job fails). Review-ready, download, expiry, cancellation, and a quota refusal back to
+ready are silent. The wire payload has only the job id, selected count, outcome, and a sanitized failure
+code.
