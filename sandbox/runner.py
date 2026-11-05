@@ -57,6 +57,12 @@ PROBE_UID = 19999  # Runs the startup isolation check; never a workspace user.
 LOCK_WAIT = MAX_TIMEOUT + 30
 SLOT_WAIT = 30
 CONVERT_TIMEOUT = int(os.environ.get("SANDBOX_CONVERT_TIMEOUT", "120"))
+# Knowledge OCR (POST /ocr): fixed commands over raw bytes, never model code. Languages must be installed packs.
+OCR_TIMEOUT = int(os.environ.get("SANDBOX_OCR_TIMEOUT", "120"))
+OCR_LANGS = os.environ.get("SANDBOX_OCR_LANGS", "eng+ita")
+MAX_OCR_BYTES = 25 * 1024 * 1024
+MAX_OCR_TEXT = 4 * 1024 * 1024
+OCR_LANGS_RE = re.compile(r"^[a-z]{3}(\+[a-z]{3}){0,3}$")
 CANCEL_TTL = 15 * 60
 INNER_SECCOMP = os.environ.get("SANDBOX_SECCOMP", "/opt/sandbox/inner.bpf")
 # Formats the app may hand to /convert. LibreOffice Impress turns them into a PDF for visual checks.
@@ -275,6 +281,9 @@ class StrictCapture:
 
 class Capture:
     """Keeps the head and tail of a stream and counts what was dropped in between."""
+
+    # It drops the middle instead of overflowing; execute() reads this like StrictCapture's flag.
+    overflow = False
 
     def __init__(self) -> None:
         self.head = bytearray()
@@ -656,6 +665,51 @@ def convert(ws: str, name: str, data: bytes, job: str | None = None) -> bytes:
         raise Failure(409, "the conversion was cancelled")
 
 
+def ocr(ws: str, data: bytes, job: str | None = None) -> str:
+    """Reads text from one scanned PDF (OCRmyPDF sidecar) or image (Pillow + Tesseract) in the same jail as a run.
+    The kind comes from the bytes, and input and output live in the run's private /tmp under fixed names."""
+    if ws in function_workspaces:
+        raise Failure(409, "function workspaces accept only one function call")
+    if len(data) > MAX_OCR_BYTES:
+        raise Failure(413, "the file is over 25 MB")
+    if not data:
+        raise Failure(400, "empty body")
+    langs = OCR_LANGS if OCR_LANGS_RE.match(OCR_LANGS) else "eng"
+    if data[:5] == b"%PDF-":
+        command = ["sh", "-c", 'cat > /tmp/in.pdf && exec ocrmypdf --skip-text --optimize 0 --jobs 2 -l "$OCR_LANGS" --sidecar /tmp/out.txt /tmp/in.pdf /tmp/out.pdf']
+    else:
+        command = ["sh", "-c", "cat > /tmp/in && exec python3 -I /opt/sandbox/ocr_image.py /tmp/in /tmp/out.txt"]
+
+    def work(path: str, uid: int, job: str) -> str:
+        limit = WORKSPACE_MB * 1024 * 1024
+        if workspace_bytes(path) + len(data) > limit:
+            raise Failure(409, f"the sandbox workspace is over {WORKSPACE_MB} MB")
+        os.utime(path)
+        try:
+            result = execute(ws, path, uid, job, command, OCR_TIMEOUT, limit, data, env={"OCR_LANGS": langs, "OCR_TIMEOUT": str(max(5, OCR_TIMEOUT - 10))})
+            if result["stopped"]:
+                raise Failure(422, f"OCR {result['stopped']}")
+            out = os.path.join(result["base"], "tmp", "out.txt")
+            try:
+                fd = os.open(out, os.O_RDONLY | os.O_NOFOLLOW)
+            except OSError:
+                detail = (result["stderr"] or result["stdout"]).strip()[-500:]
+                raise Failure(422, f"OCR failed{': ' + detail if detail else ''}")
+            with os.fdopen(fd, "rb") as f:
+                if os.fstat(f.fileno()).st_size > MAX_OCR_TEXT:
+                    raise Failure(413, "the OCR text is over 4 MB")
+                return f.read(MAX_OCR_TEXT + 1).decode("utf-8", "replace")
+        finally:
+            shutil.rmtree(os.path.join(path, PRIVATE, "run"), ignore_errors=True)
+            os.utime(path)
+
+    try:
+        # A busy runner is this request's problem (429), not a service outage (503).
+        return admitted(ws, job, work, busy_status=429)
+    except Cancelled:
+        raise Failure(409, "the OCR was cancelled")
+
+
 FUNCTION_WRAPPER = r"""
 import contextlib
 import importlib.util
@@ -987,6 +1041,9 @@ class Handler(BaseHTTPRequestHandler):
             if method == "POST" and action == "convert" and "name" in query:
                 pdf = convert(ws, query["name"], self.body(MAX_UPLOAD), job_id(query.get("job")))
                 return self.reply(200, pdf, "application/pdf")
+            if method == "POST" and action == "ocr":
+                text = ocr(ws, self.body(MAX_OCR_BYTES), job_id(query.get("job")))
+                return self.reply(200, text.encode("utf-8"), "text/plain; charset=utf-8")
             if method == "GET" and action == "files" and "path" in query:
                 return self.reply(200, read_file(ws, query["path"]), "application/octet-stream")
             if method == "GET" and action == "files":

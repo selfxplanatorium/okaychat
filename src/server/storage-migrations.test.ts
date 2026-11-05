@@ -62,7 +62,7 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       for (const column of ["edited_at", "original_enc"]) db.exec("ALTER TABLE messages DROP COLUMN " + column);
       for (const column of ["thread_mode", "thread_attached", "project_id"]) db.exec("ALTER TABLE schedules DROP COLUMN " + column);
       db.prepare("INSERT INTO server_settings (key, value) VALUES ('prompt:anonymous', ?)").run("Keep this temporary chat out of history.");
-      db.exec("DROP TABLE IF EXISTS video_threads; DROP TABLE IF EXISTS videos; DROP TABLE IF EXISTS video_jobs; DROP INDEX IF EXISTS usage_video_job; ALTER TABLE usage DROP COLUMN video_job_id; ALTER TABLE usage DROP COLUMN cost_state");
+      db.exec("DROP TABLE IF EXISTS video_threads; DROP TABLE IF EXISTS videos; DROP TABLE IF EXISTS video_jobs; DROP INDEX IF EXISTS usage_video_job; ALTER TABLE usage DROP COLUMN video_job_id; ALTER TABLE usage DROP COLUMN cost_state"); if (db.prepare("PRAGMA table_info(knowledge_sources)").all().some((c) => c.name === "extraction")) db.exec("ALTER TABLE knowledge_sources DROP COLUMN extraction");
       db.exec('PRAGMA user_version = 14');
       db.close();`);
     mkdirSync(path.join(directory, "images", "legacy"), { recursive: true });
@@ -83,6 +83,7 @@ test("integrated migrations are repeatable and backfill legacy generated image s
           evaluationActiveIndex: db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='evaluation_runs_active'").get()?.sql ?? null,
           evaluationScoreForeignKeys: db.prepare("PRAGMA foreign_key_list(evaluation_scores)").all(),
           edits: db.prepare("SELECT edited_at, original_enc FROM messages WHERE id = 'm1'").get(),
+          extraction: db.prepare("PRAGMA table_info(knowledge_sources)").all().some((c) => c.name === "extraction"),
           version: db.prepare("PRAGMA user_version").get().user_version,
           foreignKeys: db.prepare("PRAGMA foreign_key_check").all()
         })); db.exec("DELETE FROM uploads"); db.close();`));
@@ -95,7 +96,7 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       delete (state as Record<string, unknown>).evaluationScoreForeignKeys;
       assert.deepEqual((state as { customTables: number[] }).customTables, [0, 0, 0, 0]);
       delete (state as Record<string, unknown>).customTables;
-      assert.deepEqual(state, { image: 42, skills: 0, sandbox: 0, users: 1, uploads: i === 0 ? 1 : 0, temporaryPrompt: "Keep this temporary chat out of history.", oldPromptCount: 0, original: "data:image/png;base64,bGVnYWN5LWZpbGU=", integratedTables: [...Array(19).fill(0), 1, ...Array(5).fill(0), ...Array(4).fill(0), ...Array(5).fill(0), 0, ...Array(4).fill(0)], edits: { edited_at: null, original_enc: null }, foreignKeys: [] });
+      assert.deepEqual(state, { image: 42, skills: 0, sandbox: 0, users: 1, uploads: i === 0 ? 1 : 0, temporaryPrompt: "Keep this temporary chat out of history.", oldPromptCount: 0, original: "data:image/png;base64,bGVnYWN5LWZpbGU=", integratedTables: [...Array(19).fill(0), 1, ...Array(5).fill(0), ...Array(4).fill(0), ...Array(5).fill(0), 0, ...Array(4).fill(0)], edits: { edited_at: null, original_enc: null }, extraction: true, foreignKeys: [] });
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
@@ -173,7 +174,7 @@ test('n8n migration preserves selected audiences and rolls back schema and versi
     db.exec('DROP TABLE IF EXISTS outgoing_webhook_deliveries; DROP TABLE IF EXISTS outgoing_webhook_test_preparations; DROP TABLE IF EXISTS outgoing_webhook_rate_windows; DROP TABLE IF EXISTS outgoing_webhook_endpoints');
     db.exec('ALTER TABLE schedules DROP COLUMN webhook_invocation_id');
     db.exec('ALTER TABLE schedules DROP COLUMN webhook_started_at');
-      db.exec("DROP TABLE IF EXISTS video_threads; DROP TABLE IF EXISTS videos; DROP TABLE IF EXISTS video_jobs; DROP INDEX IF EXISTS usage_video_job; ALTER TABLE usage DROP COLUMN video_job_id; ALTER TABLE usage DROP COLUMN cost_state");
+      db.exec("DROP TABLE IF EXISTS video_threads; DROP TABLE IF EXISTS videos; DROP TABLE IF EXISTS video_jobs; DROP INDEX IF EXISTS usage_video_job; ALTER TABLE usage DROP COLUMN video_job_id; ALTER TABLE usage DROP COLUMN cost_state"); if (db.prepare("PRAGMA table_info(knowledge_sources)").all().some((c) => c.name === "extraction")) db.exec("ALTER TABLE knowledge_sources DROP COLUMN extraction");
     db.exec('PRAGMA user_version = 38');
     console.log(version); db.close();`;
   try {
@@ -342,7 +343,7 @@ test("channels v2 migration rolls back cleanly and keeps the event high-water", 
       db.exec("DROP TABLE IF EXISTS outgoing_webhook_deliveries; DROP TABLE IF EXISTS outgoing_webhook_test_preparations; DROP TABLE IF EXISTS outgoing_webhook_rate_windows; DROP TABLE IF EXISTS outgoing_webhook_endpoints");
       db.exec("ALTER TABLE schedules DROP COLUMN webhook_invocation_id");
       db.exec("ALTER TABLE schedules DROP COLUMN webhook_started_at");
-      db.exec("DROP TABLE IF EXISTS video_threads; DROP TABLE IF EXISTS videos; DROP TABLE IF EXISTS video_jobs; DROP INDEX IF EXISTS usage_video_job; ALTER TABLE usage DROP COLUMN video_job_id; ALTER TABLE usage DROP COLUMN cost_state");
+      db.exec("DROP TABLE IF EXISTS video_threads; DROP TABLE IF EXISTS videos; DROP TABLE IF EXISTS video_jobs; DROP INDEX IF EXISTS usage_video_job; ALTER TABLE usage DROP COLUMN video_job_id; ALTER TABLE usage DROP COLUMN cost_state"); if (db.prepare("PRAGMA table_info(knowledge_sources)").all().some((c) => c.name === "extraction")) db.exec("ALTER TABLE knowledge_sources DROP COLUMN extraction");
       db.exec("PRAGMA user_version = 48");
       console.log(JSON.stringify({ high, tail })); db.close();`));
     for (let i = 0; i < 2; i++) {
@@ -481,7 +482,7 @@ test("shared knowledge migration rolls back cleanly, keeps private rows private,
       db.exec("DROP TABLE IF EXISTS outgoing_webhook_deliveries; DROP TABLE IF EXISTS outgoing_webhook_test_preparations; DROP TABLE IF EXISTS outgoing_webhook_rate_windows; DROP TABLE IF EXISTS outgoing_webhook_endpoints");
       db.exec("ALTER TABLE schedules DROP COLUMN webhook_invocation_id");
       db.exec("ALTER TABLE schedules DROP COLUMN webhook_started_at");
-      db.exec("DROP TABLE IF EXISTS video_threads; DROP TABLE IF EXISTS videos; DROP TABLE IF EXISTS video_jobs; DROP INDEX IF EXISTS usage_video_job; ALTER TABLE usage DROP COLUMN video_job_id; ALTER TABLE usage DROP COLUMN cost_state");
+      db.exec("DROP TABLE IF EXISTS video_threads; DROP TABLE IF EXISTS videos; DROP TABLE IF EXISTS video_jobs; DROP INDEX IF EXISTS usage_video_job; ALTER TABLE usage DROP COLUMN video_job_id; ALTER TABLE usage DROP COLUMN cost_state"); if (db.prepare("PRAGMA table_info(knowledge_sources)").all().some((c) => c.name === "extraction")) db.exec("ALTER TABLE knowledge_sources DROP COLUMN extraction");
       db.exec("PRAGMA user_version = 50");
       console.log(JSON.stringify({ tail })); db.close();`, {}));
     assert.ok(before.tail >= 51);
@@ -597,7 +598,8 @@ test('video migration rolls back atomically, advances one version, and reopens w
     assert.equal(before.columns.includes('cost_state'),false);
     for(let i=0;i<2;i++){
       const state=JSON.parse(run(`const {db}=await import(${JSON.stringify(url)});console.log(JSON.stringify({version:db.prepare('PRAGMA user_version').get().user_version,tables:db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('video_jobs','videos','video_threads') ORDER BY name").all().map(r=>r.name),fks:db.prepare('PRAGMA foreign_key_check').all(),indexes:db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name='usage_video_job'").get().n}));db.close();`));
-      assert.equal(state.version,before.version+1);
+      // Later appended migrations (the knowledge extraction column) run after it in the same open.
+      assert.ok(state.version>=before.version+1);
       assert.deepEqual(state.tables,['video_jobs','video_threads','videos']);
       assert.equal(state.indexes,1);assert.deepEqual(state.fks,[]);
     }

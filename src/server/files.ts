@@ -1,45 +1,22 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { assertZipBounds } from "./documents/zip-bounds.js";
-import { extractText, getDocumentProxy } from "unpdf";
+import { HTTPException } from "hono/http-exception";
 import type { AppEnv } from "./auth.js";
 import { newId } from "./crypto.js";
 import { db } from "./db.js";
-import { readXlsx } from "./documents/lazy.js";
 import { AppError, errorJson, redactSecrets } from "./errors.js";
 import { assertStorage, QuotaError } from "./quota.js";
 import { getMedia, mediaPath, putMedia, releaseMedia } from "./media/store.js";
 import { sniffRaster } from "./media/sniff.js";
 import { serveImage } from "./media/variants.js";
+import { extract, ExtractionError, truncationMarker } from "./extraction/index.js";
+import { MAX_EXTRACTED_CHARS } from "./extraction/limits.js";
+
+export { extract } from "./extraction/index.js";
 
 export const MAX_BYTES = 25 * 1024 * 1024;
 // Keep huge documents from blowing the context window in one attachment.
-export const MAX_CHARS = 400_000;
-
-export async function extract(name: string, type: string, data: Uint8Array): Promise<{ text: string; pages?: number }> {
-  const lower = name.toLowerCase();
-  if (type === "application/pdf" || lower.endsWith(".pdf")) {
-    // pdf.js detaches the buffer it is given; a copy keeps the caller's bytes for storeUpload.
-    const pdf = await getDocumentProxy(Uint8Array.from(data));
-    const { totalPages, text } = await extractText(pdf, { mergePages: false });
-    const body = (text as string[]).map((page, i) => `--- page ${i + 1} ---\n${page.trim()}`).join("\n\n");
-    if (!body.replace(/--- page \d+ ---/g, "").trim()) {
-      return { text: "[This PDF has no text layer. It is probably scanned images. Ask the user for a text version or screenshots.]", pages: totalPages };
-    }
-    return { text: body, pages: totalPages };
-  }
-  if (lower.endsWith(".docx") || type.includes("officedocument.wordprocessingml")) {
-    assertZipBounds(data);
-    const { default: mammoth } = await import("mammoth");
-    const { value } = await mammoth.extractRawText({ buffer: Buffer.from(data) });
-    return { text: value };
-  }
-  if (lower.endsWith(".xlsx") || lower.endsWith(".xlsm") || type.includes("officedocument.spreadsheetml")) {
-    return { text: await readXlsx(data) };
-  }
-  // Everything else we accept is text of some kind.
-  return { text: new TextDecoder("utf-8", { fatal: false }).decode(data) };
-}
+export const MAX_CHARS = MAX_EXTRACTED_CHARS;
 
 /** The declared type is untrusted: an "image" that is not a raster we can sniff is stored as opaque bytes. */
 function storedMime(name: string, mime: string): string {
@@ -140,17 +117,26 @@ export const fileRoutes = new Hono<AppEnv>()
   if (file.size > MAX_BYTES) return errorJson(c, new AppError({ code: "validation", message: "File is larger than 25 MB", status: 413 }));
   const bytes = new Uint8Array(await file.arrayBuffer());
   try {
-    const { text, pages } = await extract(file.name, file.type, bytes);
+    const result = await extract(file.name, file.type, bytes, { signal: c.req.raw.signal });
+    if (result.needsOcr === "image") {
+      return errorJson(c, new AppError({
+        code: "validation",
+        status: 422,
+        message: "This image is not text. Attach it as an image to a model that can see it, or add it to a knowledge collection to read it with OCR.",
+      }));
+    }
+    // A scanned PDF keeps the sentinel as its text, so the attachment still tells the model what it is.
     const fileId = c.req.query("temporary") !== "1" ? storeUpload(c.get("user").id, file.name, file.type, bytes) : undefined;
-    const truncated = text.length > MAX_CHARS;
     return c.json({
-      text: truncated ? `${text.slice(0, MAX_CHARS)}\n\n[truncated: ${text.length - MAX_CHARS} more characters]` : text,
-      pages,
+      text: result.limit ? `${result.text}\n\n${truncationMarker(result.limit)}` : result.text,
+      pages: result.pages,
       fileId,
-      truncated,
+      truncated: !!result.truncated,
     });
   } catch (error) {
     if (error instanceof QuotaError) return errorJson(c, error);
+    if (error instanceof ExtractionError) return errorJson(c, new AppError({ code: "validation", status: 422, message: error.message }));
+    if (error instanceof HTTPException) return errorJson(c, new AppError({ code: "validation", status: error.status, message: error.message }));
     // Parser messages can include paths and internal detail. Keep them in the log, show a plain row error.
     console.error("[files] extract failed", redactSecrets(String((error as Error)?.message ?? error)).slice(0, 500));
     return errorJson(c, new AppError({

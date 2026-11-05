@@ -6,10 +6,14 @@ import { after, beforeEach, test } from "node:test";
 import { Hono } from "hono";
 import { PDFDocument } from "@cantoo/pdf-lib";
 import type { ToolSet } from "ai";
+import { strToU8, zipSync } from "fflate";
 
 const dataDir = mkdtempSync(path.join(os.tmpdir(), "okaychat-knowledge-test-"));
 process.env.OKAYCHAT_DATA_DIR = dataDir;
 process.env.OKAYCHAT_SECRET = "knowledge-test-secret-only-not-for-production";
+// OCR and the capabilities route depend on the sandbox configuration; these tests run without one.
+delete process.env.OKAYCHAT_SANDBOX_URL;
+delete process.env.OKAYCHAT_SANDBOX_TOKEN;
 const { db } = await import("../db.js");
 const { requireUser } = await import("../auth.js");
 const { sha256 } = await import("../crypto.js");
@@ -18,15 +22,15 @@ const { handleAppError } = await import("../errors.js");
 const { ensureThread, updateThread } = await import("../threads.js");
 const { knowledgeRoutes } = await import("./routes.js");
 const { attachedCollectionIds, conversationKnowledge, knowledgeTools } = await import("./tools.js");
-const { drainKnowledgeJobs, resumeKnowledgeIngestion, setEmbedderFactoryForTests } = await import("./jobs.js");
+const { drainKnowledgeJobs, resumeKnowledgeIngestion, setEmbedderFactoryForTests, setOcrExtractorForTests } = await import("./jobs.js");
 const { chunkRow, createCollection, createSource, deleteCollection, requeueSource, sourceRow, replaceChunks } = await import("./store.js");
 const { searchKnowledge, setRetrievalEmbedderFactoryForTests, fuseRankings, VECTOR_CACHE_LIMIT } = await import("./retrieval.js");
 const { saveTurnContext, storedTurnContexts } = await import("../turn-context.js");
 const { EmbeddingError, normalizeVector } = await import("./embeddings.js");
-const { storeUpload } = await import("../files.js");
+const { fileRoutes, storeUpload } = await import("../files.js");
 const { MAX_URL_BYTES, setKnowledgeUrlFetchForTests } = await import("./url.js");
 
-const app = new Hono().use(requireUser).onError(handleAppError).route("/knowledge", knowledgeRoutes);
+const app = new Hono().use(requireUser).onError(handleAppError).route("/knowledge", knowledgeRoutes).route("/", fileRoutes);
 for (const [id, role] of [["alice", "user"], ["bob", "user"]] as const) {
   db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, `${id}@example.test`, id, "unused", role, Date.now());
   db.prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)").run(sha256(`${id}-session`), id, Date.now() + 600_000);
@@ -37,8 +41,9 @@ beforeEach(() => {
   setEmbedderFactoryForTests(null);
   setRetrievalEmbedderFactoryForTests(null);
   setKnowledgeUrlFetchForTests(null);
+  setOcrExtractorForTests(null);
   db.exec(`DELETE FROM knowledge_chunks; DELETE FROM knowledge_sources; DELETE FROM knowledge_collections;
-    DELETE FROM turn_context; DELETE FROM messages; DELETE FROM threads; DELETE FROM uploads; DELETE FROM projects;`);
+    DELETE FROM turn_context; DELETE FROM messages; DELETE FROM threads; DELETE FROM uploads; DELETE FROM media; DELETE FROM projects;`);
   db.prepare("INSERT INTO projects (id, user_id, name, created_at) VALUES ('p1', 'alice', 'Atlas', 1), ('p2', 'alice', 'Other', 1), ('pb', 'bob', 'Bob', 1)").run();
   // A non-lexical collection pins the connection that will produce its vectors; these tests use an
   // injected provider, so the row only needs to exist with a stable identity for the pin.
@@ -648,7 +653,7 @@ test("a URL source keeps the original response and extracts readable text separa
   assert.ok([400, 422].includes(ftp.status), "non-http schemes are refused before any fetch");
 });
 
-test("PDF URLs extract text and reject scans without storing extraction warnings", async () => {
+test("PDF URLs extract text and queue scans for OCR from the stored original", async () => {
   const id = await create();
   const readable = await PDFDocument.create();
   readable.addPage().drawText("The quasar is in the URL document.");
@@ -660,15 +665,32 @@ test("PDF URLs extract text and reject scans without storing extraction warnings
   await waitFor();
   assert.equal(sourceRow("alice", sourceId)!.status, "ready");
   assert.match(sourceRow("alice", sourceId)!.text!, /quasar/);
+  assert.equal(sourceRow("alice", sourceId)!.extraction, "text");
   const pdf = await PDFDocument.create();
   pdf.addPage();
   const bytes = await pdf.save();
   setKnowledgeUrlFetchForTests(async () => new Response(bytes, { headers: { "Content-Type": "application/pdf" } }));
   const response = await request("POST", `/collections/${id}/sources/url`, { url: "https://example.com/scan.pdf" });
-  assert.equal(response.status, 422);
-  assert.match(((await response.json()) as { error: string }).error, /no text layer|OCR/);
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM knowledge_sources").get()!["n"], 1);
-  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM uploads").get()!["n"], 1);
+  assert.equal(response.status, 201, await response.clone().text());
+  const scanId = ((await response.json()) as { id: string }).id;
+  await waitFor();
+  const failed = sourceRow("alice", scanId)!;
+  assert.equal(failed.status, "failed");
+  assert.match(failed.error ?? "", /OCR/);
+  assert.equal(failed.text, null);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM knowledge_sources WHERE url = 'https://example.com/scan.pdf'").get()!["n"], 1);
+  assert.ok(db.prepare("SELECT 1 FROM uploads WHERE id = ?").get(failed.upload_id), "the scanned original stays for a retry");
+
+  setOcrExtractorForTests(async (req) => {
+    assert.equal(req.kind, "pdf");
+    return "Quasar scanned URL passage";
+  });
+  assert.equal((await request("POST", `/sources/${scanId}/retry`)).status, 200);
+  await waitFor();
+  assert.equal(sourceRow("alice", scanId)!.status, "ready");
+  assert.equal(sourceRow("alice", scanId)!.extraction, "ocr");
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM knowledge_sources").get()!["n"], 2);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM uploads").get()!["n"], 2);
 });
 
 test("retrieved knowledge stored in turn_context is charged to the quota", async () => {
@@ -724,7 +746,18 @@ test("PDF text is extracted and a scanned PDF fails with an honest message", asy
   await waitFor();
   const failed = sourceRow("alice", blankSource)!;
   assert.equal(failed.status, "failed");
-  assert.match(failed.error ?? "", /no text layer|OCR/i);
+  assert.equal(failed.error, "This PDF has no text layer. Reading it needs OCR, which requires the code sandbox. It is not configured on this server. Add a text version, or ask an admin to enable the sandbox.");
+  assert.ok(failed.upload_id && db.prepare("SELECT 1 FROM uploads WHERE id = ?").get(failed.upload_id), "the original is retained");
+  const withFailed = storageUsed("alice");
+  assert.ok(withFailed >= failed.bytes, "the retained original stays charged");
+
+  setOcrExtractorForTests(async () => "Quasar scanned upload passage");
+  assert.equal((await request("POST", `/sources/${blankSource}/retry`)).status, 200);
+  await waitFor();
+  assert.equal(sourceRow("alice", blankSource)!.status, "ready");
+  assert.equal(sourceRow("alice", blankSource)!.extraction, "ocr");
+  assert.equal((await request("DELETE", `/sources/${blankSource}`)).status, 200);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM uploads WHERE id = ?").get(failed.upload_id)!["n"], 0);
 });
 
 test("quota growth is enforced and a rejected source leaves no orphan upload", async () => {
@@ -758,4 +791,242 @@ test("a source file stored as an upload becomes chunks and project filters are r
   assert.equal(badProject.status, 404);
   const unknownSource = await request("GET", "/sources/missing/chunks");
   assert.equal(unknownSource.status, 404);
+});
+
+// Minimal local fixtures; nothing is downloaded.
+const zip = (files: Record<string, string>, stored: string[] = []) =>
+  zipSync(Object.fromEntries(Object.entries(files).map(([name, text]) => [name, stored.includes(name) ? [strToU8(text), { level: 0 }] : strToU8(text)])));
+
+function pptxFixture(slide: string, notes: string) {
+  const ns = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+  const rel = (id: string, type: string, target: string) => `<Relationship Id="${id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/${type}" Target="${target}"/>`;
+  const rels = (body: string) => `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${body}</Relationships>`;
+  const shape = (text: string) => `<p:sld ${ns}><p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>${text}</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`;
+  return zip({
+    "[Content_Types].xml": '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/></Types>',
+    "ppt/presentation.xml": `<p:presentation ${ns}><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst></p:presentation>`,
+    "ppt/_rels/presentation.xml.rels": rels(rel("rId1", "slide", "slides/slide1.xml")),
+    "ppt/slides/slide1.xml": shape(slide),
+    "ppt/slides/_rels/slide1.xml.rels": rels(rel("rId1", "notesSlide", "../notesSlides/notesSlide1.xml")),
+    "ppt/notesSlides/notesSlide1.xml": shape(notes).replace("p:sld ", "p:notes ").replace("</p:sld>", "</p:notes>"),
+  });
+}
+
+function epubFixture(chapter: string) {
+  return zip({
+    mimetype: "application/epub+zip",
+    "META-INF/container.xml": '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0"><rootfiles><rootfile full-path="OEBPS/book.opf" media-type="application/oebps-package+xml"/></rootfiles></container>',
+    "OEBPS/book.opf": '<package xmlns="http://www.idpf.org/2007/opf" version="3.0"><manifest><item id="c1" href="one.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c1"/></spine></package>',
+    "OEBPS/one.xhtml": `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter</title></head><body><h1>Chapter one</h1><p>${chapter}</p></body></html>`,
+  }, ["mimetype"]);
+}
+
+function odtFixture(paragraph: string) {
+  return zip({
+    mimetype: "application/vnd.oasis.opendocument.text",
+    "content.xml": `<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><office:body><office:text><text:h text:outline-level="1">Manual</text:h><text:p>${paragraph}</text:p></office:text></office:body></office:document-content>`,
+  }, ["mimetype"]);
+}
+
+const ONE_PIXEL_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+
+async function uploadFile(collectionId: string, name: string, data: Uint8Array | string, type = "") {
+  const form = new FormData();
+  form.set("file", new File([typeof data === "string" ? data : new Uint8Array(data)], name, { type }));
+  const res = await app.request(`http://app/knowledge/collections/${collectionId}/sources/file`, { method: "POST", body: form, headers: { cookie: "okaychat_session=alice-session" } });
+  assert.equal(res.status, 201, await res.clone().text());
+  return ((await res.json()) as { id: string }).id;
+}
+
+test("PPTX, PPSX, EPUB, HTML, and ODT uploads become ready, searchable, exact-offset text sources", async () => {
+  const id = await create();
+  const cases: Array<[string, Uint8Array | string, string, RegExp]> = [
+    ["deck.pptx", pptxFixture("Quasar slide token", "Pulsarnotes speaker token"), "application/vnd.openxmlformats-officedocument.presentationml.presentation", /Pulsarnotes speaker token/],
+    ["show.ppsx", pptxFixture("Quasar slideshow token", "Nebulanotes"), "", /Nebulanotes/],
+    ["book.epub", epubFixture("Quasar chapter token Magnetar."), "application/epub+zip", /Magnetar/],
+    ["page.html", "<html><head><title>T</title><script>secretScript()</script></head><body><h1>Quasar page</h1><p>Blazar <a href=\"https://example.com/hidden\">linked</a> token.</p></body></html>", "text/html", /Blazar linked token/],
+    ["manual.odt", odtFixture("Quasar odt token Kilonova."), "application/vnd.oasis.opendocument.text", /Kilonova/],
+  ];
+  for (const [name, data, type, token] of cases) {
+    const sourceId = await uploadFile(id, name, data, type);
+    await waitFor();
+    const row = sourceRow("alice", sourceId)!;
+    assert.equal(row.status, "ready", `${name}: ${row.error}`);
+    assert.equal(row.extraction, "text", name);
+    assert.match(row.text ?? "", token, name);
+    assert.doesNotMatch(row.text ?? "", /secretScript|example\.com/, name);
+    const chunks = db.prepare("SELECT start, \"end\", text FROM knowledge_chunks WHERE source_id = ?").all(sourceId) as Array<{ start: number; end: number; text: string }>;
+    assert.ok(chunks.length > 0, name);
+    for (const chunk of chunks) assert.equal(row.text!.slice(chunk.start, chunk.end), chunk.text, name);
+  }
+  for (const query of ["Pulsarnotes", "Nebulanotes", "Magnetar", "Blazar", "Kilonova"]) {
+    const found = (await (await request("POST", `/collections/${id}/search`, { query })).json()) as { hits: Array<{ text: string }> };
+    assert.ok(found.hits.some((hit) => hit.text.includes(query)), query);
+  }
+});
+
+test("an image upload is read with OCR, charged, and released on delete", async () => {
+  const id = await create();
+  const before = storageUsed("alice");
+  let calls = 0;
+  setOcrExtractorForTests(async (req) => {
+    calls++;
+    assert.equal(req.kind, "image");
+    assert.deepEqual(Buffer.from(req.data), ONE_PIXEL_PNG);
+    return "Quasar image passage";
+  });
+  const sourceId = await uploadFile(id, "scan.png", ONE_PIXEL_PNG, "image/png");
+  await waitFor();
+  const row = sourceRow("alice", sourceId)!;
+  assert.equal(row.status, "ready", row.error ?? "");
+  assert.equal(row.extraction, "ocr");
+  assert.equal(calls, 1);
+  const upload = db.prepare("SELECT media_id FROM uploads WHERE id = ?").get(row.upload_id) as { media_id: string | null };
+  assert.ok(upload.media_id && db.prepare("SELECT 1 FROM media WHERE id = ?").get(upload.media_id), "the raster original lives in the media store");
+  const chunkBytes = (db.prepare("SELECT COALESCE(SUM(length(CAST(text AS BLOB))), 0) AS n FROM knowledge_chunks WHERE source_id = ?").get(sourceId) as { n: number }).n;
+  assert.equal(storageUsed("alice"), before + ONE_PIXEL_PNG.byteLength + Buffer.byteLength("Quasar image passage") + chunkBytes);
+  const found = (await (await request("POST", `/collections/${id}/search`, { query: "Quasar image" })).json()) as { hits: Array<{ text: string }> };
+  assert.ok(found.hits.some((hit) => hit.text.includes("Quasar image passage")));
+  const listed = (await (await request("GET", `/collections/${id}`)).json()) as { sources: Array<{ id: string; extraction: string | null }> };
+  assert.equal(listed.sources.find((source) => source.id === sourceId)?.extraction, "ocr");
+
+  assert.equal((await request("DELETE", `/sources/${sourceId}`)).status, 200);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM uploads").get()!["n"], 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM media WHERE id = ?").get(upload.media_id)!["n"], 0);
+  assert.equal(storageUsed("alice"), before);
+});
+
+test("without the sandbox an image fails with the OCR message, keeps its original, and retry recovers", async () => {
+  const id = await create();
+  const sourceId = await uploadFile(id, "photo.jpg", ONE_PIXEL_PNG, "");
+  await waitFor();
+  const failed = sourceRow("alice", sourceId)!;
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.error, "This image needs OCR. OCR requires the code sandbox, which this server has not configured. Add a text version, or ask an admin to enable the sandbox.");
+  assert.equal(failed.extraction, null);
+  assert.ok(db.prepare("SELECT 1 FROM uploads WHERE id = ?").get(failed.upload_id));
+
+  setOcrExtractorForTests(async () => "Quasar recovered image text");
+  assert.equal((await request("POST", `/sources/${sourceId}/retry`)).status, 200);
+  await waitFor();
+  assert.equal(sourceRow("alice", sourceId)!.status, "ready");
+  assert.equal(sourceRow("alice", sourceId)!.extraction, "ocr");
+
+  setOcrExtractorForTests(async () => "");
+  const empty = await uploadFile(id, "blank.png", ONE_PIXEL_PNG, "image/png");
+  await waitFor();
+  assert.equal(sourceRow("alice", empty)!.error, "OCR did not find any text in this file.");
+});
+
+test("reindex never calls OCR and keeps the stored OCR text and label", async () => {
+  const id = await create();
+  let calls = 0;
+  setOcrExtractorForTests(async () => {
+    calls++;
+    return "Quasar reindex passage";
+  });
+  const sourceId = await uploadFile(id, "scan.png", ONE_PIXEL_PNG, "image/png");
+  await waitFor();
+  assert.equal(calls, 1);
+  const text = sourceRow("alice", sourceId)!.text;
+  calls = 0;
+  assert.equal((await request("POST", `/sources/${sourceId}/reindex`)).status, 200);
+  await waitFor();
+  assert.equal((await request("POST", `/collections/${id}/reindex`, {})).status, 200);
+  await waitFor();
+  const row = sourceRow("alice", sourceId)!;
+  assert.equal(calls, 0);
+  assert.equal(row.status, "ready");
+  assert.equal(row.text, text);
+  assert.equal(row.extraction, "ocr");
+  assert.ok(row.chunk_count > 0);
+});
+
+test("the capabilities route reports OCR as not configured without a sandbox", async () => {
+  const res = await request("GET", "/capabilities");
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ocr: { available: false, reason: "not_configured" } });
+});
+
+test("malformed, legacy, zip-bombed, and unsupported uploads fail specifically and keep their originals", async () => {
+  const id = await create();
+  const before = storageUsed("alice");
+  const bomb = zipSync({ "[Content_Types].xml": strToU8("<Types/>"), "ppt/presentation.xml": new Uint8Array(210 * 1024 * 1024).fill(32) });
+  const cases: Array<[string, Uint8Array | string, RegExp]> = [
+    ["broken.pptx", zip({ "[Content_Types].xml": "<Types/>", "ppt/presentation.xml": "<p:presentation" }), /^Could not open this presentation\. It may be damaged\.$/],
+    ["old.doc", Buffer.concat([Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), Buffer.alloc(64)]), /legacy Office file/],
+    ["bomb.pptx", bomb, /expands to more than 200 MB/],
+    ["notes.rtf", "{\\rtf1 hello}", /RTF files are not supported/],
+    ["archive.zip", zip({ "a.txt": "hello" }), /not a supported document/],
+    ["sheet.ods", zip({ mimetype: "application/vnd.oasis.opendocument.spreadsheet" }, ["mimetype"]), /Only OpenDocument text/],
+    ["blob.bin", Buffer.from([1, 0, 2, 0, 3, 0, 255, 254]), /not a supported document or readable text/],
+  ];
+  const ids: string[] = [];
+  for (const [name, data, message] of cases) {
+    const sourceId = await uploadFile(id, name, data, "");
+    ids.push(sourceId);
+    await waitFor();
+    const row = sourceRow("alice", sourceId)!;
+    assert.equal(row.status, "failed", name);
+    assert.match(row.error ?? "", message, name);
+    assert.ok(db.prepare("SELECT 1 FROM uploads WHERE id = ?").get(row.upload_id), `${name} keeps its original`);
+  }
+  assert.ok(storageUsed("alice") > before);
+  for (const sourceId of ids) assert.equal((await request("DELETE", `/sources/${sourceId}`)).status, 200);
+  assert.equal(storageUsed("alice"), before);
+});
+
+test("a quota rejection during extraction fails the source, keeps the original, and retry succeeds after raising the limit", async () => {
+  const id = await create();
+  const text = `Quasar quota extraction ${"payload ".repeat(400)}`;
+  const used = storageUsed("alice");
+  db.prepare("UPDATE users SET storage_limit = ? WHERE id = 'alice'").run(used + Buffer.byteLength(text) + 100);
+  try {
+    const sourceId = await uploadFile(id, "big.txt", text, "text/plain");
+    await waitFor();
+    const failed = sourceRow("alice", sourceId)!;
+    assert.equal(failed.status, "failed");
+    assert.match(failed.error ?? "", /Storage quota exceeded/);
+    assert.ok(db.prepare("SELECT 1 FROM uploads WHERE id = ?").get(failed.upload_id));
+    db.prepare("UPDATE users SET storage_limit = NULL WHERE id = 'alice'").run();
+    assert.equal((await request("POST", `/sources/${sourceId}/retry`)).status, 200);
+    await waitFor();
+    const row = sourceRow("alice", sourceId)!;
+    assert.equal(row.status, "ready");
+    assert.equal(row.progress, 1);
+  } finally {
+    db.prepare("UPDATE users SET storage_limit = NULL WHERE id = 'alice'").run();
+  }
+});
+
+test("chat extraction maps failures to 413/422 and stores an upload only after success", async () => {
+  const extractFile = async (name: string, data: Uint8Array | string, type = "") => {
+    const form = new FormData();
+    form.set("file", new File([typeof data === "string" ? data : new Uint8Array(data)], name, { type }));
+    return app.request("http://app/files/extract", { method: "POST", body: form, headers: { cookie: "okaychat_session=alice-session" } });
+  };
+  const uploads = () => (db.prepare("SELECT COUNT(*) AS n FROM uploads").get() as { n: number }).n;
+  const bomb = zipSync({ "[Content_Types].xml": strToU8("<Types/>"), "ppt/presentation.xml": new Uint8Array(210 * 1024 * 1024).fill(32) });
+  const tooLarge = await extractFile("bomb.pptx", bomb);
+  assert.equal(tooLarge.status, 413);
+  const legacy = await extractFile("old.doc", Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0]));
+  assert.equal(legacy.status, 422);
+  assert.match(((await legacy.json()) as { message: string }).message, /legacy Office file/);
+  const image = await extractFile("photo.png", ONE_PIXEL_PNG, "image/png");
+  assert.equal(image.status, 422);
+  assert.match(((await image.json()) as { message: string }).message, /knowledge collection to read it with OCR/);
+  assert.equal(uploads(), 0, "a failed extraction stores nothing");
+
+  const deck = await extractFile("deck.pptx", pptxFixture("Quasar chat slide", "Chat notes"));
+  assert.equal(deck.status, 200);
+  const body = (await deck.json()) as { text: string; fileId?: string; truncated: boolean };
+  assert.match(body.text, /## Slide 1\n\nQuasar chat slide\n\n### Notes\nChat notes/);
+  assert.equal(body.truncated, false);
+  assert.ok(body.fileId);
+  const blank = await PDFDocument.create();
+  blank.addPage();
+  const scan = await extractFile("scan.pdf", await blank.save(), "application/pdf");
+  assert.equal(scan.status, 200);
+  assert.match(((await scan.json()) as { text: string }).text, /^\[This PDF has no text layer\..*knowledge collection where OCR can read it/);
+  assert.equal(uploads(), 2);
 });

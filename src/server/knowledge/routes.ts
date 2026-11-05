@@ -16,6 +16,7 @@ import {
 } from "./jobs.js";
 import { searchKnowledge } from "./retrieval.js";
 import { fetchKnowledgeUrl } from "./url.js";
+import { knowledgeCapabilities } from "../ocr.js";
 import {
   audienceTargets,
   collectionDetail,
@@ -145,6 +146,11 @@ export const knowledgeRoutes = new Hono<AppEnv>()
   .get("/embedding-options", async (c) => {
     assertFeature(c.get("user").id, "knowledge");
     return c.json({ options: await embeddingOptions(c.get("user").id) });
+  })
+  // OCR depends on the sandbox service, never on the account's code feature (docs/implementation/extraction.md).
+  .get("/capabilities", async (c) => {
+    assertFeature(c.get("user").id, "knowledge");
+    return c.json(await knowledgeCapabilities());
   })
   // Minimal sharing directory: never an account directory, and no email or member list.
   .get("/audience-targets", (c) => {
@@ -316,9 +322,6 @@ export const knowledgeRoutes = new Hono<AppEnv>()
     const file = form.get("file");
     if (!(file instanceof File)) return c.json({ error: "No file" }, 400);
     if (file.size > MAX_BYTES) return c.json({ error: "File is larger than 25 MB" }, 413);
-    if (/^image\//.test(file.type) || /\.(png|jpe?g|gif|webp|avif|bmp|tiff?)$/i.test(file.name)) {
-      return c.json({ error: "Images are not supported yet: this build has no OCR for them. Add a text, PDF, DOCX, or spreadsheet file instead." }, 415);
-    }
     // Ownership and feature state are rechecked after the awaited form body, not only before it.
     if (!getCollectionRow(userId, collectionId)) return c.json({ error: "Collection not found" }, 404);
     const source = addSource(userId, collectionId, {
@@ -369,7 +372,7 @@ export const knowledgeRoutes = new Hono<AppEnv>()
       kind: "url",
       mime: page.mime,
       data: page.bytes,
-      text: page.text,
+      text: page.text || undefined,
       url: parsed.data.url,
     });
     enqueueSource(userId, source.id);

@@ -2188,6 +2188,8 @@ CREATE UNIQUE INDEX usage_video_job ON usage(video_job_id) WHERE video_job_id IS
     if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "video-generation") throw new Error("Injected migration failure");
     if (db.prepare("PRAGMA foreign_key_check").all().length) throw new Error("Video migration left broken foreign keys");
   },
+  // How a knowledge source's text was obtained (docs/implementation/extraction.md); null for pasted text and older rows.
+  `ALTER TABLE knowledge_sources ADD COLUMN extraction TEXT CHECK (extraction IN ('text','ocr'));`,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

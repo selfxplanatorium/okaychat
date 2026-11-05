@@ -1,6 +1,7 @@
 import { ArrowLeftIcon, BookOpenIcon, FileUpIcon, LinkIcon, Loader2Icon, PencilIcon, PlusIcon, RefreshCwIcon, SearchIcon, Share2Icon, TrashIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+  KnowledgeCapabilities,
   KnowledgeCollectionView,
   KnowledgeEmbeddingOption,
   KnowledgeEmbeddingSetting,
@@ -416,9 +417,20 @@ function CollectionDetail({ collection, onBack, onChanged }: { collection: Knowl
   const [chunksOpen, setChunksOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [sharing, setSharing] = useState(false);
+  // OCR depends on the code sandbox, not on this account's code feature. One read, no polling; a failure
+  // keeps null and shows nothing.
+  const [capabilities, setCapabilities] = useState<KnowledgeCapabilities | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const projects = useData((s) => s.projects);
   const id = collection.id;
+
+  useEffect(() => {
+    let live = true;
+    void api<KnowledgeCapabilities>("/knowledge/capabilities")
+      .then((value) => { if (live) setCapabilities(value); })
+      .catch(() => { if (live) setCapabilities(null); });
+    return () => { live = false; };
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -563,7 +575,7 @@ function CollectionDetail({ collection, onBack, onChanged }: { collection: Knowl
               type="file"
               multiple
               className="sr-only"
-              accept=".pdf,.docx,.xlsx,.xlsm,.txt,.md,.csv,.json,.ts,.tsx,.js,.jsx,.py,.go,.rs,.java,.c,.cpp,.h,.html,.css,.yaml,.yml,.xml,.sql,.sh,.toml"
+              accept=".pdf,.docx,.pptx,.ppsx,.xlsx,.xlsm,.odt,.epub,.html,.htm,.txt,.md,.csv,.json,.ts,.tsx,.js,.jsx,.py,.go,.rs,.java,.c,.cpp,.h,.css,.yaml,.yml,.xml,.sql,.sh,.toml,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff,.heic,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.openxmlformats-officedocument.presentationml.slideshow,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12,application/vnd.oasis.opendocument.text,application/epub+zip,image/png,image/jpeg,image/webp,image/gif,image/bmp,image/tiff,image/heic"
               onChange={(event) => { void uploadFiles([...(event.target.files ?? [])]); event.target.value = ""; }}
             />
             <div
@@ -577,6 +589,12 @@ function CollectionDetail({ collection, onBack, onChanged }: { collection: Knowl
             >
               {busy ? <Loader2Icon aria-hidden className="mx-auto size-4 animate-spin motion-reduce:animate-none" /> : t("knowledge.dropFiles")}
               <span className="mt-1 block">{t("knowledge.addFilesHint")}</span>
+              {capabilities?.ocr.reason === "not_configured" && (
+                <p className="text-muted-foreground mx-auto mt-1 max-w-[360px] text-xs">{t("knowledge.ocrUnavailableNotConfigured")}</p>
+              )}
+              {capabilities?.ocr.reason === "unavailable" && (
+                <p className="text-muted-foreground mx-auto mt-1 max-w-[360px] text-xs">{t("knowledge.ocrUnavailableDown")}</p>
+              )}
             </div>
           </section>
 
@@ -729,6 +747,7 @@ function OwnerSourceRow({ source, onChanged, onNotice }: { source: KnowledgeSour
             <span>{t(SOURCE_STATUS[source.status])}</span>
             <span>{formatBytes(source.bytes)}</span>
             <span>{t("knowledge.chunks", { count: source.chunkCount })}</span>
+            {source.extraction === "ocr" && <Badge>{t("knowledge.ocrRead")}</Badge>}
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-1">
@@ -754,7 +773,9 @@ function OwnerSourceRow({ source, onChanged, onNotice }: { source: KnowledgeSour
           {formatPercent(source.progress)}
         </progress>
       )}
-      {source.error && <p role="alert" className="text-destructive text-xs">{source.error}</p>}
+      {source.status === "failed" ? (
+        <p role="alert" className="text-destructive text-xs">{source.error ?? t("knowledge.sourceFailedNoDetail")}</p>
+      ) : null}
       {error && <p role="alert" className="text-destructive text-xs">{error}</p>}
     </li>
   );

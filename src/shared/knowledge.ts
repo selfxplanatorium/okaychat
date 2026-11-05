@@ -109,8 +109,21 @@ export interface KnowledgeSource {
   progress: number;
   error: string | null;
   chunkCount: number;
+  /** How the text was obtained; null for pasted text, older rows, or a source that never extracted. */
+  extraction: KnowledgeExtraction | null;
   createdAt: number;
   updatedAt: number;
+}
+
+export type KnowledgeExtraction = "text" | "ocr";
+export type KnowledgeOcrReason = "ok" | "not_configured" | "unavailable";
+export interface KnowledgeOcrCapability {
+  available: boolean;
+  reason: KnowledgeOcrReason;
+}
+/** What this server can ingest beyond plain extraction. OCR depends on the code sandbox, not the account's code feature. */
+export interface KnowledgeCapabilities {
+  ocr: KnowledgeOcrCapability;
 }
 
 /** What a reader may see about a source: no progress, error, mime, bytes, URL, upload id, or text. */

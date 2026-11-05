@@ -1,8 +1,12 @@
 import { HTTPException } from "hono/http-exception";
-import { redactSecrets } from "../errors.js";
+import { AppError, redactSecrets } from "../errors.js";
 import { readUpload } from "../media/store.js";
 import { db } from "../db.js";
 import { extract } from "../files.js";
+import { ExtractionError, limitMessage } from "../extraction/index.js";
+import { MAX_EXTRACTED_CHARS, MAX_PDF_PAGES } from "../extraction/limits.js";
+import { ocrExtract, OcrFailedError, OcrUnavailableError } from "../ocr.js";
+import type { KnowledgeExtraction } from "../../shared/knowledge.js";
 import { chunkDocument } from "./chunker.js";
 import { createEmbedder, EmbeddingError, type Embedder } from "./embeddings.js";
 import { featureAllowed } from "../permissions/guard.js";
@@ -62,6 +66,13 @@ let factory: EmbedderFactory = embedderFactory;
 /** Tests replace the provider; production never calls this. */
 export function setEmbedderFactoryForTests(next: EmbedderFactory | null) {
   factory = next ?? embedderFactory;
+}
+
+type OcrExtractor = typeof ocrExtract;
+let ocr: OcrExtractor = ocrExtract;
+/** Tests replace the sandbox OCR call; production always uses ocrExtract. */
+export function setOcrExtractorForTests(next: OcrExtractor | null) {
+  ocr = next ?? ocrExtract;
 }
 
 const queue: Job[] = [];
@@ -231,30 +242,54 @@ function readable(text: string): string {
   // A decoded binary usually has NULs or a very high replacement-character rate; FTS stops at a NUL.
   const sample = text.slice(0, 20_000);
   if (text.includes("\u0000") || (sample.match(/\uFFFD/g)?.length ?? 0) > sample.length * 0.02) {
-    throw new KnowledgeInputError("This file does not contain readable text. Use a text, PDF, DOCX, or spreadsheet file.");
+    throw new KnowledgeInputError("This file does not contain readable text. Add a supported document or a plain text file.");
   }
   return text;
 }
 
-async function extractSource(row: SourceRow): Promise<string> {
-  if (row.text) return readable(row.text);
+/**
+ * Text once, then kept: retry and reindex reuse stored text (and its `ocr` label) and never call OCR again.
+ * Only a source without text extracts, which is how a failed OCR source recovers once the sandbox is back.
+ */
+async function extractSource(
+  row: SourceRow,
+  signal: AbortSignal,
+  advance: (progress: number) => void,
+): Promise<{ text: string; extraction: KnowledgeExtraction | null }> {
+  // Pasted text has no extraction to report; fetched and extracted text keep the label they were stored with.
+  if (row.text) return { text: readable(row.text), extraction: row.extraction ?? (row.kind === "paste" ? null : "text") };
   if (!row.upload_id) throw new KnowledgeInputError("The original file is gone. Add it again.");
   const upload = readUpload(row.user_id, row.upload_id);
   if (!upload) throw new KnowledgeInputError("The original file is gone. Add it again.");
-  if (/^image\//.test(upload.mime)) throw new KnowledgeInputError("Images are not supported yet: this build has no OCR for them. Add a text, PDF, DOCX, or spreadsheet file instead.");
-  const { text } = await extract(upload.name, upload.mime, upload.data);
-  if (text.startsWith("[This PDF has no text layer")) {
-    throw new KnowledgeInputError("This PDF has no text layer (it is probably scanned images). No OCR is available; add a text version instead.");
+  const result = await extract(upload.name, upload.mime, upload.data, { signal, onProgress: (fraction) => advance(0.05 + fraction * 0.45) });
+  if (result.truncated) throw new KnowledgeInputError(limitMessage(result.limit));
+  if (result.needsOcr === "pdf" && (result.pages ?? 0) > MAX_PDF_PAGES) throw new KnowledgeInputError(limitMessage("pages"));
+  let text = result.text;
+  let extraction: KnowledgeExtraction = "text";
+  if (result.needsOcr) {
+    advance(0.3);
+    try {
+      text = await ocr({ userId: row.user_id, sourceId: row.id, kind: result.needsOcr, data: upload.data, signal });
+    } catch (error) {
+      if (error instanceof OcrUnavailableError || error instanceof OcrFailedError) throw new KnowledgeInputError(error.message);
+      throw error;
+    }
+    extraction = "ocr";
+    if (!text.trim()) throw new KnowledgeInputError("OCR did not find any text in this file.");
+    if (text.length > MAX_EXTRACTED_CHARS) throw new KnowledgeInputError(limitMessage("characters"));
   }
   if (!text.trim()) throw new KnowledgeInputError("No text could be read from this file.");
-  return readable(text);
+  return { text: readable(text), extraction };
 }
 
 const isSuperseded = (error: unknown) => error instanceof DOMException && error.message === "Superseded";
 
 /** Only messages this module or the embedder wrote are stored; anything else is logged and replaced. */
 function ingestFailureMessage(error: unknown): string {
-  if (error instanceof KnowledgeInputError || error instanceof EmbeddingError || error instanceof HTTPException) return error.message;
+  // AppError covers QuotaError and service_unavailable; their messages are authored for the user.
+  if (error instanceof KnowledgeInputError || error instanceof EmbeddingError || error instanceof HTTPException || error instanceof ExtractionError || error instanceof AppError) {
+    return error.message;
+  }
   if (error instanceof DOMException && error.name === "TimeoutError") return "The embedding provider did not respond in time.";
   console.error("[knowledge] ingest failed", redactSecrets(String((error as Error)?.stack ?? error)).slice(0, 500));
   return "Ingestion failed.";
@@ -284,9 +319,19 @@ async function runJob(job: Job, controller: AbortController) {
     if (collection.embedding_provider !== "none" && (!pinMatches(collection) || embeddingNeedsReindex(collection))) {
       throw new EmbeddingError("Reindex this collection to bind its embedding connection before adding sources.");
     }
-    const text = await extractSource(row);
+    // Extraction parts map to 0.05–0.5 and OCR to 0.3, in steps of at least 0.05 or 250 ms, never backwards.
+    let shown = 0.04;
+    let shownAt = 0;
+    const advance = (value: number) => {
+      const now = Date.now();
+      if (value <= shown || (value - shown < 0.05 && now - shownAt < 250)) return;
+      shown = value;
+      shownAt = now;
+      setSourceProgress(userId, sourceId, generation, "extracting", value);
+    };
+    const { text, extraction } = await extractSource(row, signal, advance);
     abortIfStale(userId, sourceId, generation, signal);
-    if (!setSourceText(userId, sourceId, generation, text)) return;
+    if (!setSourceText(userId, sourceId, generation, text, extraction)) return;
 
     const chunks = chunkDocument(text, { sourceId, title: row.name });
     if (!chunks.length) throw new KnowledgeInputError("The source has no readable text to index.");

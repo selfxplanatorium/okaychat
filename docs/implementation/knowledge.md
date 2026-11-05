@@ -26,15 +26,26 @@ running model and drops passages from a collection that disappeared mid-query.
 
 ## Sources and extraction
 
-- Upload: PDF (text layer only), DOCX, XLSX/XLSM, and text/code. The original bytes are stored in
-  `uploads` through `storeUpload` (25 MB cap, quota charged); extraction reuses `files.ts`/`documents`
-  helpers. Scanned PDFs fail with an honest "no OCR" message. Images are rejected: this build has no
-  OCR path.
+- Upload: PDF, DOCX, XLSX/XLSM, PPTX/PPSX (slide text and speaker notes), EPUB (spine order), HTML,
+  ODT, raster images, and text/code. The original bytes are stored in `uploads` through `storeUpload`
+  (25 MB cap, quota charged) before anything is parsed; there is no server-side extension allowlist.
+  Extraction is the shared `src/server/extraction/` module: content decides the parser, and refused or
+  damaged files fail in the queue with a specific message while the original stays
+  (`docs/implementation/extraction.md`).
+- OCR: images (PNG, JPEG, WebP, GIF first frame, BMP, TIFF, HEIC/HEIF) and PDFs without a text layer are read
+  through the code sandbox's fixed-input `/ocr` route (`src/server/ocr.ts`). It needs the sandbox service,
+  not the account's `code` feature. Without a configured or reachable sandbox the source fails with an
+  actionable message matching `/OCR/`, keeps its original, and Retry extracts again once it is back.
+  `knowledge_sources.extraction` records `text` or `ocr` (null for pasted text and older rows), and the
+  page shows an OCR badge. `GET /knowledge/capabilities` reports `{ocr:{available,reason}}` from the
+  service registry without probing an unconfigured sandbox.
 - Paste: the text is stored as an original upload plus the extracted text.
 - URL: exactly one public `http(s)` page fetched once through `publicFetch` (pinned public DNS, every redirect
   revalidated, 20 s deadline, 10 MB body cap). The **original response bytes** (HTML, PDF, or text) are stored
-  in `uploads`; readable content is extracted separately with Readability/turndown for HTML, `unpdf` for PDF,
-  and UTF-8 decoding for text. Unsupported MIME types and HTTP errors fail visibly before anything is queued.
+  in `uploads`; readable content is extracted separately with Readability/turndown for HTML, `extract()` for
+  PDF, and UTF-8 decoding for text. A PDF without a text layer is stored as a queued source with no text,
+  and the job OCRs the stored original; a PDF over 1,000 pages or 400,000 characters is refused before a
+  source exists. Unsupported MIME types and HTTP errors fail visibly before anything is queued.
   There is no Scrapling/browser fallback and no crawl; links inside the page are not followed. Nothing is
   truncated just because `web_fetch` would page a long reply.
 - Empty, binary, and oversized extraction results become a visible per-source error; failed sources can
@@ -146,8 +157,12 @@ timer: work starts when a source is created and resumes from the database at sta
 keyset batches of 500 (`created_at`, `id`) and loads the next batch as the queue drains, so any number of
 pending rows recovers without an idle timer or a stranded tail.
 
-- Progress is stored as 0–1 and refreshed by the UI while a source is processing.
-- Retry keeps extracted text and rebuilds chunks; reindex rebuilds a source or a whole collection.
+- Progress is stored as 0–1 and refreshed by the UI while a source is processing: `extracting` 0.04, then
+  0.05–0.5 across pages/slides/chapters (0.3 while OCR runs), `embedding` 0.55–0.95, `ready` 1, and 0 for
+  `failed`/`cancelled`. Writes are throttled to steps of 0.05 or 250 ms and never go backwards.
+- Retry keeps extracted text and rebuilds chunks; reindex rebuilds a source or a whole collection. Neither
+  re-extracts a source that has text, so neither calls OCR again and an `ocr` label survives. A source with
+  no text (a failed extraction) extracts again on Retry.
 - Cancel aborts fetch, embedding, and retry waits, removes queued work, and bumps `generation`, so a
   late write from the aborted job is ignored. Ownership is checked before touching a running controller,
   so a forged source id from another account cannot cancel that account's job.
@@ -168,8 +183,10 @@ Originals count as uploads. Extracted source text, duplicated chunk text, and em
 growth in the same transaction, so replaying or rewriting a block charges only what changed, and a rejected
 write leaves the previous block intact. Every growth path calls `assertStorage` inside the same synchronous
 transaction as its write; replacement writes (reindex, retry) charge only the net growth, and deleting a
-source or collection releases its bytes. Limits: 25 MB per upload, 10 MB per fetched URL, 400,000
-characters per pasted or fetched document, 2,000 sources per collection, 20 attached collections per chat,
+source or collection releases its bytes. OCR text is charged by `setSourceText` on net growth like any
+extracted text; a quota rejection fails the source with the quota message and keeps the original. Limits:
+25 MB per upload, 10 MB per fetched URL, 400,000 characters per document (an extraction that hits the
+character, 1,000-page, 300-slide, or 500-section cap fails instead of indexing part of a file), 2,000 sources per collection, 20 attached collections per chat,
 and 12 passages per chat tool call.
 
 ## Chat integration and prompt caching
@@ -232,7 +249,13 @@ and touch/focus-visible sizing.
   deterministic global vector ordering, source filtering, degraded labels, citation offsets, reindex/
   model change during an active job, failure/retry/cancel, retry during an active job, stale-generation
   guard, quota release on delete and per-turn context quota, restart resume beyond one 500-row batch,
-  attachment/project scoping, detach during retrieval, tool narrowing, and the 20k-chunk performance guard.
+  attachment/project scoping, detach during retrieval, tool narrowing, the 20k-chunk performance guard,
+  PPTX/PPSX/EPUB/HTML/ODT uploads with exact chunk offsets, image and scanned-PDF OCR through a fake
+  extractor (quota, media release, retry after the sandbox returns), reindex without OCR, the
+  capabilities route, malformed/legacy/zip-bomb/unsupported uploads, quota rejection during extraction,
+  and the `/files/extract` status mapping.
+- `extraction/formats.test.ts`, `extraction/bounds.test.ts`, `ocr.test.ts`: see
+  `docs/implementation/extraction.md`.
 - `web/state/chat-knowledge.test.ts`: optimistic attachment binding, server hydration, failed initial PATCH
   rollback, and the one-passage citation store.
 - `web/lib/knowledge-citation.test.ts`: valid ids, malformed percent escapes, forged ids, and inert
@@ -244,7 +267,8 @@ and touch/focus-visible sizing.
 
 - Scanning is bounded to two sources per account and three overall (`MAX_JOBS_PER_USER`/`MAX_JOBS_TOTAL`), one
   per collection; a huge PDF can take a while and only progress is shown.
-- No OCR for scanned PDFs or images, no crawling, and no re-ranker. Keyword retrieval misses pure
+- OCR needs the code sandbox and reads only its installed languages (`eng`, `ita`); no handwriting, layout,
+  confidence, or AVIF. No crawling and no re-ranker. Keyword retrieval misses pure
   paraphrases in lexical-only mode.
 - Embedding batches are bounded by character/token estimates rather than provider tokens; an unusual
   document can still approach a provider's per-request limit.
@@ -256,8 +280,8 @@ and touch/focus-visible sizing.
 - The Library can delete an upload that a knowledge source still references (the foreign key sets
   `upload_id` to NULL). Existing extracted text and chunks stay searchable and reindex from that text; a
   source whose job failed before extraction reports that the original is gone and must be added again.
-- URL PDFs without a text layer are rejected before storing the source, just like uploaded scanned PDFs;
-  oversized declared URL bodies are cancelled before returning an error.
+- URL sources accept HTML, PDF, and text only; Office, EPUB, and ODT files must be downloaded and uploaded.
+  Oversized declared URL bodies are cancelled before returning an error.
 - Knowledge text is stored unencrypted in SQLite (the original files are in `uploads` too). A copied
   database exposes it just like chat history; `OKAYCHAT_SECRET` covers provider keys and memory, not
   knowledge.

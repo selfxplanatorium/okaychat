@@ -1,11 +1,14 @@
 import { extract } from "../files.js";
+import { ExtractionError, limitMessage } from "../extraction/index.js";
+import { MAX_PDF_PAGES } from "../extraction/limits.js";
 import { KnowledgeInputError } from "./store.js";
 import { BlockedAddressError, publicFetch, readCapped } from "../public-fetch.js";
 import { htmlToMarkdown } from "../tools/web.js";
 
 // One URL source for a knowledge collection. The original response bytes are kept in `uploads` exactly as
 // received, and readable text is extracted separately (HTML via Readability/turndown, PDF via unpdf, text
-// decoded as UTF-8). Unlike `web_fetch`, this applies no tool-reply paging and never falls back to the
+// decoded as UTF-8). A PDF with no text layer is stored with no text, so the
+// ingestion job reads it with OCR from the original. Unlike `web_fetch`, this applies no tool-reply paging and never falls back to the
 // browser worker: a knowledge source is a single public page, not a crawl. Extracted text has its own
 // documented 400k-character cap; the original bytes stay complete.
 
@@ -32,7 +35,7 @@ export interface KnowledgeUrlPage {
   mime: string;
   /** Exact response body, persisted as the source original. */
   bytes: Uint8Array;
-  /** Readable text for chunking. */
+  /** Readable text for chunking; empty for a scanned PDF, which the ingestion job OCRs from `bytes`. */
   text: string;
 }
 
@@ -104,11 +107,21 @@ export async function fetchKnowledgeUrl(raw: string, opts: { signal?: AbortSigna
   const name = fileName(parsed);
 
   if (type === "application/pdf" || isPdf(bytes)) {
-    const { text } = await extract(name.endsWith(".pdf") ? name : `${name}.pdf`, "application/pdf", new Uint8Array(bytes));
-    if (!text.trim() || text.startsWith("[This PDF has no text layer")) {
-      throw new KnowledgeInputError("That PDF has no text layer. No OCR is available; add a text version instead.");
+    let result: Awaited<ReturnType<typeof extract>>;
+    try {
+      result = await extract(name.endsWith(".pdf") ? name : `${name}.pdf`, "application/pdf", new Uint8Array(bytes), { signal });
+    } catch (error) {
+      // Extraction messages are authored for the user; anything else stays the route's generic text.
+      if (error instanceof ExtractionError) throw new KnowledgeInputError(error.message);
+      throw error;
     }
-    return { title: name, mime: "application/pdf", bytes, text: bounded(text) };
+    if (result.needsOcr) {
+      if ((result.pages ?? 0) > MAX_PDF_PAGES) throw new KnowledgeInputError(limitMessage("pages"));
+      return { title: name, mime: "application/pdf", bytes, text: "" };
+    }
+    if (result.truncated) throw new KnowledgeInputError(limitMessage(result.limit));
+    if (!result.text.trim()) throw new KnowledgeInputError("That PDF had no readable text.");
+    return { title: name, mime: "application/pdf", bytes, text: bounded(result.text) };
   }
 
   const body = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
