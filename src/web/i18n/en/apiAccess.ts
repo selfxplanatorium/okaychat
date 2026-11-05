@@ -54,6 +54,7 @@ export default {
   https: "Use HTTPS when sending keys over a network.",
   stateless: "Send conversation history with each request. Tools and attachments are not supported.",
   loadFailed: "API access could not be loaded. Try again.",
+  listFailed: "This list could not be loaded. The rows below may be out of date.",
   createFailed: "The key could not be created. Try again.",
   revokeFailed: "The key could not be revoked. Try again.",
   labelRequired: "Enter a label.",

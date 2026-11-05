@@ -130,6 +130,12 @@ export function ApiUsagePanel({ data }: { data: ApiAccessData }) {
       </SettingsSection>
 
       <SettingsSection title={t("apiAccess.requests")}>
+        {data.requestsError && (
+          <div role="alert" className="border-warning/40 bg-warning/10 mx-4 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs">
+            <span>{t("apiAccess.listFailed")}</span>
+            <Button variant="outline" size="xs" onClick={data.refresh}>{t("common.retry")}</Button>
+          </div>
+        )}
         {data.requests.length === 0 && <p className="text-muted-foreground px-4 py-6 text-sm">{t("apiAccess.noRequests")}</p>}
         {data.requests.length > 0 && (
           <div data-no-drawer-swipe className="max-w-full overflow-x-auto">
@@ -175,6 +181,12 @@ export function ApiUsagePanel({ data }: { data: ApiAccessData }) {
       </SettingsSection>
 
       <SettingsSection title={t("apiAccess.audit")}>
+        {data.auditError && (
+          <div role="alert" className="border-warning/40 bg-warning/10 mx-4 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs">
+            <span>{t("apiAccess.listFailed")}</span>
+            <Button variant="outline" size="xs" onClick={data.refresh}>{t("common.retry")}</Button>
+          </div>
+        )}
         {data.audit.length === 0 && <p className="text-muted-foreground px-4 py-6 text-sm">{t("apiAccess.noAudit")}</p>}
         {data.audit.length > 0 && (
           <div data-no-drawer-swipe className="max-w-full overflow-x-auto">
