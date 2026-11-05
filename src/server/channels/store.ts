@@ -233,7 +233,8 @@ export function transferOwner(userId: string, channelId: string, revision: numbe
     // The new owner pays for every byte this room stores, so the transfer checks the target's limit first.
     assertStorage(targetId, channelStorageBytes(channelId));
     chargeRate(userId, "membership");
-    db.prepare("UPDATE channel_members SET role = 'moderator' WHERE channel_id = ? AND user_id = ? AND role = 'owner'").run(channelId, userId);
+    // Demote the current owner, not the caller: an admin transfer is made by a non-owner.
+    db.prepare("UPDATE channel_members SET role = 'moderator' WHERE channel_id = ? AND role = 'owner' AND user_id <> ?").run(channelId, targetId);
     db.prepare("UPDATE channel_members SET role = 'owner' WHERE channel_id = ? AND user_id = ?").run(channelId, targetId);
     db.prepare("UPDATE channels SET owner_id = ? WHERE id = ?").run(targetId, channelId);
     const next = bumpRevision(channelId);

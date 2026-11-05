@@ -23,6 +23,7 @@ import { CreateChannelDialog } from "./CreateChannelDialog";
 import { ChannelJoinDialog } from "./ChannelJoinDialog";
 import type { MessageActions } from "./ChannelMessageRow";
 
+// A stable empty list: a fresh `[]` from a selector re-renders forever (React error 185).
 const NO_MESSAGES: ChannelMessage[] = [];
 
 export function ChannelsPage({ channelId }: { channelId?: string }) {
