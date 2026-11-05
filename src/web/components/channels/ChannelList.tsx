@@ -42,7 +42,25 @@ export function ChannelList({
 }) {
   const [query, setQuery] = useState("");
   const [archivedOnly, setArchivedOnly] = useState(false);
-  const rooms = joined.filter((room) => (archivedOnly ? room.archivedAt !== null : true));
+  // Archived is a view of the joined rooms, not a scope of its own, so it selects like the other tabs.
+  const rooms = joined.filter((room) => (archivedOnly ? room.archivedAt !== null : room.archivedAt === null));
+  const select = (tab: ChannelListMode | "archived") => {
+    if (tab === "archived") {
+      onMode("joined");
+      setArchivedOnly(true);
+      return;
+    }
+    onMode(tab);
+    setArchivedOnly(false);
+  };
+  const tabs = [
+    ["joined", "channels.joined", CompassIcon],
+    ["discover", "channels.discover", SearchIcon],
+    ["invitations", "channels.invites", MailIcon],
+    ["archived", "channels.archived", ArchiveIcon],
+  ] as const;
+  const active = (tab: (typeof tabs)[number][0]) =>
+    tab === "archived" ? mode === "joined" && archivedOnly : mode === tab && !(tab === "joined" && archivedOnly);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-1 px-2 pt-2">
@@ -50,37 +68,25 @@ export function ChannelList({
           <PlusIcon aria-hidden /> {t("channels.create")}
         </Button>
       </div>
-      <div role="tablist" aria-label={t("channels.title")} className="flex flex-wrap gap-0.5 px-2 pt-2">
-        {(["joined", "discover", "invitations"] as const).map((tab) => (
+      <div role="tablist" aria-label={t("channels.title")} className="grid grid-cols-2 gap-0.5 px-2 pt-2">
+        {tabs.map(([tab, label, Icon]) => (
           <button
             key={tab}
             type="button"
             role="tab"
-            aria-selected={mode === tab}
-            onClick={() => onMode(tab)}
+            aria-selected={active(tab)}
+            onClick={() => select(tab)}
             className={cn(
-              "text-muted-foreground hover:bg-muted flex flex-1 items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-xs transition-colors",
-              mode === tab && "bg-muted text-foreground font-medium",
+              "text-muted-foreground hover:bg-muted flex min-w-0 items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-xs transition-colors",
+              active(tab) && "bg-muted text-foreground font-medium",
             )}
           >
-            {tab === "joined" ? <CompassIcon aria-hidden className="size-3.5" /> : tab === "discover" ? <SearchIcon aria-hidden className="size-3.5" /> : <MailIcon aria-hidden className="size-3.5" />}
-            {t(tab === "joined" ? "channels.joined" : tab === "discover" ? "channels.discover" : "channels.invitations")}
+            <Icon aria-hidden className="size-3.5 shrink-0" />
+            <span className="truncate">{t(label)}</span>
             {tab === "invitations" && invites.length > 0 && <span className="bg-primary text-primary-foreground rounded-full px-1 text-[0.6rem]">{invites.length}</span>}
           </button>
         ))}
       </div>
-      {mode === "joined" && (
-        <div className="flex items-center justify-between gap-1 px-2 pt-2">
-          <button
-            type="button"
-            aria-pressed={archivedOnly}
-            onClick={() => setArchivedOnly((value) => !value)}
-            className={cn("text-muted-foreground hover:bg-muted inline-flex items-center gap-1 rounded px-1.5 py-1 text-[0.7rem]", archivedOnly && "bg-muted text-foreground")}
-          >
-            <ArchiveIcon aria-hidden className="size-3" /> {t("channels.archived")}
-          </button>
-        </div>
-      )}
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
         {mode === "joined" && (
           rooms.length ? rooms.map((room) => (
@@ -91,7 +97,7 @@ export function ChannelList({
               onSelect={() => onSelect(room.id)}
               secondary={room.description || undefined}
             />
-          )) : <p className="text-muted-foreground px-2 py-6 text-sm">{t("channels.emptyRooms")}</p>
+          )) : <p className="text-muted-foreground px-2 py-6 text-sm">{t(archivedOnly ? "channels.emptyArchived" : "channels.emptyRooms")}</p>
         )}
         {mode === "discover" && (
           <>
@@ -139,7 +145,7 @@ export function ChannelList({
                 </Button>
               </div>
             </div>
-          )) : <p className="text-muted-foreground px-2 py-6 text-sm">{t("channels.emptyDiscover")}</p>
+          )) : <p className="text-muted-foreground px-2 py-6 text-sm">{t("channels.emptyInvites")}</p>
         )}
       </div>
     </div>
