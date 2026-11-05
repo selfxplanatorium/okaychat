@@ -133,6 +133,8 @@ visibility, charts, and tool-using or multi-turn cases.
 
 - No public usage/limits API for OpenCode Go was found. Go windows show our own recorded spend, not the remaining quota.
 
+- Deliberate deferrals: team channels/rooms, MFA/SSO, and a Postgres backend. Chats stay private to an account unless shared read-only; authentication is password-based with session revocation, and storage is SQLite plus files.
+
 ## ChatGPT plan OAuth release gate
 
 The SIWC desktop helper, encrypted store, and transport are implemented behind a default-off deployment flag. Live server-exchange admission, namespaced tool round trips, rotation, deployment eligibility, mobile resume, and image independence must pass before enabling it in a release. The CLI remains image-only; see `docs/implementation/codex-chat.md`.
