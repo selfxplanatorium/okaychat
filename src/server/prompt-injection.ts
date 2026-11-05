@@ -27,7 +27,9 @@ export type UntrustedKind =
   | "text_draft"
   | "assistant"
   | "evaluation_output"
-  | "evaluation_expected";
+  | "evaluation_expected"
+  | "channel_history"
+  | "channel_metadata";
 
 export interface UntrustedSource {
   kind: UntrustedKind;

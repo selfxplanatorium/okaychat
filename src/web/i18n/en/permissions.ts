@@ -134,6 +134,8 @@ export default {
   featureSkillsHelp: "Allows skill tools, source installs, and the contextual skill index. Install approvals are unchanged.",
   featureEvaluationsLabel: "Evaluations",
   featureEvaluationsHelp: "Allows private datasets and runs in the evaluation workspace. Every case and every judge verdict is a model request billed to the account.",
+  featureChannels: "Team channels",
+  featureChannelsHelp: "Allows shared rooms, membership, room search, and explicitly requested room AI replies. It is independent of sharing, schedules, and MCP.",
   limitMaxStepsLabel: "Agent steps per reply",
   limitMaxStepsHelp: "Counts tool-capable invocations; the final no-tools answer still happens. Effective value is the minimum of the request, policy, and application maximum.",
   limitMaxSearchesLabel: "Searches per reply",

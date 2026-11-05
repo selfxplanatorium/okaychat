@@ -31,6 +31,7 @@ import { useCommand, useShortcutProps } from "@/keyboard/registry";
 // Settings (theme editor, font discovery, VS Code import) are not needed to chat.
 const NavigationPage = preloadable(() => import("@/components/layout/NavigationPage").then((m) => m.NavigationPage));
 const SettingsLayout = preloadable(() => import("@/components/settings/SettingsLayout").then((m) => m.SettingsLayout));
+const ChannelsPage = preloadable(() => import("@/components/channels/ChannelsPage").then((m) => m.ChannelsPage));
 
 function ChatHeader({ sidebarOpen, onToggle }: { sidebarOpen: boolean; onToggle: () => void }) {
   const aui = useAui();
@@ -154,8 +155,9 @@ export function Shell({ userId }: { userId: string }) {
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
   const [location] = useLocation();
   const inSettings = location.startsWith("/settings");
-  const inNavigation = ["/scheduled", "/library", "/knowledge", "/plugins", "/projects", "/compare", "/evaluations"].includes(location);
-  const route = inSettings ? "settings" : inNavigation ? location : "chat";
+  const inChannels = location === "/channels" || location.startsWith("/channels/");
+  const inNavigation = inChannels || ["/scheduled", "/library", "/knowledge", "/plugins", "/projects", "/compare", "/evaluations"].includes(location);
+  const route = inSettings ? "settings" : inChannels ? "channels" : inNavigation ? location : "chat";
   // The settings layer stays mounted in the sidebar, so it keeps its last section while the chat is shown.
   const lastSection = useRef<string | undefined>(undefined);
   if (inSettings) lastSection.current = location.split("/")[2] || undefined;
@@ -262,6 +264,24 @@ export function Shell({ userId }: { userId: string }) {
                   <Suspense fallback={null}>
                     <SettingsLayout />
                   </Suspense>
+                )}
+              </Route>
+              <Route path="/channels/:channelId">
+                {(p) => (
+                  <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                    <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">{t("common.loading")}</p>}>
+                      <ChannelsPage channelId={p.channelId} />
+                    </Suspense>
+                  </main>
+                )}
+              </Route>
+              <Route path="/channels">
+                {() => (
+                  <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                    <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">{t("common.loading")}</p>}>
+                      <ChannelsPage />
+                    </Suspense>
+                  </main>
                 )}
               </Route>
               <Route path="/compare">

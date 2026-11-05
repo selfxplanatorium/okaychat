@@ -35,5 +35,11 @@ export default {
   importDoneBody: "{chats} chats were added to your history.",
   importFailed: "Import failed",
   importFailedBody: "The archive could not be imported.",
+  channelInvited: "Room invitation",
+  channelMention: "You were mentioned",
+  channelMessage: "New room message",
+  channelAiFinished: "Room reply finished",
+  channelOpenRoom: "Open the room to see it.",
+  channelOpenMessage: "Open the room to read the message.",
   unknownChat: "your chat",
 } as const;

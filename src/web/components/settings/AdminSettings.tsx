@@ -19,6 +19,7 @@ import { PermissionsWorkspace } from "./permissions/PermissionsWorkspace";
 import { ProviderLists, ProviderScopeProvider } from "./ProvidersSettings";
 import { AdminVoiceSettings } from "./AdminVoiceSettings";
 import { AgentManagement } from "@/components/agents/AgentManagement";
+import { AdminChannels } from "@/components/channels/AdminChannels";
 import { SettingsPage, SettingsRow, SettingsSection } from "./SettingsUI";
 
 function NewUserForm({ onDone }: { onDone: () => void }) {
@@ -240,7 +241,10 @@ function Users({ defaultLimit }: { defaultLimit: number | null }) {
             variant="ghost"
             aria-label={t("admin.deleteUser", { name: u.name })}
             disabled={u.id === me?.id}
-            onClick={() => confirm(t("admin.deleteUserConfirm", { email: u.email })) && void act(() => api(`/admin/users/${u.id}`, { method: "DELETE" }))}
+            onClick={() => {
+              const warning = u.channels > 0 ? `\n\n${t("channels.adminDeleteOwnedRooms", { count: u.channels })}` : "";
+              if (confirm(`${t("admin.deleteUserConfirm", { email: u.email })}${warning}`)) void act(() => api(`/admin/users/${u.id}`, { method: "DELETE" }));
+            }}
           >
             <TrashIcon />
           </Button>
@@ -514,6 +518,7 @@ export function AdminSettings() {
       </SettingsSection>
       <Users defaultLimit={defaultLimit} />
       <Groups />
+      <AdminChannels />
       <SystemPrompts />
       <AgentManagement scope="shared" />
       <AdminVoiceSettings />

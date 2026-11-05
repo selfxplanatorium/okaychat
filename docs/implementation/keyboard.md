@@ -87,3 +87,11 @@ Availability is read through `commandAvailable()` (a registered handler, or a vi
 Context actions register only while they can succeed: `chat.openContext` while a window size is known, `chat.compactNow`/`chat.trimContext` only for a saved, non-temporary chat that is not running, compacting, or showing cached history. `nav.createProject` and `nav.createSchedule` live in `KeyboardShortcuts`, so hiding a sidebar shortcut in General settings does not remove the commands.
 
 Images: `chat.loadImage` clicks the newest Load image placeholder of a remote Markdown image. `chat.retryImage` clicks the newest Retry in a failed `OwnedImage` fallback (`data-command`); the fallback is never inside the image's link or a Library tile button, so Retry and Open original are separate tab stops that do not trigger the wrapper.
+
+## Channel commands
+
+`nav.channels`, `channels.create`, `channels.search`, `channels.members`, `channels.settings`,
+`channels.markRead`, `channels.nextUnread`, `channels.focusComposer`, `channels.reply`, `channels.react`,
+`channels.askAi`, and `channels.stopAi` join the one command catalog without default global bindings.
+The room workspace handles Mod+F, J/K row movement, and R reply itself while it has focus, so private
+chat handlers never fire for a channel composer. Every action is also available without a shortcut.

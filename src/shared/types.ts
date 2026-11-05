@@ -165,7 +165,7 @@ export interface OllamaPullProgress {
 
 export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
-export const SIDEBAR_ITEMS = ["newChat", "scheduled", "library", "knowledge", "plugins", "projects", "compare", "evaluations"] as const;
+export const SIDEBAR_ITEMS = ["newChat", "scheduled", "library", "knowledge", "plugins", "projects", "channels", "compare", "evaluations"] as const;
 export type SidebarItem = (typeof SIDEBAR_ITEMS)[number];
 
 /** Account intent for durable notices. The in-app center always works; browser popups are opt-in. */
@@ -190,6 +190,8 @@ export interface UserSettings {
   keyboard?: KeyboardSettings;
   /** Visible sidebar shortcuts; omitted for older accounts to show all. */
   sidebarItems?: SidebarItem[];
+  /** Set once when an older saved sidebar list received the channels item, so a later removal sticks. */
+  sidebarChannelsSeen?: boolean;
   /** Synced appearance; absent until the first device migrates its local preferences. */
   appearance?: UserAppearance;
   /** The user dismissed the first-run provider screen and explores without a connection. */
@@ -653,7 +655,8 @@ export type PromptKey =
   | "memorySummary"
   | "assistantInstructions"
   | "evaluationCase"
-  | "evaluationJudge";
+  | "evaluationJudge"
+  | "channelReply";
 
 /** A server-wide system prompt as the admin page shows it. */
 export interface AdminPrompt {
@@ -674,6 +677,8 @@ export interface AdminUser {
   role: "admin" | "user";
   createdAt: number;
   threads: number;
+  /** Rooms owned by this account; deleting it deletes them. */
+  channels: number;
   /** Spend in the last 30 days, from recorded usage. */
   cost30d: number;
   /** Bytes the user currently stores, over every counted kind. */

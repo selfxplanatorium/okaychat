@@ -83,3 +83,17 @@ object is saved through `PATCH /settings`; a rejected save restores the previous
 
 No email digests, per-device preferences, quiet hours, grouping of notices, notifications for
 individual (non-archive) exports or comparisons, or notification actions beyond Open.
+
+## Team channels
+
+Channel notices use the `channel` kind and generic title/body keys with empty params: no room name,
+sender, text, or private id appears in a displayed string. Structured mentions win over a plain message;
+`all` adds posts by others and terminal AI replies; `none` suppresses them; invitations always notify.
+Edits, reactions, and read cursors never create notices. The server stores `channel_id` and
+`channel_message_id`, filters list and unread counts against live membership/eligibility/feature, purges
+on ACL mutation and tombstones, and marks matching notices read when the room cursor advances. Source
+keys are `channel:invite:<room>:<user>:<time>`, `channel:message:<message>:<user>`, and
+`channel:ai:<run>:<requester>`.
+
+The channel panel link uses `settingsHref("notifications")`; the General settings browser-notification row
+carries `setting-notifications` for that deep link.

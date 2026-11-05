@@ -26,7 +26,11 @@ driven and rendered by `AdminSettings` when `?view=` is one of `people`, `groups
   layer preview. Reset deletes a field instead of writing today's effective value.
 - `src/web/state/permissions-impact.ts`: canonical preview paths → display descriptors.
 - `src/web/state/permissions-query.ts`: URL parse/build, subject reconciliation, arrow-key helpers.
-The feature keys include `evaluations`: when it is denied the `/evaluations` routes answer 403 and the
+The feature keys include `channels` and `evaluations`. `channels` gates every ordinary room route,
+event frame, and room AI dispatch; the separate `/api/admin/channels` moderation routes stay usable
+without it so an admin can clean up a disabled account's rooms. Room access also needs live membership
+and group eligibility, so the feature key alone never grants a room. `evaluations` works as follows:
+when it is denied the `/evaluations` routes answer 403 and the
 workspace shows a disabled state. Every evaluation case and judge call is an ordinary `llm.call`, so
 model allowlists, `operationsPerMinute`, and `concurrentOperations` apply unchanged; a mid-run denial
 stops further dispatch. Generation and judge dispatch each resolve the `evaluations` feature for

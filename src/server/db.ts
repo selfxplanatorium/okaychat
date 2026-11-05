@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { storeInlineAttachments } from "./attachment-storage.js";
 import { resultPaths } from "./sandbox-paths.js";
 import { env } from "./env.js";
+import { newId } from "./crypto.js";
 
 export const db = new DatabaseSync(path.join(env.dataDir, "okaychat.db"));
 // FULL makes rotating-token sending markers durable; WAL still permits concurrent readers.
@@ -1259,6 +1260,216 @@ const migrations: Array<string | (() => void)> = [
     );
     `);
     if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "evaluations") throw new Error("Injected migration failure");
+  },
+  // Team channels (docs/implementation/channels.md). A separate aggregate: no thread, message, upload,
+  // generation, memory, knowledge, or share row belongs to a room. Exactly one appended migration keeps
+  // the previous history intact; notifications is rebuilt to add the channel kind and ACL columns.
+  () => {
+    db.exec(`
+    CREATE TABLE channels (
+      id TEXT PRIMARY KEY,
+      owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', icon TEXT NOT NULL DEFAULT 'hash',
+      visibility TEXT NOT NULL CHECK(visibility IN ('public','private','group')),
+      ai_json TEXT, revision INTEGER NOT NULL DEFAULT 1,
+      next_seq INTEGER NOT NULL DEFAULT 1,
+      archived_at INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX channels_owner ON channels(owner_id);
+    CREATE INDEX channels_directory ON channels(visibility, archived_at, updated_at DESC, id);
+
+    CREATE TABLE channel_groups (
+      channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+      group_id TEXT NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+      PRIMARY KEY(channel_id,group_id)
+    );
+    CREATE INDEX channel_groups_group ON channel_groups(group_id,channel_id);
+
+    CREATE TABLE channel_members (
+      channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role TEXT NOT NULL CHECK(role IN ('owner','moderator','member')),
+      read_seq INTEGER NOT NULL DEFAULT 0, notify_mode TEXT NOT NULL DEFAULT 'mentions'
+      CHECK(notify_mode IN ('all','mentions','none')),
+      joined_at INTEGER NOT NULL, PRIMARY KEY(channel_id,user_id)
+    );
+    CREATE UNIQUE INDEX channel_one_owner ON channel_members(channel_id) WHERE role='owner';
+    CREATE INDEX channel_members_user ON channel_members(user_id,channel_id);
+
+    CREATE TABLE channel_invites (
+      channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      invited_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at INTEGER NOT NULL, PRIMARY KEY(channel_id,user_id)
+    );
+
+    CREATE TABLE channel_exclusions (
+      channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL, PRIMARY KEY(channel_id,user_id)
+    );
+
+    CREATE TABLE channel_messages (
+      id TEXT PRIMARY KEY,
+      channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+      seq INTEGER NOT NULL,
+      author_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('human','ai')),
+      body TEXT NOT NULL DEFAULT '', reply_to TEXT,
+      client_id TEXT, request_hash TEXT, revision INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL, edited_at INTEGER, deleted_at INTEGER,
+      UNIQUE(channel_id,seq), UNIQUE(channel_id,id),
+      FOREIGN KEY(channel_id,reply_to) REFERENCES channel_messages(channel_id,id)
+    );
+    CREATE UNIQUE INDEX channel_message_client ON channel_messages(channel_id,author_id,client_id)
+      WHERE kind='human' AND client_id IS NOT NULL;
+    CREATE INDEX channel_messages_author ON channel_messages(author_id);
+
+    CREATE TABLE channel_mentions (
+      message_id TEXT NOT NULL REFERENCES channel_messages(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      start_offset INTEGER NOT NULL, end_offset INTEGER NOT NULL,
+      PRIMARY KEY(message_id,user_id)
+    );
+
+    CREATE TABLE channel_reactions (
+      message_id TEXT NOT NULL REFERENCES channel_messages(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      emoji TEXT NOT NULL CHECK(emoji IN ('👍','❤️','🎉','😄','👀','✅')),
+      created_at INTEGER NOT NULL, PRIMARY KEY(message_id,user_id,emoji)
+    );
+
+    CREATE TABLE channel_ai_runs (
+      id TEXT PRIMARY KEY,
+      channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+      requester_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      source_id TEXT NOT NULL, message_id TEXT NOT NULL UNIQUE,
+      client_id TEXT NOT NULL, request_hash TEXT NOT NULL,
+      model_ref TEXT NOT NULL, config_json TEXT NOT NULL, input_enc TEXT,
+      state TEXT NOT NULL CHECK(state IN ('queued','running','finished','cancelled','failed','interrupted')),
+      output_version INTEGER NOT NULL DEFAULT 0,
+      finish_reason TEXT, error_code TEXT,
+      usage_json TEXT, cost REAL NOT NULL DEFAULT 0,
+      usage_recorded INTEGER NOT NULL DEFAULT 0,
+      reserved_bytes INTEGER NOT NULL,
+      created_at INTEGER NOT NULL, started_at INTEGER, ended_at INTEGER,
+      UNIQUE(channel_id,requester_id,client_id),
+      FOREIGN KEY(channel_id,source_id) REFERENCES channel_messages(channel_id,id),
+      FOREIGN KEY(channel_id,message_id) REFERENCES channel_messages(channel_id,id)
+    );
+    CREATE UNIQUE INDEX channel_ai_open ON channel_ai_runs(channel_id)
+      WHERE state IN ('queued','running');
+    CREATE UNIQUE INDEX channel_ai_requester_open ON channel_ai_runs(requester_id)
+      WHERE state IN ('queued','running');
+    CREATE INDEX channel_ai_requester ON channel_ai_runs(requester_id,state);
+
+    CREATE TABLE channel_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      channel_id TEXT REFERENCES channels(id) ON DELETE CASCADE,
+      target_user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK(kind IN ('channel.changed','message.changed','members.changed','read.changed','sync')),
+      entity_id TEXT, version INTEGER, created_at INTEGER NOT NULL
+    );
+    CREATE INDEX channel_events_room ON channel_events(channel_id,id);
+    CREATE INDEX channel_events_user ON channel_events(target_user_id,id);
+
+    CREATE TABLE channel_create_keys (
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      client_id TEXT NOT NULL,
+      channel_id TEXT REFERENCES channels(id) ON DELETE SET NULL,
+      request_hash TEXT NOT NULL, created_at INTEGER NOT NULL,
+      PRIMARY KEY(user_id,client_id)
+    );
+
+    CREATE TABLE channel_event_state (
+      singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+      epoch TEXT NOT NULL, floor_id INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE channel_rate_windows (
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      bucket TEXT NOT NULL, window_start INTEGER NOT NULL, used INTEGER NOT NULL,
+      PRIMARY KEY(user_id,bucket,window_start)
+    );
+
+    CREATE TABLE channel_moderation_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      actor_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      channel_id TEXT, action TEXT NOT NULL, target_id TEXT,
+      reason TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL
+    );
+    CREATE INDEX channel_audit_time ON channel_moderation_audit(created_at,id);
+
+    CREATE TABLE channel_search_keys (
+      search_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id TEXT NOT NULL UNIQUE REFERENCES channel_messages(id) ON DELETE CASCADE
+    );
+
+    CREATE VIRTUAL TABLE channel_messages_fts USING fts5(
+      body, tokenize='unicode61 remove_diacritics 2'
+    );
+
+    -- FTS rows are addressed only through the integer search key. The BEFORE DELETE on the key table
+    -- survives cascade ordering: a message delete cascades to its key, which removes the FTS row first.
+    CREATE TRIGGER channel_messages_fts_insert AFTER INSERT ON channel_messages
+      WHEN NEW.deleted_at IS NULL AND NEW.body <> ''
+    BEGIN
+      INSERT OR IGNORE INTO channel_search_keys(message_id) VALUES (NEW.id);
+      INSERT INTO channel_messages_fts(rowid, body)
+        SELECT search_id, NEW.body FROM channel_search_keys WHERE message_id = NEW.id;
+    END;
+    CREATE TRIGGER channel_messages_fts_update AFTER UPDATE OF body, deleted_at ON channel_messages
+    BEGIN
+      DELETE FROM channel_messages_fts
+        WHERE rowid IN (SELECT search_id FROM channel_search_keys WHERE message_id = NEW.id);
+      INSERT OR IGNORE INTO channel_search_keys(message_id) VALUES (NEW.id);
+      INSERT INTO channel_messages_fts(rowid, body)
+        SELECT search_id, NEW.body FROM channel_search_keys
+        WHERE message_id = NEW.id AND NEW.deleted_at IS NULL AND NEW.body <> '';
+    END;
+    CREATE TRIGGER channel_messages_fts_delete AFTER DELETE ON channel_messages
+    BEGIN
+      DELETE FROM channel_messages_fts
+        WHERE rowid IN (SELECT search_id FROM channel_search_keys WHERE message_id = OLD.id);
+      DELETE FROM channel_search_keys WHERE message_id = OLD.id;
+    END;
+    CREATE TRIGGER channel_search_keys_fts_delete BEFORE DELETE ON channel_search_keys
+    BEGIN
+      DELETE FROM channel_messages_fts WHERE rowid = OLD.search_id;
+    END;
+
+    ALTER TABLE usage ADD COLUMN channel_id TEXT;
+    ALTER TABLE usage ADD COLUMN channel_run_id TEXT;
+    CREATE UNIQUE INDEX usage_channel_run ON usage(channel_run_id) WHERE channel_run_id IS NOT NULL;
+
+    -- Rebuild notifications instead of editing the old CHECK: the kind list is part of the table definition.
+    ALTER TABLE notifications RENAME TO notifications_legacy;
+    CREATE TABLE notifications (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK (kind IN ('schedule', 'import', 'export', 'channel')),
+      level TEXT NOT NULL CHECK (level IN ('info', 'success', 'error')),
+      title_key TEXT NOT NULL,
+      body_key TEXT,
+      params_json TEXT NOT NULL DEFAULT '{}',
+      thread_id TEXT,
+      channel_id TEXT REFERENCES channels(id) ON DELETE CASCADE,
+      channel_message_id TEXT,
+      action_path TEXT,
+      source_key TEXT,
+      read_at INTEGER,
+      created_at INTEGER NOT NULL
+    );
+    INSERT INTO notifications (id, user_id, kind, level, title_key, body_key, params_json, thread_id, action_path, source_key, read_at, created_at)
+      SELECT id, user_id, kind, level, title_key, body_key, params_json, thread_id, action_path, source_key, read_at, created_at
+      FROM notifications_legacy;
+    DROP TABLE notifications_legacy;
+    CREATE UNIQUE INDEX notifications_source ON notifications(user_id, source_key) WHERE source_key IS NOT NULL;
+    CREATE INDEX notifications_user_time ON notifications(user_id, created_at DESC, id);
+    CREATE INDEX notifications_unread ON notifications(user_id, created_at DESC) WHERE read_at IS NULL;
+    `);
+    db.prepare("INSERT INTO channel_event_state (singleton, epoch, floor_id) VALUES (1, ?, 0)").run(newId("chev"));
+    if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "channels") throw new Error("Injected migration failure");
   },
 ];
 

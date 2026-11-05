@@ -337,6 +337,8 @@ test("migration adds the edit columns and leaves existing rows unedited", () => 
       db.exec("ALTER TABLE user_groups DROP COLUMN prompt_order");
       for (const column of ["custom_instructions", "instructions_revision", "assistant_json", "assistant_revision", "imported_assistant_json", "preferred_head"]) db.exec("ALTER TABLE threads DROP COLUMN " + column);
       db.exec("ALTER TABLE messages DROP COLUMN imported");
+      db.exec("DROP TABLE IF EXISTS channel_messages_fts; DROP TABLE IF EXISTS channel_search_keys; DROP TABLE IF EXISTS channel_events; DROP TABLE IF EXISTS channel_event_state; DROP TABLE IF EXISTS channel_rate_windows; DROP TABLE IF EXISTS channel_moderation_audit; DROP TABLE IF EXISTS channel_create_keys; DROP TABLE IF EXISTS channel_ai_runs; DROP TABLE IF EXISTS channel_reactions; DROP TABLE IF EXISTS channel_mentions; DROP TABLE IF EXISTS channel_messages; DROP TABLE IF EXISTS channel_exclusions; DROP TABLE IF EXISTS channel_invites; DROP TABLE IF EXISTS channel_members; DROP TABLE IF EXISTS channel_groups; DROP TABLE IF EXISTS channels");
+      db.exec("DROP INDEX IF EXISTS usage_channel_run; ALTER TABLE usage DROP COLUMN channel_id; ALTER TABLE usage DROP COLUMN channel_run_id");
       db.exec("PRAGMA user_version = 32");
       db.close();`);
     const result = JSON.parse(run(`const { db } = await import(${JSON.stringify(dbUrl)});

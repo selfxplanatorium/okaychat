@@ -23,6 +23,8 @@ import {
   setModelAccessPolicies,
 } from "./entitlements.js";
 import { createGroup, deleteGroup, getAudience, listGroups, setAudience, updateGroup } from "./groups.js";
+import { abortChannelRunsForUser } from "./channels/worker.js";
+import { requestChannelRevocation } from "./channels/revocation.js";
 import { listPrompts, MAX_PROMPT_CHARS, setPrompt } from "./prompts.js";
 import { storageUsedSql } from "./quota.js";
 
@@ -68,6 +70,7 @@ export const adminRoutes = new Hono<AppEnv>()
         `SELECT u.id, u.email, u.name, u.role, u.created_at AS createdAt, u.storage_limit AS storageLimit,
            ${storageUsedSql("u.id")} AS storageUsed,
            (SELECT COUNT(*) FROM threads t WHERE t.user_id = u.id) AS threads,
+           (SELECT COUNT(*) FROM channels c WHERE c.owner_id = u.id) AS channels,
            (SELECT COALESCE(SUM(cost), 0) FROM usage g WHERE g.user_id = u.id AND g.created_at > ?) AS cost30d
          FROM users u ORDER BY u.created_at`,
       )
@@ -121,8 +124,11 @@ export const adminRoutes = new Hono<AppEnv>()
     disconnectCodex(id);
     deleteChatGPTUser(id);
     clearOwnedAgentAudiences(id);
+    // Channel AI work by this account stops before the user row and their owned rooms disappear.
+    abortChannelRunsForUser(id);
     db.prepare("DELETE FROM users WHERE id = ?").run(id);
     abortRevokedAgentRuns();
+    requestChannelRevocation();
     await rm(path.join(env.dataDir, "images", id), { recursive: true, force: true });
     // Media originals and their previews (the rows went with the user by cascade).
     removeUserMedia(id);

@@ -170,3 +170,12 @@ rg -n "MarkdownImage|SimpleMarkdown|react-markdown|MarkdownText" src/web
 ## n8n agents
 
 Outside-agent assistant replies are always model-bound n8n_agent envelopes, including legacy n8n modelRef metadata and edited replies. Assistant-role envelopes taint later tool actions. Display and public shares keep ordinary text. See [n8n agents](n8n-agents.md).
+
+## Team channels
+
+Room AI treats every transcript message, the reduced assistant instructions, and room metadata as
+third-party data. The transcript is a JSON array inside `kind="channel_history"`; room metadata uses
+`kind="channel_metadata"`; assistant instructions use the existing `kind="assistant"`. The current
+source body is removed from the transcript and sent as the explicit request. Nothing from account
+memory, projects, skills, tools, or files is present. The scanner result rides on the AI message as an
+advisory badge; it does not make model compliance a guarantee. See `docs/implementation/channels.md`.

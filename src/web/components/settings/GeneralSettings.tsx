@@ -29,6 +29,7 @@ const SIDEBAR_LABELS = {
   knowledge: "general.sidebarKnowledge",
   plugins: "general.sidebarPlugins",
   projects: "general.sidebarProjects",
+  channels: "settings.sidebarChannels",
   compare: "general.sidebarCompare",
   evaluations: "general.sidebarEvaluations",
 } as const;
@@ -216,6 +217,7 @@ export function GeneralSettings() {
 
       <SettingsSection title={t("general.notificationsTitle")} description={t("general.notificationsDeviceNote")}>
         <SettingsRow
+          id="setting-notifications"
           label={t("general.browserNotifications")}
           description={t("general.browserNotificationsDescription")}
           control={

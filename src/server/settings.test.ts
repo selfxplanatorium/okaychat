@@ -95,9 +95,13 @@ test("invalid persisted limits recover to defaults before model execution", () =
 test("sidebar visibility persists per account, including hiding every shortcut", async () => {
   assert.equal(getSettings("alice").sidebarItems, undefined);
   updateSettings("alice", { sidebarItems: ["newChat", "projects"] });
-  assert.deepEqual(getSettings("alice").sidebarItems, ["newChat", "projects"]);
+  // An older saved list receives the new channels item once.
+  assert.deepEqual(getSettings("alice").sidebarItems, ["newChat", "projects", "channels"]);
   assert.equal(getSettings("bob").sidebarItems, undefined);
   updateSettings("alice", { maxSearches: 2 });
+  assert.deepEqual(getSettings("alice").sidebarItems, ["newChat", "projects", "channels"]);
+  // Removing it after that does not append it again.
+  updateSettings("alice", { sidebarItems: ["newChat", "projects"] });
   assert.deepEqual(getSettings("alice").sidebarItems, ["newChat", "projects"]);
   updateSettings("alice", { sidebarItems: [] });
   assert.deepEqual(getSettings("alice").sidebarItems, []);

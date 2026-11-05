@@ -126,6 +126,19 @@ export function storageUsedSql(user: string): string {
     UNION ALL SELECT COALESCE(SUM(
         COALESCE(length(CAST(s.comment_enc AS BLOB)), 0)), 0)
       FROM evaluation_scores s JOIN evaluation_runs r ON r.id = s.run_id WHERE r.user_id = ${user}
+    -- Channels are paid for by the current room owner, including other members' messages and AI output.
+    -- A run's open output reservation is counted as a top-up to 64 KiB, so a growing body is charged once.
+    UNION ALL SELECT COALESCE(SUM(
+        length(CAST(c.name AS BLOB)) + length(CAST(c.description AS BLOB)) + COALESCE(length(CAST(c.ai_json AS BLOB)), 0)), 0)
+      FROM channels c WHERE c.owner_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(length(CAST(m.body AS BLOB))), 0)
+      FROM channel_messages m JOIN channels c ON c.id = m.channel_id WHERE c.owner_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(
+        length(CAST(r.config_json AS BLOB)) + COALESCE(length(CAST(r.input_enc AS BLOB)), 0) + 1024
+        + CASE WHEN r.state IN ('queued', 'running')
+            THEN MAX(0, 65536 - length(CAST(m.body AS BLOB))) ELSE 0 END), 0)
+      FROM channel_ai_runs r JOIN channels c ON c.id = r.channel_id JOIN channel_messages m ON m.id = r.message_id
+      WHERE c.owner_id = ${user}
   )), 0)`;
 }
 

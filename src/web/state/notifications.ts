@@ -30,6 +30,10 @@ export const NOTIFICATION_TITLE_MESSAGES: Record<NotificationTitleKey, MessageKe
   "export.failed": "notifications.exportFailed",
   "import.done": "notifications.importDone",
   "import.failed": "notifications.importFailed",
+  "channel.invited": "notifications.channelInvited",
+  "channel.mention": "notifications.channelMention",
+  "channel.message": "notifications.channelMessage",
+  "channel.aiFinished": "notifications.channelAiFinished",
 };
 
 export const NOTIFICATION_BODY_MESSAGES: Record<NotificationBodyKey, MessageKey> = {
@@ -40,6 +44,8 @@ export const NOTIFICATION_BODY_MESSAGES: Record<NotificationBodyKey, MessageKey>
   "export.failedBody": "notifications.exportFailedBody",
   "import.doneBody": "notifications.importDoneBody",
   "import.failedBody": "notifications.importFailedBody",
+  "channel.openRoom": "notifications.channelOpenRoom",
+  "channel.openMessage": "notifications.channelOpenMessage",
 };
 
 const text = (key: MessageKey, params: Record<string, string | number>): string =>

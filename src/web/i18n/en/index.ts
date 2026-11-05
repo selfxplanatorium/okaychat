@@ -9,6 +9,7 @@ import artifacts from "./artifacts";
 import audience from "./audience";
 import auth from "./auth";
 import common from "./common";
+import channels from "./channels";
 import chatArchives from "./chatArchives";
 import composer from "./composer";
 import compare from "./compare";
@@ -58,6 +59,7 @@ export const en = {
   audience,
   auth,
   common,
+  channels,
   chatArchives,
   composer,
   compare,
