@@ -587,7 +587,7 @@ function LibraryFiles({ tabs, active }: { tabs: ReactNode; active: boolean }) {
 
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap gap-1.5">
-          {(["all", "image", "pdf", "spreadsheet", "document", "code", "other"] as const).map((k) => (
+          {(["all", "image", "video", "pdf", "spreadsheet", "document", "code", "other"] as const).map((k) => (
             <button
               key={k}
               type="button"
