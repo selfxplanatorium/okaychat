@@ -192,6 +192,20 @@ test("wave locales leave no English prose and every English key is required", as
   }
 });
 
+test("the English-left gate checks plural forms and binds exemptions to the reviewed text", () => {
+  const pluralSource = { demo: { items: { one: "one item selected", other: "{count} items selected" } } };
+  assert.deepEqual(
+    englishProseLeft("fr", { demo: { items: { one: "un élément sélectionné", other: "{count} items selected" } } }, pluralSource),
+    ["fr: demo.items.other is still English"],
+  );
+  // A reviewed key is exempt only for the exact reviewed English text, not for whatever replaces it.
+  const changedSource = { apiAccess: { paramModel: "a changed English sentence" } };
+  assert.deepEqual(
+    englishProseLeft("fr", { apiAccess: { paramModel: "a changed English sentence" } }, changedSource),
+    ["fr: apiAccess.paramModel is still English"],
+  );
+});
+
 test("translated plural entries pick the active language's category for representative counts", async () => {
   const counts = [0, 1, 2, 5, 1.2, 1_000_000];
   for (const row of nonSource) {
