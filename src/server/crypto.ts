@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { env } from "./env.js";
 
@@ -52,4 +52,6 @@ export async function verifyPassword(password: string, stored: string): Promise<
 
 export const randomToken = () => randomBytes(32).toString("base64url");
 export const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+/** Domain-separated HMAC with the application key, for session-bound identifiers that are never stored raw. */
+export const domainHmac = (domain: string, value: string) => createHmac("sha256", env.secret).update(domain).update("\u0000").update(value).digest("hex");
 export const newId = (prefix: string) => `${prefix}_${randomBytes(12).toString("base64url")}`;

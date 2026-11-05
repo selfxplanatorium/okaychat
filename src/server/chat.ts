@@ -28,7 +28,7 @@ import { guardTools } from "./permissions/tool-policy.js";
 import { listModels, resolveModel } from "./catalog/providers.js";
 import { resolveChatTarget } from "./catalog/chat-targets.js";
 import { agentTurnStream } from "./n8n/turn.js";
-import { newId } from "./crypto.js";
+import { domainHmac, newId } from "./crypto.js";
 import { applyCompaction, compact, contextTokens, historyMessages, summaryMessages, trimCompaction } from "./compaction.js";
 import { createModel } from "./llm.js";
 import { toolsForUser } from "./mcp/manager.js";
@@ -45,6 +45,9 @@ import { draftTools } from "./email/draft-tool.js";
 import { webTools } from "./tools/web.js";
 import { SearchBudget, StepBudget, searchesInCurrentTurn, agentStepsInCurrentTurn } from "./tools/search-budget.js";
 import { hasResearch, RESEARCH_PARALLEL, RESEARCH_TOOL, researchedThisTurn, researchInput, researchTool, runResearch } from "./research.js";
+import { customToolsForTurn, EMPTY_CUSTOM_TOOLS } from "./custom-tools/tools.js";
+import { listTools as listCustomTools } from "./custom-tools/store.js";
+import { hasActiveVoiceCall } from "./voice/routes.js";
 import { errorJson, AppError } from "./errors.js";
 import { describeBoundaryError, describeProviderError, toolErrorWireText, wireErrorText } from "./provider-errors.js";
 import { conversationMemory, factsContext, memoryPreferences, temporaryMemory } from "./memory.js";
@@ -216,6 +219,8 @@ export interface TurnOptions {
   unattended?: boolean;
   /** Leave the thread's model as it is (a schedule running in a chat the user picked). */
   keepThreadModel?: boolean;
+  /** Domain-separated session binding for custom-tool approvals. Never the raw cookie. */
+  sessionHash?: string;
   signal?: AbortSignal;
   /** Stops the upstream controller for an explicit waiting-receipt cancel. Never set by a client. */
   abortRun?: () => void;
@@ -342,7 +347,11 @@ export async function turnStream(opts: TurnOptions) {
       // Ask only about services whose tools this turn could actually offer. A plain reply, a temporary chat,
       // a non-tool model, or artifacts/code execution switched off must not probe or repeat a down note.
       const wantsBrowser = useArtifacts && canViewImages && rendererAvailable();
-      const wantsSandbox = model.toolCall && !temporary && allowed("code") && settings.codeExecution && sandboxConfigured();
+      const customTurnEligible = !temporary && opts.interactive === true && opts.unattended !== true && !hasActiveVoiceCall(user.id, threadId) && allowed("customTools");
+      const customHasPython = customTurnEligible && featureAllowed(actor, "code") &&
+        listCustomTools(user.id).some((tool) => tool.enabled && !tool.invalid && tool.kind === "python");
+      const runCodeWanted = model.toolCall && !temporary && allowed("code") && settings.codeExecution && sandboxConfigured();
+      const wantsSandbox = model.toolCall && !temporary && (runCodeWanted || (customHasPython && sandboxConfigured()));
       const sidecarIds: FixedServiceId[] = [...(wantsBrowser ? ["browser" as const] : []), ...(wantsSandbox ? ["sandbox" as const] : [])];
       const sidecars = continuation || !sidecarIds.length
         ? Promise.resolve(new Map<FixedServiceId, ServiceStatus | undefined>())
@@ -365,7 +374,7 @@ export async function turnStream(opts: TurnOptions) {
       const unavailable: TurnUnavailable[] = [...priorUnavailable];
       if (!continuation) {
         if (browserDown) unavailable.push(unavailableEntry("browser", sidecarStates.get("browser"), ["view_artifact"]));
-        if (sandboxDown) unavailable.push(unavailableEntry("sandbox", sidecarStates.get("sandbox"), ["run_code"]));
+        if (sandboxDown) unavailable.push(unavailableEntry("sandbox", sidecarStates.get("sandbox"), runCodeWanted ? ["run_code"] : []));
         // A server that could not connect is named, never silently missing. Its own error text stays server-side.
         for (const server of mcp.servers) {
           if (server.status !== "error" && server.status !== "needs-auth") continue;
@@ -378,7 +387,6 @@ export async function turnStream(opts: TurnOptions) {
           });
         }
       }
-      const unavailableMetadata = unavailable.length ? { unavailable } : {};
       const searchBudget = new SearchBudget(settings.maxSearches, searchesInCurrentTurn(uiMessages));
       // Research workers spend from this too; the reply's own loop gets what is left.
       const stepBudget = new StepBudget(settings.maxSteps, agentStepsInCurrentTurn(uiMessages));
@@ -429,6 +437,25 @@ export async function turnStream(opts: TurnOptions) {
       const subagentModels = model.toolCall && settings.subagents && !temporary && allowed("delegation") && assistantAllowsDelegation(toolPolicy) ? await allowedSubagentModels(user.id, settings, model.ref) : [];
       const useGenerativeUI = model.toolCall && settings.generativeUI && !!opts.clientTools && !temporary && allowed("generativeUI");
       const widgetTools = useGenerativeUI && allows("widgets") ? frontendTools(opts.clientTools!) : {};
+      const customPythonAvailable = sandboxConfigured() && !sandboxDown;
+      const custom = customTurnEligible && model.toolCall
+        ? customToolsForTurn({
+            actor,
+            threadId,
+            logicalReplyId: assistantMessageId,
+            sessionHash: opts.sessionHash ?? `thread:${threadId}`,
+            signal,
+            runtime: "interactiveChat",
+            sandboxAvailable: customPythonAvailable,
+            reservedNames: new Set([...Object.keys(mcp.tools), ...Object.keys(widgetTools), ...Object.keys(builtInWeb)]),
+          })
+        : EMPTY_CUSTOM_TOOLS;
+      if (custom.withheldPython.length) {
+        const sandboxEntry = unavailable.find((entry) => entry.service === "sandbox");
+        if (sandboxEntry) sandboxEntry.tools.push(...custom.withheldPython);
+        else if (!continuation) unavailable.push({ service: "sandbox", tools: custom.withheldPython, reasonKey: "notConfigured", fixKey: "startSandbox" });
+      }
+      const unavailableMetadata = unavailable.length ? { unavailable } : {};
       const subagents = subagentModels.length
         ? subagentTools({ userId: user.id, threadId, allowed: subagentModels, subTools: readOnlyTools, maxSteps: settings.maxSteps, searchBudget, signal: signal })
         : {};
@@ -448,14 +475,15 @@ export async function turnStream(opts: TurnOptions) {
         ...(assistantAllowsDelegation(toolPolicy) ? subagents : {}),
         ...(useArtifacts ? artifactTools(threadId, user.id, { shots, canViewImages: model.inputModalities.includes("image"), savedThisTurn: artifactsInCurrentTurn(uiMessages), shotsThisTurn: screenshotsInCurrentTurn(uiMessages), browserDown }) : {}),
         ...(imageServices.length ? imageTools(user.id, threadId, imageServices, signal) : {}),
-        ...(model.toolCall && !temporary && allowed("code") && settings.codeExecution && allows("code") && sandboxConfigured() && !sandboxDown ? sandboxTools(user.id, threadId, signal, sandboxTurn) : {}),
+        ...(runCodeWanted && !sandboxDown && allows("code") && customPythonAvailable ? sandboxTools(user.id, threadId, signal, sandboxTurn) : {}),
+        ...custom.tools,
         ...widgetTools,
         ...mcp.tools,
         // Only trimmed chats point the model at removed attachments, so others keep their tool list (and cache).
         ...(compaction?.trim && allows("attachments") ? attachmentTools(user.id, canViewImages ? toolImages : undefined) : {}),
         // From a chat's first research on, so its tool block changes once, not with every toggle.
         ...(model.toolCall && assistantAllowsResearch(toolPolicy) && (research || hasResearch(uiMessages)) ? researchTool() : {}),
-      }, new Set(Object.keys(mcp.tools)), new Set(Object.keys(widgetTools)));
+      }, new Set(Object.keys(mcp.tools)), new Set(Object.keys(widgetTools)), new Set(Object.keys(custom.tools)));
       // Exact intersection at the last moment: a family that was not selected cannot leak through any
       // assembly branch, and an unknown tool key is denied. Delegates and research use this same set.
       const tools = filterAssistantTools(toolPolicy, offeredTools, { mcpIdentities: mcp.identities });
@@ -670,6 +698,17 @@ export async function turnStream(opts: TurnOptions) {
         // the turn. Clean turns keep every tool's configured policy. A scheduled run has no one to ask, so
         // it fails closed instead of parking an approval nobody can answer.
         toolApproval: async ({ toolCall, tools: available, messages: stepMessages }) => {
+          const taintedNow = tainted || toolsHaveExternalMetadata(available) || messagesHaveUntrustedContent(stepMessages);
+          // Custom tools are handled before the generic replay branch: an HTTP approval is bound to the
+          // prepared server record, and a replayed decision must match that row exactly.
+          if (custom.turn) {
+            const decision = await custom.turn.resolveApproval(
+              { toolCallId: toolCall.toolCallId, toolName: toolCall.toolName, input: toolCall.input },
+              stepMessages,
+              { unattended: opts.unattended === true, tainted: taintedNow },
+            );
+            if (decision) return decision;
+          }
           // A replayed approval response is already the user's decision; the generic hook must not ask again.
           const approvalIds = new Set<string>();
           for (const message of stepMessages) {
@@ -696,7 +735,6 @@ export async function turnStream(opts: TurnOptions) {
             ? await configured(toolCall.input as never, { toolCallId: toolCall.toolCallId, messages: stepMessages, context: undefined as never })
             : configured === true;
           const risk = riskOfTool(tool);
-          const taintedNow = tainted || toolsHaveExternalMetadata(available) || messagesHaveUntrustedContent(stepMessages);
           if (!needsIt && !(risk && taintedNow)) return undefined;
           const label = `"${toolCall.toolName.replaceAll("_", " ").replace(/\s+/g, " ")}"`;
           if (opts.unattended === true) {
@@ -909,6 +947,7 @@ export const chatRoutes = new Hono<AppEnv>()
         clientTools: parsed.data.tools as FrontendTools | undefined,
         clientSystem: parsed.data.system,
         interactive: true,
+        sessionHash: customSessionHash(user.id, c.get("session")),
         signal: controller.signal,
         abortRun: () => controller.abort(),
       });
@@ -1044,6 +1083,9 @@ async function allowedSubagentModels(userId: string, settings: UserSettings, cha
   const refs = subagentModelRefs(settings, chatModel);
   return refs.map((ref) => models.find((m) => m.ref === ref)).filter((m): m is ModelInfo => !!m?.toolCall);
 }
+
+/** Session binding for custom-tool approvals; the raw cookie hash is never stored on a run. */
+const customSessionHash = (userId: string, session: string) => domainHmac("custom-tools-session", `${userId}:${session}`);
 
 /** A failure before the stream opens: model resolution, research preconditions, or a route check. */
 function chatRouteError(error: unknown, modelRef: string): AppError {

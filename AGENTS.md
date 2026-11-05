@@ -85,6 +85,7 @@ src/server/
   text-drafts.ts      Editable writing drafts (draft_text), sharing owned revision/autosave storage with email drafts
   email/              IMAP/SMTP accounts, ordered discovery, MIME, six mailbox tools, editable drafts (records, tool, routes, review/send), settings API
   tools/              Built-in tools: web_search, web_fetch (+ Scrapling fallback), generate_image (Codex or image APIs), delegate_task (sub-agents), run_code (sandbox client)
+  custom-tools/       Private Python/HTTP tools: encrypted store, approval runs, bounded HTTP dispatch, function worker client, management routes and maintenance
   turn-context.ts     Stores each turn's memory/skills block and replays it so later requests keep the cached prefix
   message-edits.ts    Editable assistant replies: text-only replacement, encrypted first original, Undo, request overlay
   thread-runs.ts      Threads with an interactive turn or scheduled run, so edits and schedules can wait
@@ -97,6 +98,7 @@ src/web/
   components/artifacts Artifact card, side panel, sandboxed frame documents
   components/genui    Generative UI catalog (render_spec components) and widget toolkit
   components/settings Settings pages (EmailSettings.tsx is the account wizard); theme/ holds the T3Code theme library, editor panel, color picker, inspector
+  components/custom-tools  Plugins → Custom tools workspace: list, editor, schema builder, secret headers, test/review/result cards
   components/share    Public share page and share button
   theme/              T3Code theme engine port (see its README); bundled-fonts.ts lists the shipped font families; depth.css holds the depth utilities
   fonts/              Bundled Liberation TTFs and their CSS (see docs/implementation/bundled-fonts.md)
@@ -157,6 +159,7 @@ docs/                 Reusable documentation (see below)
 - `docs/implementation/model-comparison.md`: hidden pane threads, why `/api/chat` is reused, server persistence, promotion, caps and retention.
 - `docs/implementation/message-annotations.md`: private bookmarks and feedback, the persistence gate, the jump contract, comment encryption, conflicts, and the changed-reply notice.
 - `docs/implementation/step-limits.md`: independent agent/search limits and shared delegated-search budgets.
+- `docs/implementation/custom-tools.md`: private Python/HTTP tools, schema subset, sandbox function mode, approval binding, HTTP limits/redaction, retention, workspace UI.
 - `docs/implementation/deep-research.md`: the deep research loop, its limits, delegates, cancellation, usage, and cache behavior.
 - `docs/implementation/code-sandbox.md`: the `run_code` sandbox container, its per-run jail, installed tools, and the runner API.
 - `docs/implementation/speech.md`: read-aloud and speech-to-text engines, the speech worker, recording retention, and the engine coverage matrix.
@@ -189,6 +192,8 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 - Commits: no co-author lines.
 
 ## Non-obvious facts
+
+- Custom tools (`src/server/custom-tools/`, `shared/custom-tools.ts`) are private per-account Python functions and fixed-destination HTTPS tools, assembled only for interactive stored chats. The exposed key is `custom_<24 hex>_r<revision>`; a revision change invalidates prepared approvals. Python runs only through the sandbox runner's one-use `/function` route (fresh uid/workspace, strict 32 KiB stdout, no files/network/secrets output) and also needs the `code` feature. HTTP uses `publicFetch` with `redirect:"error"`, exact reviewed method/path/query/body, encrypted write-only header secrets, and a server-owned prepared run: the replayed approval is accepted only against that row and the executor requires a module-branded capability. Results are redacted, enveloped as `custom_tool` data and taint later actions. See `docs/implementation/custom-tools.md`.
 
 - assistant-ui puts unknown message metadata keys under `metadata.custom`. Server-side code that reads raw AI SDK messages sees them at the top level. `metadataOf()` and `currentContextTokens()` handle both.
 - `useAuiState` selectors must return primitives or stable references, or React re-renders forever.

@@ -77,6 +77,12 @@ export function voiceOriginAllowed(
 export const voiceCallRegistry = registry;
 export const voiceStartLimiter = starts;
 
+/** A local call active on this chat withholds custom tools for any request on the same thread. */
+export function hasActiveVoiceCall(userId: string, threadId: string): boolean {
+  const session = registry.get(userId);
+  return !!session && !session.ended && session.boundThread === threadId;
+}
+
 export const voiceRoutes = new Hono<AppEnv>()
   // Also mounted under the authenticated API; kept here so the route can be mounted alone in a test.
   .use("*", requireUser)

@@ -17,6 +17,7 @@ export const OPERATIONS = {
   "speech.transcribe": { feature: "voice", description: "One transcription" },
   "voice.session": { feature: "voice", description: "A voice call or Realtime signalling session" },
   "browser.render": { feature: "artifacts", description: "One browser worker render" },
+  "customTool.run": { feature: "customTools", description: "One custom Python function or approved HTTP request" },
 } as const satisfies Record<string, { feature: FeatureKey | null; description: string }>;
 
 export type OperationKey = keyof typeof OPERATIONS;

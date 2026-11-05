@@ -14,7 +14,8 @@ import { serveImage } from "../media/variants.js";
 import { scanForInjection, wrapUntrusted } from "../prompt-injection.js";
 import { getThread } from "../threads.js";
 import { resultPaths } from "../sandbox-paths.js";
-import { assertServiceAvailable, reportServiceFailure, reportServiceSuccess, serviceStatus, serviceUnavailable } from "../services.js";
+import { serviceStatus, serviceUnavailable } from "../services.js";
+import { sandboxCall, sandboxConfigured, sandboxHealthy, SandboxHttpError } from "../sandbox-client.js";
 import { assertFeature, featureAllowed } from "../permissions/guard.js";
 import { reserveOperation } from "../permissions/limits.js";
 
@@ -48,14 +49,7 @@ Use it for calculations, data analysis, charts, file conversion, OCR, media proc
 - Processes started in the background are stopped when the call ends.
 - Every file a run creates or changes is kept for the user. Put scratch files in /tmp, or delete them in a later call: a file first created in this reply and then deleted from the working directory is removed from the user's files. Never rewrite a file only to keep it.`;
 
-export const sandboxConfigured = () => !!env.sandboxUrl && env.sandboxToken.length >= 32;
-
-/** The runner's /health (no token). 503 means it is up but refuses every run because isolation failed. Throws when unreachable. */
-export async function sandboxHealthy(signal: AbortSignal): Promise<boolean> {
-  const res = await fetch(`${env.sandboxUrl}/health`, { signal });
-  await res.body?.cancel().catch(() => {});
-  return res.ok;
-}
+export { sandboxConfigured, sandboxHealthy };
 
 /** Stable per chat. Hashed so the sandbox never sees user or thread ids. */
 export const workspaceId = (userId: string, threadId: string) => sha256(`sandbox:${userId}:${threadId}`).slice(0, 32);
@@ -87,35 +81,13 @@ export interface RunCodeResult extends Omit<RunnerResult, "files"> {
  * which must still reach a runner the registry has just marked down.
  */
 async function call(route: string, init: RequestInit = {}, timeoutMs = 30_000, signal?: AbortSignal, guarded = true): Promise<Response> {
-  // A sandbox that just refused a connection or failed its probe answers at once instead of after a timeout.
-  if (guarded) assertServiceAvailable("sandbox");
-  const timeout = AbortSignal.timeout(timeoutMs);
-  let res: Response;
   try {
-    res = await fetch(`${env.sandboxUrl}${route}`, {
-      ...init,
-      headers: { ...(init.headers as Record<string, string>), Authorization: `Bearer ${env.sandboxToken}` },
-      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-    });
+    return await sandboxCall(route, init, timeoutMs, signal, guarded);
   } catch (error) {
-    if (signal?.aborted) throw new Error("Cancelled.");
-    if (timeout.aborted) throw new Error("The code sandbox did not answer in time.", { cause: error });
-    reportServiceFailure("sandbox");
-    throw serviceUnavailable("sandbox");
+    // Keep the model-facing wording of this tool unchanged; the client owns transport and health.
+    if (error instanceof SandboxHttpError) throw new Error(error.body.error ? `Sandbox: ${error.body.error}` : `Sandbox request failed (${error.status}).`);
+    throw error;
   }
-  if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
-    // 503 is the runner saying it cannot run anything (no slot, isolation failed). That is a service outage
-    // with the registry's fix. A 400/409/422 is the model's request or its code, not the service.
-    if (res.status === 503) {
-      reportServiceFailure("sandbox");
-      throw serviceUnavailable("sandbox");
-    }
-    reportServiceSuccess("sandbox");
-    throw new Error(body.error ? `Sandbox: ${body.error}` : `Sandbox request failed (${res.status}).`);
-  }
-  reportServiceSuccess("sandbox");
-  return res;
 }
 
 /** Copies attachments from the uploads table into the workspace. Names are reduced to a safe basename. */

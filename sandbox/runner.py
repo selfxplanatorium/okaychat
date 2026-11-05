@@ -45,6 +45,10 @@ CONCURRENCY = int(os.environ.get("SANDBOX_CONCURRENCY", "4"))
 IDLE_MINUTES = float(os.environ.get("SANDBOX_IDLE_MINUTES", "30"))
 OUTPUT_HEAD = 48 * 1024
 OUTPUT_TAIL = 16 * 1024
+FUNCTION_STDOUT_LIMIT = 32 * 1024
+FUNCTION_STDERR_LIMIT = 8 * 1024
+FUNCTION_MAX_BODY = 128 * 1024
+FUNCTION_SLOT_WAIT = 2
 MAX_UPLOAD = 50 * 1024 * 1024
 MAX_LISTED = 500
 UID_MIN, UID_MAX = 20000, 29999
@@ -74,6 +78,8 @@ jobs_guard = threading.Lock()
 queued: dict[str, str] = {}  # job id -> workspace, from arrival until the job ends
 running: dict[str, str] = {}  # workspace -> job id of the run holding its processes
 cancelled_jobs: dict[str, float] = {}  # job id -> expiry
+# A function workspace is used exactly once; a second call is rejected instead of re-running in it.
+function_workspaces: set[str] = set()
 # Set at startup when bubblewrap cannot build a run's namespaces. Every run is refused while it is set.
 isolation_error: str | None = "isolation check has not run yet"
 
@@ -240,6 +246,31 @@ def snapshot(path: str) -> dict[str, tuple[int, int]]:
     # A virtualenv can have any name; its pyvenv.cfg marks it.
     envs = [rel[: -len("pyvenv.cfg")] for rel in files if rel.endswith("/pyvenv.cfg")]
     return {rel: v for rel, v in files.items() if not any(rel.startswith(env) for env in envs)}
+
+
+class StrictCapture:
+    """Exact bounded capture for the function protocol: no splicing, and an overflow is a hard stop.
+
+    A truncated head is never valid JSON, so head/tail splicing is deliberately not reused here.
+    """
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        self.data = bytearray()
+        self.overflow = False
+
+    def feed(self, chunk: bytes) -> None:
+        if self.overflow:
+            return
+        room = self.limit - len(self.data)
+        if len(chunk) > room:
+            self.data += chunk[: max(room, 0)]
+            self.overflow = True
+            return
+        self.data += chunk
+
+    def text(self) -> str:
+        return self.data.decode("utf-8", "replace")
 
 
 class Capture:
@@ -415,29 +446,33 @@ def cancel(ws: str, job: str | None) -> None:
     # workspace; killing here could hit a successor that already took the same uid.
 
 
-def wait_for(acquire, job: str, seconds: float, busy: str) -> None:
+def wait_for(acquire, job: str, seconds: float, busy: str, status: int = 503) -> None:
     """Waits for a lock or slot in short steps, so a cancelled job stops queueing at once."""
     deadline = time.monotonic() + seconds
     while not acquire(timeout=0.25):
         if cancelled(job):
             raise Cancelled()
         if time.monotonic() >= deadline:
-            raise Failure(503, busy)
+            raise Failure(status, busy)
 
 
 class Cancelled(Exception):
     pass
 
 
-def execute(ws: str, path: str, uid: int, job: str, command: list[str], timeout: int, watch_limit: int, stdin: bytes | None = None, env: dict[str, str] | None = None) -> dict:
-    """Runs one command in a fresh jail as the workspace user. The caller holds the workspace lock and a slot."""
+def execute(ws: str, path: str, uid: int, job: str, command: list[str], timeout: int, watch_limit: int, stdin: bytes | None = None, env: dict[str, str] | None = None, strict: bool = False) -> dict:
+    """Runs one command in a fresh jail as the workspace user. The caller holds the workspace lock and a slot.
+
+    `strict` is the function protocol: exact bounded captures and a hard kill on overflow.
+    """
     if isolation_error and ws != "probe":
         raise Failure(503, f"run isolation is unavailable, so no code runs: {isolation_error}")
     base = run_dir(path, uid)
     # A workspace already over the limit may still run, so code can delete files; it only may not grow.
     allowed = max(watch_limit, workspace_bytes(path))
     fds: list[int] = []
-    out, err = Capture(), Capture()
+    out = StrictCapture(FUNCTION_STDOUT_LIMIT) if strict else Capture()
+    err = StrictCapture(FUNCTION_STDERR_LIMIT) if strict else Capture()
     started = time.monotonic()
     with jobs_guard:
         running[ws] = job
@@ -476,6 +511,9 @@ def execute(ws: str, path: str, uid: int, job: str, command: list[str], timeout:
             if now >= deadline:
                 reason = f"timed out after {timeout} s"
                 break
+            if out.overflow or err.overflow:
+                reason = "output limit exceeded"
+                break
             if now >= next_size_check:
                 next_size_check = now + 2
                 if workspace_bytes(path) > allowed:
@@ -503,15 +541,19 @@ def execute(ws: str, path: str, uid: int, job: str, command: list[str], timeout:
         reason = LIMIT_SIGNALS.get(sig, f"signal {sig}")
     stderr = err.text()
     # bubblewrap reports its own setup failures before the command starts; nothing of the run executed.
-    if code_ == 1 and stderr.startswith("bwrap: ") and not out.head:
+    if code_ == 1 and stderr.startswith("bwrap: ") and not getattr(out, "data", getattr(out, "head", b"")):
         raise Failure(503, f"run isolation failed, so the code did not run: {stderr.strip()}")
-    return {"exitCode": code_, "stdout": out.text(), "stderr": stderr, "stopped": reason, "durationMs": round((time.monotonic() - started) * 1000), "base": base}
+    result = {"exitCode": code_, "stdout": out.text(), "stderr": stderr, "stopped": reason, "durationMs": round((time.monotonic() - started) * 1000), "base": base}
+    if strict:
+        result["stdoutOverflow"] = out.overflow
+        result["stderrOverflow"] = err.overflow
+    return result
 
 
 LIMIT_SIGNALS = {signal.SIGXCPU: "CPU time limit", signal.SIGXFSZ: "file size limit", signal.SIGKILL: "killed (likely out of memory)"}
 
 
-def admitted(ws: str, job: str | None, work) -> dict:
+def admitted(ws: str, job: str | None, work, slot_wait: float = SLOT_WAIT, busy_status: int = 503) -> dict:
     """Queues a job for its workspace and a slot, then runs `work(path, uid, job)` with both held."""
     job = job or secrets.token_hex(12)
     with jobs_guard:
@@ -520,7 +562,7 @@ def admitted(ws: str, job: str | None, work) -> dict:
     try:
         wait_for(lock.acquire, job, LOCK_WAIT, "another run in this chat is still going; try again")
         try:
-            wait_for(run_slots.acquire, job, SLOT_WAIT, "the sandbox is busy; try again")
+            wait_for(run_slots.acquire, job, slot_wait, "busy" if busy_status == 429 else "the sandbox is busy; try again", busy_status)
             try:
                 if cancelled(job):
                     raise Cancelled()
@@ -536,6 +578,8 @@ def admitted(ws: str, job: str | None, work) -> dict:
 
 
 def run(ws: str, language: str, code: str, timeout: int, job: str | None = None) -> dict:
+    if ws in function_workspaces:
+        raise Failure(409, "function workspaces accept only one function call")
     if language not in ("python", "bash"):
         raise Failure(400, "language must be python or bash")
     timeout = max(1, min(int(timeout), MAX_TIMEOUT))
@@ -573,6 +617,8 @@ def run(ws: str, language: str, code: str, timeout: int, job: str | None = None)
 def convert(ws: str, name: str, data: bytes, job: str | None = None) -> bytes:
     """Turns a presentation into a PDF with LibreOffice, inside the same jail as a run. Input and output live in
     the run's private /tmp, so nothing appears among the chat's files."""
+    if ws in function_workspaces:
+        raise Failure(409, "function workspaces accept only one function call")
     ext = os.path.splitext(os.path.basename(name))[1]
     if ext.lower() not in CONVERTIBLE:
         raise Failure(400, f"only {', '.join(sorted(CONVERTIBLE))} files can be converted")
@@ -608,6 +654,120 @@ def convert(ws: str, name: str, data: bytes, job: str | None = None) -> bytes:
         return admitted(ws, job, work)
     except Cancelled:
         raise Failure(409, "the conversion was cancelled")
+
+
+FUNCTION_WRAPPER = r"""
+import contextlib
+import importlib.util
+import inspect
+import json
+import sys
+
+def fail(message):
+    print(message, file=sys.stderr)
+    raise SystemExit(1)
+
+def check(value):
+    # Semantic walk before dumps: tuples, bytes, sets, non-string keys and unsafe numbers are rejected.
+    if value is None or isinstance(value, bool) or isinstance(value, str):
+        return
+    if isinstance(value, int):
+        if not (-9007199254740991 <= value <= 9007199254740991):
+            raise TypeError("integer outside the safe range")
+        return
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            raise TypeError("non-finite number")
+        return
+    if isinstance(value, list):
+        for item in value:
+            check(item)
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError("mapping keys must be strings")
+            check(item)
+        return
+    raise TypeError("result is not JSON data")
+
+try:
+    data = json.loads(sys.stdin.read())
+except Exception:
+    fail("invalid input")
+
+try:
+    spec = importlib.util.spec_from_file_location("okaychat_custom_tool", sys.argv[1])
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+except Exception:
+    fail("the code could not be loaded")
+
+main = getattr(module, "main", None)
+if not callable(main):
+    fail("main is not callable")
+if inspect.iscoroutinefunction(main) or inspect.isgeneratorfunction(main):
+    fail("main must be a synchronous function")
+
+try:
+    with contextlib.redirect_stdout(sys.stderr):
+        result = main(data)
+    check(result)
+    text = json.dumps(result, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+except SystemExit:
+    raise
+except Exception:
+    fail("main raised an error")
+
+# stdout carries exactly one JSON value; any earlier direct fd1 write makes the app reject it.
+sys.stdout.write(text)
+"""
+
+
+def run_function(ws: str, code: str, input_text: str, timeout: int, job: str | None = None) -> dict:
+    """One isolated Python function execution in a fresh one-use workspace."""
+    if not isinstance(code, str) or not code or len(code.encode("utf-8")) > 64 * 1024 or "\0" in code:
+        raise Failure(400, "invalid code")
+    if not isinstance(input_text, str) or len(input_text.encode("utf-8")) > 16 * 1024:
+        raise Failure(400, "invalid input")
+    timeout = max(1, min(int(timeout), 30))
+    with jobs_guard:
+        if ws in function_workspaces:
+            raise Failure(409, "function workspace already used")
+        function_workspaces.add(ws)
+
+    def work(path: str, uid: int, job: str) -> dict:
+        limit = WORKSPACE_MB * 1024 * 1024
+        os.utime(path)
+        private = private_dir(path, uid)
+        wrapper = os.path.join(private, "function_wrapper.py")
+        module_path = os.path.join(private, "function_code.py")
+        write_owned(wrapper, FUNCTION_WRAPPER.encode("utf-8"), uid)
+        write_owned(module_path, code.encode("utf-8"), uid)
+        command = ["python3", "-I", os.path.join(PRIVATE, "function_wrapper.py"), os.path.join(PRIVATE, "function_code.py")]
+        try:
+            result = execute(ws, path, uid, job, command, timeout, limit, input_text.encode("utf-8"), strict=True)
+        finally:
+            shutil.rmtree(os.path.join(path, PRIVATE, "run"), ignore_errors=True)
+            # The whole workspace is deleted below; touching it keeps an idle sweep from racing.
+            os.utime(path)
+        result.pop("base", None)
+        return {
+            "exitCode": result.get("exitCode"),
+            "stopped": result.get("stopped"),
+            "durationMs": result.get("durationMs", 0),
+            "stdout": result.get("stdout", ""),
+            "stderr": result.get("stderr", ""),
+            "stdoutOverflow": result.get("stdoutOverflow", False),
+            "stderrOverflow": result.get("stderrOverflow", False),
+        }
+
+    try:
+        return admitted(ws, job, work, slot_wait=FUNCTION_SLOT_WAIT, busy_status=429)
+    except Cancelled:
+        return {"exitCode": None, "stdout": "", "stderr": "", "stopped": "cancelled before it started", "durationMs": 0, "stdoutOverflow": False, "stderrOverflow": False}
+    finally:
+        delete_workspace(ws)
 
 
 def split_path(rel: str) -> list[str]:
@@ -669,6 +829,7 @@ def delete_workspace(ws: str, idle_before: float | None = None) -> None:
         kill_uid(uid)
         clean_shared_tmp(uid)
         shutil.rmtree(path, ignore_errors=True)
+        function_workspaces.discard(ws)
         with uid_lock:
             used_uids.discard(uid)
 
@@ -806,6 +967,18 @@ class Handler(BaseHTTPRequestHandler):
             if method == "POST" and action == "run":
                 req = json.loads(self.body(2 * 1024 * 1024) or b"{}")
                 return self.json(200, run(ws, req.get("language", ""), str(req.get("code", "")), req.get("timeout", 60), job_id(req.get("job"))))
+            if method == "POST" and action == "function":
+                raw = self.body(FUNCTION_MAX_BODY)
+                try:
+                    req = json.loads(raw)
+                except ValueError:
+                    raise Failure(400, "invalid body")
+                if not isinstance(req, dict) or not isinstance(req.get("code"), str) or not isinstance(req.get("input"), str):
+                    raise Failure(400, "invalid body")
+                timeout_ms = req.get("timeoutMs", 10000)
+                if not isinstance(timeout_ms, int) or isinstance(timeout_ms, bool) or not 1000 <= timeout_ms <= 30000:
+                    raise Failure(400, "invalid timeout")
+                return self.json(200, run_function(ws, req["code"], req["input"], timeout_ms // 1000, job_id(req.get("job"))) )
             if method == "POST" and action == "cancel":
                 # No lock: the run holding it sees its process exit and finishes normally.
                 req = json.loads(self.body(4096) or b"{}")

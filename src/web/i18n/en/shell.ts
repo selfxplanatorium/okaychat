@@ -26,4 +26,5 @@ export default {
   nothingHere: "Nothing to see here",
   pageMissing: "This page does not exist.",
   agents: "Agents",
+  customTools: "Custom tools",
 } as const;

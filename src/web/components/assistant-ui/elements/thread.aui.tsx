@@ -118,6 +118,7 @@ import { DictationWaveform } from "@/speech/Waveform";
 import { CallButton, useCallEntry } from "@/speech/call/CallButton";
 import { useCall } from "@/speech/call/store";
 import { isSpokenMessage } from "@/speech/call/transcript";
+import { isCustomToolKey } from "@shared/custom-tools";
 
 export type ThreadGroupPart = MessagePrimitive.GroupedParts.GroupPart;
 
@@ -254,6 +255,8 @@ const resultKey = (part: GroupablePart): string | undefined => {
     case "search_knowledge":
       return `knowledge:${part.toolCallId}`;
     default:
+      // A custom tool result is the outcome of that call, kept once in a finished reply.
+      if (isCustomToolKey(part.toolName)) return `custom:${part.toolCallId}`;
       // Each MCP App call is its own result, like a generated image.
       return mcpAppOf(part.result) ? `app:${part.toolCallId}` : undefined;
   }
