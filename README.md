@@ -56,6 +56,8 @@ Open <http://localhost:8787>. The first account becomes the administrator. Conne
 
 Back up the data volume and keep `OKAYCHAT_SECRET` separately. Losing the secret makes encrypted credentials and memory unreadable. [Storage accounting](docs/implementation/storage-quota.md) explains quotas; [security](docs/implementation/security.md) explains the boundaries.
 
+The ChatGPT plan uses the official **Sign in with ChatGPT** flow for chat. Set `OKAYCHAT_PUBLIC_URL` to the deployment's canonical HTTPS origin and `OKAYCHAT_CHATGPT_OAUTH_ENABLED=true` after the release checks in [the ChatGPT guide](docs/implementation/codex-chat.md) pass. Image generation keeps its separate Codex CLI connection.
+
 ## A tour
 
 <table>
