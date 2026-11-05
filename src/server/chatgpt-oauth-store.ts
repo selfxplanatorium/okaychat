@@ -87,6 +87,12 @@ async function renew(row: Registration) {
     const saved = db.prepare("UPDATE chatgpt_registrations SET credentials_enc=?,state=?,access_expires_at=?,token_version=token_version+1,refresh_state='idle',updated_at=? WHERE user_id=? AND id=? AND generation=? AND token_version=? AND refresh_state='sending' AND active=1").run(seal(row.user_id, row.id, next), state, next.accessExpiresAt, Date.now(), row.user_id, row.id, row.generation, row.token_version);
     if (!saved.changes) { await revokeRefreshToken({ clientId: row.client_id, refreshToken: next.refreshToken }); throw new OAuthError("terminal"); }
   } catch (error) {
+    // A 429 is a definitive, unprocessed rejection: the rotating refresh token is still the current one.
+    // Return the row to idle so a later request can retry instead of forcing a full reconnect.
+    if (error instanceof OAuthError && error.kind === "temporary") {
+      db.prepare("UPDATE chatgpt_registrations SET refresh_state='idle',last_error_code=?,updated_at=? WHERE user_id=? AND id=? AND generation=? AND token_version=? AND refresh_state='sending'").run("chatgpt_refresh_rate_limited", Date.now(), row.user_id, row.id, row.generation, row.token_version);
+      throw error;
+    }
     const terminal = error instanceof OAuthError && error.kind === "terminal";
     db.prepare("UPDATE chatgpt_registrations SET state='reconnect_required',refresh_state='uncertain',credentials_enc=CASE WHEN ? THEN NULL ELSE credentials_enc END,last_error_code=?,updated_at=? WHERE user_id=? AND id=? AND generation=? AND token_version=? AND refresh_state='sending'").run(terminal ? 1 : 0, terminal ? "chatgpt_reconnect_required" : "chatgpt_refresh_uncertain", Date.now(), row.user_id, row.id, row.generation, row.token_version);
     throw error;

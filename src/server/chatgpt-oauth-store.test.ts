@@ -52,6 +52,18 @@ test("20 expired callers share one rotating refresh and version; refresh does no
   assert.deepEqual(store.chatgptPin("a"), pin);
   await store.chatgptAccess("a", { pin, rejectedVersion: 0 }); assert.equal(count, 1);
 });
+test("a 429 refresh is temporary and does not force a reconnect", async () => {
+  connect("a", "reg", 0);
+  let count = 0;
+  oauthDeps.fetch = async () => { count++; return Response.json({ error: "rate_limited" }, { status: 429 }); };
+  const pin = store.chatgptPin("a");
+  await assert.rejects(store.chatgptAccess("a", { pin }));
+  const row = db.prepare("SELECT state, refresh_state, token_version FROM chatgpt_registrations WHERE id='reg'").get() as { state: string; refresh_state: string; token_version: number };
+  assert.deepEqual({ ...row }, { state: "ready", refresh_state: "idle", token_version: 0 });
+  await assert.rejects(store.chatgptAccess("a", { pin }));
+  assert.equal(count, 2, "the next request can try the same rotating token again");
+});
+
 test("ambiguous refresh is durable and cannot resend rotating credentials", async () => {
   connect("a", "reg", 0); let count = 0;
   oauthDeps.fetch = async () => { count++; throw new Error("network sentinel"); };
