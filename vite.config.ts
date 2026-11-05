@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -7,6 +7,12 @@ import { defineConfig, type Plugin } from "vite";
 
 const chatgptHelperFile = fileURLToPath(new URL("./scripts/chatgpt-connect.mjs", import.meta.url));
 const helperChecksum = (source: Buffer) => `${createHash("sha256").update(source).digest("hex")}\n`;
+
+// A worktree usually symlinks `node_modules` to the primary checkout, which sits outside the Vite root.
+// Serving dependencies from their real path keeps bundled fonts and other node_modules assets working in
+// dev exactly as they do in the build, instead of silently falling back.
+const projectRoot = fileURLToPath(new URL("./", import.meta.url));
+const dependencyRoot = realpathSync(fileURLToPath(new URL("./node_modules", import.meta.url)));
 
 /**
  * The ChatGPT desktop helper is one standalone script, so it lives in `scripts/` and is published at the
@@ -75,6 +81,7 @@ export default defineConfig({
     port: 5173,
     // Dev servers are reached over the tailnet (see AGENTS.md); allow MagicDNS names.
     allowedHosts: [".ts.net"],
+    fs: { allow: [projectRoot, dependencyRoot] },
     // `ws` carries `/api/voice/call`; without it the dev server answers the upgrade itself.
     proxy: { "/api": { target: "http://localhost:8787", changeOrigin: false, ws: true } },
   },
