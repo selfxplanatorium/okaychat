@@ -89,7 +89,7 @@ export function NoteEditor({
     setServer(note);
     setStatus("saved");
     const entry = readOutbox(accountId, note.id);
-    if (entry) instance.restore(entry.value, entry.baseRevision);
+    if (entry && !instance.restore(entry.value, entry.baseRevision)) removeOutbox(accountId, note.id);
     return () => {
       instance.dispose();
       if (controller.current === instance) controller.current = null;

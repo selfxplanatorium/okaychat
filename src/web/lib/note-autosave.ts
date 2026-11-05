@@ -38,6 +38,9 @@ const writeOf = (note: Note): NoteWrite => ({
   projectId: note.projectId,
 });
 
+const sameValue = (a: NoteWrite, b: NoteWrite): boolean =>
+  JSON.stringify({ ...a, tags: [...a.tags].sort() }) === JSON.stringify({ ...b, tags: [...b.tags].sort() });
+
 export class NoteAutosave {
   private value: NoteWrite;
   private revision: number;
@@ -117,7 +120,11 @@ export class NoteAutosave {
     this.setStatus("saving");
     try {
       const saved = await this.deps.save(capturedValue, capturedRevision);
-      if (this.disposed) return;
+      if (this.disposed) {
+        // Edits typed while this write was in flight still reach the server once.
+        if (capturedSequence !== this.sequence) this.detachedSave(saved.revision);
+        return;
+      }
       this.server = saved;
       this.revision = saved.revision;
       if (capturedSequence === this.sequence) {
@@ -146,8 +153,12 @@ export class NoteAutosave {
     }
   }
 
-  /** Recover the actual local payload before comparing its base revision. */
-  restore(value: NoteWrite, baseRevision: number): void {
+  /**
+   * Recover the actual local payload before comparing its base revision. Returns false when the server
+   * already holds exactly that payload (a detached write landed), so the caller can drop the entry.
+   */
+  restore(value: NoteWrite, baseRevision: number): boolean {
+    if (sameValue(value, writeOf(this.server))) return false;
     this.value = { ...value, tags: [...value.tags] };
     this.sequence++;
     if (baseRevision !== this.revision) this.setStatus("conflict");
@@ -155,6 +166,7 @@ export class NoteAutosave {
       this.setStatus("dirty");
       this.schedule();
     }
+    return true;
   }
 
   /** Retry after an offline or server failure; never used for a conflict. */
@@ -195,9 +207,20 @@ export class NoteAutosave {
     return this.sequence !== this.ackedSequence || this.status === "dirty" || this.status === "saving" || this.status === "offline" || this.status === "error";
   }
 
+  /**
+   * Stops the controller. A debounced edit is still written once, silently: switching notes must not
+   * leave it only in browser storage (or nowhere, when the outbox is full). No state is emitted, so a
+   * late answer cannot clear a newer editor's outbox entry; that editor's `restore` drops it on a match.
+   */
   dispose(): void {
+    if (this.disposed) return;
     this.disposed = true;
     if (this.timer !== null) this.deps.cancel?.(this.timer);
     this.timer = null;
+    if (!this.inFlight && this.status === "dirty") this.detachedSave(this.revision);
+  }
+
+  private detachedSave(revision: number): void {
+    void this.deps.save({ ...this.value, tags: [...this.value.tags] }, revision).catch(() => {});
   }
 }

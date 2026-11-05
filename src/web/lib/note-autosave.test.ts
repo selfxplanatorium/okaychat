@@ -179,3 +179,46 @@ test("a response after disposal cannot clear a newer editor's outbox", async () 
   await saving;
   assert.equal(states.length, count);
 });
+
+test("disposal writes a debounced edit once without emitting state", async () => {
+  const writes: Array<{ value: NoteWrite; revision: number }> = [];
+  const { controller, states, runTimers } = harness(async (value, revision) => {
+    writes.push({ value, revision });
+    return { ...note(revision + 1), body: value.body };
+  });
+  controller.edit(write({ body: "typed before switching notes" }));
+  const count = states.length;
+  controller.dispose();
+  runTimers();
+  await tick();
+  assert.deepEqual(writes, [{ value: write({ body: "typed before switching notes" }), revision: 1 }]);
+  assert.equal(states.length, count);
+});
+
+test("edits made during an in-flight write are written once after disposal", async () => {
+  let release!: (note: Note) => void;
+  const writes: Array<{ value: NoteWrite; revision: number }> = [];
+  const { controller } = harness((value, revision) => {
+    writes.push({ value, revision });
+    if (writes.length === 1) return new Promise((resolve) => { release = resolve; });
+    return Promise.resolve({ ...note(revision + 1), body: value.body });
+  });
+  controller.edit(write({ body: "first" }));
+  const saving = controller.flush();
+  controller.edit(write({ body: "second" }));
+  controller.dispose();
+  release({ ...note(2), body: "first" });
+  await saving;
+  await tick();
+  assert.deepEqual(writes.map((entry) => [entry.value.body, entry.revision]), [["first", 1], ["second", 2]]);
+});
+
+test("restoring an entry the server already holds is dropped instead of conflicting", () => {
+  const { controller, runTimers, timers } = harness(async () => note());
+  assert.equal(controller.restore(write({ tags: ["a"] }), 0), false);
+  runTimers();
+  assert.equal(timers.size, 0);
+  assert.equal(controller.state().status, "saved");
+  assert.equal(controller.restore(write({ body: "different" }), 0), true);
+  assert.equal(controller.state().status, "conflict");
+});
