@@ -151,6 +151,8 @@ export type DeliveryErrorCode = (typeof DELIVERY_ERROR_CODES)[number];
 
 export interface DeliveryAttempt {
   number: number;
+  /** A manually requested attempt never starts an automatic retry chain, including after restart. */
+  manual?: true;
   startedAt: number;
   finishedAt: number;
   outcome: "succeeded" | "failed" | "uncertain";
