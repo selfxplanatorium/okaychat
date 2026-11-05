@@ -112,3 +112,21 @@ test('the production worker rechecks model-scoped video revocation before the pa
   assert.equal(submits,0);assert.equal(jobRow(accepted.jobId)!.error_code,'credentials_changed');
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM usage WHERE video_job_id=?').get(accepted.jobId)!.n,0);
 });
+
+test('queued worker refuses live assistant-family and restricted-chat changes before paid dispatch',async()=>{
+  const {VideoWorker}=await import('./worker.js');
+  for(const change of ['assistant','restricted','origin'] as const){
+    const c=setup();c.run();const accepted=await c.execute();
+    if(change==='assistant')db.prepare('UPDATE threads SET assistant_json=? WHERE id=?').run(JSON.stringify({tools:{mode:'selected',builtins:['images'],mcpTools:[]}}),c.thread);
+    if(change==='restricted')db.prepare('INSERT INTO knowledge_thread_dependencies(thread_id,collection_id,created_at) VALUES(?,?,1)').run(c.thread,'revoked-collection');
+    if(change==='origin'){
+      const run=db.prepare('SELECT config_json FROM generation_runs WHERE id=?').get(c.context.getRunId()!)!;
+      db.prepare('UPDATE generation_runs SET config_json=? WHERE id=?').run(JSON.stringify({...JSON.parse(String(run.config_json)),turnOrigin:'schedule'}),c.context.getRunId()!);
+    }
+    let submits=0;
+    const worker=new VideoWorker({provider:()=>({service:'xai',async submit(){submits++;return{id:'must_not_submit'};},async poll(){throw new Error('Unexpected poll');},async cancel(){return'unsupported';}})});
+    await worker.runOne();
+    assert.equal(submits,0,change);assert.equal(jobRow(accepted.jobId)!.error_code,'credentials_changed',change);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM usage WHERE video_job_id=?').get(accepted.jobId)!.n,0);
+  }
+});

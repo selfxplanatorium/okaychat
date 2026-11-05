@@ -3,7 +3,8 @@ import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { db } from '../db.js';
 import { decrypt, encrypt } from '../crypto.js';
-import { assertFeature, assertModelAllowed } from '../permissions/guard.js';
+import type { ResolvedRunConfig } from '../../shared/assistant-presets.js';
+import { assertVideoTurn } from './eligibility.js';
 import { getSettings } from '../settings.js';
 import { VIDEO_LIMITS, type VideoServiceId } from '../../shared/video.js';
 import { videoCredential, videoServiceStatuses } from './services.js';
@@ -24,11 +25,15 @@ export interface VideoWorkerDependencies {
 function authorizeJob(row:VideoJobRow):void {
   const run=row.llm_run_id?db.prepare('SELECT config_json FROM generation_runs WHERE id=? AND thread_id=?').get(row.llm_run_id,row.thread_id):undefined;
   if(!run)throw new VideoError('credentials_changed',403);
-  const config=JSON.parse(String(run.config_json)) as {modelRef?:unknown};
-  if(typeof config.modelRef!=='string')throw new VideoError('credentials_changed',403);
-  try {assertFeature({userId:row.user_id,modelRef:config.modelRef},'videos');assertModelAllowed(row.user_id,config.modelRef);}
-  catch {throw new VideoError('credentials_changed',403);}
-  if(!row.thread_id || !db.prepare('SELECT 1 FROM threads WHERE id=? AND user_id=? AND compare_group_id IS NULL').get(row.thread_id,row.user_id)) throw new VideoError('cancelled',409);
+  const config=JSON.parse(String(run.config_json)) as ResolvedRunConfig;
+  if(!row.thread_id) throw new VideoError('cancelled',409);
+  try {
+    // Durable jobs can outlive their text turn: recheck the same live chat/family boundary.
+    assertVideoTurn({userId:row.user_id,threadId:row.thread_id,assistantMessageId:row.assistant_message_id,
+      getRunId:()=>row.llm_run_id,modelRef:config.modelRef,toolCallModel:true,toolPolicy:config.toolPolicy,
+      interactive:config.turnOrigin==='interactive',unattended:false,turnOrigin:config.turnOrigin,
+      temporary:false,restrictedChat:false,comparison:false},row.service);
+  } catch {throw new VideoError('credentials_changed',403);}
   const status=videoServiceStatuses(row.user_id,getSettings(row.user_id).videoServices??{}).find(s=>s.id===row.service);
   if(!status?.enabled || status.model!==row.model_id) throw new VideoError('credentials_changed',403);
 }
