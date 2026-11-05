@@ -16,4 +16,3 @@ export function VideoPlayer({output}:{output:VideoOutput}) {
     <a className={buttonVariants({variant:'outline',className:'min-h-11'})} href={`${src}?download=1`}><DownloadIcon aria-hidden />{t("video.download")}</a>
   </div>;
 }
-
