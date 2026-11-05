@@ -13,7 +13,9 @@ account and grants only enumerated scopes; it never becomes an application sessi
 
 `/v1/responses`, tools, function calling, files, images, audio, memory, retrieval, projects, skills,
 schedules, history persistence, compaction, continuation, delegation, and generative UI are not
-implemented. Unknown paths return JSON 404; wrong methods return 405 with `Allow`.
+implemented. Unknown paths return JSON 404; wrong methods return 405 with `Allow`. Bearer authentication
+is route middleware on the two handlers, never a path comparison, so every spelling the router accepts
+(percent-encoded segments included) authenticates the same way.
 
 The router is mounted in `index.ts` outside the `/api` body limit and CSRF chain. Vite proxies `/v1`,
 and the service worker never caches `/v1`.

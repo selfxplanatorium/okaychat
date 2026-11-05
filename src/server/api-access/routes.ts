@@ -292,11 +292,11 @@ export const inferenceRoutes = new Hono<ApiEnv>()
     if (c.req.method === "HEAD" && (path === "/models" || path === "/chat/completions")) {
       return methodResponse(c, path === "/models" ? "GET" : "POST");
     }
-    const recognized = (path === "/models" && c.req.method === "GET") || (path === "/chat/completions" && c.req.method === "POST");
-    if (!recognized) return next();
-    return apiAuth(c, next);
+    return next();
   })
-  .get("/models", async (c) => {
+  // Authentication is bound to the matched routes, not to a path comparison, so no spelling of a path
+  // that the router accepts (percent-encoded segments included) can reach a handler without a principal.
+  .get("/models", apiAuth, async (c) => {
     const requestId = c.get("apiRequestId");
     const principal = c.get("apiPrincipal");
     if (new URL(c.req.url).search) {
@@ -335,7 +335,7 @@ export const inferenceRoutes = new Hono<ApiEnv>()
       release();
     }
   })
-  .post("/chat/completions", async (c) => {
+  .post("/chat/completions", apiAuth, async (c) => {
     const requestId = c.get("apiRequestId");
     const principal = c.get("apiPrincipal");
     if (new URL(c.req.url).search) {

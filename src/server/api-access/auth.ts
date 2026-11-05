@@ -87,9 +87,12 @@ export function newApiRequestId(generation: boolean): string {
   return newId(generation ? "apr" : "areq");
 }
 
-/** The path inside the mounted router, so a bare `/v1` and descendants are both recognized. */
+/**
+ * The path inside the mounted router, so a bare `/v1` and descendants are both recognized. It is the
+ * router's own decoded path, so `/v1/%6Dodels` is `/models` here exactly as it is for route matching.
+ */
 export function apiPath(c: Context): string {
-  const path = new URL(c.req.url).pathname;
+  const path = c.req.path;
   return path === "/v1" ? "/" : path.startsWith("/v1/") ? path.slice(3) : path;
 }
 
