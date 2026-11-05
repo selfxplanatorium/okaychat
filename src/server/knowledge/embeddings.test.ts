@@ -203,3 +203,45 @@ test("a shared key serves embeddings only when the user's model policy allows th
     deleteConnection(null, "openai");
   }
 });
+
+test("a pinned embedder stops remaining batches when its owner is demoted", async () => {
+  const { resolvePinnedConnection } = await import("../catalog/providers.js");
+  const { requestKnowledgeRevocation } = await import("./revocation.js");
+  const pin = resolvePinnedConnection("alice", "custom-mock")!;
+  let calls = 0;
+  const embedder = createEmbedder("alice", { provider: "compatible", providerId: "custom-mock", model: "embed" }, {
+    fetchImpl: (async () => {
+      calls++;
+      db.prepare("UPDATE users SET role = 'user' WHERE id = 'alice'").run();
+      requestKnowledgeRevocation();
+      return Response.json({ data: Array.from({ length: 16 }, () => ({ embedding: [1, 0] })) });
+    }) as typeof fetch,
+  }, { connection: pin.connection, providerId: "custom-mock" })!;
+  try {
+    await assert.rejects(embedder.embed(new Array(32).fill("private text")));
+    assert.equal(calls, 1);
+  } finally {
+    db.prepare("UPDATE users SET role = 'admin' WHERE id = 'alice'").run();
+  }
+});
+
+test("a shared embedding model revocation aborts a batch already in flight", async () => {
+  const { resolvePinnedConnection } = await import("../catalog/providers.js");
+  saveConnection(null, "openai", { apiKey: "sk-shared", enabled: true });
+  setModelAccessPolicies("openai", [{ target: { kind: "everyone", id: "" }, mode: "all", modelIds: [] }]);
+  const pin = resolvePinnedConnection("alice", "openai")!;
+  let calls = 0;
+  const embedder = createEmbedder("alice", { provider: "openai" }, {
+    fetchImpl: (async () => {
+      calls++;
+      setModelAccessPolicies("openai", [{ target: { kind: "everyone", id: "" }, mode: "selected", modelIds: ["gpt-a"] }]);
+      return Response.json({ data: [{ embedding: [1, 0] }] });
+    }) as typeof fetch,
+  }, { connection: pin.connection, providerId: "openai" })!;
+  try {
+    await assert.rejects(embedder.embed(["private text"]));
+    assert.equal(calls, 1);
+  } finally {
+    deleteConnection(null, "openai");
+  }
+});

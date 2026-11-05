@@ -315,6 +315,11 @@ row references a channel, room message, or room attachment.
   Retrieval rechecks before FTS/vector access, after each await, and before returning; chat holds a lease
   that aborts the provider stream and rechecks before every step; ingestion rechecks its exact pin and
   source generation before each batch. Aborting a reader's work never cancels legitimate owner indexing.
+  Resumable stream registrations retain the thread id: resume checks live content access before and after
+  opening the buffer and before each emitted chunk. Manual compaction holds a dependency lease and checks
+  access again before saving or returning its summary. Embedding calls also hold a lease: each 16-input
+  batch checks the live model grant and exact connection pin, including whether the owner now requires
+  guarded public-host transport; demotion aborts a captured unguarded connection.
 - **Citations.** `GET /knowledge/chunks/:id` resolves chunk → source → collection with matching owner
   columns and then the live predicate. Unknown, deleted, revoked, and forged ids all answer the same
   `Passage not found`. The UI revalidates while open and every 2 s, clears the passage first, and shows a
