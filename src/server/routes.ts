@@ -1,3 +1,4 @@
+import { conversationImportRoutes } from "./conversation-import/routes.js";
 import { videoRoutes } from "./video/routes.js";
 import { chatgptRoutes } from "./chatgpt-oauth-routes.js";
 import { n8nRoutes, agentSessionRoutes } from "./n8n/routes.js";
@@ -312,6 +313,7 @@ const api = new Hono<AppEnv>()
   .route("/", messageTranslationRoutes)
   .route("/", assistantPresetRoutes)
   .route("/", archiveRoutes)
+  .route("/", conversationImportRoutes)
   .route("/saved-prompts", savedPromptRoutes)
   .route("/notes", notesRoutes)
   .route("/calendar", calendarRoutes)

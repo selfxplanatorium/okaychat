@@ -25,3 +25,33 @@ export interface NormalizedItem { ordinal: number; conversation: PortableConvers
 export interface NormalizedFile { adapter: SourceNamespace; items: NormalizedItem[] }
 export type ImportJobState = 'receiving' | 'validating' | 'ready' | 'queued' | 'importing' | 'paused' | 'cancelling' | 'done' | 'cancelled' | 'failed' | 'expired';
 export type ImportItemState = 'valid' | 'invalid' | 'pending' | 'imported' | 'duplicate' | 'failed' | 'cancelled' | 'unselected';
+export interface ImportProgress {
+  total: number; valid: number; invalid: number; selected: number; processed: number;
+  imported: number; duplicates: number; failed: number; cancelled: number; pending: number;
+}
+export interface JobSummary {
+  id: string; kind: 'import' | 'export'; state: ImportJobState; admissionAt: number; expiresAt: number;
+  terminalAt: number | null; counts: ImportProgress; phase: ImportJobState; errorCode: string | null;
+  canCancel: boolean; canConfirm: boolean; canResume: boolean; canDownload: boolean;
+}
+export interface JobView extends JobSummary {
+  adapter: SourceNamespace | null; adapterVersion: number | null; projectId: string | null; modelRef: string | null;
+  normalizedBytes: number; receivedBytes: number; totalBytes: number | null;
+  dateRange: { from: number; to: number } | null; warnings: ImportWarning[];
+}
+export interface PreviewItem {
+  itemKey: string; ordinal: number; title: string | null; state: ImportItemState; selectable: boolean;
+  messageCount: number; quarantineCount: number; omittedAttachmentCount: number; discardedBranchMessages: number;
+  createdAt: number | null; updatedAt: number | null; normalizedBytes: number; warnings: ImportWarning[];
+  errorCode: string | null; duplicate: { threadId: string; changed: boolean } | null; result: { threadId: string } | null;
+}
+export interface ImportItemsPage { items: PreviewItem[]; nextCursor: string | null }
+export const IMPORT_REASON_CODES = [
+  'invalid_json','unsafe_key','duplicate_key','too_deep','too_large','unsupported_format','unsupported_version',
+  'validation_timeout','invalid_conversation','duplicate_source','invalid_tree','empty_conversation','upload_interrupted',
+  'staging_unavailable','target_missing','storage_quota','internal_error','account_busy','worker_capacity','compression',
+  'media_type','invalid_selection','wrong_state','different_confirmation','invalid_cursor','expired','not_found',
+  'export_too_large','export_unavailable','cancelled','staging_full',
+] as const;
+export type ImportReason = (typeof IMPORT_REASON_CODES)[number];
+export interface TransferErrorDetails { reason: ImportReason; jobId?: string; neededBytes?: number; availableBytes?: number }

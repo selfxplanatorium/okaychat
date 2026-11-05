@@ -1,3 +1,4 @@
+import { recoverImports, startImports, stopImports } from "./conversation-import/jobs.js";
 import { videoWorker, recoverVideoJobs } from "./video/worker.js";
 import { startVideoMaintenance, stopVideoMaintenance } from "./video/maintenance.js";
 import { chatgptHelperRoutes } from "./chatgpt-oauth-routes.js";
@@ -51,7 +52,10 @@ app.use("/api/*", async (c, next) => {
 const publicOrigin = process.env.OKAYCHAT_PUBLIC_URL ? new URL(process.env.OKAYCHAT_PUBLIC_URL).origin : undefined;
 // Upper bound for any request body. Chat and message bodies carry inline attachments (several 25 MB files,
 // base64-encoded); upload routes set tighter limits of their own.
-app.use("/api/*", bodyLimit({ maxSize: 100 * 1024 * 1024, onError: (c) => c.json({ error: "Request is too large." }, 413) }));
+const globalBodyLimit = bodyLimit({ maxSize: 100 * 1024 * 1024, onError: (c) => c.json({ error: "Request is too large." }, 413) });
+// This family streams after authenticated admission. Hono otherwise buffers unknown-length bodies
+// before the route can reserve quota or refuse a busy account. Control bodies have their own 128 KiB cap.
+app.use("/api/*", (c,next) => c.req.path === "/api/conversation-imports" || c.req.path.startsWith("/api/conversation-imports/") ? next() : globalBodyLimit(c,next));
 app.use("/api/*", csrf({ origin: (origin, c) => origin === new URL(c.req.url).origin || origin === publicOrigin }));
 app.onError(handleAppError);
 // Applied to every response that did not set its own. A script CSP is not possible here: artifact frames
@@ -100,6 +104,7 @@ if (existsSync(webDir)) {
 void warmCatalog().catch(() => {});
 // Room archive recovery runs before the listener accepts a request; the interval starts with the server.
 recoverRoomArchiveJobs();
+recoverImports();
 
 /** Explicit shutdown for tests and embedders: stop claims, timer work, and abort active attempts. */
 export function stopOutgoingWebhooks(): void {
@@ -119,6 +124,7 @@ serve({ fetch: app.fetch, port: env.port, hostname: env.host, websocket: { serve
   // Archive jobs never resume across a restart: open work fails, prepared bytes expire, staging is swept.
   resetArchiveJobsAtStartup();
   startArchiveMaintenance();
+  startImports();
   // No room archive resumes across a restart; only the bounded janitor starts here.
   startRoomArchiveMaintenance();
   // Outgoing webhooks start only after every source has reconciled its restart state, so an interrupted
@@ -154,6 +160,7 @@ serve({ fetch: app.fetch, port: env.port, hostname: env.host, websocket: { serve
   // Stop claims and abort active deliveries before the process leaves. An in-flight request may still
   // complete remotely after this point; startup treats such a row as uncertain.
   const shutdown = () => {
+    void stopImports();
     void videoWorker.stop();
     stopVideoMaintenance();
     stopOutgoingWebhooks();

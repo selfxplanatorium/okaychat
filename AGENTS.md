@@ -152,7 +152,7 @@ docs/                 Reusable documentation (see below)
 - `docs/implementation/codex-chat.md`: personal SIWC chat, desktop helper, credential isolation, release gates and operating limits.
 - `docs/implementation/assistant-presets.md`: named assistants, copied snapshots, sampling validation, and tool/knowledge intersection.
 - `docs/implementation/continuation.md`: generation receipts, trusted finish states, explicit Continue, waiting locks and cancellation.
-- `docs/implementation/chat-import.md`: text-only external transfer core, bounded worker/scanner, normalization, transactional commit and source quota; no public upload/API/job runner or settings entry yet.
+- `docs/implementation/chat-import.md`: text-only external transfer, bounded worker/scanner, durable jobs/recovery, transactional commits, source quota and private JSON API.
 - `docs/implementation/chat-archives.md`: the native v1 ZIP, bounds, export/import API, id remapping, and inert imported tool records.
 - `docs/implementation/ollama.md`: native Ollama connection, tags/show/ps metadata, the LanguageModelV4 chat adapter, pull/delete, embeddings data layer, security, and limitations.
 - `docs/implementation/image-generation.md`: image services (Codex, OpenAI, Gemini, xAI, Together, FLUX, fal, Replicate), key reuse, service choice.

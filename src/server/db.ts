@@ -2225,6 +2225,10 @@ CREATE UNIQUE INDEX usage_video_job ON usage(video_job_id) WHERE video_job_id IS
     PRIMARY KEY(user_id,namespace,source_id)
   );
   CREATE UNIQUE INDEX conversation_source_thread ON conversation_source_ids(thread_id);`,
+  `ALTER TABLE conversation_import_jobs ADD COLUMN received_bytes INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE conversation_import_jobs ADD COLUMN total_bytes INTEGER;
+   ALTER TABLE conversation_import_jobs ADD COLUMN staging_present INTEGER NOT NULL DEFAULT 0 CHECK(staging_present IN (0,1));
+   ALTER TABLE conversation_source_ids ADD COLUMN origin TEXT NOT NULL DEFAULT 'import' CHECK(origin IN ('import','export'));`,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
