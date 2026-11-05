@@ -244,7 +244,7 @@ export function projectMessages(rows: ChannelMessageRow[], userId: string): Chan
   return rows.map((row) => {
     const run = runs.get(row.id);
     const deleted = row.deleted_at !== null;
-    const aiConfig = run ? (JSON.parse(run.config_json) as { label?: string; injectionFlagged?: boolean }) : null;
+    const aiConfig = run ? (JSON.parse(run.config_json) as { binding?: { label?: string }; injectionFlagged?: boolean }) : null;
     return {
       id: row.id,
       channelId: row.channel_id,
@@ -260,7 +260,7 @@ export function projectMessages(rows: ChannelMessageRow[], userId: string): Chan
       editedAt: row.edited_at,
       deletedAt: row.deleted_at,
       aiRun: runProjection(run),
-      ...(row.kind === "ai" ? { aiLabel: aiConfig?.label ?? null, aiRequester: run?.requester_id ? authorOf(run.requester_id) : null, injectionFlagged: aiConfig?.injectionFlagged === true } : {}),
+      ...(row.kind === "ai" ? { aiLabel: aiConfig?.binding?.label ?? null, aiRequester: run?.requester_id ? authorOf(run.requester_id) : null, injectionFlagged: aiConfig?.injectionFlagged === true } : {}),
     };
   });
 }

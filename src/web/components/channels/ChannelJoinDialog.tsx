@@ -34,7 +34,6 @@ export function ChannelJoinDialog({
               onClick={async () => {
                 if (invited) await onAccept(id);
                 else await onJoin(id);
-                onOpenChange(false);
               }}
             >
               {t(invited ? "channels.accept" : "channels.join")}

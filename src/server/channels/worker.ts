@@ -8,14 +8,16 @@ import { createModel } from "../llm.js";
 import { reserveTurn } from "../chat.js";
 import { holdLease, reserveOperation } from "../permissions/limits.js";
 import { onPermissionChange } from "../permissions/audit.js";
-import { featureAllowed } from "../permissions/guard.js";
+import { sharedModelAccess } from "../entitlements.js";
+import { resolvePermissions } from "../permissions/resolve.js";
+import { assertModelAllowed, featureAllowed } from "../permissions/guard.js";
 import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "../usage.js";
 import { CHANNEL_LIMITS, type ChannelRunProjection } from "../../shared/channels.js";
 import type { ReasoningEffort, TokenUsage } from "../../shared/types.js";
 import { channelAccess, channelRow, notFound, requireChannelsFeature } from "./access.js";
 import { buildSnapshot, prepareChannelPrompt, storedBinding, trimSnapshot, type ChannelInputSnapshot } from "./ai.js";
 import { insertSync } from "./events.js";
-import { cancelQueuedRun, checkpointRun, markRunRunning, runRow, settleRun, type ChannelRunRowFull } from "./store.js";
+import { interruptOpenRuns, cancelQueuedRun, checkpointRun, markRunRunning, runRow, settleRun, type ChannelRunRowFull } from "./store.js";
 import { notifyAiFinished } from "./notifications.js";
 import { onChannelRevocation } from "./revocation.js";
 
@@ -160,6 +162,11 @@ async function runOne(runId: string, controller: AbortController): Promise<void>
       return;
     }
     const guard = () => {
+      assertModelAllowed(requesterId, initial.model_ref);
+      if (resolved.conn.shared) {
+        const access = sharedModelAccess(requesterId, resolved.model.providerId);
+        if (!access.visible || (!access.all && !access.ids.has(resolved.model.id))) throw new AppError({ code: "forbidden", message: "Access to this room's model changed." });
+      }
       const current = runRow(runId);
       if (!current || current.state !== "running") throw new AppError({ code: "aborted", message: "This reply was stopped." });
       const liveChannel = channelRow(channel.id);
@@ -247,6 +254,8 @@ async function runOne(runId: string, controller: AbortController): Promise<void>
           throw part.error instanceof Error ? part.error : new Error("Channel provider failed");
         }
       }
+      if (signal.aborted) throw signal.reason;
+      guard();
       if (outputLimit) {
         checkpointRun(runId, text);
         settleAndBill(runRow(runId)!, { state: "finished", finishReason: "output_limit", errorCode: null, body: text, ...(sawUsage ? { usage, cost } : {}) });
@@ -265,7 +274,10 @@ async function runOne(runId: string, controller: AbortController): Promise<void>
       const current = runRow(runId);
       if (!current) return;
       if (controller.signal.aborted || deadline.aborted) {
-        if (Date.now() - (current.started_at ?? Date.now()) >= CHANNEL_LIMITS.aiDeadlineMs) {
+        const reason = controller.signal.reason;
+        if (reason instanceof AppError && reason.code === "forbidden") {
+          settleAndBill(current, { state: "failed", finishReason: null, errorCode: "forbidden", body: text, ...(sawUsage ? { usage, cost } : {}) });
+        } else if (deadline.aborted) {
           settleAndBill(current, { state: "failed", finishReason: null, errorCode: "timeout", body: text, ...(sawUsage ? { usage, cost } : {}) });
         } else {
           settleAndBill(current, { state: "cancelled", finishReason: null, errorCode: null, body: text, ...(sawUsage ? { usage, cost } : {}) });
@@ -373,7 +385,7 @@ export function settleRunsForDeletion(channelId: string): void {
     }
     const snapshot = live.get(run.id);
     active.get(run.id)?.abort(new AppError({ code: "aborted", message: "This room was deleted." }));
-    active.delete(run.id);
+    // Keep the executing slot until the provider task's finally releases its turn and lease.
     if (snapshot) {
       settleAndBill(run, {
         state: "cancelled",
@@ -406,7 +418,8 @@ function runStillValid(run: ChannelRunRowFull): boolean {
   if (!channel || channel.archived_at !== null) return false;
   const access = channelAccess(run.requester_id, channel.id);
   if (!access || !access.member || !access.eligible) return false;
-  if (!featureAllowed(run.requester_id, "channels")) return false;
+  const policy = resolvePermissions(run.requester_id, run.model_ref);
+  if (policy.invalid || !policy.features.channels || !policy.modelAllowed) return false;
   try {
     const binding = storedBinding(channel.ai_json);
     if (!binding || binding.modelRef !== run.model_ref) return false;
@@ -429,15 +442,7 @@ function abortRevoked(): void {
 export function initChannelWorker(): void {
   if (initialized) return;
   initialized = true;
-  const interrupted = db.prepare("SELECT id FROM channel_ai_runs WHERE state IN ('queued', 'running')").all() as Array<{ id: string }>;
-  if (interrupted.length) {
-    tx(() => {
-      for (const row of interrupted) {
-        db.prepare("UPDATE channel_ai_runs SET state = 'interrupted', ended_at = ?, input_enc = NULL, reserved_bytes = 0 WHERE id = ?").run(Date.now(), row.id);
-      }
-      insertSync();
-    });
-  }
+  interruptOpenRuns();
   onChannelRevocation(abortRevoked);
   onPermissionChange(() => abortRevoked());
   // Queued rows that outlived their admission window fail instead of waiting forever.
