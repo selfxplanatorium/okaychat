@@ -5,7 +5,8 @@ import { env } from "./env.js";
 import { AppError } from "./errors.js";
 
 // Per-user storage quota. Every byte a user owns — uploads, artifact versions (source + built file),
-// generated images, run_code outputs, fonts, the profile picture, memories, project files — counts
+// generated images, run_code outputs, fonts, the profile picture, memories, project files, channel
+// metadata/messages/AI config, and channel attachments charged to the room owner — counts
 // (raster originals once per account in `media`, however many uploads/outputs point at them; their
 // regenerable previews in media-cache are not charged)
 // against one limit, so the database volume cannot fill up invisibly. Enforced on every write path:
@@ -136,6 +137,9 @@ export function storageUsedSql(user: string): string {
       FROM channels c WHERE c.owner_id = ${user}
     UNION ALL SELECT COALESCE(SUM(length(CAST(m.body AS BLOB))), 0)
       FROM channel_messages m JOIN channels c ON c.id = m.channel_id WHERE c.owner_id = ${user}
+    -- Channel attachments are charged once, at upload, to the room owner recorded on the row. Pending and
+    -- tombstoned-until-purged bytes are still stored and still count.
+    UNION ALL SELECT COALESCE(SUM(size), 0) FROM channel_attachments WHERE owner_id = ${user}
     UNION ALL SELECT COALESCE(SUM(
         length(CAST(r.config_json AS BLOB)) + COALESCE(length(CAST(r.input_enc AS BLOB)), 0) + 1024
         + CASE WHEN r.state IN ('queued', 'running')

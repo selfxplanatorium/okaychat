@@ -72,9 +72,20 @@ sizes.
   marker remembers that without a second encode.
 - A decode failure (corrupt, truncated, over the pixel bound) answers 422; the web shows a fallback with Retry
   and Open original. A preview never silently becomes the original.
-- Files: `dataDir/media-cache/<userId>/<key>.<variant>.webp` (key = media id or generated image id). They are
+- Files: `dataDir/media-cache/<namespace>/<key>.<variant>.webp` (key = media id or generated image id;
+  `namespace` is the account id for owned media, `ch-<channelId>` for channel attachments). They are
   regenerable and **not** charged to the user's quota. GC trims the cache to `OKAYCHAT_MEDIA_CACHE_MB`
   (default 1024) oldest first and removes previews of deleted originals.
+
+Channel attachments are not stored in `media` and not charged to the uploader. Raster originals live under
+`dataDir/channel-media/<channelId>/` with their own `channel_attachments` row; the room owner pays once at
+upload. Their previews use the `ch-<channelId>` cache namespace, so a channel image can never be written
+into an account directory. Channel media is removed by `removeChannelMedia()` on room deletion and by the
+attachment GC; `removeUserMedia` keeps using the account id. Identical bytes are not deduplicated across
+messages or rooms: one row, one charge, one authorization check per request.
+
+`serveImage()` takes `ImageSource.namespace` (never `userId`), so every call site must decide which cache
+directory it owns.
 
 Measured on the test fixtures (`media.test.ts`, run with `MEDIA_SIZES=1`):
 

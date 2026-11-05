@@ -373,7 +373,7 @@ export const imageRoutes = new Hono<AppEnv>()
     const row = db.prepare("SELECT id, mime, size FROM images WHERE id = ? AND user_id = ?").get(c.req.param("id"), user.id) as { id: string; mime: string; size: number } | undefined;
     if (!row) return c.json({ error: "Not found" }, 404);
     // Generated images never change, so the id is the validator.
-    return serveImage(c, { userId: user.id, key: row.id, file: imagePath(user.id, row.id), mime: row.mime, size: row.size, etag: row.id });
+    return serveImage(c, { namespace: user.id, key: row.id, file: imagePath(user.id, row.id), mime: row.mime, size: row.size, etag: row.id });
   })
   .get("/image-services", (c) => c.json(imageServiceStatuses(c.get("user").id)))
   .get("/image-services/:id/models", async (c) => {

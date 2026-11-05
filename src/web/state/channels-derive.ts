@@ -1,9 +1,54 @@
-import type { ChannelMessage, ChannelSummary } from "@shared/channels";
+import type { ChannelMessage, ChannelSummary, ChannelThreadPage, ChannelThreadSummary } from "@shared/channels";
+import { t } from "@/i18n";
+import { formatList } from "@/i18n/format";
 
 /** Pure channel list and timeline helpers, tested without React or the network. */
 
 export const MAX_CACHED_MESSAGES = 300;
 export const MAX_ROOMS_IN_MEMORY = 5;
+export const MAX_THREADS_IN_MEMORY = 3;
+export const MAX_THREAD_MESSAGES = 200;
+
+export interface ChannelThreadState {
+  root: ChannelMessage | null;
+  items: ChannelMessage[];
+  nextBeforeSeq: number | null;
+  hasMore: boolean;
+  readSeq: number;
+  replyCount: number;
+  /** Least-recently-opened eviction order; never rendered. */
+  openedAt: number;
+}
+
+export const roomsOf = (items: ChannelSummary[]): ChannelSummary[] => items.filter((room) => room.kind === "room");
+export const dmsOf = (items: ChannelSummary[]): ChannelSummary[] => items.filter((room) => room.kind === "dm");
+
+/** The other accounts in a DM, never the viewer. A gone member leaves a readable fallback. */
+export function dmTitle(room: Pick<ChannelSummary, "dmMembers">, meId: string | null): string {
+  const others = (room.dmMembers ?? []).filter((member) => member.id !== meId);
+  if (!others.length) return t("channels.deletedAccount");
+  if (others.length === 1) return others[0]!.name;
+  return t("channels.dmTitle", { names: formatList(others.map((member) => member.name), { type: "conjunction", style: "short" }) });
+}
+
+export function threadLabel(thread: ChannelThreadSummary | null): "none" | "unread" | "replies" {
+  if (!thread || thread.replyCount === 0) return "none";
+  return thread.unread > 0 ? "unread" : "replies";
+}
+
+/** Applies a page without dropping replies already loaded, and never moves a read cursor back. */
+export function mergeThread(current: ChannelThreadState | undefined, page: ChannelThreadPage): ChannelThreadState {
+  const items = capMessages(mergeMessages(current?.items ?? [], page.items), MAX_THREAD_MESSAGES);
+  return {
+    root: page.root,
+    items,
+    nextBeforeSeq: page.nextBeforeSeq,
+    hasMore: page.hasMore,
+    readSeq: Math.max(current?.readSeq ?? 0, page.readSeq),
+    replyCount: page.replyCount,
+    openedAt: current?.openedAt ?? Date.now(),
+  };
+}
 
 export function sortMessages(items: ChannelMessage[]): ChannelMessage[] {
   return [...items].sort((a, b) => a.seq - b.seq);

@@ -1,6 +1,7 @@
 import { db } from "../db.js";
 import type {
   ChannelAiSummary,
+  ChannelAttachment,
   ChannelCapabilities,
   ChannelDirectoryEntry,
   ChannelInviteSummary,
@@ -17,8 +18,9 @@ import type {
   ChannelReaction,
   ChannelNotifyMode,
 } from "../../shared/channels.js";
-import { CHANNEL_REACTIONS, isChannelRunState } from "../../shared/channels.js";
+import { CHANNEL_LIMITS, CHANNEL_REACTIONS, channelAttachmentUrl, isChannelRunState } from "../../shared/channels.js";
 import type { ChannelRow, MemberRow } from "./access.js";
+import { threadsUnreadCount, threadUnreadByRoot } from "./thread-counts.js";
 
 /** Read-only projections shared by REST, sync, and events. No authorization decision lives here. */
 
@@ -30,6 +32,7 @@ export interface ChannelMessageRow {
   kind: "human" | "ai";
   body: string;
   reply_to: string | null;
+  thread_root: string | null;
   client_id: string | null;
   request_hash: string | null;
   revision: number;
@@ -71,15 +74,19 @@ export function parseAi(value: string | null): ChannelAiSummary | null {
   return null;
 }
 
-export function capabilitiesOf(channel: Pick<ChannelRow, "archived_at" | "ai_json">, member: MemberRow | null, eligible: boolean): ChannelCapabilities {
+export function capabilitiesOf(channel: Pick<ChannelRow, "archived_at" | "ai_json" | "kind">, member: MemberRow | null, eligible: boolean): ChannelCapabilities {
   const present = !!member && eligible;
   // Archive blocks posting and AI, but moderators still need unarchive, removal, and owner transfer.
   const post = present && channel.archived_at === null;
+  // A DM is never a room: it has no AI, invites, roles, archive, or audience surface.
+  const room = channel.kind !== "dm";
   return {
     post,
-    moderate: present && (member.role === "owner" || member.role === "moderator"),
-    manage: present && member.role === "owner",
-    requestAi: post && !!channel.ai_json,
+    moderate: present && room && (member.role === "owner" || member.role === "moderator"),
+    manage: present && room && member.role === "owner",
+    requestAi: post && room && !!channel.ai_json,
+    attach: post,
+    thread: post,
   };
 }
 
@@ -92,7 +99,7 @@ export function unreadCounts(channelId: string, userId: string, readSeq: number)
     db
       .prepare(
         `SELECT COUNT(*) AS n FROM channel_messages
-         WHERE channel_id = ? AND seq > ? AND deleted_at IS NULL
+         WHERE channel_id = ? AND seq > ? AND deleted_at IS NULL AND thread_root IS NULL
            AND (kind = 'ai' OR author_id IS NULL OR author_id <> ?)`,
       )
       .get(channelId, readSeq, userId) as { n: number }
@@ -102,7 +109,8 @@ export function unreadCounts(channelId: string, userId: string, readSeq: number)
       .prepare(
         `SELECT COUNT(*) AS n FROM channel_messages m
          JOIN channel_mentions mm ON mm.message_id = m.id
-         WHERE m.channel_id = ? AND m.seq > ? AND m.deleted_at IS NULL AND m.kind = 'human' AND m.author_id <> ? AND mm.user_id = ?`,
+         WHERE m.channel_id = ? AND m.seq > ? AND m.deleted_at IS NULL AND m.thread_root IS NULL
+           AND m.kind = 'human' AND m.author_id <> ? AND mm.user_id = ?`,
       )
       .get(channelId, readSeq, userId, userId) as { n: number }
   ).n;
@@ -111,6 +119,7 @@ export function unreadCounts(channelId: string, userId: string, readSeq: number)
 
 export function channelSummary(channel: ChannelRow, member: MemberRow | null, eligible: boolean, userId: string): ChannelSummary {
   const { unread, mentionsUnread } = member ? unreadCounts(channel.id, userId, member.read_seq) : { unread: 0, mentionsUnread: 0 };
+  const dm = channel.kind === "dm";
   return {
     id: channel.id,
     name: channel.name,
@@ -128,7 +137,20 @@ export function channelSummary(channel: ChannelRow, member: MemberRow | null, el
     mentionsUnread,
     ai: parseAi(channel.ai_json),
     capabilities: capabilitiesOf(channel, member, eligible),
+    kind: dm ? "dm" : "room",
+    dmMembers: dm ? dmMembersOf(channel.id) : null,
+    threadsUnread: member ? threadsUnreadCount(channel.id, userId) : 0,
   };
+}
+
+/** DM members for the title and header. Names only; bounded by the DM member cap. */
+export function dmMembersOf(channelId: string): ChannelMessageAuthor[] {
+  return db
+    .prepare(
+      `SELECT u.id, u.name FROM channel_members m JOIN users u ON u.id = m.user_id
+       WHERE m.channel_id = ? ORDER BY m.joined_at, m.user_id LIMIT ?`,
+    )
+    .all(channelId, CHANNEL_LIMITS.dmMembers) as unknown as ChannelMessageAuthor[];
 }
 
 export function directoryEntry(channel: ChannelRow, joinable: boolean, invited: boolean): ChannelDirectoryEntry {
@@ -231,6 +253,28 @@ function mentionsOf(messageId: string): Array<{ userId: string; start: number; e
   );
 }
 
+export function attachmentProjection(row: {
+  id: string;
+  channel_id: string;
+  name: string;
+  mime: string;
+  size: number;
+  file: 0 | 1;
+  width: number | null;
+  height: number | null;
+}): ChannelAttachment {
+  return {
+    id: row.id,
+    name: row.name,
+    mime: row.mime,
+    size: row.size,
+    width: row.width,
+    height: row.height,
+    image: row.file === 1,
+    url: channelAttachmentUrl(row.channel_id, row.id),
+  };
+}
+
 /** One page of messages, best-first input order is preserved. */
 export function projectMessages(rows: ChannelMessageRow[], userId: string): ChannelMessage[] {
   if (!rows.length) return [];
@@ -241,10 +285,48 @@ export function projectMessages(rows: ChannelMessageRow[], userId: string): Chan
     )
     .all(...rows.map((row) => row.id)) as unknown as ChannelRunRow[];
   const runs = new Map(runRows.map((row) => [row.message_id, row]));
+
+  const rootIds = rows.filter((row) => row.thread_root === null).map((row) => row.id);
+  const threadRows = rootIds.length
+    ? (db.prepare(`SELECT * FROM channel_thread_state WHERE root_id IN (${rootIds.map(() => "?").join(",")})`).all(...rootIds) as Array<{
+        root_id: string;
+        reply_count: number;
+        last_seq: number;
+        last_at: number;
+        last_author_id: string | null;
+      }>)
+    : [];
+  const threads = new Map(threadRows.map((row) => [row.root_id, row]));
+  const unread = threadUnreadByRoot(rows[0]!.channel_id, userId, rootIds);
+
+  const attachmentRows = db
+    .prepare(
+      `SELECT id, channel_id, message_id, name, mime, size, file, width, height FROM channel_attachments
+       WHERE message_id IN (${rows.map(() => "?").join(",")}) ORDER BY id`,
+    )
+    .all(...rows.map((row) => row.id)) as Array<{
+    id: string;
+    channel_id: string;
+    message_id: string;
+    name: string;
+    mime: string;
+    size: number;
+    file: 0 | 1;
+    width: number | null;
+    height: number | null;
+  }>;
+  const attachments = new Map<string, ChannelAttachment[]>();
+  for (const row of attachmentRows) {
+    const list = attachments.get(row.message_id) ?? [];
+    list.push(attachmentProjection(row));
+    attachments.set(row.message_id, list);
+  }
+
   return rows.map((row) => {
     const run = runs.get(row.id);
     const deleted = row.deleted_at !== null;
     const aiConfig = run ? (JSON.parse(run.config_json) as { binding?: { label?: string }; injectionFlagged?: boolean }) : null;
+    const state = row.thread_root === null && !deleted ? threads.get(row.id) : undefined;
     return {
       id: row.id,
       channelId: row.channel_id,
@@ -261,6 +343,11 @@ export function projectMessages(rows: ChannelMessageRow[], userId: string): Chan
       deletedAt: row.deleted_at,
       aiRun: runProjection(run),
       ...(row.kind === "ai" ? { aiLabel: aiConfig?.binding?.label ?? null, aiRequester: run?.requester_id ? authorOf(run.requester_id) : null, injectionFlagged: aiConfig?.injectionFlagged === true } : {}),
+      threadRootId: row.thread_root,
+      thread: state
+        ? { replyCount: state.reply_count, lastReplySeq: state.last_seq, lastReplyAt: state.last_at, unread: unread.get(row.id) ?? 0 }
+        : null,
+      attachments: deleted ? [] : (attachments.get(row.id) ?? []),
     };
   });
 }

@@ -3,6 +3,8 @@ import type {
   ChannelChangesPage,
   ChannelChangesReset,
   ChannelDirectoryEntry,
+  ChannelAttachment,
+  ChannelDmBlock,
   ChannelInviteSummary,
   ChannelMemberSummary,
   ChannelMessage,
@@ -10,6 +12,7 @@ import type {
   ChannelSearchPage,
   ChannelSummary,
   ChannelSync,
+  ChannelThreadPage,
   ChannelVisibility,
   ChannelIcon,
   ChannelRole,
@@ -74,8 +77,30 @@ export const channelsApi = {
     return api<ChannelMessagePage>(path(id, `/messages${params.size ? `?${params}` : ""}`));
   },
   message: (id: string, messageId: string) => api<{ message: ChannelMessage; cursor: string }>(path(id, `/messages/${encodeURIComponent(messageId)}`)),
-  post: (id: string, input: { clientId: string; body: string; replyTo?: string; mentions?: ChannelMentionInput[]; requestAi?: boolean }) =>
+  post: (id: string, input: { clientId: string; body: string; replyTo?: string; threadRootId?: string; mentions?: ChannelMentionInput[]; attachmentIds?: string[]; requestAi?: boolean }) =>
     api<{ message: ChannelMessage; messageId?: string; runId?: string | null; cursor?: string }>(path(id, "/messages"), { method: "POST", json: input }),
+  uploadAttachment: (id: string, file: File, signal?: AbortSignal) => {
+    const form = new FormData();
+    form.set("file", file);
+    return api<{ attachment: ChannelAttachment }>(path(id, "/attachments"), { method: "POST", body: form, signal });
+  },
+  deleteAttachment: (id: string, attachmentId: string) =>
+    api<{ ok: true }>(path(id, `/attachments/${encodeURIComponent(attachmentId)}`), { method: "DELETE" }),
+  thread: (id: string, messageId: string, query: { beforeSeq?: number; afterSeq?: number; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (query.beforeSeq !== undefined) params.set("beforeSeq", String(query.beforeSeq));
+    if (query.afterSeq !== undefined) params.set("afterSeq", String(query.afterSeq));
+    if (query.limit !== undefined) params.set("limit", String(query.limit));
+    return api<ChannelThreadPage>(path(id, `/messages/${encodeURIComponent(messageId)}/thread${params.size ? `?${params}` : ""}`));
+  },
+  threadRead: (id: string, rootId: string, throughSeq: number) =>
+    api<{ readSeq: number; unread: number }>(path(id, `/threads/${encodeURIComponent(rootId)}/read`), { method: "POST", json: { throughSeq } }),
+  people: (email: string) => api<{ items: Array<{ id: string; name: string }> }>(`/channels/people?q=${encodeURIComponent(email)}`),
+  createDm: (input: { clientId: string; userIds: string[] }) => api<{ channel: ChannelSummary }>("/channels/dms", { method: "POST", json: input }),
+  addDmMembers: (id: string, userIds: string[]) => api<{ channel: ChannelSummary }>(path(id, "/members"), { method: "POST", json: { userIds } }),
+  blocks: () => api<{ items: ChannelDmBlock[] }>("/channels/dm-blocks"),
+  block: (userId: string) => api<{ ok: true }>(`/channels/dm-blocks/${encodeURIComponent(userId)}`, { method: "POST", json: {} }),
+  unblockDm: (userId: string) => api<{ ok: true }>(`/channels/dm-blocks/${encodeURIComponent(userId)}`, { method: "DELETE" }),
   editMessage: (id: string, messageId: string, input: { revision: number; body: string; mentions?: ChannelMentionInput[] }) =>
     api<{ message: ChannelMessage }>(path(id, `/messages/${encodeURIComponent(messageId)}`), { method: "PATCH", json: input }),
   deleteMessage: (id: string, messageId: string, revision: number, reason?: string) =>

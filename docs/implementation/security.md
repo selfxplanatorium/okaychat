@@ -119,6 +119,23 @@ projects, files, RAG, or account instructions, and uses a reduced binding that n
 provider key. Active runs recheck access before retries and checkpoints. Admin inspection is a separate
 audited route and does not fabricate membership. See `docs/implementation/channels.md`.
 
+Channel attachment reads call `assertChannelMember` before touching a file or BLOB and again verify the
+message is live; no public or share route resolves a channel attachment. The filename is display-only
+(never a path), `Content-Disposition` uses the RFC 5987 form, rasters are identified by magic bytes (SVG is
+refused), and anything not a raster downloads with `nosniff` and `default-src 'none'; sandbox`. The quota
+check runs before the first byte is written; a failed write leaves no row and no file. Preview responses
+are `private, no-cache` with `Vary: Cookie`; non-image bytes are `private, no-store`.
+
+Direct messages are excluded from `/api/admin/channels` list, inspect, patch, delete, and moderate (404
+before the reason check) and never write an audit row, so an admin cannot read or enumerate them through
+the app. A DM is still a `channels` row: anyone with direct database access can read it. That is the
+residual risk of storing DMs in the same file, and it is accepted for this self-hosted product. DM
+creation and member additions require a shared group (admins exempt), check blocks both ways inside the
+transaction, and the people lookup returns an empty list for a miss, a channel-disabled account, a blocked
+pair, and a non-shared group, so the endpoint is not an account directory. Thread placement validates the
+same room and one-level depth inside the write transaction; a reply cannot be a root, and replies never
+enter the room AI transcript.
+
 ## External API access
 
 `/v1` is a separate authentication surface. A bearer credential never sets `user` or `session`, so it cannot

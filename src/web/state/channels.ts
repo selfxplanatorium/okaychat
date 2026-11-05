@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { generateId } from "ai";
 import type {
+  ChannelAttachment,
+  ChannelDmBlock,
   ChannelDirectoryEntry,
   ChannelEventFrame,
   ChannelIcon,
@@ -11,12 +13,15 @@ import type {
   ChannelMentionInput,
   ChannelNotifyMode,
   ChannelSummary,
+  ChannelThreadPage,
   ChannelVisibility,
 } from "@shared/channels";
+import { CHANNEL_LIMITS } from "@shared/channels";
+import { t } from "@/i18n";
 import { channelError } from "@/lib/channel-error";
 import { channelsApi, type ChannelBindingRequest } from "./channels-api";
 import { startChannelTransport, type TransportState } from "./channels-events";
-import { capMessages, mergeMessages, mergeMessage, newestSeq, reconcileRooms, sortMessages, totalUnread } from "./channels-derive";
+import { capMessages, mergeMessages, mergeMessage, mergeThread, newestSeq, reconcileRooms, sortMessages, totalUnread, MAX_THREADS_IN_MEMORY, type ChannelThreadState } from "./channels-derive";
 
 /** In-memory channel workspace state. No room text, drafts, or history may touch browser storage. */
 
@@ -27,8 +32,22 @@ interface PendingSend {
   clientId: string;
   body: string;
   replyTo?: string;
+  threadRootId?: string;
+  attachmentIds?: string[];
   mentions?: ChannelMentionInput[];
   requestAi: boolean;
+}
+
+export interface PendingAttachment {
+  localId: string;
+  name: string;
+  size: number;
+  status: "uploading" | "ready" | "failed";
+  attachment?: ChannelAttachment;
+  /** Kept in memory only, so a failed chip can retry without asking for the file again. */
+  file?: File;
+  /** A translated reason for a failed upload; never a server body. */
+  error?: string;
 }
 
 interface ChannelsState {
@@ -55,6 +74,13 @@ interface ChannelsState {
   replyTo: Record<string, ChannelMessage | null>;
   aiArmed: Record<string, boolean>;
   pending: Record<string, PendingSend | null>;
+  pendingAttachments: Record<string, PendingAttachment[]>;
+  uploading: Record<string, number>;
+  activeThreadId: string | null;
+  threadStatus: "idle" | "loading" | "ready" | "error";
+  threadFocusId: string | null;
+  threads: Record<string, ChannelThreadState>;
+  blocks: ChannelDmBlock[];
   sending: boolean;
   notice: string | null;
   start: (accountId: string) => Promise<void>;
@@ -71,6 +97,21 @@ interface ChannelsState {
   setReply: (message: ChannelMessage | null) => void;
   setAiArmed: (armed: boolean) => void;
   send: (input: { body: string; mentions?: ChannelMentionInput[]; requestAi: boolean }) => Promise<void>;
+  attachFiles: (composerKey: string, files: File[]) => Promise<void>;
+  removePendingAttachment: (composerKey: string, localId: string) => void;
+  clearPendingAttachments: (composerKey: string) => void;
+  openThread: (rootId: string) => Promise<void>;
+  closeThread: () => void;
+  loadThread: (rootId: string, beforeSeq?: number) => Promise<void>;
+  sendToThread: (rootId: string, input: { body: string; mentions?: ChannelMentionInput[]; replyTo?: string }) => Promise<void>;
+  markThreadRead: (rootId: string, seq?: number) => Promise<void>;
+  loadBlocks: () => Promise<void>;
+  blockUser: (userId: string) => Promise<void>;
+  unblockUser: (userId: string) => Promise<void>;
+  createDm: (userIds: string[]) => Promise<string | null>;
+  addDmMembers: (userIds: string[]) => Promise<boolean>;
+  lookupPeople: (email: string) => Promise<Array<{ id: string; name: string }>>;
+  setThreadFocus: (messageId: string | null) => void;
   edit: (messageId: string, body: string, mentions?: ChannelMentionInput[]) => Promise<boolean>;
   removeMessage: (messageId: string) => Promise<void>;
   react: (messageId: string, emoji: string, add: boolean) => Promise<void>;
@@ -116,8 +157,45 @@ export const useChannels = create<ChannelsState>((set, get) => {
     });
   };
 
-  const clearRoomText = (roomId: string) => {
-    set((state) => {
+  /** A message can be the root of one thread or a reply in another; keep both projections fresh. */
+  const mergeIntoThreads = (threads: Record<string, ChannelThreadState>, message: ChannelMessage): Record<string, ChannelThreadState> => {
+    let changed = false;
+    const next = { ...threads };
+    for (const [rootId, thread] of Object.entries(threads)) {
+      const isRoot = thread.root?.id === message.id;
+      const isReply = thread.items.some((item) => item.id === message.id);
+      if (!isRoot && !isReply) continue;
+      changed = true;
+      next[rootId] = {
+        ...thread,
+        root: isRoot && thread.root ? mergeMessage(thread.root, message) : thread.root,
+        items: isReply ? mergeMessages(thread.items, [message]) : thread.items,
+      };
+    }
+    return changed ? next : threads;
+  };
+
+  const findMessage = (state: ChannelsState, roomId: string, messageId: string): ChannelMessage | undefined => {
+    const direct = (state.messages[roomId] ?? []).find((message) => message.id === messageId);
+    if (direct) return direct;
+    for (const thread of Object.values(state.threads)) {
+      if (thread.root?.id === messageId) return thread.root;
+      const reply = thread.items.find((message) => message.id === messageId);
+      if (reply) return reply;
+    }
+    return undefined;
+  };
+
+  const updateChip = (composerKey: string, localId: string, patch: Partial<PendingAttachment>) => {
+    set((state) => ({
+      pendingAttachments: {
+        ...state.pendingAttachments,
+        [composerKey]: (state.pendingAttachments[composerKey] ?? []).map((chip) => (chip.localId === localId ? { ...chip, ...patch } : chip)),
+      },
+    }));
+  };
+
+  const clearRoomText = (roomId: string) => {    set((state) => {
       const messages = { ...state.messages };
       const pages = { ...state.pages };
       delete messages[roomId];
@@ -130,7 +208,25 @@ export const useChannels = create<ChannelsState>((set, get) => {
       delete replyTo[roomId];
       delete aiArmed[roomId];
       delete pending[roomId];
-      return { messages, pages, drafts, replyTo, aiArmed, pending };
+      // Pending chips and open thread panels belong to the room that just went away.
+      const pendingAttachments = { ...state.pendingAttachments };
+      const uploading = { ...state.uploading };
+      for (const key of Object.keys(pendingAttachments)) if (key === `room:${roomId}` || key.startsWith("thread:")) delete pendingAttachments[key];
+      for (const key of Object.keys(uploading)) if (key === `room:${roomId}` || key.startsWith("thread:")) delete uploading[key];
+      return {
+        messages,
+        pages,
+        drafts,
+        replyTo,
+        aiArmed,
+        pending,
+        pendingAttachments,
+        uploading,
+        activeThreadId: null,
+        threadStatus: "idle" as const,
+        threadFocusId: null,
+        threads: {},
+      };
     });
   };
 
@@ -211,10 +307,16 @@ export const useChannels = create<ChannelsState>((set, get) => {
       }
       if (event.type === "channel.changed" && event.channelId) {
         scheduleRoomRefresh(event.channelId);
+        const active = get().room;
+        if (active && "kind" in active && active.id === event.channelId && active.kind === "dm") void get().refreshRoom();
         continue;
       }
       if (event.type === "message.changed" && event.channelId && event.entityId) {
         if (get().activeRoomId !== event.channelId) continue;
+        if (event.rootId) {
+          void get().refreshMessage(event.rootId);
+          if (get().activeThreadId === event.rootId) void mergeThreadReplies(event.rootId);
+        }
         const ids = pendingMessageIds.get(event.channelId) ?? new Set<string>();
         ids.add(event.entityId);
         // A changed quote target invalidates every cached reply preview that points at it.
@@ -233,7 +335,28 @@ export const useChannels = create<ChannelsState>((set, get) => {
       if (event.type === "read.changed" && event.channelId) {
         const active = get().activeRoomId === event.channelId;
         if (active) scheduleRoomRefresh(event.channelId);
+        if (event.rootId && event.version !== undefined) {
+          set((state) => {
+            const thread = state.threads[event.rootId!];
+            if (!thread || event.version! <= thread.readSeq) return {};
+            return { threads: { ...state.threads, [event.rootId!]: { ...thread, readSeq: event.version! } } };
+          });
+        }
       }
+    }
+  };
+
+  const mergeThreadReplies = async (rootId: string) => {
+    const roomId = get().activeRoomId;
+    if (!roomId) return;
+    const thread = get().threads[rootId];
+    const afterSeq = thread?.items.at(-1)?.seq;
+    try {
+      const page = await channelsApi.thread(roomId, rootId, afterSeq === undefined ? {} : { afterSeq });
+      if (get().activeRoomId !== roomId) return;
+      set((state) => ({ threads: { ...state.threads, [rootId]: mergeThread(state.threads[rootId], page) } }));
+    } catch {
+      if (get().activeRoomId === roomId) void get().loadThread(rootId);
     }
   };
 
@@ -271,6 +394,13 @@ export const useChannels = create<ChannelsState>((set, get) => {
       replyTo: {},
       aiArmed: {},
       pending: {},
+      pendingAttachments: {},
+      uploading: {},
+      activeThreadId: null,
+      threadStatus: "idle",
+      threadFocusId: null,
+      threads: {},
+      blocks: [],
       sending: false,
       notice: null,
     });
@@ -283,7 +413,21 @@ export const useChannels = create<ChannelsState>((set, get) => {
       onFrames: handleFrames,
       onReset: () => {
         // Clear cached text first; sync decides which rooms still exist before anything is reloaded.
-        set((state) => ({ messages: {}, pages: {}, members: [], room: null, roomStatus: "idle", notice: null, generation: state.generation + 1 }));
+        set((state) => ({
+          messages: {},
+          pages: {},
+          members: [],
+          room: null,
+          roomStatus: "idle",
+          notice: null,
+          generation: state.generation + 1,
+          threads: {},
+          activeThreadId: null,
+          threadStatus: "idle",
+          threadFocusId: null,
+          pendingAttachments: {},
+          uploading: {},
+        }));
       },
       onRevoked: () => {
         resetData(get().accountId);
@@ -323,6 +467,13 @@ export const useChannels = create<ChannelsState>((set, get) => {
     replyTo: {},
     aiArmed: {},
     pending: {},
+    pendingAttachments: {},
+    uploading: {},
+    activeThreadId: null,
+    threadStatus: "idle",
+    threadFocusId: null,
+    threads: {},
+    blocks: [],
     sending: false,
     notice: null,
 
@@ -369,7 +520,17 @@ export const useChannels = create<ChannelsState>((set, get) => {
             drafts,
             replyTo,
             aiArmed,
-            ...(lost ? { activeRoomId: null, room: null, roomStatus: "idle" as const } : {}),
+            ...(lost ? {
+              activeRoomId: null,
+              room: null,
+              roomStatus: "idle" as const,
+              activeThreadId: null,
+              threadStatus: "idle" as const,
+              threadFocusId: null,
+              threads: {},
+              pendingAttachments: {},
+              uploading: {},
+            } : {}),
             ...(activeStill && state.room && !("joinable" in state.room) ? { room: activeStill } : {}),
           };
         });
@@ -401,6 +562,10 @@ export const useChannels = create<ChannelsState>((set, get) => {
 
     selectRoom: async (id) => {
       const generation = get().generation;
+      if (get().activeRoomId !== id) {
+        // A different room owns its own chips, drafts, and thread panels.
+        set({ activeThreadId: null, threadStatus: "idle", threadFocusId: null, threads: {}, pendingAttachments: {}, uploading: {} });
+      }
       set({ activeRoomId: id, roomStatus: "loading", error: null, notice: null });
       try {
         const { channel } = await channelsApi.get(id);
@@ -472,7 +637,10 @@ export const useChannels = create<ChannelsState>((set, get) => {
       if (!id) return;
       try {
         const { message } = await channelsApi.message(id, messageId);
-        set((state) => ({ messages: { ...state.messages, [id]: mergeMessages(state.messages[id] ?? [], [message]) } }));
+        set((state) => ({
+          messages: { ...state.messages, [id]: mergeMessages(state.messages[id] ?? [], [message]) },
+          threads: mergeIntoThreads(state.threads, message),
+        }));
       } catch {
         void get().loadHistory();
       }
@@ -482,6 +650,13 @@ export const useChannels = create<ChannelsState>((set, get) => {
       const id = get().activeRoomId;
       if (!id) return;
       try {
+        const { message } = await channelsApi.message(id, messageId);
+        if (message.threadRootId) {
+          // A reply opens its thread panel; the room timeline never anchors on it.
+          await get().openThread(message.threadRootId);
+          set({ threadFocusId: message.id });
+          return;
+        }
         const page = await channelsApi.messages(id, { aroundId: messageId });
         set((state) => ({
           messages: { ...state.messages, [id]: mergeMessages(state.messages[id] ?? [], page.items) },
@@ -514,16 +689,29 @@ export const useChannels = create<ChannelsState>((set, get) => {
       const id = get().activeRoomId;
       const room = get().room;
       if (!id || !room || !("capabilities" in room) || !room.capabilities.post) return;
+      const composerKey = `room:${id}`;
+      const chips = get().pendingAttachments[composerKey] ?? [];
+      if (chips.some((chip) => chip.status === "uploading")) {
+        set({ error: t("channels.attachmentUploading") });
+        return;
+      }
+      const attachmentIds = chips.flatMap((chip) => (chip.status === "ready" && chip.attachment ? [chip.attachment.id] : []));
       const text = body.replace(/\r\n/g, "\n");
-      if (!text.trim()) return;
+      if (!text.trim() && !attachmentIds.length) return;
       const prior = get().pending[id];
-      const same = prior && prior.body === text && prior.requestAi === requestAi && (prior.replyTo ?? null) === (get().replyTo[id]?.id ?? null);
+      const same =
+        prior &&
+        prior.body === text &&
+        prior.requestAi === requestAi &&
+        (prior.replyTo ?? null) === (get().replyTo[id]?.id ?? null) &&
+        JSON.stringify(prior.attachmentIds ?? []) === JSON.stringify(attachmentIds);
       const clientId = same ? prior.clientId : generateId();
       const pending: PendingSend = {
         clientId,
         body: text,
         requestAi,
         ...(get().replyTo[id]?.id ? { replyTo: get().replyTo[id]!.id } : {}),
+        ...(attachmentIds.length ? { attachmentIds } : {}),
         ...(mentions?.length ? { mentions } : {}),
       };
       set((state) => ({ pending: { ...state.pending, [id]: pending }, sending: true, error: null, notice: null }));
@@ -535,12 +723,15 @@ export const useChannels = create<ChannelsState>((set, get) => {
         }
         set((state) => {
           const messages = result.message ? mergeMessages(state.messages[id] ?? [], [result.message]) : state.messages[id] ?? [];
+          const pendingAttachments = { ...state.pendingAttachments };
+          delete pendingAttachments[composerKey];
           return {
             messages: { ...state.messages, [id]: messages },
             drafts: { ...state.drafts, [id]: "" },
             replyTo: { ...state.replyTo, [id]: null },
             aiArmed: { ...state.aiArmed, [id]: false },
             pending: { ...state.pending, [id]: null },
+            pendingAttachments,
             sending: false,
           };
         });
@@ -551,14 +742,263 @@ export const useChannels = create<ChannelsState>((set, get) => {
       }
     },
 
+    attachFiles: async (composerKey, files) => {
+      const id = get().activeRoomId;
+      const room = get().room;
+      if (!id || !room || !("capabilities" in room) || !room.capabilities.attach) return;
+      const existing = get().pendingAttachments[composerKey] ?? [];
+      let count = existing.length;
+      const accepted: Array<{ localId: string; file: File }> = [];
+      const rejected: PendingAttachment[] = [];
+      for (const file of files) {
+        if (count >= CHANNEL_LIMITS.attachmentsPerMessage) {
+          rejected.push({ localId: generateId(), name: file.name, size: file.size, status: "failed", error: t("channels.attachmentTooMany") });
+          continue;
+        }
+        if (file.size > CHANNEL_LIMITS.attachmentBytes) {
+          rejected.push({ localId: generateId(), name: file.name, size: file.size, status: "failed", error: t("channels.attachmentTooLarge") });
+          continue;
+        }
+        if (/\.svg$/i.test(file.name) || file.type === "image/svg+xml") {
+          rejected.push({ localId: generateId(), name: file.name, size: file.size, status: "failed", error: t("channels.attachmentTypeBlocked") });
+          continue;
+        }
+        count++;
+        accepted.push({ localId: generateId(), file });
+      }
+      if (!accepted.length) {
+        set((state) => ({ pendingAttachments: { ...state.pendingAttachments, [composerKey]: [...existing, ...rejected] } }));
+        return;
+      }
+      const chips: PendingAttachment[] = accepted.map(({ localId, file }) => ({ localId, name: file.name, size: file.size, status: "uploading", file }));
+      set((state) => ({
+        pendingAttachments: { ...state.pendingAttachments, [composerKey]: [...existing, ...chips, ...rejected] },
+        uploading: { ...state.uploading, [composerKey]: (state.uploading[composerKey] ?? 0) + accepted.length },
+      }));
+      await Promise.all(
+        accepted.map(async ({ localId, file }) => {
+          try {
+            const { attachment } = await channelsApi.uploadAttachment(id, file);
+            updateChip(composerKey, localId, { status: "ready", attachment });
+          } catch (error) {
+            updateChip(composerKey, localId, { status: "failed", error: channelError(error, "channels.attachmentFailed", { owner: room.ownerId === get().accountId }) });
+          } finally {
+            set((state) => ({ uploading: { ...state.uploading, [composerKey]: Math.max(0, (state.uploading[composerKey] ?? 1) - 1) } }));
+          }
+        }),
+      );
+    },
+
+    removePendingAttachment: (composerKey, localId) => {
+      const chip = (get().pendingAttachments[composerKey] ?? []).find((item) => item.localId === localId);
+      const id = get().activeRoomId;
+      if (chip?.status === "ready" && chip.attachment && id) void channelsApi.deleteAttachment(id, chip.attachment.id).catch(() => {});
+      set((state) => ({
+        pendingAttachments: { ...state.pendingAttachments, [composerKey]: (state.pendingAttachments[composerKey] ?? []).filter((item) => item.localId !== localId) },
+      }));
+    },
+
+    clearPendingAttachments: (composerKey) => {
+      const id = get().activeRoomId;
+      for (const chip of get().pendingAttachments[composerKey] ?? []) {
+        if (chip.status === "ready" && chip.attachment && id) void channelsApi.deleteAttachment(id, chip.attachment.id).catch(() => {});
+      }
+      set((state) => ({ pendingAttachments: { ...state.pendingAttachments, [composerKey]: [] } }));
+    },
+
+    openThread: async (rootId) => {
+      if (!get().activeRoomId) return;
+      set({ activeThreadId: rootId, threadStatus: "loading", threadFocusId: null });
+      await get().loadThread(rootId);
+    },
+
+    closeThread: () => set({ activeThreadId: null, threadStatus: "idle", threadFocusId: null }),
+
+    loadThread: async (rootId, beforeSeq) => {
+      const id = get().activeRoomId;
+      if (!id) return;
+      const generation = get().generation;
+      try {
+        const page = await channelsApi.thread(id, rootId, beforeSeq === undefined ? {} : { beforeSeq });
+        if (generation !== get().generation || get().activeRoomId !== id) return;
+        set((state) => {
+          const threads = { ...state.threads, [rootId]: mergeThread(state.threads[rootId], page) };
+          // At most three open threads keep their replies; the least recently opened goes first.
+          const keys = Object.keys(threads);
+          if (keys.length > MAX_THREADS_IN_MEMORY) {
+            const oldest = keys.filter((key) => key !== rootId).sort((a, b) => threads[a]!.openedAt - threads[b]!.openedAt)[0];
+            if (oldest) delete threads[oldest];
+          }
+          const messages = mergeMessages(state.messages[id] ?? [], [page.root]);
+          return {
+            threads,
+            threadStatus: state.activeThreadId === rootId ? "ready" : state.threadStatus,
+            messages: { ...state.messages, [id]: messages },
+          };
+        });
+      } catch (error) {
+        if (generation === get().generation && get().activeRoomId === id) {
+          set({ threadStatus: "error", error: safeError(error, "channels.notFound") });
+        }
+      }
+    },
+
+    sendToThread: async (rootId, { body, mentions, replyTo }) => {
+      const id = get().activeRoomId;
+      const room = get().room;
+      if (!id || !room || !("capabilities" in room) || !room.capabilities.thread) return;
+      const composerKey = `thread:${rootId}`;
+      const chips = get().pendingAttachments[composerKey] ?? [];
+      if (chips.some((chip) => chip.status === "uploading")) {
+        set({ error: t("channels.attachmentUploading") });
+        return;
+      }
+      const attachmentIds = chips.flatMap((chip) => (chip.status === "ready" && chip.attachment ? [chip.attachment.id] : []));
+      const text = body.replace(/\r\n/g, "\n");
+      if (!text.trim() && !attachmentIds.length) return;
+      const prior = get().pending[composerKey];
+      const same = prior && prior.body === text && prior.threadRootId === rootId && JSON.stringify(prior.attachmentIds ?? []) === JSON.stringify(attachmentIds);
+      const clientId = same ? prior.clientId : generateId();
+      const pending: PendingSend = {
+        clientId,
+        body: text,
+        requestAi: false,
+        threadRootId: rootId,
+        ...(replyTo ? { replyTo } : {}),
+        ...(attachmentIds.length ? { attachmentIds } : {}),
+        ...(mentions?.length ? { mentions } : {}),
+      };
+      set((state) => ({ pending: { ...state.pending, [composerKey]: pending }, sending: true, error: null }));
+      try {
+        const result = await channelsApi.post(id, pending);
+        if (get().activeRoomId !== id) {
+          set((state) => ({ sending: false, pending: { ...state.pending, [composerKey]: null } }));
+          return;
+        }
+        set((state) => {
+          const thread = state.threads[rootId];
+          const threads = thread && result.message
+            ? { ...state.threads, [rootId]: { ...thread, items: mergeMessages(thread.items, [result.message]), replyCount: thread.replyCount + 1 } }
+            : state.threads;
+          const pendingAttachments = { ...state.pendingAttachments };
+          delete pendingAttachments[composerKey];
+          return {
+            threads,
+            drafts: { ...state.drafts, [composerKey]: "" },
+            pending: { ...state.pending, [composerKey]: null },
+            pendingAttachments,
+            sending: false,
+          };
+        });
+        void get().refreshMessage(rootId);
+      } catch (error) {
+        if (get().activeRoomId === id) set({ sending: false, error: safeError(error, "channels.sendingFailed") });
+        else set({ sending: false });
+      }
+    },
+
+    markThreadRead: async (rootId, seq) => {
+      const id = get().activeRoomId;
+      const thread = get().threads[rootId];
+      if (!id || !thread) return;
+      const target = seq ?? newestSeq(thread.items);
+      if (target <= thread.readSeq) return;
+      try {
+        const result = await channelsApi.threadRead(id, rootId, target);
+        set((state) => {
+          const current = state.threads[rootId];
+          if (!current) return {};
+          const messages = (state.messages[id] ?? []).map((message) =>
+            message.id === rootId && message.thread ? { ...message, thread: { ...message.thread, unread: result.unread } } : message,
+          );
+          return {
+            threads: { ...state.threads, [rootId]: { ...current, readSeq: result.readSeq } },
+            messages: { ...state.messages, [id]: messages },
+          };
+        });
+      } catch {
+        // A cursor race is harmless: the next event or sync is authoritative.
+      }
+    },
+
+    loadBlocks: async () => {
+      try {
+        const result = await channelsApi.blocks();
+        set({ blocks: result.items });
+      } catch {
+        // The blocked list is optional context for the DM dialog.
+      }
+    },
+
+    blockUser: async (userId) => {
+      try {
+        await channelsApi.block(userId);
+        await get().loadBlocks();
+        await get().loadSync();
+      } catch (error) {
+        set({ error: safeError(error, "channels.notFound") });
+      }
+    },
+
+    unblockUser: async (userId) => {
+      try {
+        await channelsApi.unblockDm(userId);
+        await get().loadBlocks();
+      } catch (error) {
+        set({ error: safeError(error, "channels.notFound") });
+      }
+    },
+
+    createDm: async (userIds) => {
+      try {
+        const { channel } = await channelsApi.createDm({ clientId: generateId(), userIds });
+        set((state) => ({ joined: [channel, ...state.joined.filter((room) => room.id !== channel.id)] }));
+        await get().selectRoom(channel.id);
+        return channel.id;
+      } catch (error) {
+        set({ error: safeError(error, "channels.dmUnavailable") });
+        return null;
+      }
+    },
+
+    addDmMembers: async (userIds) => {
+      const id = get().activeRoomId;
+      if (!id) return false;
+      try {
+        const { channel } = await channelsApi.addDmMembers(id, userIds);
+        updateRoomSummary(channel);
+        set((state) => ({ joined: state.joined.map((room) => (room.id === channel.id ? channel : room)) }));
+        return true;
+      } catch (error) {
+        set({ error: safeError(error, "channels.dmUnavailable") });
+        return false;
+      }
+    },
+
+    lookupPeople: async (email) => {
+      try {
+        const result = await channelsApi.people(email);
+        return result.items;
+      } catch (error) {
+        set({ error: safeError(error, "channels.dmUnavailable") });
+        return [];
+      }
+    },
+
+    setThreadFocus: (messageId) => set({ threadFocusId: messageId }),
+
     edit: async (messageId, body, mentions) => {
       const id = get().activeRoomId;
       if (!id) return false;
-      const current = (get().messages[id] ?? []).find((message) => message.id === messageId);
+      const current = findMessage(get(), id, messageId);
       if (!current) return false;
       try {
         const { message } = await channelsApi.editMessage(id, messageId, { revision: current.revision, body: body.replace(/\r\n/g, "\n"), mentions });
-        set((state) => ({ messages: { ...state.messages, [id]: mergeMessages(state.messages[id] ?? [], [message]) }, error: null }));
+        set((state) => ({
+          messages: { ...state.messages, [id]: mergeMessages(state.messages[id] ?? [], [message]) },
+          threads: mergeIntoThreads(state.threads, message),
+          error: null,
+        }));
         return true;
       } catch (error) {
         set({ error: safeError(error, "channels.invalidMessage") });
@@ -569,7 +1009,7 @@ export const useChannels = create<ChannelsState>((set, get) => {
     removeMessage: async (messageId) => {
       const id = get().activeRoomId;
       if (!id) return;
-      const current = (get().messages[id] ?? []).find((message) => message.id === messageId);
+      const current = findMessage(get(), id, messageId);
       if (!current) return;
       try {
         await channelsApi.deleteMessage(id, messageId, current.revision);
@@ -584,7 +1024,10 @@ export const useChannels = create<ChannelsState>((set, get) => {
       if (!id) return;
       try {
         const { message } = await channelsApi.react(id, messageId, emoji, add);
-        set((state) => ({ messages: { ...state.messages, [id]: mergeMessages(state.messages[id] ?? [], [message]) } }));
+        set((state) => ({
+          messages: { ...state.messages, [id]: mergeMessages(state.messages[id] ?? [], [message]) },
+          threads: mergeIntoThreads(state.threads, message),
+        }));
       } catch (error) {
         set({ error: safeError(error, "channels.notFound") });
       }

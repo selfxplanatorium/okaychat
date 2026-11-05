@@ -10,7 +10,7 @@ import { channelsApi } from "@/state/channels-api";
 import { useCommand } from "@/keyboard/registry";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { channelError } from "@/lib/channel-error";
-import { nextUnreadAfter } from "@/state/channels-derive";
+import { dmTitle, nextUnreadAfter } from "@/state/channels-derive";
 import { Button } from "@/components/ui/button";
 import { ChannelList, type ChannelListMode } from "./ChannelList";
 import { ChannelHeader } from "./ChannelHeader";
@@ -21,12 +21,14 @@ import { ChannelMemberPanel } from "./ChannelMemberPanel";
 import { ChannelSettingsDialog } from "./ChannelSettingsDialog";
 import { CreateChannelDialog } from "./CreateChannelDialog";
 import { ChannelJoinDialog } from "./ChannelJoinDialog";
+import { ChannelDmDialog } from "./ChannelDmDialog";
+import { ChannelThreadPanel } from "./ChannelThreadPanel";
 import type { MessageActions } from "./ChannelMessageRow";
 
 // A stable empty list: a fresh `[]` from a selector re-renders forever (React error 185).
 const NO_MESSAGES: ChannelMessage[] = [];
 
-export function ChannelsPage({ channelId }: { channelId?: string }) {
+export function ChannelsPage({ channelId, threadRootId }: { channelId?: string; threadRootId?: string }) {
   const me = useData((state) => state.me);
   const [, navigate] = useLocation();
   const search = useSearch();
@@ -50,8 +52,11 @@ export function ChannelsPage({ channelId }: { channelId?: string }) {
   const drafts = useChannels((state) => state.drafts);
   const replyTo = useChannels((state) => state.replyTo);
   const aiArmed = useChannels((state) => state.aiArmed);
+  const activeThreadId = useChannels((state) => state.activeThreadId);
+  const threadStatus = useChannels((state) => state.threadStatus);
   const [mode, setMode] = useState<ChannelListMode>("joined");
   const [createOpen, setCreateOpen] = useState(false);
+  const [dmOpen, setDmOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -73,14 +78,18 @@ export function ChannelsPage({ channelId }: { channelId?: string }) {
   }, [channelId]);
 
   useEffect(() => {
+    if (!room || room.id !== channelId) return;
+    if (threadRootId && room.kind !== "dm" && activeThreadId !== threadRootId) void useChannels.getState().openThread(threadRootId);
+    if (!threadRootId && activeThreadId) useChannels.getState().closeThread();
+  }, [activeThreadId, channelId, room?.id, room?.kind, threadRootId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     if (mode === "discover" && !discover.length) void useChannels.getState().loadDiscover("");
   }, [mode, discover.length]);
 
   useEffect(() => {
     if (!messageId || !room) return;
     void jump(messageId);
-    // The query is an entry hint, not a permanent selection.
-    navigate(`/channels/${room.id}`, { replace: true });
   }, [messageId, room?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -123,6 +132,16 @@ export function ChannelsPage({ channelId }: { channelId?: string }) {
     const running = messages.find((message) => message.aiRun && (message.aiRun.state === "queued" || message.aiRun.state === "running"));
     if (running?.aiRun && room) void useChannels.getState().cancelAi(running.aiRun.id);
   });
+  useCommand("channels.openThread", () => {
+    const message = messages.find((item) => item.id === focusedId);
+    if (!message || !room) return;
+    openThread(message.threadRootId ?? message.id, message.threadRootId ? message.id : undefined);
+  });
+  useCommand("channels.closeThread", () => {
+    if (activeThreadId) closeThread();
+  });
+  useCommand("channels.attach", () => document.querySelector<HTMLButtonElement>("[data-channel-attach]")?.click());
+  useCommand("channels.newDm", () => setDmOpen(true));
 
   const askAi = async (message: ChannelMessage) => {
     if (!room) return;
@@ -138,10 +157,26 @@ export function ChannelsPage({ channelId }: { channelId?: string }) {
     if (!room) return;
     await useChannels.getState().jumpToMessage(messageId);
     setFocusedId(messageId);
+    const opened = useChannels.getState().activeThreadId;
+    navigate(opened ? `/channels/${room.id}/thread/${opened}` : `/channels/${room.id}`, { replace: true });
     requestAnimationFrame(() => {
       document.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(messageId)}"]`)?.focus({ preventScroll: false });
     });
   };
+
+  const openThread = useCallback(
+    (rootId: string, focusId?: string) => {
+      void useChannels.getState().openThread(rootId);
+      if (focusId) useChannels.getState().setThreadFocus(focusId);
+      if (room) navigate(`/channels/${room.id}/thread/${rootId}`);
+    },
+    [navigate, room],
+  );
+
+  const closeThread = useCallback(() => {
+    useChannels.getState().closeThread();
+    if (room) navigate(`/channels/${room.id}`);
+  }, [navigate, room]);
 
   const focusSibling = (direction: 1 | -1) => {
     const rows = [...(grid.current?.querySelectorAll<HTMLElement>("[data-message-id]") ?? [])];
@@ -158,6 +193,8 @@ export function ChannelsPage({ channelId }: { channelId?: string }) {
       document.getElementById("channel-composer")?.focus();
     },
     onJumpToQuote: (messageId) => void jump(messageId),
+    onReplyInThread: (message) => openThread(message.id),
+    onOpenThread: (rootId, focusId) => openThread(rootId, focusId),
     onEdit: (messageId, body, mentions) => useChannels.getState().edit(messageId, body, mentions),
     onDelete: (message) => void useChannels.getState().removeMessage(message.id),
     onReact: (messageId, emoji, add) => void useChannels.getState().react(messageId, emoji, add),
@@ -184,6 +221,7 @@ export function ChannelsPage({ channelId }: { channelId?: string }) {
       mode={mode}
       onMode={setMode}
       selectedId={activeRoomId}
+      meId={meId}
       onSelect={navigateRoom}
       onDiscoverQuery={(query) => void useChannels.getState().loadDiscover(query)}
       onJoin={(id) => {
@@ -194,6 +232,7 @@ export function ChannelsPage({ channelId }: { channelId?: string }) {
       onAccept={(id) => void useChannels.getState().accept(id).then(() => useChannels.getState().selectRoom(id))}
       onDecline={(id) => void useChannels.getState().decline(id)}
       onCreate={() => setCreateOpen(true)}
+      onNewDm={() => setDmOpen(true)}
       onLoadMore={() => void useChannels.getState().loadDiscover(undefined, true)}
       hasMore={!!discoverCursor}
     />
@@ -210,7 +249,7 @@ export function ChannelsPage({ channelId }: { channelId?: string }) {
       onKeyDown={(event) => {
         if (event.defaultPrevented) return;
         const target = event.target as HTMLElement;
-        if (target.closest("input, textarea, select, [contenteditable=true], [role=menu], [role=dialog]")) return;
+        if (target.closest("input, textarea, select, [contenteditable=true], [role=menu], [role=dialog], [role=region]")) return;
         if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
           event.preventDefault();
           setSearchOpen(true);
@@ -231,6 +270,7 @@ export function ChannelsPage({ channelId }: { channelId?: string }) {
     >
       <ChannelHeader
         room={room}
+        meId={meId}
         connection={connection}
         lastSync={lastSync}
         onBack={back}
@@ -250,29 +290,40 @@ export function ChannelsPage({ channelId }: { channelId?: string }) {
           <Button type="button" size="xs" variant="ghost" onClick={() => copyToClipboard(drafts[room.id] ?? "")}>{t("channels.copyLocal")}</Button>
         </div>
       )}
-      <ChannelTimeline
-        room={room}
-        messages={messages}
-        nextBeforeSeq={pages?.nextBeforeSeq ?? null}
-        meId={meId}
-        focusedId={focusedId}
-        actions={actions}
-        onFocus={setFocusedId}
-        onLoadOlder={() => void useChannels.getState().loadHistory(pages?.nextBeforeSeq ?? undefined)}
-        onSeen={(seq) => void useChannels.getState().markRead(seq)}
-      />
-      <ChannelComposer
-        room={room}
-        members={members}
-        draft={drafts[room.id] ?? ""}
-        reply={replyTo[room.id] ?? null}
-        aiArmed={aiArmed[room.id] === true}
-        sending={sending}
-        onDraftChange={(text) => useChannels.getState().setDraft(text)}
-        onSend={(body, mentions) => void useChannels.getState().send({ body, mentions, requestAi: aiArmed[room.id] === true })}
-        onCancelReply={() => useChannels.getState().setReply(null)}
-        onAiToggle={() => useChannels.getState().setAiArmed(aiArmed[room.id] !== true)}
-      />
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <ChannelTimeline
+            room={room}
+            title={room.kind === "dm" ? dmTitle(room, meId) : room.name}
+            messages={messages}
+            nextBeforeSeq={pages?.nextBeforeSeq ?? null}
+            meId={meId}
+            focusedId={focusedId}
+            activeThreadId={activeThreadId}
+            actions={actions}
+            onFocus={setFocusedId}
+            onLoadOlder={() => void useChannels.getState().loadHistory(pages?.nextBeforeSeq ?? undefined)}
+            onSeen={(seq) => void useChannels.getState().markRead(seq)}
+          />
+          <ChannelComposer
+            room={room}
+            members={members}
+            composerKey={`room:${room.id}`}
+            draft={drafts[room.id] ?? ""}
+            reply={replyTo[room.id] ?? null}
+            aiArmed={aiArmed[room.id] === true}
+            sending={sending}
+            showAi={room.kind !== "dm"}
+            onDraftChange={(text) => useChannels.getState().setDraft(text)}
+            onSend={(body, mentions) => void useChannels.getState().send({ body, mentions, requestAi: aiArmed[room.id] === true })}
+            onCancelReply={() => useChannels.getState().setReply(null)}
+            onAiToggle={() => useChannels.getState().setAiArmed(aiArmed[room.id] !== true)}
+          />
+        </div>
+        {activeThreadId && (
+          <ChannelThreadPanel room={room} rootId={activeThreadId} members={members} actions={actions} onClose={closeThread} />
+        )}
+      </div>
       <ChannelSearch open={searchOpen} channelId={room.id} onOpenChange={setSearchOpen} onJump={(id) => void jump(id)} />
       <ChannelMemberPanel
         open={membersOpen}
@@ -330,6 +381,14 @@ export function ChannelsPage({ channelId }: { channelId?: string }) {
           const id = await useChannels.getState().create(input);
           if (id) navigateRoom(id);
           return id;
+        }}
+      />
+      <ChannelDmDialog
+        open={dmOpen}
+        onOpenChange={setDmOpen}
+        onCreated={(id) => {
+          setMode("dm");
+          navigateRoom(id);
         }}
       />
       <ChannelJoinDialog

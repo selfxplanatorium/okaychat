@@ -48,6 +48,7 @@ import { notificationRoutes } from "./notifications.js";
 import { compareRoutes } from "./compare.js";
 import { evaluationRoutes } from "./evaluations/routes.js";
 import { channelAdminRoutes, channelRoutes } from "./channels/routes.js";
+import { channelAttachmentRoutes } from "./channels/attachment-routes.js";
 import { customToolRoutes } from "./custom-tools/routes.js";
 import { apiKeyRoutes } from "./api-access/routes.js";
 import { skillRoutes } from "./skills.js";
@@ -442,6 +443,8 @@ const api = new Hono<AppEnv>()
   .route("/", notificationRoutes)
   .route("/", compareRoutes)
   .route("/evaluations", evaluationRoutes)
+  // Attachment bytes must not inherit the JSON channel router's 128 KiB ceiling.
+  .route("/channels", channelAttachmentRoutes)
   .route("/channels", channelRoutes)
   .route("/admin/channels", channelAdminRoutes)
   .route("/custom-tools", customToolRoutes)

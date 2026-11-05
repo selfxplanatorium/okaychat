@@ -108,7 +108,7 @@ export function buildSnapshot(channel: ChannelRow, sourceId: string, requesterId
        FROM channel_messages m
        LEFT JOIN users u ON u.id = m.author_id
        LEFT JOIN channel_ai_runs r ON r.message_id = m.id
-       WHERE m.channel_id = ? AND m.seq <= ? AND m.deleted_at IS NULL AND m.body <> ''
+       WHERE m.channel_id = ? AND m.seq <= ? AND m.deleted_at IS NULL AND m.body <> '' AND m.thread_root IS NULL
          AND (m.kind = 'human' OR r.state = 'finished')
        ORDER BY m.seq DESC LIMIT ?`,
     )

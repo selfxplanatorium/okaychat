@@ -14,13 +14,13 @@ export interface HistoryQuery {
 }
 
 function rows(channelId: string, sql: string, ...params: Array<string | number>): ChannelMessageRow[] {
-  return db.prepare(`SELECT * FROM channel_messages WHERE channel_id = ? ${sql}`).all(channelId, ...params) as unknown as ChannelMessageRow[];
+  return db.prepare(`SELECT * FROM channel_messages WHERE channel_id = ? AND thread_root IS NULL ${sql}`).all(channelId, ...params) as unknown as ChannelMessageRow[];
 }
 
 const existsOlder = (channelId: string, seq: number) =>
-  !!db.prepare("SELECT 1 FROM channel_messages WHERE channel_id = ? AND seq < ?").get(channelId, seq);
+  !!db.prepare("SELECT 1 FROM channel_messages WHERE channel_id = ? AND thread_root IS NULL AND seq < ?").get(channelId, seq);
 const existsNewer = (channelId: string, seq: number) =>
-  !!db.prepare("SELECT 1 FROM channel_messages WHERE channel_id = ? AND seq > ?").get(channelId, seq);
+  !!db.prepare("SELECT 1 FROM channel_messages WHERE channel_id = ? AND thread_root IS NULL AND seq > ?").get(channelId, seq);
 
 export function channelHistory(channelId: string, viewerId: string, query: HistoryQuery): ChannelMessagePage {
   const channel = db.prepare("SELECT revision FROM channels WHERE id = ?").get(channelId) as { revision: number } | undefined;
@@ -44,7 +44,7 @@ export function channelHistory(channelId: string, viewerId: string, query: Histo
   }
 
   if (query.aroundId !== undefined) {
-    const target = db.prepare("SELECT seq FROM channel_messages WHERE channel_id = ? AND id = ?").get(channelId, query.aroundId) as { seq: number } | undefined;
+    const target = db.prepare("SELECT seq FROM channel_messages WHERE channel_id = ? AND thread_root IS NULL AND id = ?").get(channelId, query.aroundId) as { seq: number } | undefined;
     if (!target) throw new AppError({ code: "not_found", message: "That message was not found." });
     const before = rows(channelId, "AND seq < ? ORDER BY seq DESC LIMIT ?", target.seq, 50).reverse();
     const after = rows(channelId, "AND seq >= ? ORDER BY seq ASC LIMIT ?", target.seq, 50);

@@ -542,6 +542,16 @@ test("the migration moves assistant image output too", async () => {
   assert.equal(storedParts("legacy", "a1")[0]!.text, "Here it is.");
 });
 
+test("a variant cache namespace is used instead of the account", async () => {
+  const original = await solid("#224466");
+  const { media } = putMedia("alice", original);
+  const { variantFile } = await import("./variants.js");
+  const chosen = await variantFile({ namespace: "ch-test", key: media.id, file: mediaPath(media), mime: media.mime, size: media.size, etag: media.id }, "thumb");
+  assert.equal(chosen.original, false);
+  assert.match(chosen.file, /media-cache[\\/]ch-test[\\/]/);
+  assert.equal(existsSync(path.join(dataDir, "media-cache", "alice", `${media.id}.thumb.webp`)), false);
+});
+
 test("a release inside a transaction that rolls back keeps the original", async () => {
   const { tx } = await import("../db.js");
   const { releaseMedia } = await import("./store.js");

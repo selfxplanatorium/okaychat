@@ -60,7 +60,9 @@ export const postMessageSchema = z.strictObject({
   clientId,
   body: z.string(),
   replyTo: z.string().min(1).max(200).optional(),
+  threadRootId: z.string().min(1).max(200).optional(),
   mentions: z.array(mentionSchema).max(CHANNEL_LIMITS.mentions).optional(),
+  attachmentIds: z.array(z.string().min(1).max(200)).max(CHANNEL_LIMITS.attachmentsPerMessage).optional(),
   requestAi: z.boolean().optional(),
 });
 
@@ -76,6 +78,14 @@ export const deleteMessageSchema = z.strictObject({
 });
 
 export const readSchema = z.strictObject({ throughSeq: z.number().int().min(0) });
+export const threadReadSchema = z.strictObject({ throughSeq: z.number().int().min(0) });
+export const createDmSchema = z.strictObject({
+  clientId,
+  userIds: z.array(z.string().min(1).max(200)).min(1).max(CHANNEL_LIMITS.dmMembers - 1),
+});
+export const addDmMembersSchema = z.strictObject({
+  userIds: z.array(z.string().min(1).max(200)).min(1).max(CHANNEL_LIMITS.dmMembers - 1),
+});
 export const preferencesSchema = z.strictObject({ notifyMode: notifyModeSchema });
 export const inviteSchema = z.strictObject({ userIds: z.array(z.string().min(1).max(200)).min(1).max(20) });
 export const roleSchema = z.strictObject({ revision: z.number().int().min(1), role: z.enum(["moderator", "member"]) });
@@ -105,17 +115,20 @@ export function normalizeBody(raw: string): string {
   return body;
 }
 
-export function assertBody(body: string): string {
-  const normalized = normalizeBody(body);
-  if (!normalized.trim()) throw new AppError({ code: "validation", status: 422, message: "Write a message first." });
+/**
+ * A message needs text or an attachment. Image markdown and app-owned asset refs stay refused: the
+ * only images in a channel are the attachment rows, which the renderer resolves itself.
+ */
+export function assertContent(raw: string, hasAttachments: boolean): string {
+  const normalized = normalizeBody(raw);
+  if (!normalized.trim() && !hasAttachments) throw new AppError({ code: "validation", status: 422, message: "Write a message first." });
   if ([...normalized].length > CHANNEL_LIMITS.bodyChars) {
     throw new AppError({ code: "validation", status: 422, message: `Messages are limited to ${CHANNEL_LIMITS.bodyChars} characters.` });
   }
   if (Buffer.byteLength(normalized, "utf8") > CHANNEL_LIMITS.bodyBytes) {
     throw new AppError({ code: "validation", status: 422, message: "That message is too large." });
   }
-  // V1 is text only. Images and app-owned asset references are refused before storage, and the renderer
-  // blocks image nodes again regardless of author, including AI output.
+  // Attachments travel as rows, never as inline Markdown or app-owned refs, for every author including AI.
   if (/!\[[^\]]*\]\([^)]*\)/u.test(normalized) || /okaychat-upload:/iu.test(normalized)) {
     throw new AppError({ code: "validation", status: 422, message: "Images and file attachments are not supported in channels." });
   }
@@ -205,6 +218,9 @@ export const REQUEST_SCHEMAS = {
   edit: editMessageSchema,
   deleteMessage: deleteMessageSchema,
   read: readSchema,
+  threadRead: threadReadSchema,
+  createDm: createDmSchema,
+  addDmMembers: addDmMembersSchema,
   preferences: preferencesSchema,
   invite: inviteSchema,
   role: roleSchema,

@@ -33,6 +33,8 @@ export const NOTIFICATION_TITLE_MESSAGES: Record<NotificationTitleKey, MessageKe
   "channel.invited": "notifications.channelInvited",
   "channel.mention": "notifications.channelMention",
   "channel.message": "notifications.channelMessage",
+  "channel.dmMessage": "notifications.channelDmMessage",
+  "channel.threadReply": "notifications.channelThreadReply",
   "channel.aiFinished": "notifications.channelAiFinished",
   "calendar.reminder": "notifications.calendarReminder",
 };
@@ -47,6 +49,7 @@ export const NOTIFICATION_BODY_MESSAGES: Record<NotificationBodyKey, MessageKey>
   "import.failedBody": "notifications.importFailedBody",
   "channel.openRoom": "notifications.channelOpenRoom",
   "channel.openMessage": "notifications.channelOpenMessage",
+  "channel.openThread": "notifications.channelOpenThread",
   "calendar.openEvent": "notifications.calendarOpenEvent",
 };
 

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BotIcon, CopyIcon, CornerUpLeftIcon, MoreHorizontalIcon, PencilIcon, SparklesIcon, Trash2Icon } from "lucide-react";
+import { BotIcon, CopyIcon, CornerUpLeftIcon, MessagesSquareIcon, MoreHorizontalIcon, PencilIcon, SparklesIcon, Trash2Icon } from "lucide-react";
 import type { ChannelMessage, ChannelSummary } from "@shared/channels";
 import { t } from "@/i18n";
 import { formatTime } from "@/i18n/format";
@@ -12,9 +12,13 @@ import { ChannelMarkdown } from "./ChannelMarkdown";
 import { ChannelQuote } from "./ChannelQuote";
 import { ChannelReactionMenu } from "./ChannelReactionMenu";
 import { ChannelAiStatus } from "./ChannelAiStatus";
+import { ChannelAttachmentList } from "./ChannelAttachmentList";
+import { ChannelThreadChip } from "./ChannelThreadChip";
 
 export interface MessageActions {
   onReply: (message: ChannelMessage) => void;
+  onReplyInThread?: (message: ChannelMessage) => void;
+  onOpenThread?: (rootId: string, focusId?: string) => void;
   onJumpToQuote: (messageId: string) => void;
   onEdit: (messageId: string, body: string, mentions?: ChannelMessage["mentions"]) => Promise<boolean>;
   onDelete: (message: ChannelMessage) => void;
@@ -30,6 +34,8 @@ export function ChannelMessageRow({
   focused,
   actions,
   onFocus,
+  showThreadChip = true,
+  threadOpen = false,
 }: {
   message: ChannelMessage;
   room: ChannelSummary;
@@ -37,6 +43,8 @@ export function ChannelMessageRow({
   focused: boolean;
   actions: MessageActions;
   onFocus: () => void;
+  showThreadChip?: boolean;
+  threadOpen?: boolean;
 }) {
   const { copyToClipboard } = useCopyToClipboard();
   const [editing, setEditing] = useState(false);
@@ -89,6 +97,16 @@ export function ChannelMessageRow({
               <MenuItem onClick={() => actions.onReply(message)} disabled={!room.capabilities.post}>
                 <CornerUpLeftIcon aria-hidden /> {t("channels.reply")}
               </MenuItem>
+              {room.capabilities.thread && !message.threadRootId && actions.onReplyInThread && (
+                <MenuItem onClick={() => actions.onReplyInThread!(message)}>
+                  <MessagesSquareIcon aria-hidden /> {t("channels.replyInThread")}
+                </MenuItem>
+              )}
+              {message.threadRootId && actions.onOpenThread && (
+                <MenuItem onClick={() => actions.onOpenThread!(message.threadRootId!, message.id)}>
+                  <MessagesSquareIcon aria-hidden /> {t("channels.threadShowInRoom")}
+                </MenuItem>
+              )}
               <MenuItem onClick={() => copyToClipboard(message.body)}>
                 <CopyIcon aria-hidden /> {t("channels.copy")}
               </MenuItem>
@@ -138,6 +156,8 @@ export function ChannelMessageRow({
       ) : pending ? (
         <p className="text-muted-foreground text-sm italic">{t("channels.aiQueued")}</p>
       ) : null}
+      {message.attachments.length > 0 && <ChannelAttachmentList attachments={message.attachments} authorName={message.author?.name ?? null} />}
+      {showThreadChip && <ChannelThreadChip message={message} expanded={threadOpen} onOpen={(rootId, focusId) => actions.onOpenThread?.(rootId, focusId)} />}
       <ChannelReactionMenu message={message} onToggle={(emoji, add) => actions.onReact(message.id, emoji, add)} disabled={!room.capabilities.post} />
       {message.kind === "ai" && (
         <ChannelAiStatus

@@ -10,6 +10,8 @@ import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { channelsApi, type ChannelBindingRequest } from "@/state/channels-api";
 import { useData } from "@/state/data";
+import { useChannels } from "@/state/channels";
+import { ChannelNotificationPreferences } from "./ChannelNotificationPreferences";
 import { useAssistantPresets } from "@/state/assistant-presets";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +33,7 @@ export function ChannelSettingsDialog({
   onLeave: () => Promise<void>;
 }) {
   const rawModels = useData((state) => state.models);
+  const meId = useData((state) => state.me?.id ?? null);
   const models = useMemo(() => llmTargets(rawModels), [rawModels]);
   const presets = useAssistantPresets((state) => state.mine);
   const loadPresets = useAssistantPresets((state) => state.loadMine);
@@ -46,6 +49,10 @@ export function ChannelSettingsDialog({
   const [reduced, setReduced] = useState(false);
   const [aiTouched, setAiTouched] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [dmEmail, setDmEmail] = useState("");
+  const [dmBusy, setDmBusy] = useState(false);
+  const blocks = useChannels((state) => state.blocks);
+  const dm = room.kind === "dm";
 
   useEffect(() => {
     if (!open) return;
@@ -58,6 +65,10 @@ export function ChannelSettingsDialog({
     setReduced(false);
     setAiTouched(false);
     setAudienceReady(room.visibility !== "group");
+    if (room.kind === "dm") {
+      void useChannels.getState().loadBlocks();
+      return;
+    }
     void loadPresets();
     void channelsApi.groups().then((result) => setGroups(result.items)).catch(() => setGroups([]));
     void channelsApi
@@ -78,6 +89,96 @@ export function ChannelSettingsDialog({
           ? { kind: "preset", presetId, confirmReduced: reduced }
           : undefined;
   const bindingInvalid = canManage && aiTouched && aiMode !== "none" && ((aiMode === "model" && !modelRef) || (aiMode === "preset" && (!presetId || !reduced)));
+
+  if (dm) {
+    const owner = room.ownerId;
+    const isOwner = room.membership?.role === "owner";
+    const add = async () => {
+      const email = dmEmail.trim();
+      if (!email) return;
+      setDmBusy(true);
+      const found = await useChannels.getState().lookupPeople(email);
+      const person = found[0];
+      if (!person) {
+        setDmBusy(false);
+        return;
+      }
+      const ok = await useChannels.getState().addDmMembers([person.id]);
+      setDmBusy(false);
+      if (ok) setDmEmail("");
+    };
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{t("channels.directMessages")}</DialogTitle>
+            <DialogDescription>{t("channels.dmNoAi")}</DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <fieldset>
+              <legend className="mb-1 text-sm font-medium">{t("channels.members")}</legend>
+              <ul className="flex flex-col gap-1">
+                {(room.dmMembers ?? []).map((person) => (
+                  <li key={person.id} className="flex items-center gap-2 text-sm">
+                    <span className="min-w-0 flex-1 truncate">{person.name}</span>
+                    {person.id === owner && <span className="text-muted-foreground text-xs">{t("channels.owner")}</span>}
+                    {person.id !== meId && (
+                      <Button type="button" size="xs" variant="ghost" onClick={() => { if (window.confirm(t("channels.dmBlockConfirm"))) void useChannels.getState().blockUser(person.id); }}>
+                        {t("channels.dmBlock")}
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </fieldset>
+            {room.membership && (
+              <div className="flex items-center justify-between gap-2 text-sm">
+                <span className="font-medium">{t("channels.notificationMode")}</span>
+                <ChannelNotificationPreferences mode={room.membership.notifyMode} onChange={(mode) => void useChannels.getState().setNotify(mode)} />
+              </div>
+            )}
+            {isOwner && (
+              <label className="flex flex-col gap-1 text-sm font-medium">
+                {t("channels.dmAddPeople")}
+                <div className="flex gap-1">
+                  <Input value={dmEmail} type="email" placeholder={t("channels.dmSearchPlaceholder")} aria-label={t("channels.dmSearchPlaceholder")} onChange={(event) => setDmEmail(event.target.value)} />
+                  <Button type="button" variant="outline" disabled={!dmEmail.trim() || dmBusy} onClick={() => void add()}>{t("channels.dmAddPeople")}</Button>
+                </div>
+              </label>
+            )}
+            {blocks.length > 0 && (
+              <fieldset>
+                <legend className="mb-1 text-sm font-medium">{t("channels.dmBlockedList")}</legend>
+                <ul className="flex flex-col gap-1">
+                  {blocks.map((person) => (
+                    <li key={person.id} className="flex items-center gap-2 text-sm">
+                      <span className="min-w-0 flex-1 truncate">{person.name}</span>
+                      <Button type="button" size="xs" variant="ghost" onClick={() => void useChannels.getState().unblockUser(person.id)}>
+                        {t("channels.dmUnblock")}
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </fieldset>
+            )}
+            <div className="flex flex-wrap gap-1">
+              <Button type="button" variant="outline" onClick={() => { if (window.confirm(t("channels.dmLeaveConfirm"))) void onLeave(); }}>
+                {t("channels.dmLeave")}
+              </Button>
+              {isOwner && (
+                <Button type="button" variant="destructive" onClick={() => { if (window.confirm(t("channels.dmDeleteConfirm"))) void onDelete(room.revision); }}>
+                  {t("channels.deleteRoom")}
+                </Button>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>{t("channels.cancel")}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -114,6 +215,7 @@ export function ChannelSettingsDialog({
             </div>
           </fieldset>
           <p className="text-muted-foreground text-xs">{t("channels.visibilityImmutable")}</p>
+          <p className="text-muted-foreground text-xs">{t("channels.attachmentsStorageNote")}</p>
           {room.visibility === "group" && (
             <fieldset>
               <legend className="mb-1 text-sm font-medium">{t("channels.groups")}</legend>

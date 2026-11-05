@@ -390,7 +390,7 @@ export const sandboxRoutes = new Hono<AppEnv>()
       if (!media || media.user_id !== user.id) return c.json({ error: "Not found" }, 404);
       // A rerun that overwrites the path points at a new media row, so the validator changes with it.
       const { "Cache-Control": _, "Content-Type": __, ...headers } = downloadHeaders(path.basename(stored.path), media.mime, c.req.query("preview") === "1");
-      return serveImage(c, { userId: user.id, key: media.id, file: mediaPath(media), mime: media.mime, size: media.size, etag: media.sha256.slice(0, 32) }, { headers });
+      return serveImage(c, { namespace: user.id, key: media.id, file: mediaPath(media), mime: media.mime, size: media.size, etag: media.sha256.slice(0, 32) }, { headers });
     }
     const row = stored && sandboxBytes(user.id, stored);
     if (!row) return c.json({ error: "Not found" }, 404);

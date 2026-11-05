@@ -1787,6 +1787,88 @@ CREATE INDEX notifications_calendar ON notifications(calendar_event_id) WHERE ca
     `);
     if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "message-translations") throw new Error("Injected migration failure");
   },
+  // Channels v2 (docs/implementation/channels.md): attachments, one level of thread replies, and DMs as
+  // channel rows. One appended migration: rebuilding `channels`, `channel_messages`, or `channel_events`
+  // would reset the event AUTOINCREMENT high-water and invalidate every live cursor.
+  () => {
+    db.exec(`
+    -- kind is validated in code: SQLite cannot add a CHECK constraint in place, and rebuilding
+    -- channels would require rebuilding every child table's foreign keys.
+    ALTER TABLE channels ADD COLUMN kind TEXT NOT NULL DEFAULT 'room';
+    ALTER TABLE channels ADD COLUMN dm_key TEXT;
+
+    CREATE UNIQUE INDEX channel_dm_key ON channels(dm_key) WHERE dm_key IS NOT NULL;
+    CREATE INDEX channels_kind_owner ON channels(kind, owner_id);
+
+    -- One level only: a reply names its top-level message. Same-room integrity is enforced in
+    -- channel_store (a composite FK is impossible on an added column).
+    ALTER TABLE channel_messages ADD COLUMN thread_root TEXT REFERENCES channel_messages(id) ON DELETE CASCADE;
+    CREATE INDEX channel_messages_thread ON channel_messages(channel_id, thread_root, seq) WHERE thread_root IS NOT NULL;
+
+    -- Denormalized thread counters: the room list, message projection, and search hits read one row
+    -- instead of counting replies per message.
+    CREATE TABLE channel_thread_state (
+      root_id TEXT PRIMARY KEY REFERENCES channel_messages(id) ON DELETE CASCADE,
+      channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+      reply_count INTEGER NOT NULL DEFAULT 0 CHECK(reply_count >= 0),
+      last_seq INTEGER NOT NULL DEFAULT 0,
+      last_at INTEGER NOT NULL,
+      last_author_id TEXT REFERENCES users(id) ON DELETE SET NULL
+    );
+    CREATE INDEX channel_thread_state_room ON channel_thread_state(channel_id, last_seq DESC);
+
+    CREATE TABLE channel_thread_reads (
+      root_id TEXT NOT NULL REFERENCES channel_messages(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+      read_seq INTEGER NOT NULL DEFAULT 0 CHECK(read_seq >= 0),
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY(root_id, user_id)
+    );
+    CREATE INDEX channel_thread_reads_user ON channel_thread_reads(user_id, channel_id);
+
+    CREATE TABLE channel_attachments (
+      id TEXT PRIMARY KEY,
+      channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+      message_id TEXT REFERENCES channel_messages(id) ON DELETE CASCADE,
+      uploader_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      mime TEXT NOT NULL,
+      size INTEGER NOT NULL CHECK(size > 0),
+      -- 1: raster original in dataDir/channel-media/<channelId>/<id>.<ext>, data NULL.
+      -- 0: opaque bytes in data (never a second source of truth for the same bytes).
+      file INTEGER NOT NULL CHECK(file IN (0,1)),
+      data BLOB,
+      width INTEGER, height INTEGER,
+      created_at INTEGER NOT NULL,
+      deleted_at INTEGER,
+      CHECK ((file = 1 AND data IS NULL) OR (file = 0 AND data IS NOT NULL))
+    );
+    CREATE INDEX channel_attachments_message ON channel_attachments(message_id, id);
+    CREATE INDEX channel_attachments_owner ON channel_attachments(owner_id);
+    CREATE INDEX channel_attachments_channel ON channel_attachments(channel_id, id);
+    CREATE INDEX channel_attachments_pending ON channel_attachments(uploader_id, created_at)
+      WHERE message_id IS NULL;
+    CREATE INDEX channel_attachments_purge ON channel_attachments(deleted_at)
+      WHERE deleted_at IS NOT NULL;
+
+    -- Person-level DM blocks. Existing group DMs are untouched; only new DMs and new memberships check it.
+    CREATE TABLE channel_dm_blocks (
+      blocker_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      blocked_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY(blocker_id, blocked_id),
+      CHECK (blocker_id <> blocked_id)
+    );
+    CREATE INDEX channel_dm_blocks_blocked ON channel_dm_blocks(blocked_id, blocker_id);
+
+    -- The root a thread invalidation or thread read refers to. Plain column: no CHECK, so no rebuild.
+    ALTER TABLE channel_events ADD COLUMN root_id TEXT;
+    ALTER TABLE notifications ADD COLUMN channel_root_id TEXT;
+    `);
+    if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "channels-v2") throw new Error("Injected migration failure");
+  },
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

@@ -97,7 +97,7 @@ export const fileRoutes = new Hono<AppEnv>()
       const media = getMedia(row.media_id);
       if (!media || media.user_id !== userId) return c.json({ error: "Not found" }, 404);
       // Validated against the owner above; the digest never changes for one media id.
-      return serveImage(c, { userId, key: media.id, file: mediaPath(media), mime: media.mime, size: media.size, etag: media.sha256.slice(0, 32) }, {
+      return serveImage(c, { namespace: userId, key: media.id, file: mediaPath(media), mime: media.mime, size: media.size, etag: media.sha256.slice(0, 32) }, {
         headers: { "Content-Disposition": disposition(true), "Content-Security-Policy": "default-src 'none'; sandbox" },
       });
     }
