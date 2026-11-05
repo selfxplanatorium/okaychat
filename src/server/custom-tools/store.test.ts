@@ -217,3 +217,22 @@ test("a changed revision invalidates a prepared approval before dispatch", async
   assert.equal(calls, 0);
   store.deleteTool("alice", created.id, updated.revision);
 });
+
+
+test("HTTP credential payloads are redacted before persistence and delivery", async () => {
+  for (const secret of ["ab", "Bearer opaque-token", "Basic dXNlcjpwYXNz", "123"]) {
+    const created = store.createTool("alice", httpWrite, { set: { apiKey: secret }, remove: [] });
+    const payload = secret.replace(/^(?:Bearer|Basic) /, "");
+    setExecutionDeps({ fetch: (async () => new Response(JSON.stringify({ echo: secret === "123" ? 123 : payload }), {
+      headers: { "content-type": "application/json" },
+    })) as typeof fetch });
+    const key = `test:redaction:${created.id}`;
+    const prepared = prepareExecution({ userId: "alice", row: store.toolRow("alice", created.id)!, input: { id: "a", limit: 1 }, source: "test", executionKey: key, sessionHash: "session" });
+    const result = await executePrepared({ actor: { userId: "alice" }, runId: prepared.row.id, input: prepared.input,
+      runtime: "workspaceTest", executionKey: key, sessionHash: "session", requestHash: prepared.requestHash, assertReady: () => {} });
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.value, { echo: "[redacted]" });
+    assert.deepEqual(store.runView(store.runRow("alice", prepared.row.id)!).result, { echo: "[redacted]" });
+    store.deleteTool("alice", created.id, 1);
+  }
+});

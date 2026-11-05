@@ -1147,28 +1147,36 @@ const CREDENTIAL_PATTERNS: Array<[RegExp, string]> = [
 function redactString(text: string, secrets: readonly string[]): string {
   let out = text;
   for (const secret of secrets) {
-    if (secret.length >= 4) out = out.split(secret).join("[redacted]");
+    if (secret.length > 0) out = out.split(secret).join("[redacted]");
   }
   for (const [pattern, replacement] of CREDENTIAL_PATTERNS) out = out.replace(pattern, replacement);
   return out;
 }
 
 export function redactResult(value: Json, secrets: readonly string[]): ValidationResult<Json> {
+  // Header echoes may omit the authentication scheme. Match all accepted lengths, including
+  // numeric JSON scalars, before anything can reach the ledger or the model.
+  const sensitive = [...new Set(secrets.flatMap((secret) => {
+    const credential = /^(?:Bearer|Basic) +(.+)$/i.exec(secret);
+    return credential ? [secret, credential[1]!] : [secret];
+  }).filter(Boolean))].sort((a, b) => b.length - a.length);
   const issues = new Issues();
   let nodes = 0;
   const walk = (item: Json, path: string, depth: number): Json => {
     if (depth > OUTPUT_JSON_LIMITS.maxDepth) { issues.add(path, "too_deep"); return null; }
     if (++nodes > OUTPUT_JSON_LIMITS.maxNodes) { issues.add(path, "too_many_nodes"); return null; }
-    if (typeof item === "string") return redactString(item, secrets);
-    if (item === null || typeof item === "boolean" || typeof item === "number") return item;
+    if (typeof item === "string") return redactString(item, sensitive);
+    if (item === null || typeof item === "boolean" || typeof item === "number") {
+      return sensitive.includes(String(item)) ? "[redacted]" : item;
+    }
     if (Array.isArray(item)) return item.map((child, index) => walk(child, `${path}/${index}`, depth + 1));
     const out: { [key: string]: Json } = Object.create(null) as { [key: string]: Json };
     for (const [key, child] of Object.entries(item)) {
       let safeKey = key;
-      for (const secret of secrets) {
-        if (secret.length >= 4 && key.includes(secret)) { issues.add(path, "reserved_key"); safeKey = key; }
+      for (const secret of sensitive) {
+        if (key.includes(secret)) { issues.add(path, "reserved_key"); safeKey = key; }
       }
-      safeKey = redactString(safeKey, secrets);
+      safeKey = redactString(safeKey, sensitive);
       if (RESERVED_KEYS.has(safeKey)) { issues.add(path, "duplicate_key"); continue; }
       if (Object.hasOwn(out, safeKey)) { issues.add(path, "duplicate_key"); continue; }
       out[safeKey] = walk(child, pointer(path, safeKey), depth + 1);
