@@ -115,23 +115,68 @@ function mapping(value: unknown, now: number, warnings: ImportWarning[], c: Impo
   if (updatedAt < createdAt) fail();
   return {source:{namespace:'mapping-v1',id:sourceId},title:o.title == null ? null : label(str(o.title),200,warnings,true) || null,createdAt,updatedAt,status:o.is_archived ? 'archived' : 'regular',messages};
 }
+/** Attachment kinds from a declared MIME type; anything else is a file and stays inert. */
+function attachmentKind(mime: string): 'image' | 'audio' | 'video' | 'file' {
+  if (/^image\//i.test(mime)) return 'image';
+  if (/^audio\//i.test(mime)) return 'audio';
+  if (/^video\//i.test(mime)) return 'video';
+  return 'file';
+}
+
+/**
+ * Attachments the transcript names only in `metadata.attachments` (a PDF, a spreadsheet, an audio file) used to
+ * disappear without a trace. Each becomes an inert placeholder with a count and a warning, so preview tells the
+ * truth and the portable export keeps the label. An attachment already represented by a content part is not
+ * counted twice.
+ */
+function metadataAttachments(m: Obj, represented: ReadonlySet<string>, warnings: ImportWarning[], c: ImportCounts): PortablePart[] {
+  if (m.metadata == null) return [];
+  const metadata = obj(m.metadata);
+  if (metadata.attachments == null) return [];
+  const attachments = arr(metadata.attachments);
+  if (attachments.length > L.parts) fail('too_large');
+  const parts: PortablePart[] = [];
+  for (const entry of attachments) {
+    const a = obj(entry);
+    const name = a.name != null ? label(str(a.name),240,warnings) || null : null;
+    if (a.id != null) {
+      const key = str(a.id);
+      if ([...represented].some((ref) => ref === key || ref.endsWith(key))) continue;
+    }
+    const kind = a.mime_type != null ? attachmentKind(str(a.mime_type)) : 'file';
+    c.omittedAttachments++; warning(warnings,'attachments_missing');
+    parts.push({type:'missing-attachment',kind,name});
+  }
+  return parts;
+}
+
 function sourceParts(m: Obj, warnings: ImportWarning[], c: ImportCounts): PortablePart[] {
   const author = obj(m.author); if (author.name != null) str(author.name);
   if (m.recipient != null) str(m.recipient); if (m.channel != null) str(m.channel);
-  if (m.metadata != null) { const metadata = obj(m.metadata); if (metadata.attachments != null) arr(metadata.attachments); }
   const content = obj(m.content), type = str(content.content_type);
+  const raw = type === 'text' || type === 'multimodal_text' ? arr(content.parts) : [];
+  if (raw.length > L.parts) fail('too_large');
+  const represented = new Set<string>();
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const pointer = (entry as Obj).asset_pointer;
+    if (typeof pointer === 'string') represented.add(pointer);
+  }
   if (type !== 'text' && type !== 'multimodal_text') {
     warning(warnings,'unsupported_content');
-    return typeof content.text === 'string' ? [{type:'text',text:sanitizeText(content.text,warnings)}] : [{type:'missing-attachment',kind:'unknown',name:null}];
+    const parts: PortablePart[] = typeof content.text === 'string'
+      ? [{type:'text',text:sanitizeText(content.text,warnings)}]
+      : [{type:'missing-attachment',kind:'unknown',name:null}];
+    return [...parts, ...metadataAttachments(m,represented,warnings,c)];
   }
-  const parts = arr(content.parts); if (parts.length > L.parts) fail('too_large');
-  return parts.map((p): PortablePart => {
+  const parts = raw.map((p): PortablePart => {
     if (typeof p === 'string') return {type:'text',text:sanitizeText(p,warnings)};
     const descriptor = obj(p), kind = str(descriptor.content_type);
     const normalized = kind === 'image_asset_pointer' ? 'image' : /audio/.test(kind) ? 'audio' : /video/.test(kind) ? 'video' : /file/.test(kind) ? 'file' : 'unknown';
     c.omittedAttachments++; warning(warnings,'attachments_missing'); if (normalized === 'unknown') warning(warnings,'unsupported_content');
     return {type:'missing-attachment',kind:normalized,name:null};
   });
+  return [...parts, ...metadataAttachments(m,represented,warnings,c)];
 }
 export function normalizeFile(value: unknown, admissionTime: number): NormalizedFile {
   let adapter: SourceNamespace, entries: unknown[];
