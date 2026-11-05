@@ -17,7 +17,7 @@ Private credentials reuse `xai` and `image-replicate` through `getOwnConnection`
 historical and must not be renamed. Disabled or missing private keys never fall back to shared keys.
 Custom base endpoints are refused, including a trailing-slash variant of the canonical URL.
 The fingerprint hashes connection ID, canonical endpoint, and a key digest; it contains no key.
-The worker resolves and compares it before each request and checks live account permissions and service settings.
+The worker resolves and compares it before each request and repeats the live receipt-origin, chat restriction, assistant-family, voice, account permission and service checks. Queued work cannot dispatch after the chat becomes restricted or its assistant loses the video family.
 
 ## Persistence
 
@@ -178,6 +178,10 @@ Run one app process per database. Keep the private key enabled and unchanged whi
 body is retained encrypted for 24 hours; terminal receipts normally retain 30 days and a completed video's
 minimal receipt remains while its file exists. Missing output is unavailable, never regenerated.
 Hourly maintenance retries failed cleanup; bytes/reservations stay charged until removal succeeds.
+
+Known limitation: retrying a job after its starting image was normalized copies the retained digest
+into a new job without copying its staged JPEG. That retry fails locally before submission; start a
+new chat request with the owned image instead. Text-only retries are unaffected.
 
 The inspector is a deliberately narrow H.264/AAC MP4 container check, not full decoding or sanitization.
 Local cancellation, unknown submit outcomes, provider charges after local validation/storage failure,
