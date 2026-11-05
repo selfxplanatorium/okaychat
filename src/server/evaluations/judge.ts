@@ -1,6 +1,6 @@
 import { generateText } from "ai";
 import type { EvalCaseSnapshot, EvalJudgeConfig, EvalScoreMode } from "../../shared/evaluations.js";
-import { EVAL_MAX_RUBRIC } from "../../shared/evaluations.js";
+import { EVAL_CASE_TIMEOUT_MS, EVAL_MAX_RUBRIC } from "../../shared/evaluations.js";
 import { EVAL_MAX_COMMENT } from "../../shared/evaluations.js";
 import type { ModelInfo } from "../../shared/types.js";
 import { AppError } from "../errors.js";
@@ -17,7 +17,7 @@ import type { TokenUsage } from "../../shared/types.js";
 
 export type JudgeVerdict =
   | { ok: true; score: number; rationale: string; usage: TokenUsage; cost: number }
-  | { ok: false; error: AppError };
+  | { ok: false; error: AppError; usage?: TokenUsage; cost?: number };
 
 export interface JudgeInput {
   userId: string;
@@ -46,13 +46,20 @@ export async function judgeCase(input: JudgeInput): Promise<JudgeVerdict> {
       maxRetries: 0,
       maxOutputTokens: 512,
       prompt,
-      abortSignal: input.signal,
+      // Same per-case bound as generation, so a stalled judge cannot hold a worker slot forever.
+      abortSignal: AbortSignal.any([input.signal, AbortSignal.timeout(EVAL_CASE_TIMEOUT_MS)]),
     });
+    const usage = normalizeUsage(result.totalUsage);
     const verdict = parseJudgeVerdict(result.text, input.config.scale);
     if (!verdict) {
-      return { ok: false, error: new AppError({ code: "unknown", message: "The judge did not return a usable verdict." }) };
+      // The call was paid for even though its reply is unusable.
+      return {
+        ok: false,
+        error: new AppError({ code: "unknown", message: "The judge did not return a usable verdict." }),
+        usage,
+        cost: costOf(input.model.cost, usage),
+      };
     }
-    const usage = normalizeUsage(result.totalUsage);
     return {
       ok: true,
       score: verdict.score,

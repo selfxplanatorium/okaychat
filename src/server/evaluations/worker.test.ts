@@ -397,6 +397,8 @@ test("a malformed judge reply leaves no score and counts a failed case", async (
   const created = dataset([fields("one")], "JudgeParse");
   const { run } = launch(created.id);
   finishRun(run.id, [{ caseId: created.cases[0]!.caseId, output: "answer" }]);
+  const judgeUsage = () => (db.prepare("SELECT COUNT(*) AS n FROM usage WHERE kind = 'evaluation_judge'").get() as { n: number }).n;
+  const usageBefore = judgeUsage();
   worker.setEvaluationModelFactoryForTests(() => fakeModel("gpt-judge", [], () => answer("not json")));
   store.queueJudge("alice", run.id, judgeConfig());
   worker.enqueueJudge("alice", run.id);
@@ -404,6 +406,34 @@ test("a malformed judge reply leaves no score and counts a failed case", async (
   const detail = store.getRun("alice", run.id)!;
   assert.equal(detail.judge?.failedCases, 1);
   assert.equal(detail.scores.length, 0);
+  // The unusable reply was still paid for.
+  assert.equal(judgeUsage(), usageBefore + 1);
+});
+
+test("malformed judge replies count against the judge cost cap", async () => {
+  const created = dataset([fields("one"), fields("two")], "JudgeParseBudget");
+  const { run } = launch(created.id);
+  finishRun(run.id, [
+    { caseId: created.cases[0]!.caseId, output: "first" },
+    { caseId: created.cases[1]!.caseId, output: "second" },
+  ]);
+  const calls: LanguageModelV4CallOptions[] = [];
+  worker.setEvaluationModelFactoryForTests(() => fakeModel("gpt-judge-pricey", calls, () => answer("not json", 100, 0)));
+  store.queueJudge("alice", run.id, judgeConfig("scale5", "openai/gpt-judge-pricey"));
+  worker.enqueueJudge("alice", run.id);
+  await waitFor(() => store.runById(run.id)?.judge_state !== "queued" && store.runById(run.id)?.judge_state !== "running", "judge settled");
+  assert.equal(calls.length, 1);
+  assert.equal(worker.activeEvaluationRuns().length, 0);
+});
+
+test("a dataset cannot be deleted while one of its runs is being judged", () => {
+  const created = dataset([fields("one")], "JudgeDelete");
+  const { run } = launch(created.id);
+  finishRun(run.id, [{ caseId: created.cases[0]!.caseId, output: "answer" }]);
+  store.queueJudge("alice", run.id, judgeConfig());
+  assert.throws(() => store.deleteDataset("alice", created.id), (error: unknown) => error instanceof AppError && error.code === "conflict");
+  store.setRunJudgeState(run.id, "cancelled");
+  store.deleteDataset("alice", created.id);
 });
 
 test("the judge cost cap stops the pass with the remaining cases unjudged", async () => {

@@ -61,8 +61,9 @@ deletes old judge rows atomically; manual scores and raw outputs are untouched. 
 sequentially, receives the rubric, the case input, the optional reference answer, and the candidate
 answer — both answers inside `wrapUntrusted` as `evaluation_output` / `evaluation_expected`. A reply
 must be one JSON object with an in-range score and a reason; anything else is a failed case with no
-score row. The pass stops at $2 of judge spend. Judge cost is summed from score rows, never stored on
-the run.
+score row, but its usage is still recorded and counts toward the cap. The pass stops at $2 of judge
+spend, summed in the worker from every paid judge call. Each judge call is aborted at 120 s, like a
+case. A dataset cannot be deleted while one of its runs is being judged.
 
 ## API
 
