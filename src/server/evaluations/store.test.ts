@@ -422,3 +422,34 @@ test("comparison refuses two datasets, unions cases, and marks a missing side nu
   assert.ok(comparison.cases[1]!.a);
   assert.ok(comparison.cases[1]!.b);
 });
+
+
+test("evaluation reservations remain charged while other writes compete and results settle", async () => {
+  const { storageUsed, assertStorage } = await import("../quota.js");
+  const { EVAL_RESULT_RESERVATION } = await import("../../shared/evaluations.js");
+  const created = await createDataset("alice", { name: "Reserved", cases: [fields("q")] });
+  const before = storageUsed("alice");
+  const { run } = launch(created.id);
+  const reserved = storageUsed("alice");
+  assert.ok(reserved - before >= EVAL_RESULT_RESERVATION, "launch must retain its output reservation");
+  db.prepare("UPDATE users SET storage_limit = ? WHERE id = 'alice'").run(reserved);
+  try {
+    assert.throws(() => assertStorage("alice", 1), /Storage quota/);
+    const caseId = created.cases[0]!.caseId;
+    store.markResultRunning(run.id, caseId);
+    store.settleResultSuccess(run.id, caseId, {
+      output: "x".repeat(32 * 1024), outputBytes: 32 * 1024, truncated: false, finishReason: "stop",
+      usage: { input: 1, output: 1, reasoning: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0, latencyMs: 1,
+    });
+    store.saveJudgeScore(run.id, caseId, {
+      score: 5, rationale: "good", modelRef: "openai/gpt-eval", rubricHash: "hash", scale: "scale5",
+      usage: { input: 1, output: 1, reasoning: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0,
+    });
+    assert.equal(storageUsed("alice"), reserved, "settlement consumes the reservation without double charging");
+    store.updateRunState(run.id, { state: "done", stopReason: "completed", errorCode: null, errorMessage: null, endedAt: Date.now() });
+    store.deleteRun("alice", run.id);
+    assert.equal(storageUsed("alice"), before, "deletion frees the reservation");
+  } finally {
+    db.prepare("UPDATE users SET storage_limit = NULL WHERE id = 'alice'").run();
+  }
+});

@@ -1,6 +1,7 @@
 import { createUIMessageStream, generateId, type UIMessage } from 'ai';
 import type { AssistantMetadata } from '../../shared/types.js';
 import { randomToken, sha256 } from '../crypto.js';
+import { assertModelAllowed } from '../permissions/guard.js';
 import { AppError } from '../errors.js';
 import { wireErrorText } from '../provider-errors.js';
 import { scanForInjection } from '../prompt-injection.js';
@@ -35,6 +36,8 @@ export function agentBody(messages: UIMessage[], config: NonNullable<ReturnType<
 }
 
 export function agentTurnStream(opts: TurnOptions, agentId: string, requestAgent: typeof agentRequest = agentRequest) {
+  const modelRef = `n8n/${agentId}`;
+  assertModelAllowed(opts.userId, modelRef);
   const agent = resolveAgent(opts.userId, agentId);
   if (!agent) throw new AppError({ code: 'not_found' });
   if (!agent.enabled) throw new AppError({ code: 'validation' });
@@ -68,6 +71,7 @@ export function agentTurnStream(opts: TurnOptions, agentId: string, requestAgent
       writer.write({ type: 'start-step' });
       try {
         const response = await requestAgent(agent.config, request.body, { signal: controller.signal, beforePost: () => {
+          assertModelAllowed(opts.userId, modelRef);
           if (!agentAccessible(opts.userId, agentId, agent.revision)) throw new AppError({ code: 'forbidden' });
           attempted = true;
         } });

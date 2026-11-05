@@ -66,3 +66,30 @@ test('agent stream emits honest metadata, reuses remote session only on exact hi
   assert.equal(agentUsage('u').runs, 1);
   assert.doesNotMatch(JSON.stringify(assistant), /https:|sessionId|okc_/);
 });
+
+
+test('n8n turns enforce live model denial before dispatch, including a policy change before POST', async () => {
+  const { writePolicy } = await import('./permissions/store.js');
+  const { agentTurnStream } = await import('./n8n/turn.js');
+  const agent = createAgent({ kind: 'own', userId: 'u' }, { name: 'Denied', description: '', avatar: 'bot', enabled: true, config });
+  const subject = { kind: 'user' as const, id: 'u' };
+  const opts = { userId: 'u', threadId: 'tmp_denied', modelRef: agent.ref, uiMessages: [{ id: 'u', role: 'user' as const, parts: [{ type: 'text' as const, text: 'Hello' }] }] };
+  const deny = () => writePolicy(subject, agent.ref, { version: 1, modelAllowed: false }, null);
+  deny();
+  try {
+    await assert.rejects(turnStream(opts), { code: 'forbidden' });
+    assert.throws(() => agentTurnStream(opts, agent.id), { code: 'forbidden' });
+    writePolicy(subject, agent.ref, { version: 1, modelAllowed: true }, null);
+    let posts = 0;
+    const stream = agentTurnStream(opts, agent.id, async (_config, _body, options) => {
+      deny();
+      options?.beforePost?.();
+      posts++;
+      return new Response('should not execute');
+    });
+    for await (const _message of readUIMessageStream({ stream, onError: () => {} })) { /* drain */ }
+    assert.equal(posts, 0);
+  } finally {
+    db.prepare("DELETE FROM permission_policies WHERE subject_id = 'u'").run();
+  }
+});

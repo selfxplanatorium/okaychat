@@ -217,7 +217,7 @@ async function runCase(job: CaseJob): Promise<void> {
     settleResultFailure(runId, caseId, { state: "skipped", errorCode: "aborted", errorMessage: null, latencyMs: null });
     return;
   }
-  if (!featureAllowed(userId, "evaluations")) {
+  if (!featureAllowed({ userId, modelRef: target.modelRef }, "evaluations")) {
     stop.reason = "error";
     stop.error = new AppError({ code: "forbidden", message: "Your administrator disabled evaluations for this account." });
     settleResultFailure(runId, caseId, { state: "skipped", errorCode: "forbidden", errorMessage: stop.error.message, latencyMs: null });
@@ -394,7 +394,7 @@ async function judgeAll(
       cancelled = true;
       break;
     }
-    if (!featureAllowed(userId, "evaluations")) {
+    if (!featureAllowed({ userId, modelRef: config.modelRef }, "evaluations")) {
       denied = true;
       break;
     }

@@ -1,3 +1,4 @@
+import { EVAL_RESULT_RESERVATION } from "../shared/evaluations.js";
 import { db } from "./db.js";
 import { env } from "./env.js";
 import { AppError } from "./errors.js";
@@ -115,12 +116,15 @@ export function storageUsedSql(user: string): string {
         + COALESCE(length(CAST(r.judge_json AS BLOB)), 0)
         + COALESCE(length(CAST(r.error_message AS BLOB)), 0)), 0)
       FROM evaluation_runs r WHERE r.user_id = ${user}
+    -- Keep output/error/judge capacity reserved durably; concurrent writes cannot spend it.
     UNION ALL SELECT COALESCE(SUM(
-        length(CAST(x.output AS BLOB)) + length(CAST(x.case_json AS BLOB))
-        + COALESCE(length(CAST(x.error_message AS BLOB)), 0)), 0)
+        length(CAST(x.case_json AS BLOB)) + MAX(${EVAL_RESULT_RESERVATION},
+          length(CAST(x.output AS BLOB)) + COALESCE(length(CAST(x.error_message AS BLOB)), 0)
+          + COALESCE((SELECT length(CAST(j.rationale AS BLOB)) FROM evaluation_scores j
+              WHERE j.run_id = x.run_id AND j.case_id = x.case_id AND j.source = 'judge'), 0))), 0)
       FROM evaluation_results x JOIN evaluation_runs r ON r.id = x.run_id WHERE r.user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(
-        COALESCE(length(CAST(s.comment_enc AS BLOB)), 0) + COALESCE(length(CAST(s.rationale AS BLOB)), 0)), 0)
+        COALESCE(length(CAST(s.comment_enc AS BLOB)), 0)), 0)
       FROM evaluation_scores s JOIN evaluation_runs r ON r.id = s.run_id WHERE r.user_id = ${user}
   )), 0)`;
 }

@@ -95,8 +95,10 @@ n8n definitions charge name/description/avatar/config ciphertext to the owner; e
   result output/error text/case snapshots, and score comment/rationale bytes count. Judge usage columns
   are inside the per-result reservation.
 - A launch reserves 48 KiB per result plus the snapshot bytes before any provider request, so the final
-  result write cannot fail after the model was paid. Case writes, dataset edits, manual comments, and
-  judge configs charge net growth; deleting a dataset or run frees its bytes.
+  result write cannot fail after the model was paid. The storage sum retains this floor for every
+  result (including completed results), with output, errors, and judge rationale consuming the same
+  reservation rather than being charged twice. Deleting the run releases it. Case writes, dataset edits,
+  manual comments, and judge configs charge net growth; deleting a dataset or run frees its bytes.
 
 ## Wave 3 additions
 

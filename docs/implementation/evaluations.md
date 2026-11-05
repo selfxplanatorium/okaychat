@@ -99,8 +99,9 @@ only; full answers come from the case endpoint when opened.
 
 Dataset text, case text and tags, run target/judge/label/error bytes, result output/error/snapshot
 bytes, and score comment/rationale bytes count against the storage quota. Launch reserves each result
-at 48 KiB (a true upper bound) plus the snapshot bytes. Case writes charge net growth; manual comments
-and judge configs charge their growth.
+at 48 KiB plus the snapshot bytes. The storage sum keeps this floor for the result's lifetime;
+output, errors, and judge rationale consume it without a second charge. Deletion releases it.
+Case writes charge net growth; manual comments and judge configs charge their growth.
 
 ## Web
 
