@@ -130,3 +130,21 @@ test('queued worker refuses live assistant-family and restricted-chat changes be
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM usage WHERE video_job_id=?').get(accepted.jobId)!.n,0);
   }
 });
+
+test('an active voice call blocks queued dispatch but never discards work the provider already accepted',async()=>{
+  const {VideoWorker}=await import('./worker.js');
+  const {voiceCallRegistry}=await import('../voice/routes.js');
+  const c=setup();c.run();const accepted=await c.execute();
+  let now=Date.now(),submits=0;
+  const worker=new VideoWorker({now:()=>now,provider:()=>({service:'xai',async submit(){submits++;return{id:'voice_job'};},async poll(){return{state:'running'};},async cancel(){return'unsupported';}})});
+  const call={ended:false} as unknown as Parameters<typeof voiceCallRegistry.set>[1];
+  await worker.runOne();assert.equal(submits,1);assert.equal(jobRow(accepted.jobId)!.state,'polling');
+  voiceCallRegistry.set(c.user,call);
+  try{now+=20_000;await worker.runOne();assert.equal(jobRow(accepted.jobId)!.state,'polling');assert.equal(jobRow(accepted.jobId)!.error_code,null);}
+  finally{voiceCallRegistry.delete(c.user,call);}
+  const d=setup();d.run();const queued=await d.execute();
+  voiceCallRegistry.set(d.user,call);
+  try{await worker.runOne();assert.equal(submits,1);assert.equal(jobRow(queued.jobId)!.error_code,'credentials_changed');}
+  finally{voiceCallRegistry.delete(d.user,call);}
+  const row=jobRow(accepted.jobId)!;finishVideo(row.id,row.lease_epoch,'cancelled','cancelled');
+});

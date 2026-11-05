@@ -93,6 +93,10 @@ test('bounded JSON, HTTP rejection, and connection failures use safe errors',asy
   await assert.rejects(videoJson('xai','/videos/generations','key','POST',{},undefined,huge),(e:unknown)=>e instanceof VideoError && e.dispatch==='unknown');
   const denied:VideoFetch=async()=>new Response('secret',{status:401});
   await assert.rejects(videoJson('xai','/videos/generations','key','POST',{},undefined,denied),(e:unknown)=>e instanceof VideoError && e.code==='provider_auth' && e.dispatch==='rejected');
+  for(const status of [408,500,502,504]){
+    const gateway:VideoFetch=async()=>new Response('upstream detail',{status});
+    await assert.rejects(videoJson('xai','/videos/generations','key','POST',{},undefined,gateway),(e:unknown)=>e instanceof VideoError && e.dispatch==='unknown');
+  }
   const broken:VideoFetch=async()=>{throw new Error('key and signed URL');};
   await assert.rejects(videoJson('xai','/videos/generations','key','POST',{},undefined,broken),(e:unknown)=>e instanceof VideoError && e.dispatch==='unknown' && e.message==='provider_unavailable');
 });

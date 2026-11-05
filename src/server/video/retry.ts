@@ -1,13 +1,9 @@
-import { copyFile, mkdir } from 'node:fs/promises';
-import path from 'node:path';
 import { db } from '../db.js';
 import { AppError } from '../errors.js';
 import { getSettings } from '../settings.js';
 import type { ResolvedRunConfig } from '../../shared/assistant-presets.js';
 import { assertVideoTurn, checkVideoTurn, type VideoTurnContext, type VideoEligibilityDependencies } from './eligibility.js';
-import { admitVideo, ownJob, requestOf, retryableVideoCode, isVideoOpen, patchJob, type VideoJobRow } from './store.js';
-import { videoStaging } from './paths.js';
-import { encrypt } from '../crypto.js';
+import { admitVideo, ownJob, requestOf, retryableVideoCode, isVideoOpen, type VideoJobRow } from './store.js';
 import { videoServiceStatuses } from './services.js';
 
 export function retryContext(row:VideoJobRow):VideoTurnContext|null {
@@ -35,14 +31,6 @@ export async function retryVideo(userId:string,id:string,expectedRevision:number
   if(service?.model!==parent.model_id)throw new AppError({code:'conflict',message:'Video settings changed. Start a new request in chat.'});
   const request=requestOf(parent);
   const child=admitVideo({userId,threadId:parent.thread_id!,llmRunId:parent.llm_run_id!,assistantMessageId:parent.assistant_message_id,toolCallId:parent.tool_call_id,service:parent.service,model:parent.model_id,request,authorize:()=>{authorize();if(ownJob(userId,id).revision!==expectedRevision)throw new AppError({code:'conflict'});}},Date.now(),parent);
-  // The parent's normalized JPEG lives in the parent's staging directory. Carry it to the child so a retry
-  // still works after the original upload was deleted; the retained hash refers to that exact file. If the
-  // parent's file is already gone, drop the hash and let preparation re-normalize from the upload.
-  if(request.referenceUploadId&&request.referenceSha256){
-    const from=path.join(videoStaging(parent.user_id,parent.id),'reference.jpg');
-    const to=path.join(videoStaging(child.user_id,child.id),'reference.jpg');
-    try{await mkdir(path.dirname(to),{recursive:true,mode:0o700});await copyFile(from,to);}
-    catch{delete request.referenceSha256;patchJob(child.id,child.lease_epoch,['queued'],{request_enc:encrypt(JSON.stringify(request))});}
-  }
+  // The worker carries the parent's retained normalized frame into the child before submission.
   return child;
 }

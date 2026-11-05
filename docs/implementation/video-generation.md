@@ -17,7 +17,7 @@ Private credentials reuse `xai` and `image-replicate` through `getOwnConnection`
 historical and must not be renamed. Disabled or missing private keys never fall back to shared keys.
 Custom base endpoints are refused, including a trailing-slash variant of the canonical URL.
 The fingerprint hashes connection ID, canonical endpoint, and a key digest; it contains no key.
-The worker resolves and compares it before each request and repeats the live receipt-origin, chat restriction, assistant-family, voice, account permission and service checks. Queued work cannot dispatch after the chat becomes restricted or its assistant loses the video family.
+The worker resolves and compares it before each request and repeats the live receipt-origin, chat restriction, assistant-family, account permission and service checks; an active voice call blocks only the paid POST, never polling or download of accepted work. Queued work cannot dispatch after the chat becomes restricted or its assistant loses the video family.
 
 ## Persistence
 
@@ -29,7 +29,7 @@ and the usage linkage/cost-state columns and indexes. Its failure seam is
 
 Adapters accept an injected fetch for local tests, use fixed API origins/paths, reject opaque IDs
 outside `[A-Za-z0-9_-]{1,200}`, and never retry submits. POST timeouts are 30 seconds, GETs 15,
-cancel 10; JSON is capped at 1 MiB. A malformed successful submit is an ambiguous dispatch and must
+cancel 10; JSON is capped at 1 MiB. A malformed successful submit, or a 408/5xx submit response, is an ambiguous dispatch and must
 never be automatically reposted. Replicate submission returns its ID even on immediate success;
 the caller must persist it before polling. Polls expose normalized states, billing duration, and
 an opaque internal download descriptor; vendor bodies and URLs are not public DTOs.
@@ -179,9 +179,11 @@ body is retained encrypted for 24 hours; terminal receipts normally retain 30 da
 minimal receipt remains while its file exists. Missing output is unavailable, never regenerated.
 Hourly maintenance retries failed cleanup; bytes/reservations stay charged until removal succeeds.
 
-Known limitation: retrying a job after its starting image was normalized copies the retained digest
-into a new job without copying its staged JPEG. That retry fails locally before submission; start a
-new chat request with the owned image instead. Text-only retries are unaffected.
+A failed retryable job keeps its normalized starting frame (`reference.jpg`, 256 KiB still reserved)
+while its encrypted request lasts (24 hours); cleanup and the hourly sweep skip it, then free it. The
+worker copies that frame into the retry under the retry's lease and checks the retained digest, so a
+retry works after the upload was deleted. Without a retained frame it normalizes the owned upload again.
+Reservation changes do not bump the job revision, so a retry's expected revision stays valid.
 
 The inspector is a deliberately narrow H.264/AAC MP4 container check, not full decoding or sanitization.
 Local cancellation, unknown submit outcomes, provider charges after local validation/storage failure,

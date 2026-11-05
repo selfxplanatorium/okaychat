@@ -2,7 +2,8 @@ import { readdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { db } from '../db.js';
 import { env } from '../env.js';
-import { cleanupVideoJob, deleteVideoFile } from './files.js';
+import { VIDEO_LIMITS } from '../../shared/video.js';
+import { cleanupVideoJob, deleteVideoFile, keepsReference } from './files.js';
 import { jobRow, isVideoOpen, cancelRunVideos, type VideoJobRow } from './store.js';
 
 let timer:ReturnType<typeof setInterval>|null=null;
@@ -10,8 +11,9 @@ let running=false;
 export async function maintainVideos(now=Date.now()):Promise<void> {
   if(running)return;running=true;
   try{
-    const terminal=db.prepare("SELECT * FROM video_jobs WHERE state NOT IN ('queued','submitting','polling','downloading','validating','cancel_requested') AND reservation_bytes>32768 LIMIT 100").all() as unknown as VideoJobRow[];
-    for(const row of terminal)await cleanupVideoJob(row).catch(()=>{});
+    // Frames retained for a possible retry are revisited only once their retry window has closed.
+    const terminal=db.prepare("SELECT * FROM video_jobs WHERE state NOT IN ('queued','submitting','polling','downloading','validating','cancel_requested') AND reservation_bytes>32768 AND NOT (reservation_bytes=? AND request_enc IS NOT NULL AND created_at>?) ORDER BY created_at LIMIT 100").all(VIDEO_LIMITS.receiptBytes+VIDEO_LIMITS.referenceBytes,now-86400000) as unknown as VideoJobRow[];
+    for(const row of terminal)await cleanupVideoJob(row,now).catch(()=>{});
     const unreferenced=db.prepare('SELECT id,user_id FROM videos v WHERE NOT EXISTS(SELECT 1 FROM video_threads r WHERE r.video_id=v.id) LIMIT 100').all() as Array<{id:string;user_id:string}>;
     for(const row of unreferenced)await deleteVideoFile(row.user_id,row.id).catch(()=>{});
     // Same revision/timestamp discipline as live mutations; open work is never pruned.
@@ -27,7 +29,7 @@ export async function maintainVideos(now=Date.now()):Promise<void> {
           const file=path.join(userDir,entry.name),id=root==='videos'?entry.name.replace(/\.mp4$/,''):entry.name;
           const info=await stat(file).catch(()=>null);if(!info||info.mtimeMs>now-3600000)continue;
           const job=jobRow(id);
-          if(ownerExists&&job?.user_id===user.name&&(isVideoOpen(job.state)||root==='videos'&&db.prepare('SELECT 1 FROM videos WHERE id=? AND user_id=?').get(id,user.name)))continue;
+          if(ownerExists&&job?.user_id===user.name&&(isVideoOpen(job.state)||root==='video-staging'&&keepsReference(job,now)||root==='videos'&&db.prepare('SELECT 1 FROM videos WHERE id=? AND user_id=?').get(id,user.name)))continue;
           await rm(file,{recursive:true,force:true}).catch(()=>{});
         }
         if(!ownerExists)await rm(userDir,{recursive:true,force:true}).catch(()=>{});

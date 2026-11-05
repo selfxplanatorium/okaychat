@@ -1,4 +1,4 @@
-import { mkdir, open, link, rm, readFile, stat } from 'node:fs/promises';
+import { mkdir, open, link, rm, readFile, readdir, stat } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -10,7 +10,7 @@ import { encrypt } from '../crypto.js';
 import { VideoError } from './errors.js';
 import { videoFile, videoStaging } from './paths.js';
 import { inspectMp4 } from './mp4.js';
-import { jobRow, parametersOf, patchJob, requestOf, settleVideo, changed, type VideoJobRow } from './store.js';
+import { jobRow, parametersOf, patchJob, requestOf, settleVideo, changed, isVideoOpen, retryableVideoCode, type VideoJobRow } from './store.js';
 import { VIDEO_LIMITS } from '../../shared/video.js';
 
 export async function prepareVideoReference(row:VideoJobRow):Promise<Buffer|undefined> {
@@ -18,9 +18,19 @@ export async function prepareVideoReference(row:VideoJobRow):Promise<Buffer|unde
   if(!request.referenceUploadId) return undefined;
   const dir=videoStaging(row.user_id,row.id),file=path.join(dir,'reference.jpg');
   if(request.referenceSha256) {
-    const bytes=await readFile(file);
-    if(bytes.length>VIDEO_LIMITS.referenceBytes || createHash('sha256').update(bytes).digest('hex')!==request.referenceSha256) throw new VideoError('invalid_reference',400);
-    return bytes;
+    const digest=request.referenceSha256;
+    const matches=(bytes:Buffer)=>bytes.length<=VIDEO_LIMITS.referenceBytes && createHash('sha256').update(bytes).digest('hex')===digest;
+    const own=await readFile(file).catch(()=>null);
+    if(own) {if(!matches(own)) throw new VideoError('invalid_reference',400);return own;}
+    // A retry starts from the parent's retained frame (kept by cleanupVideoJob), so the upload may be gone.
+    const parent=row.retry_of?await readFile(path.join(videoStaging(row.user_id,row.retry_of),'reference.jpg')).catch(()=>null):null;
+    if(parent) {
+      if(!matches(parent)) throw new VideoError('invalid_reference',400);
+      await writeReference(dir,file,parent);
+      return parent;
+    }
+    // No retained frame anywhere: normalize the owned upload again below and pin the new digest.
+    delete request.referenceSha256;
   }
   const original=db.prepare('SELECT COALESCE(m.size,length(u.data)) AS size FROM uploads u LEFT JOIN media m ON m.id=u.media_id AND m.user_id=u.user_id WHERE u.id=? AND u.user_id=?').get(request.referenceUploadId,row.user_id) as {size:number}|undefined;
   if(!original || original.size>25*1024*1024)throw new VideoError('invalid_reference',400);
@@ -29,12 +39,20 @@ export async function prepareVideoReference(row:VideoJobRow):Promise<Buffer|unde
   let bytes:Buffer;
   try {bytes=await normalizeVideoReference(Buffer.from(upload.data),request.aspectRatio);}
   catch(error){throw new VideoError(error instanceof Error && error.message==='reference_aspect_mismatch'?'reference_aspect_mismatch':'invalid_reference',400);}
-  await mkdir(dir,{recursive:true,mode:0o700});
-  const fd=await open(file,'w',0o600);
-  try {await fd.writeFile(bytes);await fd.sync();}finally{await fd.close();}
+  await writeReference(dir,file,bytes);
   request.referenceSha256=createHash('sha256').update(bytes).digest('hex');
   if(!patchJob(row.id,row.lease_epoch,['queued'],{request_enc:encrypt(JSON.stringify(request))})) throw new VideoError('cancelled',409);
   return bytes;
+}
+async function writeReference(dir:string,file:string,bytes:Buffer):Promise<void> {
+  await mkdir(dir,{recursive:true,mode:0o700});
+  const fd=await open(file,'w',0o600);
+  try {await fd.writeFile(bytes);await fd.sync();}finally{await fd.close();}
+}
+/** A failed job's normalized frame stays (and stays charged) while the job can still be retried. */
+export function keepsReference(row:VideoJobRow,now:number):boolean {
+  if(isVideoOpen(row.state) || row.state==='succeeded' || !row.error_code || !retryableVideoCode(row.error_code) || !row.request_enc || row.created_at<=now-86400000 || row.attempt>=7) return false;
+  return !!requestOf(row).referenceSha256;
 }
 export async function inspectVideoFile(row:VideoJobRow,file:string) {
   const fd=await open(file,'r');
@@ -70,12 +88,16 @@ export async function persistVideo(row:VideoJobRow,source:string,now=Date.now())
   });
 }
 /** Release reservations only after the corresponding bytes are really gone. Retry from maintenance on failure. */
-export async function cleanupVideoJob(row:VideoJobRow):Promise<void> {
+export async function cleanupVideoJob(row:VideoJobRow,now=Date.now()):Promise<void> {
   const current=jobRow(row.id);
   if(!current || current.lease_epoch!==row.lease_epoch) return;
-  await rm(videoStaging(row.user_id,row.id),{recursive:true,force:true});
+  const staging=videoStaging(row.user_id,row.id);
+  const keep=keepsReference(current,now);
+  if(keep) {for(const entry of await readdir(staging).catch(()=>[]))if(entry!=='reference.jpg')await rm(path.join(staging,entry),{recursive:true,force:true});}
+  else await rm(staging,{recursive:true,force:true});
   if(!db.prepare('SELECT 1 FROM videos WHERE job_id=?').get(row.id)) await rm(videoFile(row.user_id,row.id),{force:true});
-  patchJob(row.id,row.lease_epoch,[current.state],{reservation_bytes:VIDEO_LIMITS.receiptBytes});
+  // Reservations are not part of the status view: no revision bump, so a retry's expected revision stays valid.
+  db.prepare('UPDATE video_jobs SET reservation_bytes=? WHERE id=? AND lease_epoch=? AND state=?').run(VIDEO_LIMITS.receiptBytes+(keep?VIDEO_LIMITS.referenceBytes:0),row.id,row.lease_epoch,current.state);
 }
 export async function deleteVideoFile(userId:string,id:string):Promise<boolean> {
   if(!db.prepare('SELECT 1 FROM videos WHERE id=? AND user_id=?').get(id,userId)) return false;

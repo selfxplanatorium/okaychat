@@ -19,11 +19,12 @@ export async function videoJson(service: VideoServiceId, path: string, key: stri
     throw new VideoError('provider_unavailable',503,submit ? 'unknown':'none');
   }
   if (!response.ok) {
+    // A gateway error or timeout after a POST does not prove the provider refused (and did not bill) it.
     await response.body?.cancel();
     const status = response.status;
     const retry = response.headers.get('retry-after');
     const retryAfterMs = retry && /^\d+$/.test(retry) ? Math.min(30_000,Number(retry)*1000) : null;
-    throw new VideoError(status === 401 || status === 403 ? 'provider_auth' : status === 429 ? 'provider_rate_limit' : status === 404 ? 'provider_output_expired' : status >= 500 ? 'provider_unavailable':'provider_rejected',status,submit ? 'rejected':'none',retryAfterMs);
+    throw new VideoError(status === 401 || status === 403 ? 'provider_auth' : status === 429 ? 'provider_rate_limit' : status === 404 ? 'provider_output_expired' : status >= 500 ? 'provider_unavailable':'provider_rejected',status,submit ? (status >= 500 || status === 408 ? 'unknown':'rejected'):'none',retryAfterMs);
   }
   if (response.status !== expectedStatus) {
     await response.body?.cancel();
