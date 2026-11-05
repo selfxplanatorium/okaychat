@@ -48,14 +48,6 @@ Status as of 2026-11-05. Update this file when a feature ships or a plan changes
 | Mobile app | Installable PWA (manifest, maskable icons, offline shell), safe areas, touch-sized controls, swipe drawer, native-style settings rows | Install needs HTTPS. See `docs/implementation/mobile-pwa.md` |
 | Deploy | Dockerfile with two targets (`app`; `browser`: Chromium + Scrapling worker), separate sandbox and speech Dockerfiles, Compose with all workers and SearXNG | Optional `docker-compose.gpu.yml` enables CUDA Whisper. `SCRAPLING_BROWSER=false` skips Scrapling's stealth-browser fallback |
 
-## Pass 10: custom tools (built)
-
-- Plugins → Custom tools: private per-account Python functions and fixed-destination HTTPS request tools,
-  strict schema builder, write-only encrypted secrets, exact approval review, workspace tests, retained
-  run ledger, counters and a new `customTools` permission. Python uses a one-use sandbox function mode;
-  HTTP uses `publicFetch` only, with redirects and private destinations refused. See
-  `docs/implementation/custom-tools.md`.
-
 ## Pass 2: completed
 
 - Resumable streams and selected-chat restoration after reload.
@@ -155,7 +147,28 @@ Deferred: uploads/images, nested threads, DMs, presence, custom emoji, room shar
 scheduled room posting, autonomous AI, in-place regeneration, per-room retention, and multi-writer
 deployment.
 
-## Pass 10: external API access (built)
+## Pass 10: custom tools (built)
+
+- Plugins → Custom tools: private per-account Python functions and fixed-destination HTTPS request tools,
+  strict schema builder, write-only encrypted secrets, exact approval review, workspace tests, retained
+  run ledger, counters and a new `customTools` permission. Python uses a one-use sandbox function mode;
+  HTTP uses `publicFetch` only, with redirects and private destinations refused. See
+  `docs/implementation/custom-tools.md`.
+
+## Pass 11: notes and calendar (built)
+
+- **Notes**: private Markdown notes with a title, flat tags, favorite/pin, FTS search, project links, an
+  autosaving editor with revision compare-and-set and a plaintext per-account outbox, safe preview,
+  conflict recovery, saving a stored message or Markdown artifact version as a note, and a single-use
+  note-to-chat handoff. See `docs/implementation/notes.md`.
+- **Calendar**: private timed and all-day events with time zones, authoritative gap/fold resolution, a
+  durable reminder ledger with a 30-second ticker and the shared notification center, a range/search API,
+  and agenda/month/week views. See `docs/implementation/calendar.md`.
+
+Deferred: note collaboration and sharing, external calendar sync, invitations, recurrence, drag/resize
+editing, and concurrent editing.
+
+## Pass 12: external API access (built)
 
 - **A small OpenAI-compatible endpoint**: `GET /v1/models` and `POST /v1/chat/completions`, buffered or
   SSE, authenticated only by an account-owned bearer credential. Stateless by design: no tools, memory,

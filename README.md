@@ -68,6 +68,7 @@ The ChatGPT plan uses the official **Sign in with ChatGPT** flow for chat. Set `
 - Branches, editable replies, retries, model switching, and full-text search
 - Named assistants, a saved prompt library with variables and `/shortcuts`, bookmarks, feedback, and explicit continuation of truncated replies
 - Shared team channels with rooms, mentions, reactions, realtime updates, and explicit AI replies
+- Private notes with tags and search, and a calendar with reminders
 - Tags, saved filters, notifications, and portable chat archives
 - Attachments: images, PDFs, DOCX, and text/code files
 - Prompt-injection envelopes, approval gates, and honest errors
@@ -77,6 +78,7 @@ The ChatGPT plan uses the official **Sign in with ChatGPT** flow for chat. Set `
 - OpenCode Go, ChatGPT plan, OpenCode Zen, Ollama, and 100+ providers
 - Custom OpenAI-compatible endpoints and side-by-side model comparison
 - Assistant presets with sampling, tool, and knowledge policies
+- An OpenAI-compatible `/v1` API with account-owned, scoped keys and usage
 - Private evaluation datasets, repeatable runs, manual or model-graded scoring, and CSV/JSON export
 - Per-model reasoning effort and context/cost metering
 - Shared keys with per-audience model policies and granular feature limits
@@ -86,6 +88,7 @@ The ChatGPT plan uses the official **Sign in with ChatGPT** flow for chat. Set `
 **Tools**
 - MCP tools, resources, prompts, OAuth, forms, and embedded apps
 - n8n webhook agents for your own workflows
+- Custom Python functions and approved HTTPS request tools, built in the app
 - Keyless web search and readable page fetching
 - Code execution in an offline sandbox
 - PDF, Word, and Excel creation and in-place editing
