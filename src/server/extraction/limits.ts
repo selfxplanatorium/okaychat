@@ -8,6 +8,11 @@ export const MAX_SLIDES = 300;
 export const MAX_EPUB_DOCUMENTS = 500;
 /** One selected ZIP entry. The shared 200 MB archive bound alone would allow a single 199 MB XML part. */
 export const MAX_XML_PART_BYTES = 32 * 1024 * 1024;
+/**
+ * Tags and attributes (`<` and `=`) in one XML part parsed into a DOM. xmldom holds 1–2 KB per node, so the byte
+ * cap alone would let a 90 KB PPTX build a 3.6 GB tree; this bounds one part to a few hundred MB.
+ */
+export const MAX_XML_MARKUP = 300_000;
 /** All selected ZIP entries of one file together. */
 export const MAX_SELECTED_BYTES = 64 * 1024 * 1024;
 /** Checked between parts; one synchronous parse is not preempted. */

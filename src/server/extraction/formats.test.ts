@@ -211,6 +211,23 @@ test("HTML: a document title becomes a heading when the body has none", async ()
   assert.equal(untitled.text, "Body only.");
 });
 
+test("HTML: a fragment without an html element keeps its text", async () => {
+  const result = await extract("snippet.html", "text/html", strToU8("<h2>Quasar Fragment</h2><p>Fragment body.</p><script>ScriptToken()</script>"));
+  assert.equal(result.format, "html");
+  assert.match(result.text, /^## Quasar Fragment$/m);
+  assert.match(result.text, /Fragment body\./);
+  assert.ok(!result.text.includes("ScriptToken"));
+});
+
+test("HTML: an ordered list split into batches keeps counting from its start", async () => {
+  const items = Array.from({ length: 6_000 }, (_, i) => `<li>Item ${i + 1} padding padding</li>`).join("");
+  const result = await extract("list.html", "text/html", strToU8(`<html><body><div><ol start="5">${items}</ol><p>After list.</p></div></body></html>`));
+  const numbers = result.text.split("\n").filter((line) => /^\d+\. /.test(line)).map((line) => Number.parseInt(line, 10));
+  assert.equal(numbers.length, 6_000);
+  assert.ok(numbers.every((value, i) => value === 5 + i));
+  assert.match(result.text, /After list\.$/);
+});
+
 // --- ODT -----------------------------------------------------------------------------------------------
 
 const ODT_CONTENT = `<?xml version="1.0" encoding="UTF-8"?>
@@ -423,6 +440,16 @@ test("Detection: a .png name holding text is plain text", async () => {
   const result = await extract("renamed.png", "image/png", textBytes("Not an image"));
   assert.equal(result.format, "text");
   assert.equal(result.text, "Not an image");
+});
+
+test("Detection: text starting with BM is text, while a bitmap header is an image under any name", async () => {
+  const text = await extract("notes.md", "text/markdown", textBytes("BMW quarterly report"));
+  assert.equal(text.format, "text");
+  assert.equal(text.text, "BMW quarterly report");
+  const header = new Uint8Array(26);
+  header.set([0x42, 0x4d, 26, 0, 0, 0, 0, 0, 0, 0, 26, 0, 0, 0, 12]);
+  const bitmap = await extract("scan.dat", "application/octet-stream", header);
+  assert.equal(bitmap.format, "image");
 });
 
 test("Detection: OLE magic is a legacy Office file", async () => {

@@ -13,11 +13,15 @@ const PARTS = /^ppt\/(?:_rels\/presentation\.xml\.rels|(?:slides|notesSlides)\/(
 /** Placeholders that repeat layout chrome (slide number, date, footer, the notes page's slide image). */
 const CHROME = new Set(["sldNum", "dt", "ftr", "hdr", "sldImg"]);
 
-function placeholderType(paragraph: XmlElement): string | undefined {
+/** Cached per shape: searching the shape again for every paragraph is quadratic in a shape with many paragraphs. */
+function placeholderType(paragraph: XmlElement, shapes: Map<XmlElement, string | undefined>): string | undefined {
   for (let node: XmlNode | null = paragraph.parentNode; node; node = node.parentNode) {
     if (isElement(node) && node.namespaceURI === P && node.localName === "sp") {
-      const ph = elements(node, P, "ph")[0];
-      return ph ? (attr(ph, null, "type") ?? "body") : undefined;
+      if (!shapes.has(node)) {
+        const ph = elements(node, P, "ph")[0];
+        shapes.set(node, ph ? (attr(ph, null, "type") ?? "body") : undefined);
+      }
+      return shapes.get(node);
     }
   }
   return undefined;
@@ -35,8 +39,9 @@ function runText(node: XmlNode, out: string[]) {
 
 function paragraphs(doc: XmlDocument): string {
   const lines: string[] = [];
+  const shapes = new Map<XmlElement, string | undefined>();
   for (const paragraph of elements(doc, A, "p")) {
-    const type = placeholderType(paragraph);
+    const type = placeholderType(paragraph, shapes);
     if (type && CHROME.has(type)) continue;
     const out: string[] = [];
     runText(paragraph, out);

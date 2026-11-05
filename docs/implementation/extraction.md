@@ -15,7 +15,7 @@ sandbox (`src/server/ocr.ts`). Separate from `read_document` and artifact editin
 | XLSX / XLSM | exceljs cell tables (`documents/xlsx.ts` `readXlsx`) |
 | PPTX / PPSX (and macro/template variants) | `## Slide n` per slide in presentation order, DrawingML paragraph text, `### Notes` with speaker notes; slide number, date, footer, header, and the notes page's slide image placeholders are skipped |
 | EPUB (non-DRM) | Spine XHTML in reading order (including `linear="no"`), each chapter through `htmlToText`, `## <title>` when a chapter has a title and no heading |
-| HTML / HTM / XHTML file | Markdown via linkedom + turndown: no script/style/noscript/iframe/svg/form, links keep only their text, images only their alt, `# <title>` when there is no heading. Chat still attaches `.html` as code |
+| HTML / HTM / XHTML file | Markdown via linkedom + turndown: no script/style/noscript/iframe/svg/form, links keep only their text, images only their alt, `# <title>` when there is no heading. A fragment without `<html>` is wrapped in a document first. Chat still attaches `.html` as code |
 | ODT | `office:text` walk: `#` headings by outline level, paragraphs, `- ` list items (nested indented), table cells joined by a pipe, `text:s`/tab/line-break, footnotes inline, comments skipped |
 | Raster/HEIF images | `needsOcr: "image"`, empty text. Chat: 422 pointing to the vision path or knowledge |
 | Text, CSV, JSON, Markdown, code | UTF-8, BOM stripped, binary check |
@@ -33,7 +33,7 @@ and AVIF OCR are not read (deferrals below).
 `…main+xml`), then the fixed main part names (`word/document.xml`, `xl/workbook.xml`, `ppt/presentation.xml`) for
 macro and template variants; anything else is an unsupported ZIP. 4. `{\rtf` → unsupported. 5. HTML by type,
 extension, or a leading `<!doctype html`/`<html`, only for bytes without a NUL in the first 8 KiB. 6. Image magic
-(chat rasters, BMP, TIFF, HEIF brands), or an image type/name on bytes that are not text: a `.png` holding text is
+(chat rasters, BMP with its reserved header bytes at zero so text starting with "BM" stays text, TIFF, HEIF brands), or an image type/name on bytes that are not text: a `.png` holding text is
 text. 7. SVG → unsupported. 8. A NUL in the first 8 KiB → unsupported. 9. Text.
 
 A supported document is read under any name; the stored name never changes and no mismatch is recorded.
@@ -47,7 +47,14 @@ documents, 32 MiB per selected ZIP entry and 64 MiB for all selected entries (on
 `documents/zip-bounds.ts`: 200 MiB expanded, 10,000 entries, checked once by every ZIP extractor), a 20 s budget
 checked before each page/slide/chapter (it does not preempt one synchronous parse; the size caps bound that),
 25 MiB OCR input, 120 s runner OCR time with a 150 s app deadline. fflate inflates each selected entry into a
-buffer of its declared size, so an understated header cannot grow memory past the declared caps. The first limit
+buffer of its declared size, so an understated header cannot grow memory past the declared caps; a stored entry is
+copied at its compressed size instead, so the per-entry and total caps count the larger of the two (overlapping
+directory entries could otherwise each copy the whole file). Each XML part parsed into an xmldom tree may hold at
+most 300,000 `<` and `=` (tags and attributes, about 1–2 KB of memory each), checked before parsing. ODT `text:s`
+adds at most 400,000 spaces per document. HTML is converted in batches of about 64 KiB of markup, each wrapped in
+its ancestors (a split `<ol>` keeps its numbering through `start`), because turndown's output join is quadratic in
+one element's size; conversion checks the budget before each batch and stops once the text passes the character
+cap. Parsing one 25 MiB HTML file still takes several seconds. The first limit
 reached sets `truncated` and `limit` (`characters`, `pages`, `slides`, `documents`). `/files/extract` appends a
 fixed marker (`[truncated: the first 400,000 characters were kept]` and the page/slide/section variants); a
 knowledge source or URL refuses a truncated extraction instead of indexing part of a file.
@@ -122,8 +129,8 @@ server that holds `OKAYCHAT_SECRET`.
 
 - `extraction/formats.test.ts`: local PPTX/PPSX/EPUB/HTML/ODT/DOCX/XLSX/PDF/text fixtures (fflate, pdf-lib, the
   document creators), detection under wrong names, refused formats, the sentinel, image results, truncation.
-- `extraction/bounds.test.ts`: 210 MiB entries, a 70 MiB selected part, a 10,001-entry ZIP, malformed parts, the
-  time budget, and aborts.
+- `extraction/bounds.test.ts`: 210 MiB entries, a 70 MiB selected part, overlapping stored entries, a 10,001-entry
+  ZIP, a dense slide, the XML markup cap, ODT space expansion, malformed parts, the time budget, and aborts.
 - `ocr.test.ts`: not configured, service down, the request/cleanup sequence, abort, 429/422, oversized answers,
   and capabilities.
 - `knowledge/knowledge.test.ts`: uploads of each format to `ready`, OCR through a fake extractor, failures that

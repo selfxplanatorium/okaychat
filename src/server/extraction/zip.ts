@@ -5,12 +5,23 @@ import { ExtractionError, TOO_LARGE_PART } from "./errors.js";
 export { ArchiveTooLargeError, assertZipBounds } from "../documents/zip-bounds.js";
 
 // Selective ZIP reads. fflate inflates each selected entry into a buffer of its declared size, so a header that
-// understates an entry cannot grow memory beyond the declared caps checked here.
+// understates an entry cannot grow memory beyond the declared caps checked here. A stored entry is instead copied
+// at its compressed size, which overlapping directory entries can each set to the whole file, so the caps use the
+// larger of the two sizes.
 
 const MAX_ENTRIES = 10_000;
 export const DAMAGED_ZIP = "This file could not be opened. It may be damaged.";
 
-function unzip(data: Uint8Array, filter: (file: { name: string; originalSize: number }) => boolean): Record<string, Uint8Array> {
+interface ZipFile {
+  name: string;
+  size: number;
+  originalSize: number;
+}
+
+/** The bytes fflate allocates for one selected entry. */
+const allocated = (file: ZipFile) => Math.max(file.size, file.originalSize);
+
+function unzip(data: Uint8Array, filter: (file: ZipFile) => boolean): Record<string, Uint8Array> {
   try {
     return unzipSync(data, { filter });
   } catch (error) {
@@ -33,9 +44,13 @@ export function zipEntryNames(data: Uint8Array): string[] {
 /** One entry, or undefined when it is absent or declares more than `max` bytes. Never a partial entry. */
 export function readZipEntry(data: Uint8Array, name: string, max: number): Uint8Array | undefined {
   let entries = 0;
+  let found = false;
   const files = unzip(data, (file) => {
     if (++entries > MAX_ENTRIES) throw new ArchiveTooLargeError();
-    return file.name === name && file.originalSize <= max;
+    // Only the first entry of that name, so repeated directory entries cannot allocate it again and again.
+    if (found || file.name !== name || allocated(file) > max) return false;
+    found = true;
+    return true;
   });
   const entry = files[name];
   return entry && entry.byteLength <= max ? entry : undefined;
@@ -48,8 +63,9 @@ export function inflateSelected(data: Uint8Array, select: (name: string) => bool
   const files = unzip(data, (file) => {
     if (++entries > MAX_ENTRIES) throw new ArchiveTooLargeError();
     if (!select(file.name)) return false;
-    selected += file.originalSize;
-    if (file.originalSize > perPart || selected > total) throw new ExtractionError("too_large", TOO_LARGE_PART);
+    const size = allocated(file);
+    selected += size;
+    if (size > perPart || selected > total) throw new ExtractionError("too_large", TOO_LARGE_PART);
     return true;
   });
   return new Map(Object.entries(files));
