@@ -52,7 +52,7 @@ import { errorJson, AppError } from "./errors.js";
 import { describeBoundaryError, describeProviderError, toolErrorWireText, wireErrorText } from "./provider-errors.js";
 import { conversationMemory, factsContext, memoryPreferences, temporaryMemory } from "./memory.js";
 import { attachedCollectionIds, conversationKnowledge, type KnowledgeTurn } from "./knowledge/tools.js";
-import { assertThreadContentReadable, knowledgeAccessRevoked, restrictedThreadReadable, threadKnowledgeAccess } from "./knowledge/thread-policy.js";
+import { assertThreadContentReadable, knowledgeAccessRevoked, restrictedThreadReadable, restrictedThreadSignal, threadKnowledgeAccess } from "./knowledge/thread-policy.js";
 import { registerKnowledgeOperation } from "./knowledge/revocation.js";
 import { contextText, insertTurnContexts, saveTurnContext, shownFactIds, storedTurnContexts, turnBlock } from "./turn-context.js";
 import { isVoiceTurn, withVoiceNotes } from "./voice/turn.js";
@@ -874,7 +874,7 @@ const resumable = createResumableStreamContext({
   ttlMs: RESUME_TTL_MS,
   onFinalize: (streamId) => setTimeout(() => runs.delete(streamId), RESUME_TTL_MS).unref(),
 });
-const runs = new Map<string, { userId: string; controller: AbortController }>();
+const runs = new Map<string, { userId: string; threadId: string; controller: AbortController }>();
 
 // Each turn can fan out into sub-agents, browser renders, and sandbox runs, possibly on a server-wide key.
 // The counter lives in turn-slots.ts so the external API shares the same hard ceiling.
@@ -975,7 +975,7 @@ export const chatRoutes = new Hono<AppEnv>()
         signal: controller.signal,
         abortRun: () => controller.abort(),
       });
-      runs.set(streamId, { userId: user.id, controller });
+      runs.set(streamId, { userId: user.id, threadId: parsed.data.id, controller });
       const response = createUIMessageStreamResponse({ stream: releasing(stream, release, controller.signal) });
       const body = await resumable.run(streamId, () => response.body!);
       const headers = new Headers(response.headers);
@@ -992,9 +992,17 @@ export const chatRoutes = new Hono<AppEnv>()
     const run = runs.get(c.req.param("streamId"));
     // 204 is the AI SDK's "no active stream" answer.
     if (!run || run.userId !== c.get("user").id) return c.body(null, 204);
+    assertThreadContentReadable(run.userId, run.threadId);
     const body = await resumable.resume(c.req.param("streamId"));
+    assertThreadContentReadable(run.userId, run.threadId);
     if (!body) return c.body(null, 204);
-    return new Response(body, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "x-vercel-ai-ui-message-stream": "v1" } });
+    const guarded = body.pipeThrough(new TransformStream({
+      transform(chunk, controller) {
+        assertThreadContentReadable(run.userId, run.threadId);
+        controller.enqueue(chunk);
+      },
+    }));
+    return new Response(guarded, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store", "x-vercel-ai-ui-message-stream": "v1" } });
   })
   .post("/chat/:streamId/cancel", (c) => {
     const run = runs.get(c.req.param("streamId"));
@@ -1025,6 +1033,7 @@ export const chatRoutes = new Hono<AppEnv>()
     // Edits wait while the thread is busy, so a reply cannot change after its old text went to the summary.
     if (threadBusy(threadId)) return c.json({ error: "This chat is busy. Try again when the reply finishes." }, 409);
     const release = markBusy(threadId);
+    const access = restrictedThreadSignal(user.id, threadId, c.req.raw.signal);
     try {
       // A stale tab may hold text from before an edit or Undo; the stored edits are authoritative.
       const messages = withStoredEdits(user.id, threadId, body.messages);
@@ -1034,16 +1043,19 @@ export const chatRoutes = new Hono<AppEnv>()
       // Provider errors explain themselves; the global handler would hide them behind a generic 500.
       let state;
       try {
-        state = await compact({ userId: user.id, threadId, messages, previous: thread.compaction, model, conn, signal: c.req.raw.signal });
+        assertThreadContentReadable(user.id, threadId);
+        state = await compact({ userId: user.id, threadId, messages, previous: thread.compaction, model, conn, signal: access.signal });
       } catch (error) {
         const failure = describeProviderError(error, { model: model.ref, provider: model.providerId });
         // A provider 401 is not this session's 401; keep the upstream failure away from the auth handler.
         const status = failure.code === "validation" || failure.code === "model_not_found" ? 400 : 502;
         return errorJson(c, failure, status);
       }
+      assertThreadContentReadable(user.id, threadId);
       setCompaction(user.id, threadId, state);
       return c.json(state);
     } finally {
+      access.release();
       release();
     }
   })

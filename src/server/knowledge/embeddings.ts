@@ -1,11 +1,12 @@
 import type { KnowledgeEmbeddingOption, KnowledgeEmbeddingProvider, KnowledgeEmbeddingSetting } from "../../shared/knowledge.js";
 import { ollamaEmbed } from "../catalog/ollama.js";
-import { getConnection, listProviders, type Connection } from "../catalog/providers.js";
+import { getConnection, listProviders, resolvePinnedConnection, type Connection } from "../catalog/providers.js";
 import { USER_AGENT } from "../env.js";
 import { modelAccessMessage, sharedModelAccess } from "../entitlements.js";
 import { describeProviderError } from "../provider-errors.js";
 import { publicFetch, readCapped } from "../public-fetch.js";
-import { assertFeature } from "../permissions/guard.js";
+import { registerKnowledgeOperation } from "./revocation.js";
+import { assertFeature, featureAllowed } from "../permissions/guard.js";
 import { reserveOperation } from "../permissions/limits.js";
 
 // Embedding backends for knowledge collections. Every provider is called over plain fetch; Ollama uses
@@ -306,43 +307,61 @@ export function createEmbedder(
   if (!model) throw new EmbeddingError("Enter the embedding model name for this collection.");
   if (!embeddingAllowed(userId, conn, model)) throw new EmbeddingError(modelAccessMessage(`${providerId}/${model}`));
   const requestOpts: RequestOptions = { ...opts };
+  const pin = pinned ? resolvePinnedConnection(userId, providerId) : null;
+  const connectionAllowed = () => {
+    if (!featureAllowed(userId, "knowledge") || !embeddingAllowed(userId, conn, model)) return false;
+    if (!pinned) return true;
+    const live = resolvePinnedConnection(userId, providerId);
+    return !!pin && !!live && live.scope === pin.scope && live.createdAt === pin.createdAt
+      && live.endpointHash === pin.endpointHash && live.connection.guarded === conn.guarded;
+  };
 
-  const embed = async (texts: string[], signal?: AbortSignal): Promise<Float32Array[]> => {
-    const out: Float32Array[] = [];
-    for (let i = 0; i < texts.length; i += EMBED_BATCH) {
-      signal?.throwIfAborted();
-      // Knowledge may be revoked while a job is running: each batch re-checks and charges one operation.
-      assertFeature(userId, "knowledge");
-      const lease = reserveOperation({ userId }, "knowledge.embed");
-      const batch = texts.slice(i, i + EMBED_BATCH).map((text) => (text.length > MAX_INPUT_CHARS ? text.slice(0, MAX_INPUT_CHARS) : text));
-      let rows: number[][];
-      try {
-        rows =
-          setting.provider === "ollama"
-            ? await withRetry(
-                async () => {
-                  try {
-                    return await ollamaEmbed(conn, model, batch, requestSignal(signal, opts.timeoutMs));
-                  } catch (error) {
-                    if (signal?.aborted) throw error;
-                    const safe = describeProviderError(error, { provider: "ollama", log: false });
-                    throw new EmbeddingError(`${safe.message} ${safe.hint}`, (error as { status?: number }).status);
-                  }
-                },
-                { signal, sleep: opts.sleep },
-              )
-            : setting.provider === "google"
-              ? await googleEmbed(conn, model, batch, { ...requestOpts, signal })
-              : await openaiEmbed(conn, model, batch, { ...requestOpts, signal });
-      } finally {
-        lease.release();
+  const embed = async (texts: string[], callerSignal?: AbortSignal): Promise<Float32Array[]> => {
+    const controller = new AbortController();
+    const signal = callerSignal ? AbortSignal.any([callerSignal, controller.signal]) : controller.signal;
+    const release = registerKnowledgeOperation(controller, connectionAllowed);
+    try {
+      const out: Float32Array[] = [];
+      for (let i = 0; i < texts.length; i += EMBED_BATCH) {
+        signal.throwIfAborted();
+        if (!connectionAllowed()) throw new EmbeddingError("The embedding connection is no longer allowed. Reindex the collection.");
+        // Knowledge may be revoked while a job is running: each batch re-checks and charges one operation.
+        assertFeature(userId, "knowledge");
+        const lease = reserveOperation({ userId }, "knowledge.embed");
+        const batch = texts.slice(i, i + EMBED_BATCH).map((text) => (text.length > MAX_INPUT_CHARS ? text.slice(0, MAX_INPUT_CHARS) : text));
+        let rows: number[][];
+        try {
+          rows =
+            setting.provider === "ollama"
+              ? await withRetry(
+                  async () => {
+                    try {
+                      return await ollamaEmbed(conn, model, batch, requestSignal(signal, opts.timeoutMs));
+                    } catch (error) {
+                      if (signal?.aborted) throw error;
+                      const safe = describeProviderError(error, { provider: "ollama", log: false });
+                      throw new EmbeddingError(`${safe.message} ${safe.hint}`, (error as { status?: number }).status);
+                    }
+                  },
+                  { signal, sleep: opts.sleep },
+                )
+              : setting.provider === "google"
+                ? await googleEmbed(conn, model, batch, { ...requestOpts, signal })
+                : await openaiEmbed(conn, model, batch, { ...requestOpts, signal });
+        } finally {
+          lease.release();
+        }
+        if (rows.length !== batch.length) throw new EmbeddingError(`${providerId} returned ${rows.length} embeddings for ${batch.length} passages.`);
+        out.push(...rows.map((row) => normalizeVector(row)));
       }
-      if (rows.length !== batch.length) throw new EmbeddingError(`${providerId} returned ${rows.length} embeddings for ${batch.length} passages.`);
-      out.push(...rows.map((row) => normalizeVector(row)));
+      const dimensions = out[0]?.length ?? 0;
+      if (out.some((vector) => vector.length !== dimensions)) throw new EmbeddingError(`${providerId} returned vectors with different dimensions.`);
+      signal.throwIfAborted();
+      if (!connectionAllowed()) throw new EmbeddingError("The embedding connection is no longer allowed. Reindex the collection.");
+      return out;
+    } finally {
+      release();
     }
-    const dimensions = out[0]?.length ?? 0;
-    if (out.some((vector) => vector.length !== dimensions)) throw new EmbeddingError(`${providerId} returned vectors with different dimensions.`);
-    return out;
   };
   return { provider: setting.provider, providerId, model, embed };
 }

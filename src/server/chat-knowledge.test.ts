@@ -171,3 +171,59 @@ test("detaching during new retrieval also revokes earlier replay blocks", async 
     setRetrievalEmbedderFactoryForTests(null);
   }
 });
+
+async function restrictedRouteFixture() {
+  const { Hono } = await import("hono");
+  const { requireUser } = await import("./auth.js");
+  const { sha256 } = await import("./crypto.js");
+  const { handleAppError } = await import("./errors.js");
+  const { chatRoutes } = await import("./chat.js");
+  const { setCollectionSharing } = await import("./knowledge/access.js");
+  const { applyKnowledgeAttachments } = await import("./knowledge/thread-policy.js");
+  db.prepare("INSERT OR IGNORE INTO users (id, email, name, password_hash, role, created_at) VALUES ('bob', 'bob@example.test', 'Bob', 'unused', 'user', 1)").run();
+  db.prepare("INSERT OR REPLACE INTO sessions (token_hash, user_id, expires_at) VALUES (?, 'alice', ?)").run(sha256("knowledge-session"), Date.now() + 60_000);
+  const id = createCollection("bob", { name: "Shared manual", embedding: { provider: "none" } }).id;
+  setCollectionSharing("bob", id, { visibility: "shared", expectedRevision: 1 });
+  ensureThread("alice", "restricted-chat");
+  applyKnowledgeAttachments("alice", "restricted-chat", { knowledgeIds: [id], acceptSharedRestrictions: true });
+  const app = new Hono().use(requireUser).onError(handleAppError).route("/", chatRoutes);
+  return {
+    request: (route: string, body?: unknown) => app.request(`http://app${route}`, {
+      method: body ? "POST" : "GET",
+      headers: { cookie: "okaychat_session=knowledge-session", "Content-Type": "application/json" },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    }),
+    revoke: () => setCollectionSharing("bob", id, { visibility: "private", expectedRevision: 2 }),
+  };
+}
+
+test("a revoked chat cannot replay a completed resumable reply", async (t) => {
+  const fixture = await restrictedRouteFixture();
+  provider(t);
+  const response = await fixture.request("/chat", { id: "restricted-chat", messages: [turn()], config: { modelName: "custom-test/mock" } });
+  assert.equal(response.status, 200);
+  const streamId = response.headers.get((await import("assistant-stream/resumable")).RESUMABLE_STREAM_ID_HEADER);
+  assert.ok(streamId);
+  assert.match(await response.text(), /flight handbook/);
+  fixture.revoke();
+  const resumed = await fixture.request(`/chat/resume/${streamId}`);
+  assert.equal(resumed.status, 403);
+  assert.doesNotMatch(await resumed.text(), /flight handbook/);
+});
+
+test("manual compaction withholds a summary if access is revoked during generation", async (t) => {
+  const fixture = await restrictedRouteFixture();
+  t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL) => {
+    if (String(input).endsWith("/models")) return Response.json({ data: [{ id: "mock" }] });
+    fixture.revoke();
+    return Response.json({ id: "summary", model: "mock", choices: [{ index: 0, message: { role: "assistant", content: "private-summary-marker" }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 5 } });
+  });
+  const response = await fixture.request("/threads/restricted-chat/compact", {
+    modelRef: "custom-test/mock",
+    messages: [turn(), { id: "a1", role: "assistant", parts: [{ type: "text", text: "Shared passage" }] }],
+  });
+  assert.notEqual(response.status, 200);
+  assert.doesNotMatch(await response.text(), /private-summary-marker/);
+  const row = db.prepare("SELECT compaction_json FROM threads WHERE id = 'restricted-chat'").get() as { compaction_json: string | null };
+  assert.equal(row.compaction_json, null);
+});
