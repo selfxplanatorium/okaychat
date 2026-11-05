@@ -58,6 +58,7 @@ const { requireUser } = await import("../auth.js");
 const { sha256 } = await import("../crypto.js");
 const { ensureThread } = await import("../threads.js");
 const { SandboxTurn, sandboxRoutes, sandboxTools, workspaceId } = await import("./sandbox.js");
+const { resetServicesForTests } = await import("../services.js");
 const app = new Hono().use(requireUser).route("/", sandboxRoutes);
 for (const id of ["alice", "bob"]) {
   db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(id, `${id}@example.test`, id, "unused", "user", Date.now());
@@ -69,6 +70,7 @@ after(() => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 beforeEach(() => {
+  resetServicesForTests();
   calls.length = 0;
   runFiles = [{ path: "out/plot.png", size: 10 }];
   runMode = "answer";
