@@ -1,3 +1,5 @@
+import { useGlassBackdrop } from "@/components/glass/GlassBackdrop";
+import { useRef } from "react";
 import { ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { useEffect, type ComponentType } from "react";
 import { Link, useSearch } from "wouter";
@@ -63,6 +65,8 @@ function MobileIndex({ sections }: { sections: ReturnType<typeof useSettingsSect
 }
 
 export function SettingsLayout({ section }: { section?: string }) {
+  const scroller = useRef<HTMLElement>(null);
+  const backdrop = useGlassBackdrop("route-content", scroller);
   const sections = useSettingsSections();
   // No section means /settings. Desktop shows General there; phones show the index instead.
   const current = sections.find((s) => s.id === section) ?? sections[0]!;
@@ -80,18 +84,18 @@ export function SettingsLayout({ section }: { section?: string }) {
     <div className="flex h-full min-h-0 flex-1 max-md:flex-col">
       {/* The desktop rail is SettingsNav inside the shell's sidebar panel, so the panel stays put while its contents change. */}
       {section === undefined && <MobileIndex sections={sections} />}
-      <main className={cn("min-h-0 flex-1 overflow-y-auto", section === undefined && "max-md:hidden")}>
+      <main ref={scroller} className={cn("min-h-0 flex-1 overflow-y-auto", section === undefined && "max-md:hidden")}>
         {/* Sticky inside main, which is the scroll container, so the bar stays while the page scrolls.
             No title here: the page heading right below already names the section. */}
         {section !== undefined && (
-          <header className="bg-background/80 border-border sticky top-0 z-10 flex h-12 items-center border-b px-2 backdrop-blur md:hidden">
+          <header data-glass-surface="toolbar" className=" border-border sticky top-0 z-10 flex h-12 items-center border-b px-2 md:hidden">
             <Link href="/settings" className="text-muted-foreground hover:text-foreground flex min-h-11 items-center gap-1 rounded-lg pr-2 text-sm">
               <ChevronLeftIcon className="size-4" /> {t("common.settings")}
             </Link>
           </header>
         )}
         {/* Section changes remount the page, so the entrance replays; no exit animation. */}
-        <div key={current.id} className="animate-rise-in">
+        <div ref={backdrop} key={current.id} className="animate-rise-in">
           <Page />
         </div>
       </main>

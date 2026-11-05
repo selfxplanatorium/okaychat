@@ -1,3 +1,5 @@
+import { useCallback } from "react";
+import { useGlassSurface } from "@/components/glass/GlassSurface";
 import { Select as SelectPrimitive } from "@base-ui/react/select";
 import { CheckIcon, ChevronsUpDownIcon } from "lucide-react";
 import { t } from "@/i18n";
@@ -32,6 +34,12 @@ export function Select<T extends string>({
 }) {
   const current = options.find((o) => o.value === value);
   const smoothHeight = useSmoothHeight();
+  const glassRef = useGlassSurface({ source: "active-content", family: "overlay", priority: 100 });
+  const materialRef = useCallback((node: HTMLElement | null) => {
+    glassRef(node);
+    const cleanup = smoothHeight(node);
+    return () => { glassRef(null); cleanup?.(); };
+  }, [glassRef, smoothHeight]);
   return (
     <SelectPrimitive.Root
       disabled={disabled}
@@ -52,7 +60,7 @@ export function Select<T extends string>({
       <SelectPrimitive.Portal>
         <SelectPrimitive.Positioner sideOffset={6} alignItemWithTrigger={false} className="isolate z-50">
           <SelectPrimitive.Popup
-            ref={smoothHeight}
+            ref={materialRef}
             className={cn(
               "dropdown-glass text-popover-foreground flex max-h-80 min-w-(--anchor-width) origin-(--transform-origin) flex-col overflow-hidden rounded-xl border depth-float outline-none",
               "translate-x-0 translate-y-0 scale-100 transition-[opacity,scale,translate] duration-[var(--motion-base)] ease-out-expo",

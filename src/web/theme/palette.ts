@@ -1,6 +1,7 @@
 // Ported from T3Code (MIT, Copyright (c) 2026 T3 Tools Inc.).
 // Source: apps/web/src/themePalette.ts. Effect Schema, desktop, environment,
 // preview-sidebar, and collection-publishing code removed.
+import { invalidateGlass } from "./glass";
 import { t } from "@/i18n";
 import { converter, parse } from "culori/fn";
 import "culori/css";
@@ -1339,6 +1340,7 @@ export function applyThemeColorPreview(colors: ThemeColors, appearance: ThemeApp
     if (isThemeColor(value)) root.style.setProperty(APP_THEME_VARIABLES[role], value);
   }
   void applyBrandAccent(colors.accent);
+  invalidateGlass("preview");
 }
 
 export function applyThemePalette(theme: ThemePreference, appearance?: ThemeAppearance): void {

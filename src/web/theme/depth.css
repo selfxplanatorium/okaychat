@@ -79,15 +79,10 @@
   box-shadow: var(--depth-highlight), var(--shadow-float);
 }
 
-/* Desktop sidebar: a frosted panel inset from the window edge. */
+/* Desktop sidebar: a frosted panel inset from the window edge.
+   Fill and frost belong to glass.css, so a solid tier can remove them; this
+   utility keeps the elevation. */
 @utility depth-sidebar {
-  background: color-mix(
-    in srgb,
-    var(--sidebar) min(100%, calc(var(--glass-opacity) + 25%)),
-    transparent
-  );
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
   box-shadow:
     var(--depth-highlight),
     0 0 0 1px var(--depth-line),

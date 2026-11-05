@@ -89,7 +89,7 @@ export function SharePage({ token }: { token: string }) {
 
   return (
     <div className="h-full overflow-y-auto">
-      <header className="bg-background/80 animate-rise-in sticky top-0 z-10 border-b backdrop-blur">
+      <header data-glass-surface="toolbar" className=" animate-rise-in sticky top-0 z-10 border-b">
         <div className="mx-auto flex h-12 max-w-3xl items-center justify-between px-4">
           <a href="/" className="transition-opacity duration-(--motion-fast) ease-out-quart hover:opacity-80">
             <Brand />
