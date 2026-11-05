@@ -19,24 +19,10 @@ export const CORE_NAMESPACES = [
   "translation", "settings", "general", "account", "usage", "format", "errors", "services", "tags", "ui", "webhooks",
 ] as const;
 
-/** Feature namespaces a `wave` locale also translates completely. */
-export const WAVE_NAMESPACES = ["channels", "roomArchives", "knowledge", "customTools", "evaluations", "notifications"] as const;
-
 /** Keys `legacy` locales already translated outside CORE; they must not regress to English. */
 export const LEGACY_SUPPLEMENT = [
   "channels.presenceOnline", "channels.presenceAway", "channels.presenceOffline", "channels.presenceUnavailable",
   "channels.presenceLabel", "channels.typingOne", "channels.typingTwo", "channels.typingMany", "channels.activitySettings",
-  "keyboard.cmdMessageTranslate", "keyboard.cmdMessageTranslateChoose",
-] as const;
-
-/** Keys a `wave` locale translates from namespaces that otherwise stay optional. */
-export const WAVE_SUPPLEMENT = [
-  "admin.webhooksTitle", "admin.webhooksDescription", "admin.webhooksEmpty", "admin.webhooksRefresh", "admin.webhooksTotals",
-  "admin.webhooksOwner", "admin.webhooksEndpoint", "admin.webhooksPending", "admin.webhooksDead", "admin.webhooksDropped",
-  "admin.webhooksOldest", "admin.webhooksAutoDisabled", "admin.webhooksState",
-  "permissions.featureKnowledgeLabel", "permissions.featureKnowledgeHelp", "permissions.featureEvaluationsLabel",
-  "permissions.featureEvaluationsHelp", "permissions.featureOutgoingWebhooksLabel", "permissions.featureOutgoingWebhooksHelp",
-  "permissions.featureChannels", "permissions.featureChannelsHelp", "permissions.featureCustomTools", "permissions.featureCustomToolsHelp",
   "keyboard.cmdMessageTranslate", "keyboard.cmdMessageTranslateChoose",
 ] as const;
 
@@ -46,11 +32,14 @@ export const LEGACY_TAGS = ["de", "es"] as const;
 const namespaceKeys = (namespaces: readonly string[]) =>
   namespaces.flatMap((ns) => Object.keys(SOURCE[ns] ?? {}).map((key) => `${ns}.${key}`));
 
-/** Every key a locale with this coverage must supply. */
+/**
+ * Every key a locale with this coverage must supply. `wave` means the complete English source,
+ * including namespaces added later; `legacy` keeps the grandfathered core subset.
+ */
 export function requiredKeys(coverage: UiLocaleRow["coverage"]): string[] {
   if (coverage === "source") return [];
   if (coverage === "legacy") return [...new Set([...namespaceKeys(CORE_NAMESPACES), "permissions.featureVideosLabel", "permissions.featureVideosHelp", "assistants.familyVideos", ...LEGACY_SUPPLEMENT])];
-  return [...new Set([...namespaceKeys(CORE_NAMESPACES), "permissions.featureVideosLabel", "permissions.featureVideosHelp", "assistants.familyVideos", ...namespaceKeys(WAVE_NAMESPACES), ...WAVE_SUPPLEMENT])];
+  return Object.entries(SOURCE).flatMap(([ns, entries]) => Object.keys(entries).map((key) => `${ns}.${key}`));
 }
 
 export const placeholders = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!);

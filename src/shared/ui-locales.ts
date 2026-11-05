@@ -6,8 +6,8 @@
  * - `nativeName` is the reviewed autonym shown in the language picker, the same in every UI language.
  * - `direction` is the expected text direction; tests check it against the runtime resolver.
  * - `coverage` selects the required-key policy in the i18n tests: `source` is the English catalog itself,
- *   `legacy` (German and Spanish only) covers the core namespaces, `wave` covers core plus the feature
- *   namespaces. This is not a server allowlist: any valid BCP 47 tag may be stored as an account language.
+ *   `legacy` (German and Spanish only) covers the core namespaces, `wave` covers every English key.
+ *   This is not a server allowlist: any valid BCP 47 tag may be stored as an account language.
  */
 export const UI_LOCALES = [
   { tag: "en", nativeName: "English", direction: "ltr", coverage: "source" },
