@@ -22,6 +22,7 @@ export default {
   plugins: "Plugins",
   projects: "Projects",
   compare: "Compare models",
+  evaluations: "Evaluations",
   account: "Account",
   logOut: "Log out",
   allChats: "All chats",

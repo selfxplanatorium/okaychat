@@ -165,7 +165,7 @@ export interface OllamaPullProgress {
 
 export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
-export const SIDEBAR_ITEMS = ["newChat", "scheduled", "library", "knowledge", "plugins", "projects", "compare"] as const;
+export const SIDEBAR_ITEMS = ["newChat", "scheduled", "library", "knowledge", "plugins", "projects", "compare", "evaluations"] as const;
 export type SidebarItem = (typeof SIDEBAR_ITEMS)[number];
 
 /** Account intent for durable notices. The in-app center always works; browser popups are opt-in. */
@@ -651,7 +651,9 @@ export type PromptKey =
   | "memory"
   | "memoryExtract"
   | "memorySummary"
-  | "assistantInstructions";
+  | "assistantInstructions"
+  | "evaluationCase"
+  | "evaluationJudge";
 
 /** A server-wide system prompt as the admin page shows it. */
 export interface AdminPrompt {

@@ -36,6 +36,7 @@ The common lesson is the lethal trifecta. A prompt-injected model is most danger
 | `read_attachment` | Extracted attachment text or image | Envelope, scanner, card badge |
 | Project files | Pinned file text in system message 2 | Envelope; project files taint the turn |
 | Project instructions | User-authored instructions in system message 2 | Left as user instructions (not third-party data); they are authored by the account owner |
+| Evaluation judge | Candidate answer and optional reference answer | Both are enveloped as `evaluation_output` / `evaluation_expected`; the judge only scores them. Evaluation exports are plain files the owner downloads and are never rendered as Markdown. |
 | Skills index | Names and descriptions in turn context | Envelope; the section says they are data, not a higher authority |
 | `load_skill` / `read_skill_file` | Skill body and reference files | Envelope labelled as user-installed guidance; scanner badge |
 | Skill source listings and installation receipts | Remote names/descriptions/files | Envelope, scanner badge |

@@ -24,6 +24,7 @@ export const FEATURE_KEYS = [
   "generativeUI",
   "delegation",
   "skills",
+  "evaluations",
 ] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 

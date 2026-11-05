@@ -89,6 +89,15 @@ n8n definitions charge name/description/avatar/config ciphertext to the owner; e
   the account. Final imported messages, uploads/media, artifacts, and inactive assistant settings count
   through the normal sums when confirmed.
 
+## Evaluations
+
+- Dataset name/description, case text and the tag JSON, run label/target/judge config/safe error text,
+  result output/error text/case snapshots, and score comment/rationale bytes count. Judge usage columns
+  are inside the per-result reservation.
+- A launch reserves 48 KiB per result plus the snapshot bytes before any provider request, so the final
+  result write cannot fail after the model was paid. Case writes, dataset edits, manual comments, and
+  judge configs charge net growth; deleting a dataset or run frees its bytes.
+
 ## Wave 3 additions
 
 - A frozen share snapshot charges `snapshot_json` plus `snapshot_assets_json` bytes to the link's owner.

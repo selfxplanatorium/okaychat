@@ -86,7 +86,7 @@ export function KeyboardShortcuts() {
   useCommand("nav.previousChat", () => stepChat(-1));
   useCommand("nav.nextChat", () => stepChat(1));
   // Hooks in loops: the lists are constant, so they run in the same order on every render.
-  for (const page of ["library", "knowledge", "projects", "scheduled", "plugins", "compare"] as const) {
+  for (const page of ["library", "knowledge", "projects", "scheduled", "plugins", "compare", "evaluations"] as const) {
     useCommand(`nav.${page}`, () => navigate(`/${page}`));
   }
   useCommand("nav.settings", () => navigate("/settings"));
@@ -107,7 +107,7 @@ export function KeyboardShortcuts() {
     });
   }
 
-  const inChat = !location.startsWith("/settings") && !["/scheduled", "/library", "/plugins", "/projects", "/compare"].includes(location);
+  const inChat = !location.startsWith("/settings") && !["/scheduled", "/library", "/plugins", "/projects", "/compare", "/evaluations"].includes(location);
   useCommand("chat.focusComposer", () => {
     if (inChat) return focusComposer();
     showChat(navigate);

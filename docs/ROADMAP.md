@@ -111,6 +111,22 @@ All four are private account data beside messages or the prompt library. None en
 Deferred: share slugs/QR/analytics/watermarks, tag hierarchy/colors/automation, Web Push and quiet
 hours, more than three panes or pane-side tools/artifacts, comparison judging and export.
 
+## Pass 8: private evaluation workspace (built)
+
+- **Datasets and runs**: `/evaluations` holds named case sets with revision compare-and-set, immutable
+  per-run snapshots of the cases and target, and no chat/thread reuse. One active run per account is a
+  partial unique index; the worker is in-process, bounded to two runs, and never resumes after a
+  restart. See `docs/implementation/evaluations.md`.
+- **Scoring and judging**: manual 1–5 or pass/fail scores with encrypted comments, plus one rubric judge
+  pass whose candidate and reference answers arrive inside the untrusted-data envelope. Re-judging
+  replaces judge rows only.
+- **Comparison and export**: two runs of one dataset side by side, CSV/JSON download with a
+  spreadsheet formula guard, budget/time/output caps, and per-table storage accounting.
+
+Deferred: dataset import/templates, rubric libraries, multiple judges, pairwise preference judging,
+one-click reruns of failed cases, regression gates, scheduled or webhook runs, sharing/admin
+visibility, charts, and tool-using or multi-turn cases.
+
 ## Known gaps
 
 - Stream replay is kept in server memory for 15 minutes after the last update. Reload recovery works; pending generations do not survive a server restart.

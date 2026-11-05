@@ -325,6 +325,7 @@ test("migration adds the edit columns and leaves existing rows unedited", () => 
       db.exec("ALTER TABLE email_drafts DROP COLUMN kind");
       db.exec("DROP TABLE message_feedback; DROP TABLE message_bookmarks; DROP TABLE saved_prompts; DROP TABLE assistant_presets; DROP TABLE generation_segments; DROP TABLE generation_runs; DROP TABLE archive_jobs");
       db.exec("DROP TABLE image_threads; DROP TABLE media; DROP INDEX uploads_media; DROP INDEX sandbox_files_media");
+      for (const table of ["evaluation_scores", "evaluation_results", "evaluation_runs", "evaluation_cases", "evaluation_datasets"]) db.exec("DROP TABLE IF EXISTS " + table);
       for (const table of ["notifications", "tag_filter_presets", "thread_tags", "comparison_panes", "comparison_groups"]) db.exec("DROP TABLE IF EXISTS " + table);
       for (const index of ["shares_user_time", "shares_thread", "shares_expiry", "threads_compare"]) db.exec("DROP INDEX IF EXISTS " + index);
       db.exec("ALTER TABLE threads DROP COLUMN compare_group_id");

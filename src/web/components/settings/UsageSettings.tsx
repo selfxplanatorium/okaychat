@@ -14,7 +14,9 @@ const PURPOSE_LABELS = {
   compaction: "usage.purposeCompaction",
   title: "usage.purposeTitle",
   research: "usage.purposeResearch",
-} as const satisfies Record<"chat" | "compaction" | "title" | "research", PlainMessageKey>;
+  evaluation: "usage.purposeEvaluation",
+  evaluation_judge: "usage.purposeEvaluationJudge",
+} as const satisfies Record<"chat" | "compaction" | "title" | "research" | "evaluation" | "evaluation_judge", PlainMessageKey>;
 
 type UsageResponse = { rows: UsageRow[]; go: GoWindow[]; agents?: AgentUsageCounters };
 
@@ -150,7 +152,7 @@ export function UsageSettings() {
 
       <SettingsSection title={t("usage.byPurpose")} description={t("usage.byPurposeDescription")}>
         <div key={`${days}-${byKind ? "data" : "loading"}`} className="animate-fade-in grid grid-cols-2 divide-x sm:grid-cols-4">
-          {(["chat", "compaction", "title", "research"] as const).map((k) => {
+          {(["chat", "compaction", "title", "research", "evaluation", "evaluation_judge"] as const).map((k) => {
             const r = byKind?.rows.find((x) => x.key === k);
             return <Stat key={k} label={t(PURPOSE_LABELS[k])} value={formatCost(r?.cost ?? 0)} hint={t("usage.requestCount", { count: r?.requests ?? 0 })} />;
           })}

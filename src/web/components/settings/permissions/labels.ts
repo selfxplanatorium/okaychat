@@ -48,6 +48,7 @@ export const FEATURE_LABEL: Record<FeatureKey, PlainMessageKey> = {
   generativeUI: "permissions.featureGenerativeUILabel",
   delegation: "permissions.featureDelegationLabel",
   skills: "permissions.featureSkillsLabel",
+  evaluations: "permissions.featureEvaluationsLabel",
 };
 
 export const FEATURE_HELP: Record<FeatureKey, PlainMessageKey> = {
@@ -68,6 +69,7 @@ export const FEATURE_HELP: Record<FeatureKey, PlainMessageKey> = {
   generativeUI: "permissions.featureGenerativeUIHelp",
   delegation: "permissions.featureDelegationHelp",
   skills: "permissions.featureSkillsHelp",
+  evaluations: "permissions.featureEvaluationsHelp",
 };
 
 export const LIMIT_LABEL: Record<LimitKey, PlainMessageKey> = {

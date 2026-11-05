@@ -25,6 +25,7 @@ export const FEATURE_NAMES: Record<FeatureKey, string> = {
   generativeUI: "interactive widgets",
   delegation: "delegation",
   skills: "skills",
+  evaluations: "evaluations",
 };
 
 export interface Actor {

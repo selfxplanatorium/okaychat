@@ -23,7 +23,7 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       db.exec("DROP TRIGGER messages_fts_insert; DROP TRIGGER messages_fts_update; DROP TRIGGER messages_fts_delete");
       db.exec("DROP TABLE message_search_keys");
       db.exec("DROP INDEX messages_thread_time");
-      for (const table of ["chatgpt_login_attempts", "chatgpt_registrations", "chatgpt_hosts", "chatgpt_controls", "saved_prompts", "message_bookmarks", "message_feedback", "assistant_presets", "generation_segments", "generation_runs", "archive_jobs", "provider_model_grants", "provider_model_policies", "knowledge_chunks_fts", "knowledge_chunks", "knowledge_sources", "knowledge_collections", "share_groups", "share_users", "share_audiences", "user_group_members", "user_groups", "n8n_agent_sessions", "n8n_agent_runs", "n8n_agents", "permission_leases", "permission_rate_windows", "permission_audit", "user_model_instructions", "prompt_rules", "permission_policies", "permission_state", "notifications", "tag_filter_presets", "thread_tags", "comparison_panes", "comparison_groups"]) db.exec("DROP TABLE " + table);
+      for (const table of ["evaluation_scores", "evaluation_results", "evaluation_runs", "evaluation_cases", "evaluation_datasets", "chatgpt_login_attempts", "chatgpt_registrations", "chatgpt_hosts", "chatgpt_controls", "saved_prompts", "message_bookmarks", "message_feedback", "assistant_presets", "generation_segments", "generation_runs", "archive_jobs", "provider_model_grants", "provider_model_policies", "knowledge_chunks_fts", "knowledge_chunks", "knowledge_sources", "knowledge_collections", "share_groups", "share_users", "share_audiences", "user_group_members", "user_groups", "n8n_agent_sessions", "n8n_agent_runs", "n8n_agents", "permission_leases", "permission_rate_windows", "permission_audit", "user_model_instructions", "prompt_rules", "permission_policies", "permission_state", "notifications", "tag_filter_presets", "thread_tags", "comparison_panes", "comparison_groups"]) db.exec("DROP TABLE " + table);
       for (const index of ["shares_user_time", "shares_thread", "shares_expiry", "threads_compare"]) db.exec("DROP INDEX " + index);
       db.exec("ALTER TABLE threads DROP COLUMN compare_group_id");
       for (const column of ["custom_instructions", "instructions_revision", "assistant_json", "assistant_revision", "imported_assistant_json", "preferred_head"]) db.exec("ALTER TABLE threads DROP COLUMN " + column);
@@ -64,7 +64,9 @@ test("integrated migrations are repeatable and backfill legacy generated image s
           oldPromptCount: db.prepare("SELECT count(*) AS n FROM server_settings WHERE key='prompt:anonymous'").get().n,
           original: JSON.parse(db.prepare("SELECT content FROM messages WHERE id='m1'").get().content).parts[0].url,
           users: db.prepare("SELECT count(*) AS n FROM users").get().n,
-          integratedTables: ["provider_model_policies", "provider_model_grants", "email_accounts", "knowledge_collections", "knowledge_sources", "knowledge_chunks", "knowledge_chunks_fts", "email_drafts", "media", "image_threads", "saved_prompts", "message_bookmarks", "message_feedback", "shares", "thread_tags", "tag_filter_presets", "notifications", "comparison_groups", "comparison_panes", "message_search_keys"].map(table => db.prepare("SELECT count(*) AS n FROM " + table).get().n),
+          integratedTables: ["provider_model_policies", "provider_model_grants", "email_accounts", "knowledge_collections", "knowledge_sources", "knowledge_chunks", "knowledge_chunks_fts", "email_drafts", "media", "image_threads", "saved_prompts", "message_bookmarks", "message_feedback", "shares", "thread_tags", "tag_filter_presets", "notifications", "comparison_groups", "comparison_panes", "message_search_keys", "evaluation_datasets", "evaluation_cases", "evaluation_runs", "evaluation_results", "evaluation_scores"].map(table => db.prepare("SELECT count(*) AS n FROM " + table).get().n),
+          evaluationActiveIndex: db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='evaluation_runs_active'").get()?.sql ?? null,
+          evaluationScoreForeignKeys: db.prepare("PRAGMA foreign_key_list(evaluation_scores)").all(),
           edits: db.prepare("SELECT edited_at, original_enc FROM messages WHERE id = 'm1'").get(),
           version: db.prepare("PRAGMA user_version").get().user_version,
           foreignKeys: db.prepare("PRAGMA foreign_key_check").all()
@@ -72,9 +74,46 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       // The version only grows with appended migrations; the FTS addressing migration is version 36.
       assert.ok(result.version >= 43, `user_version ${result.version}`);
       const { version: _version, ...state } = result as Record<string, unknown>;
-      assert.deepEqual(state, { image: 42, skills: 0, sandbox: 0, users: 1, uploads: i === 0 ? 1 : 0, temporaryPrompt: "Keep this temporary chat out of history.", oldPromptCount: 0, original: "data:image/png;base64,bGVnYWN5LWZpbGU=", integratedTables: [...Array(19).fill(0), 1], edits: { edited_at: null, original_enc: null }, foreignKeys: [] });
+      assert.match(String((state as { evaluationActiveIndex: string }).evaluationActiveIndex), /UNIQUE INDEX evaluation_runs_active/);
+      assert.deepEqual((state as { evaluationScoreForeignKeys: Array<{ table: string; from: string; to: string }> }).evaluationScoreForeignKeys.map((key) => [key.table, key.from, key.to]), [["evaluation_results", "run_id", "run_id"], ["evaluation_results", "case_id", "case_id"]]);
+      delete (state as Record<string, unknown>).evaluationActiveIndex;
+      delete (state as Record<string, unknown>).evaluationScoreForeignKeys;
+      assert.deepEqual(state, { image: 42, skills: 0, sandbox: 0, users: 1, uploads: i === 0 ? 1 : 0, temporaryPrompt: "Keep this temporary chat out of history.", oldPromptCount: 0, original: "data:image/png;base64,bGVnYWN5LWZpbGU=", integratedTables: [...Array(19).fill(0), 1, ...Array(5).fill(0)], edits: { edited_at: null, original_enc: null }, foreignKeys: [] });
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("storage accounting counts every evaluation table and releases it with the dataset", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "okaychat-eval-quota-"));
+  const environment = { ...process.env, OKAYCHAT_DATA_DIR: directory, OKAYCHAT_SECRET: "migration-tests-secret-not-for-production" };
+  const dbUrl = new URL("./db.ts", import.meta.url).href;
+  const quotaUrl = new URL("./quota.ts", import.meta.url).href;
+  try {
+    const result = JSON.parse(execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", `
+      const { db } = await import(${JSON.stringify(dbUrl)});
+      const { storageUsed } = await import(${JSON.stringify(quotaUrl)});
+      const { encrypt } = await import(${JSON.stringify(new URL("./crypto.ts", import.meta.url).href)});
+      db.prepare("INSERT INTO users (id,email,name,password_hash,role,created_at) VALUES ('u','u@example.test','U','unused','user',1)").run();
+      const before = storageUsed("u");
+      db.prepare("INSERT INTO evaluation_datasets (id,user_id,name,description,revision,created_at,updated_at) VALUES ('d','u','Dataset','description',1,1,1)").run();
+      db.prepare("INSERT INTO evaluation_cases (id,dataset_id,position,input,instructions,expected,notes,tags_json,created_at,updated_at) VALUES ('c','d',1,'input','instructions','expected','notes',?,1,1)").run('["tag"]');
+      const target = JSON.stringify({modelRef:'m',modelName:'M',effort:null,sampling:{},assistantPresetId:null,assistantName:null,instructions:''});
+      const judge = JSON.stringify({modelRef:'j',modelName:'J',effort:null,scale:'scale5',rubric:'rubric',rubricHash:'hash'});
+      db.prepare("INSERT INTO evaluation_runs (id,user_id,dataset_id,dataset_revision,label,target_json,score_mode,concurrency,budget_tokens,budget_micros,state,error_message,total_cases,judge_json,created_at,updated_at) VALUES ('r','u','d',1,'label',?,'scale5',1,10000,10000,'done','message',1,?,1,1)").run(target, judge);
+      const snapshot = JSON.stringify({caseId:'c',position:1,input:'input',instructions:'',expected:'',notes:'',tags:[]});
+      db.prepare("INSERT INTO evaluation_results (run_id,case_id,position,state,case_json,output,output_bytes,error_message,created_at,updated_at) VALUES ('r','c',1,'done',?,'output',6,null,1,1)").run(snapshot);
+      db.prepare("INSERT INTO evaluation_scores (run_id,case_id,source,scale,value,comment_enc,rationale,cost,revision,created_at,updated_at) VALUES ('r','c','manual','scale5',4,?,NULL,0,1,1,1)").run(encrypt("comment"));
+      db.prepare("INSERT INTO evaluation_scores (run_id,case_id,source,scale,value,comment_enc,rationale,judge_model_ref,judge_rubric_hash,cost,revision,created_at,updated_at) VALUES ('r','c','judge','scale5',3,NULL,'judge rationale','j','hash',0,1,1,1)").run();
+      const after = storageUsed("u");
+      db.prepare("DELETE FROM evaluation_datasets WHERE id='d'").run();
+      console.log(JSON.stringify({ before, after, restored: storageUsed("u"), runs: db.prepare("SELECT count(*) AS n FROM evaluation_runs").get().n, results: db.prepare("SELECT count(*) AS n FROM evaluation_results").get().n, scores: db.prepare("SELECT count(*) AS n FROM evaluation_scores").get().n }));
+      db.close();`], { env: environment, encoding: "utf8" })) as { before: number; after: number; restored: number; runs: number; results: number; scores: number };
+    assert.ok(result.after > result.before, `${result.after} > ${result.before}`);
+    assert.equal(result.restored, result.before);
+    assert.deepEqual([result.runs, result.results, result.scores], [0, 0, 0]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('n8n migration preserves selected audiences and rolls back schema and version together', () => {
@@ -93,6 +132,7 @@ test('n8n migration preserves selected audiences and rolls back schema and versi
     db.exec('DROP TABLE n8n_agent_sessions; DROP TABLE n8n_agent_runs; DROP TABLE n8n_agents');
     db.exec('DROP TABLE permission_leases; DROP TABLE permission_rate_windows; DROP TABLE permission_audit; DROP TABLE user_model_instructions; DROP TABLE prompt_rules; DROP TABLE permission_policies; DROP TABLE permission_state');
     db.exec('DROP TABLE saved_prompts; DROP TABLE message_bookmarks; DROP TABLE message_feedback');
+    db.exec('DROP TABLE evaluation_scores; DROP TABLE evaluation_results; DROP TABLE evaluation_runs; DROP TABLE evaluation_cases; DROP TABLE evaluation_datasets');
     for (const table of ['notifications', 'tag_filter_presets', 'thread_tags', 'comparison_panes', 'comparison_groups']) db.exec('DROP TABLE ' + table);
     for (const index of ['shares_user_time', 'shares_thread', 'shares_expiry', 'threads_compare']) db.exec('DROP INDEX ' + index);
     db.exec('ALTER TABLE threads DROP COLUMN compare_group_id');

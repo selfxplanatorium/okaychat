@@ -1138,6 +1138,128 @@ const migrations: Array<string | (() => void)> = [
     `);
     if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "parity-wave3") throw new Error("Injected migration failure");
   },
+  () => {
+    db.exec(`
+    -- Private evaluation workspace. These tables deliberately reference no thread, message, upload, or
+    -- generation row: an evaluation turn is not a chat and may never create one.
+    -- A dataset is a named, ordered fixture. Revision is the compare-and-set guard for every case write.
+    CREATE TABLE evaluation_datasets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 80),
+      description TEXT NOT NULL DEFAULT '' CHECK (length(description) <= 500),
+      revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX evaluation_datasets_user ON evaluation_datasets(user_id, updated_at DESC, id);
+
+    -- No UNIQUE(dataset_id, position): a reorder is a set of UPDATEs inside one tx, and (position, id) is
+    -- a total order on its own. \`position\` starts at 1 and is dense after every reorder.
+    CREATE TABLE evaluation_cases (
+      id TEXT PRIMARY KEY,
+      dataset_id TEXT NOT NULL REFERENCES evaluation_datasets(id) ON DELETE CASCADE,
+      position INTEGER NOT NULL CHECK (position >= 1),
+      input TEXT NOT NULL CHECK (length(input) BETWEEN 1 AND 8000),
+      instructions TEXT NOT NULL DEFAULT '' CHECK (length(instructions) <= 8000),
+      expected TEXT NOT NULL DEFAULT '' CHECK (length(expected) <= 8000),
+      notes TEXT NOT NULL DEFAULT '' CHECK (length(notes) <= 2000),
+      tags_json TEXT NOT NULL DEFAULT '[]'
+        CHECK (json_valid(tags_json) AND json_type(tags_json) = 'array' AND json_array_length(tags_json) <= 10),
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX evaluation_cases_dataset ON evaluation_cases(dataset_id, position, id);
+
+    -- One row per launch. \`target_json\` and the per-result \`case_json\` snapshots make a run immutable.
+    CREATE TABLE evaluation_runs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      dataset_id TEXT NOT NULL REFERENCES evaluation_datasets(id) ON DELETE CASCADE,
+      dataset_revision INTEGER NOT NULL CHECK (dataset_revision >= 1),
+      label TEXT NOT NULL DEFAULT '' CHECK (length(label) <= 80),
+      target_json TEXT NOT NULL CHECK (json_valid(target_json) AND json_type(target_json) = 'object'),
+      score_mode TEXT NOT NULL CHECK (score_mode IN ('scale5', 'pass_fail')),
+      concurrency INTEGER NOT NULL CHECK (concurrency BETWEEN 1 AND 8),
+      budget_tokens INTEGER NOT NULL CHECK (budget_tokens BETWEEN 10000 AND 20000000),
+      budget_micros INTEGER NOT NULL CHECK (budget_micros BETWEEN 10000 AND 20000000),
+      state TEXT NOT NULL CHECK (state IN ('queued', 'running', 'cancelling', 'done', 'failed', 'cancelled')),
+      stop_reason TEXT CHECK (stop_reason IN ('completed', 'budget', 'cancelled', 'error', 'interrupted')),
+      error_code TEXT,
+      error_message TEXT,
+      total_cases INTEGER NOT NULL CHECK (total_cases BETWEEN 1 AND 200),
+      completed_cases INTEGER NOT NULL DEFAULT 0,
+      failed_cases INTEGER NOT NULL DEFAULT 0,
+      skipped_cases INTEGER NOT NULL DEFAULT 0,
+      usage_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(usage_json)),
+      cost REAL NOT NULL DEFAULT 0,
+      latency_total_ms INTEGER NOT NULL DEFAULT 0,
+      judge_json TEXT CHECK (judge_json IS NULL OR (json_valid(judge_json) AND json_type(judge_json) = 'object')),
+      judge_state TEXT NOT NULL DEFAULT 'idle'
+        CHECK (judge_state IN ('idle', 'queued', 'running', 'done', 'failed', 'cancelled')),
+      judge_done_cases INTEGER NOT NULL DEFAULT 0,
+      judge_failed_cases INTEGER NOT NULL DEFAULT 0,
+      started_at INTEGER,
+      ended_at INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    -- One active run per account, enforced by the database rather than by a count-then-insert race.
+    CREATE UNIQUE INDEX evaluation_runs_active ON evaluation_runs(user_id)
+      WHERE state IN ('queued', 'running', 'cancelling');
+    CREATE INDEX evaluation_runs_dataset ON evaluation_runs(dataset_id, created_at DESC, id);
+    CREATE INDEX evaluation_runs_user ON evaluation_runs(user_id, created_at DESC, id);
+
+    -- case_id deliberately has no foreign key: the dataset may change or shrink; \`case_json\` is what ran.
+    CREATE TABLE evaluation_results (
+      run_id TEXT NOT NULL REFERENCES evaluation_runs(id) ON DELETE CASCADE,
+      case_id TEXT NOT NULL,
+      position INTEGER NOT NULL CHECK (position >= 1),
+      state TEXT NOT NULL CHECK (state IN ('pending', 'running', 'done', 'error', 'skipped')),
+      case_json TEXT NOT NULL CHECK (json_valid(case_json) AND json_type(case_json) = 'object'),
+      output TEXT NOT NULL DEFAULT '',
+      output_bytes INTEGER NOT NULL DEFAULT 0,
+      truncated INTEGER NOT NULL DEFAULT 0 CHECK (truncated IN (0, 1)),
+      finish_reason TEXT,
+      error_code TEXT,
+      error_message TEXT,
+      usage_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(usage_json)),
+      cost REAL NOT NULL DEFAULT 0,
+      latency_ms INTEGER,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (run_id, case_id)
+    );
+    CREATE INDEX evaluation_results_run ON evaluation_results(run_id, position, case_id);
+
+    -- Manual and judged scores coexist: the primary key keeps one of each per case.
+    -- The rubric itself lives once in runs.judge_json; a row keeps only its hash.
+    CREATE TABLE evaluation_scores (
+      run_id TEXT NOT NULL,
+      case_id TEXT NOT NULL,
+      source TEXT NOT NULL CHECK (source IN ('manual', 'judge')),
+      scale TEXT NOT NULL CHECK (scale IN ('scale5', 'pass_fail')),
+      value REAL NOT NULL,
+      comment_enc TEXT,
+      rationale TEXT,
+      judge_model_ref TEXT,
+      judge_rubric_hash TEXT,
+      usage_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(usage_json)),
+      cost REAL NOT NULL DEFAULT 0,
+      revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (run_id, case_id, source),
+      FOREIGN KEY (run_id, case_id) REFERENCES evaluation_results(run_id, case_id) ON DELETE CASCADE,
+      CHECK ((scale = 'scale5' AND value = CAST(value AS INTEGER) AND value BETWEEN 1 AND 5)
+          OR (scale = 'pass_fail' AND value IN (0, 1))),
+      CHECK (source = 'manual' OR comment_enc IS NULL),
+      CHECK (source = 'judge' OR (rationale IS NULL AND judge_model_ref IS NULL AND judge_rubric_hash IS NULL))
+    );
+    `);
+    if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "evaluations") throw new Error("Injected migration failure");
+  },
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
