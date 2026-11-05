@@ -9,7 +9,6 @@ export default {
   copied: "Copied",
   copy: "Copy",
   delete: "Delete",
-  disconnect: "Disconnect",
   download: "Download",
   edit: "Edit",
   export: "Export",

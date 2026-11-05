@@ -12,13 +12,13 @@ import { errorText } from "@/lib/error-text";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 import { AudienceButton } from "./Audience";
-import { CodexConnect } from "./CodexConnect";
+import { ChatGPTConnect } from "./ChatGPTConnect";
 import { ModelEntitlementsDialog } from "./ModelEntitlements";
 import { OllamaSettings } from "./OllamaSettings";
 import { SettingsPage, SettingsSection } from "./SettingsUI";
 
 export const OPENCODE_GO_CONSOLE = "https://opencode.ai/console";
-/** Connected through the Codex login rather than a key. See docs/implementation/codex-chat.md. */
+/** Personal Sign in with ChatGPT connection; never shared, and independent of the image login. */
 const CHATGPT = "chatgpt";
 
 /** Which connections the page edits: the user's own, or the server-wide ones an admin shares. */
@@ -156,12 +156,7 @@ function ProviderRow({ provider, index, expanded, onToggle, onModels }: { provid
           {provider.id === "ollama" ? (
             <OllamaSettings provider={provider} base={base} onChanged={refresh} />
           ) : chatgpt ? (
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-muted-foreground max-w-sm text-xs">
-                {t("providers.chatgptDescription")}
-              </p>
-              <CodexConnect onChange={refresh} />
-            </div>
+            <ChatGPTConnect />
           ) : (
             <div className="flex flex-col gap-2">
               <ProviderForm provider={provider} onSaved={onToggle} autoFocus />

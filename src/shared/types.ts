@@ -634,3 +634,5 @@ export interface MessageEditResult {
   /** When the text was last edited; null after Undo. */
   editedAt: number | null;
 }
+
+export type * from "./chatgpt.js";

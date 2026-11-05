@@ -96,7 +96,7 @@ function serialized<T>(userId: string, run: () => Promise<T>): Promise<T> {
 
 function readAuth(userId: string): string {
   const row = db.prepare("SELECT auth_enc FROM codex_auth WHERE user_id = ?").get(userId) as { auth_enc: string } | undefined;
-  if (!row) throw new Error("ChatGPT is not connected. Connect it in Settings → Providers or Image generation.");
+  if (!row) throw new Error("ChatGPT is not connected. Connect it in Settings → Image generation.");
   return decrypt(row.auth_enc);
 }
 
@@ -117,57 +117,6 @@ export function withCodexHome<T>(userId: string, fn: (home: string) => Promise<T
     }
   };
   return serialized(userId, run);
-}
-
-// Chat models call the ChatGPT backend directly with the same login (docs/implementation/codex-chat.md). The CLI
-// refreshes tokens itself during image runs; for chat we refresh here, inside the same per-user queue.
-const TOKEN_URL = "https://auth.openai.com/oauth/token";
-const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
-const REFRESH_MARGIN_MS = 5 * 60_000;
-
-interface AuthFile {
-  tokens?: { id_token?: string; access_token?: string; refresh_token?: string; account_id?: string };
-  last_refresh?: string;
-  [key: string]: unknown;
-}
-
-const jwtExpiry = (token: string): number => {
-  try {
-    const claims = JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString()) as { exp?: number };
-    return (claims.exp ?? 0) * 1000;
-  } catch {
-    return 0;
-  }
-};
-
-/** A current access token and account id for the ChatGPT backend. `force` refreshes even an unexpired token (after a 401). */
-export function codexAccess(userId: string, force = false): Promise<{ token: string; accountId: string }> {
-  return serialized(userId, async () => {
-    const generation = generationOf(userId);
-    const auth = JSON.parse(readAuth(userId)) as AuthFile;
-    const tokens = auth.tokens;
-    if (!tokens?.access_token || !tokens.account_id) throw new Error("The ChatGPT login has no access token. Connect it again.");
-    if (!force && jwtExpiry(tokens.access_token) - REFRESH_MARGIN_MS > Date.now()) return { token: tokens.access_token, accountId: tokens.account_id };
-    if (!tokens.refresh_token) throw new Error("The ChatGPT login expired. Connect it again.");
-    const res = await fetch(TOKEN_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ client_id: CLIENT_ID, grant_type: "refresh_token", refresh_token: tokens.refresh_token, scope: "openid profile email" }),
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!res.ok) throw new Error(res.status === 400 || res.status === 401 ? "The ChatGPT login expired. Connect it again." : `ChatGPT token refresh failed (HTTP ${res.status}).`);
-    const fresh = (await res.json()) as { id_token?: string; access_token?: string; refresh_token?: string };
-    if (!fresh.access_token) throw new Error("ChatGPT token refresh returned no access token.");
-    auth.tokens = {
-      ...tokens,
-      access_token: fresh.access_token,
-      ...(fresh.id_token ? { id_token: fresh.id_token } : {}),
-      ...(fresh.refresh_token ? { refresh_token: fresh.refresh_token } : {}),
-    };
-    auth.last_refresh = new Date().toISOString();
-    saveRefreshed(userId, generation, JSON.stringify(auth, null, 2));
-    return { token: fresh.access_token, accountId: tokens.account_id };
-  });
 }
 
 interface PendingLogin {

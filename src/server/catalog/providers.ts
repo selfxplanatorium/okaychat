@@ -98,7 +98,7 @@ function readScope(scope: ConnectionScope, viewer?: string): Map<string, Connect
 function readConnections(userId: string): Map<string, Connection> {
   const shared = [...readScope(null, userId)].filter(([, c]) => c.enabled && c.providerId !== CHATGPT);
   const own = readScope(userId);
-  // The ChatGPT login lives in codex_auth. A provider_connections row only records whether chat uses it.
+  // The ChatGPT login lives in its isolated OAuth registration store. A provider_connections row only records whether chat uses it.
   const chatgpt = own.get(CHATGPT);
   own.delete(CHATGPT);
   if (chatgptConnected(userId)) own.set(CHATGPT, { providerId: CHATGPT, baseURL: CHATGPT_BASE_URL, enabled: chatgpt?.enabled ?? true });

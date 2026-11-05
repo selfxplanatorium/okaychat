@@ -1,11 +1,48 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
+
+const chatgptHelperFile = fileURLToPath(new URL("./scripts/chatgpt-connect.mjs", import.meta.url));
+const helperChecksum = (source: Buffer) => `${createHash("sha256").update(source).digest("hex")}\n`;
+
+/**
+ * The ChatGPT desktop helper is one standalone script, so it lives in `scripts/` and is published at the
+ * web root: Vite serves it in dev and emits it into the built web directory. The published checksum lets a
+ * user verify the downloaded script before running it. No package or build-script change is needed.
+ */
+function chatgptHelper(): Plugin {
+  const isHelperPath = (url: string | undefined) => {
+    const path = url?.split("?")[0];
+    return path === "/chatgpt-connect.mjs" || path === "/chatgpt-connect.mjs.sha256";
+  };
+  return {
+    name: "okaychat-chatgpt-helper",
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (!isHelperPath(req.url)) return next();
+        const source = readFileSync(chatgptHelperFile);
+        const checksum = req.url!.split("?")[0]!.endsWith(".sha256");
+        res.setHeader("Content-Type", checksum ? "text/plain; charset=utf-8" : "text/javascript; charset=utf-8");
+        res.setHeader("Cache-Control", "no-store");
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        if (!checksum) res.setHeader("Content-Disposition", 'attachment; filename="chatgpt-connect.mjs"');
+        res.end(checksum ? helperChecksum(source) : source);
+      });
+    },
+    generateBundle() {
+      const source = readFileSync(chatgptHelperFile);
+      this.emitFile({ type: "asset", fileName: "chatgpt-connect.mjs", source });
+      this.emitFile({ type: "asset", fileName: "chatgpt-connect.mjs.sha256", source: helperChecksum(source) });
+    },
+  };
+}
 
 export default defineConfig({
   root: "src/web",
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), chatgptHelper()],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src/web", import.meta.url)),

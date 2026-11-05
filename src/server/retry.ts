@@ -1,5 +1,5 @@
 import type { ErrorCode, RetryNotice } from "../shared/errors.js";
-import { retryAfterFromHeaders, transientStatus } from "./provider-errors.js";
+import { retryAfterFromHeaders, structuredRefusalText, transientStatus } from "./provider-errors.js";
 
 /**
  * Provider retries live at the fetch boundary: before a response body is consumed, so a failed
@@ -85,7 +85,7 @@ const timeoutFailure = (error: unknown) => {
 };
 
 // Google's 429 says RESOURCE_EXHAUSTED and may call it a project quota; only billing/credit is permanent.
-const QUOTA_BODY = /insufficient[_ -]?quota|billing|credit balance|payment required|out of credit|hard limit/i;
+const QUOTA_BODY = /subscription_sharing_usage_limit_exceeded|insufficient[_ -]?quota|billing|credit balance|payment required|out of credit|hard limit/i;
 const NETWORK_ERROR = /fetch failed|econnrefused|econnreset|enotfound|eai_again|ehostunreach|enetunreach|epipe|getaddrinfo|socket hang up|other side closed|und_err|connection (?:closed|reset|refused)|could not reach/i;
 
 const networkFailure = (error: unknown) => {
@@ -225,7 +225,9 @@ export function createRetryingFetch(options: RetryingFetchOptions = {}): typeof 
       if (response.status >= 500 || response.status === 429) {
         inspected = await peek(response);
         response = inspected.response;
-        if (PERMANENT_BODY.test(inspected.text.slice(0, 4_000))) {
+        // A structured machine code is authoritative before any message-shaped regex: a plan usage
+        // limit served as 429 must not be retried, while a temporary 503 still may be.
+        if (structuredRefusalText(inspected.text) || PERMANENT_BODY.test(inspected.text.slice(0, 4_000))) {
           notice({ status: "done" });
           return response;
         }

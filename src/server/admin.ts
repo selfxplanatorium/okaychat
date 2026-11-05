@@ -1,3 +1,4 @@
+import { deleteChatGPTUser } from "./chatgpt-oauth-store.js";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { env } from "./env.js";
@@ -114,6 +115,7 @@ export const adminRoutes = new Hono<AppEnv>()
     clearModelAccessPoliciesForUser(id);
     // A pending ChatGPT login would otherwise save credentials for the deleted user when it completes.
     disconnectCodex(id);
+    deleteChatGPTUser(id);
     db.prepare("DELETE FROM users WHERE id = ?").run(id);
     await rm(path.join(env.dataDir, "images", id), { recursive: true, force: true });
     // Media originals and their previews (the rows went with the user by cascade).

@@ -30,7 +30,7 @@ Keep the tool definitions constant within a turn. The `deep_research` tool joins
 | OpenAI Responses, GPT-5.6 and newer | Account affinity as `promptCacheKey`, with an explicit breakpoint on system message 1 where supported. |
 | Other OpenAI Responses / Chat Completions | Account affinity as `promptCacheKey`; prefix caching is provider-managed. |
 | Google Gemini | No explicit tail breakpoint; implicit caching is provider-managed. |
-| ChatGPT-plan connection | Account affinity is retained, but `catalog/chatgpt.ts` strips unsupported breakpoint/retention fields. See `codex-chat.md`. |
+| ChatGPT-plan connection | Local prompt order is retained; explicit affinity key, breakpoint and retention fields are omitted until verified. See `codex-chat.md`. |
 
 The chosen model's wire format controls its provider options. Cache retention, actual reuse, and pricing are provider behavior; the app cannot guarantee a cache hit.
 
@@ -60,3 +60,7 @@ Use a context-tier price when input exceeds its threshold; invalid token breakdo
 The skills index belongs to turn context, never the stable system prefix. Skill bodies arrive through load/read tool results. Disabling skills revokes offered tools and drops the replayed index; normal skill creation or editing reads live tables without rewriting the running turn's prefix.
 
 Saving temporary chats and materializing legacy attachments preserve their original message parts. Durable file metadata is recorded separately so persistence does not rewrite the conversation's data URLs.
+
+### ChatGPT plan SIWC
+
+SIWC sends no explicit breakpoint, retention or prompt cache key until a live compatibility profile verifies them. Stable local prompt/tool order and reported cache-read usage remain; no cache guarantee is exposed. See `codex-chat.md`.

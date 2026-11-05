@@ -61,3 +61,7 @@ Output lands in `$OKAYCHAT_DATA_DIR/images/<userId>/<id>.png`, indexed in `image
 - No image model selector. The backend picks the model.
 - Resolution is selected by the image backend. The app does not pass size or quality flags.
 - Generation time depends on the backend. The tool times out after five minutes and stops when the chat request is aborted.
+
+## Independent chat connection
+
+This CLI login is for images only. Chat uses separate SIWC registrations (`codex-chat.md`); connecting or disconnecting images never imports, refreshes or revokes chat credentials.
