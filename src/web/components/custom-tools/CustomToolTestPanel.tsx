@@ -26,14 +26,14 @@ export function CustomToolTestPanel({ detail, dirty, onSaved }: { detail: ToolDe
     visible.current = false;
     controller.current?.abort();
     const pending = reviewRef.current;
-    if (pending) void api(`custom-tools/${encodeURIComponent(detail.id)}/runs/${encodeURIComponent(pending.runId)}/cancel`, { method: "POST", json: {} }).catch(() => {});
+    if (pending) void api(`/custom-tools/${encodeURIComponent(detail.id)}/runs/${encodeURIComponent(pending.runId)}/cancel`, { method: "POST", json: {} }).catch(() => {});
   }, [detail.id]);
 
   useEffect(() => {
     if (!run || (run.state !== "running" && run.state !== "prepared")) return;
     const timer = setInterval(() => {
       if (!visible.current) return;
-      void api<{ run: RunView }>(`custom-tools/${encodeURIComponent(detail.id)}/runs/${encodeURIComponent(run.id)}`).then((value) => {
+      void api<{ run: RunView }>(`/custom-tools/${encodeURIComponent(detail.id)}/runs/${encodeURIComponent(run.id)}`).then((value) => {
         if (visible.current) setRun(value.run);
       }).catch(() => {});
     }, 1000);
@@ -69,7 +69,7 @@ export function CustomToolTestPanel({ detail, dirty, onSaved }: { detail: ToolDe
     setBusy(true);
     setReview(null);
     try {
-      const response = await api<{ run?: RunView; review?: TestReview }>(`custom-tools/${encodeURIComponent(detail.id)}/test`, {
+      const response = await api<{ run?: RunView; review?: TestReview }>(`/custom-tools/${encodeURIComponent(detail.id)}/test`, {
         method: "POST",
         json: { expectedRevision: detail.revision, input, requestId: requestId() },
         signal: local.signal,
@@ -89,7 +89,7 @@ export function CustomToolTestPanel({ detail, dirty, onSaved }: { detail: ToolDe
     setBusy(true);
     setError(null);
     try {
-      const response = await api<{ run: RunView }>(`custom-tools/${encodeURIComponent(detail.id)}/test/execute`, { method: "POST", json: { runId: review.runId, token: review.token } });
+      const response = await api<{ run: RunView }>(`/custom-tools/${encodeURIComponent(detail.id)}/test/execute`, { method: "POST", json: { runId: review.runId, token: review.token } });
       setRun(response.run);
       setReview(null);
     } catch (failure) {
@@ -103,10 +103,10 @@ export function CustomToolTestPanel({ detail, dirty, onSaved }: { detail: ToolDe
   const cancel = () => {
     controller.current?.abort();
     if (review) {
-      void api(`custom-tools/${encodeURIComponent(detail.id)}/runs/${encodeURIComponent(review.runId)}/cancel`, { method: "POST", json: {} }).catch(() => {});
+      void api(`/custom-tools/${encodeURIComponent(detail.id)}/runs/${encodeURIComponent(review.runId)}/cancel`, { method: "POST", json: {} }).catch(() => {});
       setReview(null);
     } else if (run && (run.state === "running" || run.state === "prepared")) {
-      void api(`custom-tools/${encodeURIComponent(detail.id)}/runs/${encodeURIComponent(run.id)}/cancel`, { method: "POST", json: {} }).then((value) => setRun((value as { run: RunView }).run)).catch(() => {});
+      void api(`/custom-tools/${encodeURIComponent(detail.id)}/runs/${encodeURIComponent(run.id)}/cancel`, { method: "POST", json: {} }).then((value) => setRun((value as { run: RunView }).run)).catch(() => {});
     }
     setBusy(false);
   };

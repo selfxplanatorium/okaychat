@@ -31,7 +31,7 @@ export function CustomToolList({ items, onChanged, navigate }: { items: ToolSumm
   const toggle = async (item: ToolSummary, enabled: boolean) => {
     setBusy(item.id);
     try {
-      await api(`custom-tools/${encodeURIComponent(item.id)}/enabled`, { method: "PATCH", json: { expectedRevision: item.revision, enabled } });
+      await api(`/custom-tools/${encodeURIComponent(item.id)}/enabled`, { method: "PATCH", json: { expectedRevision: item.revision, enabled } });
       onChanged();
     } catch {
       // The row keeps its stored state; a failed CAS must never look applied.

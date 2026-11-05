@@ -52,14 +52,14 @@ export const useCustomTools = create<CustomToolsState>((set, get) => ({
       if (!current()) return;
       const feature = self.features.customTools === true;
       if (!feature) {
-        const cleanup = await api<{ items: CleanupItem[] }>("custom-tools/cleanup");
+        const cleanup = await api<{ items: CleanupItem[] }>("/custom-tools/cleanup");
         if (!current()) return;
         set({ feature, cleanup: cleanup.items, items: [], detail: null, loading: false });
         return;
       }
-      const list = await api<{ items: ToolSummary[] }>("custom-tools");
+      const list = await api<{ items: ToolSummary[] }>("/custom-tools");
       if (!current()) return;
-      const detail = options?.detailId ? await api<{ tool: ToolDetail }>(`custom-tools/${encodeURIComponent(options.detailId)}`).then((value) => value.tool).catch(() => null) : null;
+      const detail = options?.detailId ? await api<{ tool: ToolDetail }>(`/custom-tools/${encodeURIComponent(options.detailId)}`).then((value) => value.tool).catch(() => null) : null;
       if (!current()) return;
       set({ feature, items: list.items, cleanup: [], detail, loading: false });
     } catch (error) {
@@ -72,7 +72,7 @@ export const useCustomTools = create<CustomToolsState>((set, get) => ({
     const generation = get().generation;
     set({ loading: true, error: null });
     try {
-      const detail = await api<{ tool: ToolDetail }>(`custom-tools/${encodeURIComponent(id)}`);
+      const detail = await api<{ tool: ToolDetail }>(`/custom-tools/${encodeURIComponent(id)}`);
       if (get().userId !== userId || get().generation !== generation) return;
       set({ detail: detail.tool, loading: false });
     } catch (error) {

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import type { CleanupItem, ToolSummary } from "@shared/custom-tools";
 import { Link, useLocation } from "wouter";
 import { WrenchIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,12 +12,17 @@ import { customToolsHref, parseCustomToolsLink } from "@/lib/custom-tool-link";
 import { CustomToolEditor } from "./CustomToolEditor";
 import { CustomToolList } from "./CustomToolList";
 
+// Stable empty lists: a selector that returned a new array (or a state older than the current store)
+// must never turn into a render crash while the workspace is loading.
+const NO_ITEMS: ToolSummary[] = [];
+const NO_CLEANUP: CleanupItem[] = [];
+
 export function CustomToolsWorkspace({ search }: { search: string }) {
   const me = useData((state) => state.me);
   const [, navigate] = useLocation();
   const feature = useCustomTools((state) => state.feature);
-  const items = useCustomTools((state) => state.items);
-  const cleanup = useCustomTools((state) => state.cleanup);
+  const items = useCustomTools((state) => state.items ?? NO_ITEMS);
+  const cleanup = useCustomTools((state) => state.cleanup ?? NO_CLEANUP);
   const detail = useCustomTools((state) => state.detail);
   const loading = useCustomTools((state) => state.loading);
   const error = useCustomTools((state) => state.error);
@@ -47,7 +53,7 @@ export function CustomToolsWorkspace({ search }: { search: string }) {
               {cleanup.map((item) => (
                 <li key={item.id} className="flex items-center gap-2 rounded-md border p-2">
                   <span className="min-w-0 flex-1 truncate text-sm">{item.name}</span>
-                  <Button type="button" size="sm" variant="destructive" onClick={() => void api(`custom-tools/${encodeURIComponent(item.id)}`, { method: "DELETE", json: { expectedRevision: item.revision } }).then(() => useCustomTools.getState().load(userId, {}))}>
+                  <Button type="button" size="sm" variant="destructive" onClick={() => void api(`/custom-tools/${encodeURIComponent(item.id)}`, { method: "DELETE", json: { expectedRevision: item.revision } }).then(() => useCustomTools.getState().load(userId, {}))}>
                     {t("common.delete")}
                   </Button>
                 </li>

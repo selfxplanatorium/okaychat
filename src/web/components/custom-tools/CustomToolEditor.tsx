@@ -106,7 +106,7 @@ export function CustomToolEditor({ userId, detail, newKind, onBack }: {
     try {
       const body = { tool: draft, ...(secretsPatch() ? { secrets: secretsPatch()! } : {}) };
       if (detail) {
-        const response = await api<{ tool: ToolDetail }>(`custom-tools/${encodeURIComponent(detail.id)}`, { method: "PUT", json: { expectedRevision, ...body } });
+        const response = await api<{ tool: ToolDetail }>(`/custom-tools/${encodeURIComponent(detail.id)}`, { method: "PUT", json: { expectedRevision, ...body } });
         setExpectedRevision(response.tool.revision);
         setDirty(false);
         setSaved(true);
@@ -114,7 +114,7 @@ export function CustomToolEditor({ userId, detail, newKind, onBack }: {
         setRemovedSecrets([]);
         await refresh(userId, response.tool.id);
       } else {
-        const response = await api<{ tool: ToolDetail }>("custom-tools", { method: "POST", json: body });
+        const response = await api<{ tool: ToolDetail }>("/custom-tools", { method: "POST", json: body });
         setDirty(false);
         setSaved(true);
         await refresh(userId, response.tool.id);
@@ -134,7 +134,7 @@ export function CustomToolEditor({ userId, detail, newKind, onBack }: {
     setBusy(true);
     setError(null);
     try {
-      await api(`custom-tools/${encodeURIComponent(detail.id)}`, { method: "DELETE", json: { expectedRevision } });
+      await api(`/custom-tools/${encodeURIComponent(detail.id)}`, { method: "DELETE", json: { expectedRevision } });
       setDeleteOpen(false);
       setDirty(false);
       await refresh(userId, null);
