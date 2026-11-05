@@ -73,6 +73,7 @@ const FAMILY_LABELS: Record<ToolFamily, PlainMessageKey> = {
   drafts: "assistants.familyDrafts",
   artifacts: "assistants.familyArtifacts",
   images: "assistants.familyImages",
+  videos: "assistants.familyVideos",
   code: "assistants.familyCode",
   widgets: "assistants.familyWidgets",
   delegate: "assistants.familyDelegate",

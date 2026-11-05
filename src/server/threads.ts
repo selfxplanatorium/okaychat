@@ -1,3 +1,4 @@
+import { deletingThreadVideos } from "./video/maintenance.js";
 import { isDeepStrictEqual } from "node:util";
 import type { UIMessage } from "ai";
 import { HTTPException } from "hono/http-exception";
@@ -220,7 +221,10 @@ export function setCompaction(userId: string, id: string, state: CompactionState
 
 export function deleteThread(userId: string, id: string) {
   const row = db.prepare("SELECT compare_group_id FROM threads WHERE user_id = ? AND id = ?").get(userId, id) as { compare_group_id: string | null } | undefined;
-  db.prepare("DELETE FROM threads WHERE user_id = ? AND id = ?").run(userId, id);
+  tx(() => {
+    deletingThreadVideos(userId, id);
+    db.prepare("DELETE FROM threads WHERE user_id = ? AND id = ?").run(userId, id);
+  });
   // Pane rows cascade from the thread; the group survives while another pane remains.
   if (row?.compare_group_id) {
     db.prepare(
@@ -383,6 +387,22 @@ export function toolMedia(contents: unknown[]): { images: Set<string>; sandboxPa
  * charge). Non-image run outputs stay with the source chat.
  */
 function copyImagesForBranch(userId: string, sourceId: string, targetId: string, contents: unknown[]): void {
+  for (const content of contents) {
+    if (!content || typeof content !== "object") continue;
+    const parts = (content as { parts?: unknown }).parts;
+    if (!Array.isArray(parts)) continue;
+    for (const raw of parts) {
+      if (!raw || typeof raw !== "object") continue;
+      const part = raw as { type?: unknown; state?: unknown; output?: {version?:unknown;accepted?:unknown;jobId?:unknown} };
+      if (part.type !== "tool-generate_video" || part.state !== "output-available" || part.output?.version !== 1 || part.output.accepted !== true || typeof part.output.jobId !== "string") continue;
+      db.prepare(`INSERT OR IGNORE INTO video_threads (video_id,thread_id)
+        SELECT v.id,? FROM videos v JOIN video_jobs j ON j.id=v.job_id
+        JOIN video_jobs original ON original.id=? AND original.user_id=j.user_id AND original.thread_id IS j.thread_id
+          AND original.assistant_message_id=j.assistant_message_id AND original.tool_call_id=j.tool_call_id
+        JOIN video_threads refs ON refs.video_id=v.id AND refs.thread_id=?
+        WHERE v.user_id=? AND j.state='succeeded'`).run(targetId,part.output.jobId,sourceId,userId);
+    }
+  }
   const { images, sandboxPaths } = toolMedia(contents);
   const ref = db.prepare(`INSERT OR IGNORE INTO image_threads (image_id, thread_id)
     SELECT id, ? FROM images WHERE id = ? AND user_id = ?`);

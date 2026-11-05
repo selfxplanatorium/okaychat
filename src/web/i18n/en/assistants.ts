@@ -62,6 +62,7 @@ export default {
   familyEmailWrite: "Send email",
   familyDrafts: "Drafts",
   familyArtifacts: "Artifacts and documents",
+  familyVideos: "Video generation",
   familyImages: "Images",
   familyCode: "Code execution",
   familyWidgets: "Generative UI",

@@ -1,3 +1,5 @@
+import { videoWorker, recoverVideoJobs } from "./video/worker.js";
+import { startVideoMaintenance, stopVideoMaintenance } from "./video/maintenance.js";
 import { chatgptHelperRoutes } from "./chatgpt-oauth-routes.js";
 import { existsSync } from "node:fs";
 import { startMediaMaintenance } from "./media/maintenance.js";
@@ -122,6 +124,9 @@ serve({ fetch: app.fetch, port: env.port, hostname: env.host, websocket: { serve
   // Outgoing webhooks start only after every source has reconciled its restart state, so an interrupted
   // schedule or turn is admitted exactly once before the first delivery claim.
   reconcileScheduleInvocations();
+  recoverVideoJobs();
+  videoWorker.start();
+  startVideoMaintenance();
   startOutgoingWebhookWorker();
   startOutgoingWebhookMaintenance();
   startMemoryWorker();
@@ -149,6 +154,8 @@ serve({ fetch: app.fetch, port: env.port, hostname: env.host, websocket: { serve
   // Stop claims and abort active deliveries before the process leaves. An in-flight request may still
   // complete remotely after this point; startup treats such a row as uncertain.
   const shutdown = () => {
+    void videoWorker.stop();
+    stopVideoMaintenance();
     stopOutgoingWebhooks();
     process.exit(0);
   };

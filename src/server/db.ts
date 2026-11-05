@@ -2108,6 +2108,86 @@ CREATE INDEX notifications_calendar ON notifications(calendar_event_id) WHERE ca
     const broken = db.prepare("PRAGMA foreign_key_check").all();
     if (broken.length) throw new Error(`Outgoing webhooks migration left ${broken.length} broken foreign keys`);
   },
+  () => {
+    db.exec(`
+CREATE TABLE video_jobs (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  thread_id TEXT REFERENCES threads(id) ON DELETE SET NULL,
+  llm_run_id TEXT,
+  assistant_message_id TEXT NOT NULL,
+  tool_call_id TEXT NOT NULL,
+  attempt INTEGER NOT NULL DEFAULT 0 CHECK(attempt BETWEEN 0 AND 7),
+  retry_of TEXT,
+  service TEXT NOT NULL CHECK(service IN ('xai','replicate')),
+  model_id TEXT NOT NULL,
+  connection_id TEXT NOT NULL,
+  connection_fingerprint TEXT NOT NULL,
+  request_enc TEXT,
+  parameters_json TEXT NOT NULL CHECK(json_valid(parameters_json)),
+  price_json TEXT NOT NULL CHECK(json_valid(price_json)),
+  provider_id_enc TEXT,
+  state TEXT NOT NULL CHECK(state IN ('queued','submitting','polling','downloading','validating',
+    'cancel_requested','succeeded','failed','cancelled','timed_out','submission_unknown')),
+  stage TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
+  submitted_at INTEGER,
+  deadline_at INTEGER NOT NULL,
+  next_poll_at INTEGER,
+  poll_failures INTEGER NOT NULL DEFAULT 0 CHECK(poll_failures >= 0),
+  lease_until INTEGER,
+  lease_epoch INTEGER NOT NULL DEFAULT 0,
+  cancel_requested_at INTEGER,
+  remote_cancellation TEXT NOT NULL DEFAULT 'not_requested'
+    CHECK(remote_cancellation IN ('not_requested','unsupported','confirmed','unconfirmed')),
+  error_code TEXT,
+  may_have_charged INTEGER NOT NULL DEFAULT 0 CHECK(may_have_charged IN (0,1)),
+  reservation_bytes INTEGER NOT NULL DEFAULT 0 CHECK(reservation_bytes >= 0),
+  estimated_cost_microusd INTEGER NOT NULL CHECK(estimated_cost_microusd >= 0),
+  settled_cost_microusd INTEGER CHECK(settled_cost_microusd >= 0),
+  cost_state TEXT NOT NULL DEFAULT 'unknown' CHECK(cost_state IN ('unknown','estimated','reported')),
+  billed_seconds REAL CHECK(billed_seconds > 0),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  finished_at INTEGER,
+  UNIQUE(thread_id, assistant_message_id, tool_call_id, attempt)
+);
+CREATE INDEX video_jobs_due ON video_jobs(state, next_poll_at, lease_until);
+CREATE INDEX video_jobs_owner ON video_jobs(user_id, created_at DESC, id);
+CREATE INDEX video_jobs_thread ON video_jobs(thread_id, created_at, id);
+CREATE UNIQUE INDEX video_jobs_one_active_owner ON video_jobs(user_id)
+  WHERE state IN ('queued','submitting','polling','downloading','validating','cancel_requested');
+CREATE UNIQUE INDEX video_jobs_retry_once ON video_jobs(retry_of) WHERE retry_of IS NOT NULL;
+CREATE TABLE videos (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  job_id TEXT NOT NULL UNIQUE REFERENCES video_jobs(id),
+  origin_thread_id TEXT REFERENCES threads(id) ON DELETE SET NULL,
+  label TEXT NOT NULL,
+  mime TEXT NOT NULL DEFAULT 'video/mp4' CHECK(mime = 'video/mp4'),
+  size INTEGER NOT NULL CHECK(size > 0 AND size <= 67108864),
+  sha256 TEXT NOT NULL,
+  duration_ms INTEGER NOT NULL CHECK(duration_ms > 0 AND duration_ms <= 8500),
+  width INTEGER NOT NULL CHECK(width > 0 AND width <= 1920),
+  height INTEGER NOT NULL CHECK(height > 0 AND height <= 1920),
+  has_audio INTEGER NOT NULL CHECK(has_audio IN (0,1)),
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX videos_owner ON videos(user_id, created_at DESC, id);
+CREATE TABLE video_threads (
+  video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+  thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+  PRIMARY KEY(video_id,thread_id)
+);
+CREATE INDEX video_threads_thread ON video_threads(thread_id,video_id);
+ALTER TABLE usage ADD COLUMN video_job_id TEXT;
+ALTER TABLE usage ADD COLUMN cost_state TEXT NOT NULL DEFAULT 'estimated'
+  CHECK(cost_state IN ('unknown','estimated','reported'));
+CREATE UNIQUE INDEX usage_video_job ON usage(video_job_id) WHERE video_job_id IS NOT NULL;
+    `);
+    if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "video-generation") throw new Error("Injected migration failure");
+    if (db.prepare("PRAGMA foreign_key_check").all().length) throw new Error("Video migration left broken foreign keys");
+  },
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

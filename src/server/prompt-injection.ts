@@ -8,6 +8,7 @@ import type { InjectionFinding, InjectionReport } from "../shared/types.js";
 // approval gate. See docs/implementation/prompt-injection.md.
 
 export type UntrustedKind =
+  | "video_provider"
   | "n8n_agent"
   | "web_page"
   | "web_search"
@@ -53,6 +54,7 @@ const UNTRUSTED_CLOSE = "</untrusted_data>";
 
 /** Tools whose results carry third-party content even when an older stored result predates envelopes. */
 export const UNTRUSTED_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "generate_video",
   "web_search",
   "web_fetch",
   "mcp_list_resources",

@@ -72,6 +72,7 @@ export function threadMarkdown(title: string | null, messages: UIMessage[], imag
         } else if (part.text.trim()) body.push(part.text.trim());
       }
     }
+    if (message.parts.some(part => part.type === "tool-generate_video")) body.push("_Video not included_");
     const pictures = shown.map((image) => {
       const label = image.name.replace(/[[\]\\]/g, "");
       if (!images) return `_Image: ${label}_`;

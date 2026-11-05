@@ -180,6 +180,7 @@ const messageGroupBy = groupPartByType({
   "tool-call:edit_widget": [],
   "tool-call:render_spec": [],
   "tool-call:generate_image": [],
+  "tool-call:generate_video": [],
   "tool-call:delegate_task": [],
   "tool-call:deep_research": [],
   "tool-call:run_code": [],
@@ -245,6 +246,8 @@ const resultKey = (part: GroupablePart): string | undefined => {
       return `widget:${String(args.title ?? "")}`;
     case "render_spec":
       return "spec";
+    case "generate_video":
+      return `video:${part.toolCallId}`;
     case "generate_image":
       return `image:${part.toolCallId}`;
     // The research card stays above its report: it holds the questions and the pages read.

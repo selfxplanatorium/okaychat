@@ -1,4 +1,5 @@
-import { DownloadIcon, FileCodeIcon, FileSpreadsheetIcon, FileTextIcon, ImageIcon, LayoutGridIcon, ListIcon, Loader2Icon, MessageCircleIcon, PaperclipIcon, SearchIcon, TrashIcon } from "lucide-react";
+import { VideoPlayer } from "@/components/chat/VideoPlayer";
+import { VideoIcon, DownloadIcon, FileCodeIcon, FileSpreadsheetIcon, FileTextIcon, ImageIcon, LayoutGridIcon, ListIcon, Loader2Icon, MessageCircleIcon, PaperclipIcon, SearchIcon, TrashIcon } from "lucide-react";
 import { OwnedImage } from "@/components/ui/owned-image";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { useLocation } from "wouter";
@@ -15,7 +16,7 @@ import { SimpleMarkdown } from "@/components/ui/simple-markdown";
 import { Delayed, Skeleton } from "@/components/ui/skeleton";
 import { BulkDeleteDialog, FloatingSelectionBar, SelectionCheck, SelectModeToggle, useSelection, useSelectionKeys } from "@/components/ui/selection";
 import { t, type PlainMessageKey } from "@/i18n";
-import { formatBytes, formatDate } from "@/i18n/format";
+import { formatBytes, formatDate, formatDuration } from "@/i18n/format";
 import { api } from "@/lib/api";
 import { runBatch } from "@/lib/selection";
 import { cn } from "@/lib/utils";
@@ -30,6 +31,7 @@ import { ArchivedChats } from "./ArchivedChats";
 const VIEW_KEY = "okaychat:library-view";
 
 const KIND_LABELS = {
+  video: "video.libraryKind",
   image: "library.kindImages",
   document: "library.kindDocuments",
   pdf: "library.kindPdfs",
@@ -39,6 +41,7 @@ const KIND_LABELS = {
 } as const satisfies Record<LibraryKind, PlainMessageKey>;
 
 const KIND_ICONS: Record<LibraryKind, typeof FileTextIcon> = {
+  video: VideoIcon,
   image: ImageIcon,
   document: FileTextIcon,
   pdf: FileTextIcon,
@@ -69,6 +72,7 @@ function downloadText(name: string, content: string, mime: string) {
 const downloadable = (item: LibraryItem) => Boolean(item.downloadUrl || item.artifactId);
 
 async function downloadItem(item: LibraryItem) {
+  if (item.kind === "video" && item.downloadUrl) { Object.assign(document.createElement("a"), {href:item.downloadUrl,download:""}).click(); return; }
   if (item.downloadUrl) return downloadUrl(item.name, item.downloadUrl);
   // Text artifacts have no bytes endpoint; their latest version's content is the file.
   const versions = await api<ArtifactVersion[]>(`/threads/${encodeURIComponent(item.threadId!)}/artifacts/${encodeURIComponent(item.artifactId!)}`);
@@ -103,7 +107,8 @@ function ItemActions({ item, onDeleted }: { item: LibraryItem; onDeleted: () => 
   return (
     <>
       {error && <p role="alert" className="text-destructive text-xs">{error}</p>}
-      {downloadable(item) && (
+      {item.kind === "video" && confirming && <p className="text-muted-foreground text-xs">{t("video.deleteEverywhere")}</p>}
+      {item.kind === "video" && item.downloadUrl ? <a className="text-primary inline-flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm underline underline-offset-4" href={item.downloadUrl}><DownloadIcon aria-hidden className="size-4" />{t("common.download")}</a> : downloadable(item) && (
         <Button variant="outline" size="sm" onClick={() => void downloadItem(item).catch((e: Error) => setError(e.message))}>
           <DownloadIcon /> {t("common.download")}
         </Button>
@@ -185,6 +190,7 @@ function ArtifactPreview({ item }: { item: LibraryItem }) {
 }
 
 function ItemPreviewBody({ item }: { item: LibraryItem }) {
+  if (item.kind === "video" && item.previewUrl && item.width && item.height && item.durationMs) return <div className="h-full overflow-auto p-4"><VideoPlayer key={item.id} output={{id:item.id.slice(6),mime:"video/mp4",size:item.size,durationMs:item.durationMs,width:item.width,height:item.height,hasAudio:item.hasAudio===true,fileUrl:item.previewUrl,downloadUrl:item.downloadUrl!,posterUrl:null}} /></div>;
   if (item.kind === "image" && item.previewUrl) {
     return (
       <div className="flex h-full items-center justify-center bg-muted/30 p-2 sm:p-4">
@@ -245,7 +251,7 @@ function ItemPreviewDialog({ item, onClose, onDeleted }: { item: LibraryItem | n
               <div className="min-w-0 pr-8 sm:flex-1 sm:pr-0">
                 <DialogTitle className="truncate text-sm font-medium">{item.name}</DialogTitle>
                 <p className="text-muted-foreground truncate text-xs">
-                  {t(KIND_LABELS[item.kind])} · {formatSize(item.size)} · {formatDate(item.createdAt)}
+                  {t(KIND_LABELS[item.kind])}{item.durationMs ? ` · ${formatDuration(item.durationMs/1000)}` : ""} · {formatSize(item.size)} · {formatDate(item.createdAt)}
                   {item.threadTitle ? ` · ${item.threadTitle}` : ""}
                 </p>
               </div>
@@ -302,7 +308,7 @@ function GridCard({ item, onOpen, selection }: { item: LibraryItem; onOpen: () =
       <div className="flex flex-col gap-0.5 px-3 py-2">
         <span className="truncate text-sm">{item.name}</span>
         <span className="text-muted-foreground truncate text-xs">
-          {t(KIND_LABELS[item.kind])} · {formatSize(item.size)} · {formatDate(item.createdAt)}
+          {t(KIND_LABELS[item.kind])}{item.durationMs ? ` · ${formatDuration(item.durationMs/1000)}` : ""} · {formatSize(item.size)} · {formatDate(item.createdAt)}
         </span>
       </div>
     </button>

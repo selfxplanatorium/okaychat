@@ -188,3 +188,23 @@ export async function serveImage(
   const stream = Readable.toWeb(createReadStream(chosen.file)) as ReadableStream;
   return new Response(stream, { headers: { ...headers, "Content-Length": String(size) } });
 }
+
+/** Private starting frame for video providers. Uses the shared decode queue, never creates media rows. */
+export async function normalizeVideoReference(input: Buffer, aspect: "16:9" | "9:16"): Promise<Buffer> {
+  if (input.length > 25 * 1024 * 1024) throw new MediaProcessingError("Invalid video reference");
+  const inspected = await inspectRaster(input);
+  const ratio = aspect === "16:9" ? 16 / 9 : 9 / 16;
+  if (inspected.pages !== 1) throw new MediaProcessingError("Invalid video reference");
+  if (Math.abs(inspected.width / inspected.height / ratio - 1) > 0.01) throw new MediaProcessingError("reference_aspect_mismatch");
+  const sharp = await loadSharp();
+  return queued(async () => {
+    for (const quality of [85, 75, 65]) {
+      const result = await sharp(input, { limitInputPixels: MAX_IMAGE_PIXELS, failOn: "error" })
+        .autoOrient().flatten({ background: "#ffffff" })
+        .resize({ width: 1280, height: 1280, fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality }).toBuffer();
+      if (result.length <= 256 * 1024) return result;
+    }
+    throw new MediaProcessingError("Invalid video reference");
+  });
+}

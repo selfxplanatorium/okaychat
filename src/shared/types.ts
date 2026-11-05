@@ -1,3 +1,4 @@
+import type { VideoSettings } from "./video.js";
 import type { ChannelActivitySettings } from "./channel-activity.js";
 import type { UserAppearance } from "./appearance.js";
 import type { AssistantIcon } from "./assistant-presets.js";
@@ -226,6 +227,7 @@ export interface UserSettings {
   subagentModel?: string | null;
   /** Image generation services switched off and image models chosen per service. */
   imageServices?: ImageServiceSettings;
+  videoServices?: VideoSettings;
   /** Speech to text and read aloud. */
   speech?: SpeechSettings;
   /** The user may rewrite the text of finished assistant replies. Off by default. */
@@ -455,6 +457,7 @@ export interface UsageRow {
   cacheWrite: number;
   cost: number;
   requests: number;
+  unknownCostRequests?: number;
 }
 
 export interface GoWindow {
@@ -600,7 +603,7 @@ export interface SharedThread {
 }
 
 /** Library entries grouped by what the browser can do with them. */
-export type LibraryKind = "image" | "document" | "pdf" | "spreadsheet" | "code" | "other";
+export type LibraryKind = "video" | "image" | "document" | "pdf" | "spreadsheet" | "code" | "other";
 /** How the item entered the library: attached by the user or produced by the agent. */
 export type LibrarySource = "uploaded" | "generated";
 export type LibrarySort = "newest" | "oldest" | "name" | "size";
@@ -622,6 +625,9 @@ export interface LibraryItem {
   previewUrl: string | null;
   /** Small grid thumbnail for raster images (server-made, bounded); absent when none can be made. */
   thumbUrl?: string;
+  durationMs?: number;
+  hasAudio?: boolean;
+  posterUrl?: null;
   /** Pixel size of raster images, when known, so the grid and preview can reserve space. */
   width?: number;
   height?: number;

@@ -204,7 +204,7 @@ export const MAX_PUBLISHED_PAGE_TRAVERSAL = PUBLISHED_PAGE_CAP;
 // Builder options: what this account may actually grant. Never connects to a disabled MCP server.
 // ---------------------------------------------------------------------------------------------------
 
-const BUILTIN_OPTIONS: Array<{ id: string; labelKey: string; feature?: "webSearch" | "memory" | "knowledge" | "skills" | "email" | "artifacts" | "images" | "code" | "generativeUI" | "delegation" | "research"; setting?: keyof ReturnType<typeof getSettings> }> = [
+const BUILTIN_OPTIONS: Array<{ id: string; labelKey: string; feature?: "webSearch" | "memory" | "knowledge" | "skills" | "email" | "artifacts" | "images" | "videos" | "code" | "generativeUI" | "delegation" | "research"; setting?: keyof ReturnType<typeof getSettings> }> = [
   { id: "web", labelKey: "assistants.familyWeb", feature: "webSearch", setting: "webTools" },
   { id: "memory", labelKey: "assistants.familyMemory", feature: "memory" },
   { id: "knowledge", labelKey: "assistants.familyKnowledge", feature: "knowledge" },
@@ -213,6 +213,7 @@ const BUILTIN_OPTIONS: Array<{ id: string; labelKey: string; feature?: "webSearc
   { id: "email-write", labelKey: "assistants.familyEmailWrite", feature: "email" },
   { id: "drafts", labelKey: "assistants.familyDrafts", feature: "email" },
   { id: "artifacts", labelKey: "assistants.familyArtifacts", feature: "artifacts", setting: "artifacts" },
+  { id: "videos", labelKey: "assistants.familyVideos", feature: "videos" },
   { id: "images", labelKey: "assistants.familyImages", feature: "images" },
   { id: "code", labelKey: "assistants.familyCode", feature: "code", setting: "codeExecution" },
   { id: "widgets", labelKey: "assistants.familyWidgets", feature: "generativeUI", setting: "generativeUI" },

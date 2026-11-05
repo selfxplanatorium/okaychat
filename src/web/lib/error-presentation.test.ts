@@ -11,7 +11,8 @@ const wire = (code: ErrorWire["code"], extra: Partial<ErrorWire> = {}): ErrorWir
 });
 
 test("every taxonomy code has a message and hint decision, including unknown", () => {
-  assert.equal(ERROR_CODES.length, 21);
+  assert.equal(ERROR_CODES.length, 45);
+  assert.ok(ERROR_CODES.includes("video_submission_unknown"));
   for (const code of ERROR_CODES) {
     const chat = presentError(wire(code), "chat");
     assert.match(chat.messageKey, /^errors\./, code);

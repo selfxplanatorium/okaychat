@@ -71,6 +71,8 @@ export function storageUsedSql(user: string): string {
       WHERE thread_id IN (SELECT id FROM threads WHERE user_id = ${user})
     UNION ALL SELECT COALESCE(SUM(length(data)), 0) FROM user_fonts WHERE user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(length(data)), 0) FROM user_avatars WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(size), 0) FROM videos WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(reservation_bytes), 0) FROM video_jobs WHERE user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(size), 0) FROM images WHERE user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(size), 0) FROM media WHERE user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(length(data)), 0) FROM sandbox_files WHERE user_id = ${user}

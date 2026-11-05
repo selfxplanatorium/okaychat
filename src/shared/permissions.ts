@@ -12,6 +12,7 @@ export const FEATURE_KEYS = [
   "research",
   "code",
   "images",
+  "videos",
   "mcp",
   "knowledge",
   "memory",

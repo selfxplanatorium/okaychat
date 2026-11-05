@@ -1,3 +1,4 @@
+import { isVideoSettings, type VideoSettings } from "../shared/video.js";
 import { z } from "zod";
 import { LOCALE_TAG, MAX_LOCALE_TAG } from "../shared/locale-tag.js";
 import { speechSettingsSchema } from "./speech/config.js";
@@ -19,6 +20,7 @@ export const settingsPatch = z.object({
   }).strict().optional(),
   maxSteps: z.number().optional(),
   maxSearches: z.number().optional(),
+  videoServices: z.custom<VideoSettings>(isVideoSettings).optional(),
   imageServices: z.record(z.string(), z.unknown()).optional(),
   speech: speechSettingsSchema.optional(),
   defaultModel: modelRef.nullable().optional(),

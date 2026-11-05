@@ -1,3 +1,4 @@
+import { VideoServicesSettings } from "./VideoServicesSettings";
 import { Loader2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { REASONING_EFFORTS } from "@shared/reasoning";
@@ -479,6 +480,7 @@ export function GeneralSettings() {
       <ServiceAvailability id="sandbox" />
 
       <ImageServicesSettings />
+      <VideoServicesSettings />
 
       <SettingsSection title={t("general.customInstructions")} description={t("general.customInstructionsDescription")}>
         <div className="p-3">

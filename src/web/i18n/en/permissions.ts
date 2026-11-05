@@ -106,6 +106,8 @@ export default {
   featureResearchHelp: "Requires web search, page reading, a positive search allowance, and a tool-capable model.",
   featureCodeLabel: "Code execution",
   featureCodeHelp: "Runs new sandbox work. Existing stored outputs remain readable.",
+  featureVideosLabel: "Video generation",
+  featureVideosHelp: "Allows paid video generation with a private key and explicit service opt-in. Cancelling may still incur charges.",
   featureImagesLabel: "Image generation",
   featureImagesHelp: "Allows generating images. An own or service key does not bypass this; existing images stay readable.",
   featureMcpLabel: "MCP servers",

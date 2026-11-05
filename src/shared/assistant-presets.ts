@@ -44,6 +44,7 @@ export const TOOL_FAMILIES = [
   "drafts",
   "artifacts",
   "images",
+  "videos",
   "code",
   "widgets",
   "delegate",
@@ -75,6 +76,7 @@ export const FAMILY_TOOLS: Readonly<Record<ToolFamily, readonly string[]>> = {
     "view_artifact",
   ],
   images: ["generate_image"],
+  videos: ["generate_video"],
   code: ["run_code"],
   // Browser-executed tools. Unknown frontend keys are denied under a selected policy.
   widgets: ["render_spec", "show_widget", "edit_widget", "read_me", "preview_widget"],

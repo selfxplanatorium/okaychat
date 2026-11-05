@@ -1,3 +1,4 @@
+import { deletingUserVideos, removeUserVideoFiles } from "./video/maintenance.js";
 import { deleteChatGPTUser } from "./chatgpt-oauth-store.js";
 import { n8nRoutes } from "./n8n/routes.js";
 import { adminWebhookRoutes } from "./outgoing-webhooks/admin-routes.js";
@@ -146,7 +147,9 @@ export const adminRoutes = new Hono<AppEnv>()
     abortApiCalls(id);
     // Active webhook attempts stop before their endpoint rows cascade away.
     abortUserEndpointSends(id);
+    deletingUserVideos(id);
     db.prepare("DELETE FROM users WHERE id = ?").run(id);
+    await removeUserVideoFiles(id);
     abortRevokedAgentRuns();
     requestChannelRevocation();
     await rm(path.join(env.dataDir, "images", id), { recursive: true, force: true });

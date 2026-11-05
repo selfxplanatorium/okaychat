@@ -52,6 +52,7 @@ import tools from "./tools";
 import ui from "./ui";
 import usage from "./usage";
 import ux from "./ux";
+import video from "./video";
 import voice from "./voice";
 import webhooks from "./webhooks";
 
@@ -109,6 +110,7 @@ export const en = {
   ui,
   usage,
   ux,
+  video,
   voice,
   webhooks,
 };

@@ -1,3 +1,7 @@
+import { videoTools } from "./tools/video.js";
+import { videoModeEligible, videoVoiceActive, type VideoTurnContext } from "./video/eligibility.js";
+import { videoServiceStatuses } from "./video/services.js";
+import { cancelRunVideos } from "./video/store.js";
 import {
   convertToModelMessages,
   createUIMessageStream,
@@ -229,6 +233,7 @@ export interface TurnOptions {
   signal?: AbortSignal;
   /** Stops the upstream controller for an explicit waiting-receipt cancel. Never set by a client. */
   abortRun?: () => void;
+  onRunId?: (id: string) => void;
 }
 
 /** One assistant turn as a UI message stream. Used by /api/chat and by scheduled runs. */
@@ -497,6 +502,10 @@ export async function turnStream(opts: TurnOptions) {
       const shots = new Map<string, VisualShot>();
       const injectedShots = new Set<string>();
       const sandboxTurn = new SandboxTurn();
+      let videoRunId: string | null = null;
+      const videoContext: VideoTurnContext = {userId:user.id,threadId,assistantMessageId,getRunId:()=>videoRunId,modelRef,toolCallModel:model.toolCall,toolPolicy,interactive:opts.interactive===true,unattended:opts.unattended===true,turnOrigin:opts.turnOrigin,temporary,restrictedChat,comparison:opts.turnOrigin==="comparison"};
+      const videoServices = videoModeEligible(videoContext) && allowed("videos") && !videoVoiceActive(user.id)
+        ? videoServiceStatuses(user.id,settings.videoServices??{}).filter(s=>s.enabled) : [];
       const imageServices = !restrictedChat && model.toolCall && !temporary && allowed("images") && allows("images") ? enabledImageServices(user.id, settings) : [];
       // The final assembly is explicit: a restricted chat gets the knowledge pair and nothing else, so a
       // future family cannot leak in by forgetting its own guard.
@@ -512,6 +521,7 @@ export async function turnStream(opts: TurnOptions) {
         ...(model.toolCall && !temporary && allows("drafts") ? textDraftTools({ userId: user.id, threadId }) : {}),
         ...(assistantAllowsDelegation(toolPolicy) ? subagents : {}),
         ...(useArtifacts ? artifactTools(threadId, user.id, { shots, canViewImages: model.inputModalities.includes("image"), savedThisTurn: artifactsInCurrentTurn(uiMessages), shotsThisTurn: screenshotsInCurrentTurn(uiMessages), browserDown }) : {}),
+        ...(videoServices.length ? videoTools(videoContext,videoServices) : {}),
         ...(imageServices.length ? imageTools(user.id, threadId, imageServices, signal) : {}),
         ...(runCodeWanted && !sandboxDown && allows("code") && customPythonAvailable ? sandboxTools(user.id, threadId, signal, sandboxTurn) : {}),
         ...custom.tools,
@@ -716,6 +726,8 @@ export async function turnStream(opts: TurnOptions) {
             throw error;
           }
         }
+        videoRunId = run?.id ?? null;
+        if (run) opts.onRunId?.(run.id);
         if (run) attachRunAbort(run.id, opts.abortRun ?? (() => {}));
       }
       let segmentDone = false;
@@ -901,7 +913,7 @@ const resumable = createResumableStreamContext({
   ttlMs: RESUME_TTL_MS,
   onFinalize: (streamId) => setTimeout(() => runs.delete(streamId), RESUME_TTL_MS).unref(),
 });
-const runs = new Map<string, { userId: string; threadId: string; controller: AbortController }>();
+const runs = new Map<string, { userId: string; threadId: string; controller: AbortController; getRunId: () => string | null }>();
 
 // Each turn can fan out into sub-agents, browser renders, and sandbox runs, possibly on a server-wide key.
 // The counter lives in turn-slots.ts so the external API shares the same hard ceiling.
@@ -983,6 +995,7 @@ export const chatRoutes = new Hono<AppEnv>()
     // Generation is decoupled from this request so a reload can reattach. Stop sends an explicit cancel.
     const release = markBusy(parsed.data.id, releaseTurn);
     const streamId = newId("str");
+    let llmRunId: string | null = null;
     const controller = new AbortController();
     try {
       const stream = await turnStream({
@@ -1003,8 +1016,9 @@ export const chatRoutes = new Hono<AppEnv>()
         sessionHash: customSessionHash(user.id, c.get("session")),
         signal: controller.signal,
         abortRun: () => controller.abort(),
+        onRunId: (id) => { llmRunId = id; },
       });
-      runs.set(streamId, { userId: user.id, threadId: parsed.data.id, controller });
+      runs.set(streamId, { userId: user.id, threadId: parsed.data.id, controller, getRunId: () => llmRunId });
       const response = createUIMessageStreamResponse({ stream: releasing(stream, release, controller.signal) });
       const body = await resumable.run(streamId, () => response.body!);
       const headers = new Headers(response.headers);
@@ -1035,7 +1049,11 @@ export const chatRoutes = new Hono<AppEnv>()
   })
   .post("/chat/:streamId/cancel", (c) => {
     const run = runs.get(c.req.param("streamId"));
-    if (run?.userId === c.get("user").id) run.controller.abort();
+    if (run?.userId === c.get("user").id) {
+      const videoRunId = run.getRunId();
+      if (videoRunId) cancelRunVideos(run.userId,run.threadId,videoRunId);
+      run.controller.abort();
+    }
     return c.json({ ok: true });
   })
   // A logical reply waiting for a tool result or approval has no HTTP stream. This owned endpoint aborts
@@ -1044,6 +1062,7 @@ export const chatRoutes = new Hono<AppEnv>()
     const userId = c.get("user").id;
     const threadId = c.req.param("id");
     if (!getThread(userId, threadId)) return c.json({ error: "Thread not found" }, 404);
+    cancelRunVideos(userId,threadId,c.req.param("runId"));
     const result = cancelWaitingRun(userId, threadId, c.req.param("runId"));
     return c.json({ ok: true, state: result.state });
   })

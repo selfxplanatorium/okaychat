@@ -10,6 +10,7 @@ import { SettingsPage, SettingsSection } from "./SettingsUI";
 type Range = "1" | "7" | "30" | "90";
 
 const PURPOSE_LABELS = {
+  video: "video.purpose",
   chat: "usage.purposeChat",
   compaction: "usage.purposeCompaction",
   title: "usage.purposeTitle",
@@ -19,7 +20,7 @@ const PURPOSE_LABELS = {
   channel: "usage.kindChannel",
   api: "usage.purposeApi",
   translation: "usage.purposeTranslation",
-} as const satisfies Record<"chat" | "compaction" | "title" | "research" | "evaluation" | "evaluation_judge" | "channel" | "api" | "translation", PlainMessageKey>;
+} as const satisfies Record<"video" | "chat" | "compaction" | "title" | "research" | "evaluation" | "evaluation_judge" | "channel" | "api" | "translation", PlainMessageKey>;
 
 type UsageResponse = { rows: UsageRow[]; go: GoWindow[]; agents?: AgentUsageCounters };
 
@@ -37,7 +38,7 @@ function useUsage(days: Range, groupBy: "day" | "model" | "kind") {
   return data;
 }
 
-const sum = (rows: UsageRow[], key: keyof UsageRow) => rows.reduce((n, r) => n + Number(r[key]), 0);
+const sum = (rows: UsageRow[], key: keyof UsageRow) => rows.reduce((n, r) => n + Number(r[key] ?? 0), 0);
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -81,7 +82,7 @@ export function UsageSettings() {
 
       <SettingsSection>
         <div key={`${days}-${byDay ? "data" : "loading"}`} className="animate-fade-in grid grid-cols-2 divide-x sm:grid-cols-4">
-          <Stat label={t("usage.cost")} value={formatCost(sum(rows, "cost"))} />
+          <Stat label={t(sum(rows,"unknownCostRequests") ? "video.knownSubtotal" : "usage.cost")} value={formatCost(sum(rows, "cost"))} hint={sum(rows,"unknownCostRequests") ? t("video.unknownCharges",{count:formatNumber(sum(rows,"unknownCostRequests"))}) : undefined} />
           <Stat label={t("usage.requests")} value={formatNumber(sum(rows, "requests"))} />
           <Stat label={t("usage.tokensInOut")} value={t("usage.tokensInOutValue", { input: formatTokens(input), output: formatTokens(sum(rows, "output")) })} />
           <Stat label={t("usage.cacheHits")} value={formatPercent(input ? sum(rows, "cacheRead") / input : 0)} hint={t("usage.cacheHitsHint")} />
@@ -146,7 +147,7 @@ export function UsageSettings() {
                 <td className="px-2 py-2 text-right">{formatTokens(r.input)}</td>
                 <td className="px-2 py-2 text-right">{r.input ? formatPercent(r.cacheRead / r.input) : "–"}</td>
                 <td className="px-2 py-2 text-right">{formatTokens(r.output)}</td>
-                <td className="px-4 py-2 text-right">{formatCost(r.cost)}</td>
+                <td className="px-4 py-2 text-right">{formatCost(r.cost)}{(r.unknownCostRequests??0)>0&&<span className="text-muted-foreground block text-xs">{t("video.knownSubtotal")} · {t("video.unknownCharges",{count:formatNumber(r.unknownCostRequests??0)})}</span>}</td>
               </tr>
             ))}
           </tbody>
@@ -157,7 +158,7 @@ export function UsageSettings() {
         <div key={`${days}-${byKind ? "data" : "loading"}`} className="animate-fade-in grid grid-cols-2 divide-x sm:grid-cols-4">
           {(Object.keys(PURPOSE_LABELS) as Array<keyof typeof PURPOSE_LABELS>).map((k) => {
             const r = byKind?.rows.find((x) => x.key === k);
-            return <Stat key={k} label={t(PURPOSE_LABELS[k])} value={formatCost(r?.cost ?? 0)} hint={t("usage.requestCount", { count: r?.requests ?? 0 })} />;
+            return <Stat key={k} label={t(PURPOSE_LABELS[k])} value={formatCost(r?.cost ?? 0)} hint={(r?.unknownCostRequests??0)>0 ? t("video.unknownCharges",{count:formatNumber(r?.unknownCostRequests??0)}) : t("usage.requestCount", { count: r?.requests ?? 0 })} />;
           })}
         </div>
       </SettingsSection>

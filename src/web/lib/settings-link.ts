@@ -38,6 +38,7 @@ export const SETTINGS_FOCUS_PARAM = "focus";
 export const SETTINGS_ANCHOR_PREFIX = "setting-";
 
 export const SETTINGS_DESTINATIONS = {
+  videos: { section: "general", anchor: "video-generation" },
   compaction: { section: "general", anchor: "compaction" },
   notifications: { section: "general", anchor: "notifications" },
   channelActivity: { section: "general", anchor: "channel-activity" },

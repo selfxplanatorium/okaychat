@@ -15,7 +15,7 @@ export const SOURCE = en as Source;
 
 /** Namespaces every non-English shipped locale translates completely. */
 export const CORE_NAMESPACES = [
-  "common", "shell", "auth", "sidebar", "composer", "thread", "messageDetails", "generation", "annotations",
+  "video", "common", "shell", "auth", "sidebar", "composer", "thread", "messageDetails", "generation", "annotations",
   "translation", "settings", "general", "account", "usage", "format", "errors", "services", "tags", "ui", "webhooks",
 ] as const;
 
@@ -49,8 +49,8 @@ const namespaceKeys = (namespaces: readonly string[]) =>
 /** Every key a locale with this coverage must supply. */
 export function requiredKeys(coverage: UiLocaleRow["coverage"]): string[] {
   if (coverage === "source") return [];
-  if (coverage === "legacy") return [...new Set([...namespaceKeys(CORE_NAMESPACES), ...LEGACY_SUPPLEMENT])];
-  return [...new Set([...namespaceKeys(CORE_NAMESPACES), ...namespaceKeys(WAVE_NAMESPACES), ...WAVE_SUPPLEMENT])];
+  if (coverage === "legacy") return [...new Set([...namespaceKeys(CORE_NAMESPACES), "permissions.featureVideosLabel", "permissions.featureVideosHelp", "assistants.familyVideos", ...LEGACY_SUPPLEMENT])];
+  return [...new Set([...namespaceKeys(CORE_NAMESPACES), "permissions.featureVideosLabel", "permissions.featureVideosHelp", "assistants.familyVideos", ...namespaceKeys(WAVE_NAMESPACES), ...WAVE_SUPPLEMENT])];
 }
 
 export const placeholders = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!);

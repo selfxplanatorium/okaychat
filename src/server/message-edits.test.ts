@@ -349,6 +349,7 @@ test("migration adds the edit columns and leaves existing rows unedited", () => 
       db.exec("DROP TABLE IF EXISTS outgoing_webhook_deliveries; DROP TABLE IF EXISTS outgoing_webhook_test_preparations; DROP TABLE IF EXISTS outgoing_webhook_rate_windows; DROP TABLE IF EXISTS outgoing_webhook_endpoints");
       db.exec("ALTER TABLE schedules DROP COLUMN webhook_invocation_id");
       db.exec("ALTER TABLE schedules DROP COLUMN webhook_started_at");
+      db.exec("DROP TABLE IF EXISTS video_threads; DROP TABLE IF EXISTS videos; DROP TABLE IF EXISTS video_jobs; DROP INDEX IF EXISTS usage_video_job; ALTER TABLE usage DROP COLUMN video_job_id; ALTER TABLE usage DROP COLUMN cost_state");
       db.exec("PRAGMA user_version = 32");
       db.close();`);
     const result = JSON.parse(run(`const { db } = await import(${JSON.stringify(dbUrl)});

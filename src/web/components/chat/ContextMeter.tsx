@@ -1,3 +1,4 @@
+import { VideoMessageDetails } from "./VideoMessageDetails";
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { BotIcon, ChevronDownIcon, Loader2Icon, RotateCcwIcon, ScissorsIcon, ShrinkIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
@@ -169,8 +170,8 @@ export function ContextMeter() {
           {autoCompactAt > 0 && <div className="bg-foreground/40 absolute top-0 h-full w-px" style={{ left: `${autoCompactAt * 100}%` }} title={t("composer.autoCompactThreshold")} />}
         </div>
         <dl className="text-muted-foreground grid grid-cols-2 gap-y-1 text-xs">
-          <dt>{t("composer.threadCost")}</dt>
-          <dd className="text-foreground text-right tabular-nums">{formatCost(meta?.usage?.cost ?? 0)}</dd>
+          <dt>{t(meta?.usage?.unknownCostRequests ? "video.knownSubtotal" : "composer.threadCost")}</dt>
+          <dd className="text-foreground text-right tabular-nums">{formatCost(meta?.usage?.cost ?? 0)}{meta?.usage?.unknownCostRequests ? <span className="text-muted-foreground block">{t("video.unknownCharges",{count:formatNumber(meta.usage.unknownCostRequests)})}</span>:null}</dd>
           <dt>{t("composer.tokensInOut")}</dt>
           <dd className="text-foreground text-right tabular-nums">
             {formatTokens(meta?.usage?.input ?? 0)} / {formatTokens(meta?.usage?.output ?? 0)}
@@ -305,6 +306,7 @@ export function MessageMeta() {
   const models = useData((s) => s.models);
   const threadId = useCurrentThreadId();
   const messageId = useAuiState((s) => s.message.id);
+  const hasVideo = useAuiState((s) => s.message.parts.some(part => part.type === "tool-call" && part.toolName === "generate_video"));
   const edited = useMessageEdits((s) => (threadId ? s.editedAt[editKey(threadId, messageId)] !== undefined : false));
   const meta = metadataOf(raw);
   const name = meta.agent?.name ?? meta.provenance?.name ?? models.find((m) => m.ref === meta.modelRef)?.name ?? meta.modelRef?.split("/").pop();
@@ -387,6 +389,7 @@ export function MessageMeta() {
           <p className="text-muted-foreground mt-2 text-xs">{t("messageDetails.totalsHelp")}</p>
           <p className="text-muted-foreground mt-1 text-xs">{t("messageDetails.cacheHelp")}</p>
           {edited && <p className="text-muted-foreground mt-2 text-xs">{t("messageDetails.originalGeneration")}</p>}
+          {hasVideo && <VideoMessageDetails threadId={threadId ?? null} messageId={messageId} open={open} onNavigate={()=>setOpen(false)} />}
         </PopoverContent>
       </Popover>
     </div>
