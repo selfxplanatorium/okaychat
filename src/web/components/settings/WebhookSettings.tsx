@@ -32,6 +32,7 @@ export function WebhookSettings() {
   const initialEndpoint = query.get("endpoint");
   const [, navigate] = useLocation();
   const generation = useRef(0);
+  const detailToken = useRef(0);
 
   useEffect(() => {
     if (!state.endpoints.length) {
@@ -79,12 +80,16 @@ export function WebhookSettings() {
   }, [userId]);
 
   const loadDetail = useCallback(async (id: string): Promise<EndpointDetail | null> => {
+    // A slower answer for an endpoint the user already left must not replace the current one.
+    const token = ++detailToken.current;
     try {
       const result = await api<{ endpoint: EndpointDetail }>(`/webhooks/${encodeURIComponent(id)}`);
+      if (detailToken.current !== token) return null;
       setDetail(result.endpoint);
       setDetailError(false);
       return result.endpoint;
     } catch {
+      if (detailToken.current !== token) return null;
       setDetailError(true);
       return null;
     }
@@ -94,6 +99,9 @@ export function WebhookSettings() {
     if (!selectedId || creating) return;
     setDetail(null);
     void loadDetail(selectedId);
+    return () => {
+      detailToken.current++;
+    };
   }, [selectedId, creating, loadDetail]);
 
   const onCreate = async (input: Parameters<typeof state.create>[0]) => {

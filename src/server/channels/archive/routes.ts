@@ -332,6 +332,7 @@ export const roomArchiveRoutes = new Hono<AppEnv>()
     // Authority is checked before state so a revoked owner sees the same 404 as an unknown id.
     row = recheckExport(row);
     if (row.state !== "ready") return archiveError(c, 409, "not_ready", "This archive is not ready to download.");
+    if (row.expires_at <= Date.now()) return archiveError(c, 410, "expired", "This archive has expired.");
     const file = stagePath(userId, row.id, "export.zip");
     let size: number;
     try {

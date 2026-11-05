@@ -70,7 +70,7 @@ The ChatGPT plan uses the official **Sign in with ChatGPT** flow for chat. Set `
 - Shared team channels with rooms, attachments, thread replies, direct messages, mentions, reactions, realtime updates, and explicit AI replies
 - Private notes with tags and search, and a calendar with reminders
 - German and Spanish UI, plus per-message translation into any language
-- Read-only shared knowledge collections for teams, and live presence/typing in rooms
+- Read-only shared knowledge collections for teams, live presence/typing, and room export/import
 - Tags, saved filters, notifications, and portable chat archives
 - Attachments: images, PDFs, DOCX, and text/code files
 - Prompt-injection envelopes, approval gates, and honest errors
@@ -81,6 +81,7 @@ The ChatGPT plan uses the official **Sign in with ChatGPT** flow for chat. Set `
 - Custom OpenAI-compatible endpoints and side-by-side model comparison
 - Assistant presets with sampling, tool, and knowledge policies
 - An OpenAI-compatible `/v1` API with account-owned, scoped keys and usage
+- Signed outgoing webhooks for chat, schedule, channel, and archive events
 - Private evaluation datasets, repeatable runs, manual or model-graded scoring, and CSV/JSON export
 - Per-model reasoning effort and context/cost metering
 - Shared keys with per-audience model policies and granular feature limits
