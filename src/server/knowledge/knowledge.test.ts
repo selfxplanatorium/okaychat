@@ -40,6 +40,11 @@ beforeEach(() => {
   db.exec(`DELETE FROM knowledge_chunks; DELETE FROM knowledge_sources; DELETE FROM knowledge_collections;
     DELETE FROM turn_context; DELETE FROM messages; DELETE FROM threads; DELETE FROM uploads; DELETE FROM projects;`);
   db.prepare("INSERT INTO projects (id, user_id, name, created_at) VALUES ('p1', 'alice', 'Atlas', 1), ('p2', 'alice', 'Other', 1), ('pb', 'bob', 'Bob', 1)").run();
+  // A non-lexical collection pins the connection that will produce its vectors; these tests use an
+  // injected provider, so the row only needs to exist with a stable identity for the pin.
+  for (const user of ["alice", "bob"]) {
+    db.prepare("INSERT OR REPLACE INTO provider_connections (user_id, provider_id, api_key_enc, base_url, config_json, enabled, created_at) VALUES (?, 'openai', NULL, NULL, '{}', 1, 1)").run(user);
+  }
   ensureThread("alice", "thread-1", null);
   ensureThread("alice", "thread-p1", "p1");
   ensureThread("bob", "bob-thread", null);
@@ -54,7 +59,7 @@ const request = (method: string, route = "", body?: unknown, user = "alice") =>
 
 async function create(embedding = { provider: "none" }, user = "alice", extra: Record<string, unknown> = {}): Promise<string> {
   const res = await request("POST", "/collections", { name: `Collection ${Math.random().toString(36).slice(2, 8)}`, embedding, ...extra }, user);
-  assert.equal(res.status, 200);
+  assert.equal(res.status, 201);
   return ((await res.json()) as { id: string }).id;
 }
 
@@ -218,7 +223,7 @@ test("hybrid retrieval uses normalized embeddings and reindexes when the model c
   assert.equal(search.mode, "hybrid");
   assert.ok(search.hits.length > 0);
 
-  const patched = await request("PATCH", `/collections/${id}`, { embedding: { provider: "none" } });
+  const patched = await request("POST", `/collections/${id}/reindex`, { embedding: { provider: "none" } });
   assert.equal(patched.status, 200);
   await waitFor();
   const after = db.prepare("SELECT id, embedding FROM knowledge_chunks WHERE collection_id = ?").all(id) as Array<{ id: string; embedding: Uint8Array | null }>;
@@ -229,8 +234,8 @@ test("hybrid retrieval uses normalized embeddings and reindexes when the model c
 });
 
 test("vector candidates merge globally before RRF and are independent of attachment order", async () => {
-  const a = await create({ provider: "none" }, "alice", { name: "Vector A" });
-  const b = await create({ provider: "none" }, "alice", { name: "Vector B" });
+  const a = await create({ provider: "openai", model: "query" }, "alice", { name: "Vector A" });
+  const b = await create({ provider: "openai", model: "query" }, "alice", { name: "Vector B" });
   const aSource = seedVectors(a, "A", [{ text: "alpha passage", vector: [0.5, Math.sqrt(3) / 2] }]);
   const bSource = seedVectors(b, "B", [{ text: "beta passage", vector: [1, 0] }]);
   const aChunk = (db.prepare("SELECT id FROM knowledge_chunks WHERE source_id = ?").get(aSource) as { id: string }).id;
@@ -245,7 +250,7 @@ test("vector candidates merge globally before RRF and are independent of attachm
 });
 
 test("a source filter applies before vector ranking", async () => {
-  const id = await create({ provider: "none" }, "alice", { name: "Filtered" });
+  const id = await create({ provider: "openai", model: "query" }, "alice", { name: "Filtered" });
   const high = seedVectors(id, "High", Array.from({ length: 61 }, (_, i) => ({ text: `alpha passage ${i}`, vector: [1, 0] })));
   const target = seedVectors(id, "Target", [{ text: "beta passage", vector: [0.5, Math.sqrt(3) / 2] }]);
   const targetChunk = (db.prepare("SELECT id FROM knowledge_chunks WHERE source_id = ?").get(target) as { id: string }).id;
@@ -360,7 +365,7 @@ test("a forged cancel from another account cannot abort a running ingest", async
   await waitUntil(() => sourceRow("alice", sourceId)?.status === "embedding", "Alice's job to reach embedding");
   try {
     const forged = await request("POST", `/sources/${sourceId}/cancel`, undefined, "bob");
-    assert.equal(forged.status, 409, "Bob's forged id is not found in his account");
+    assert.equal(forged.status, 403, "Bob cannot change another account's source");
     assert.equal(sourceRow("alice", sourceId)!.status, "embedding", "the running controller was not aborted");
   } finally {
     release();
@@ -416,7 +421,7 @@ test("changing a collection's embeddings during an active job queues the replace
   const sourceId = await paste(id, "Quasar content whose embedding model changes mid-ingest.");
   await waitUntil(() => calls === 1, "the first embed call");
   try {
-    const patched = await request("PATCH", `/collections/${id}`, { embedding: { provider: "none" } });
+    const patched = await request("POST", `/collections/${id}/reindex`, { embedding: { provider: "none" } });
     assert.equal(patched.status, 200);
   } finally {
     release();

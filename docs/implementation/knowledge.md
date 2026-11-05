@@ -261,3 +261,73 @@ and touch/focus-visible sizing.
 - Knowledge text is stored unencrypted in SQLite (the original files are in `uploads` too). A copied
   database exposes it just like chat history; `OKAYCHAT_SECRET` covers provider keys and memory, not
   knowledge.
+
+## Shared team knowledge (read-only collections)
+
+Owners publish a global collection to everyone or to selected users/groups through the existing
+`share_audiences`/`share_users`/`share_groups` system with kind `knowledge`. This is not a team-room
+feature: channels remain a separate aggregate, and no collection, source, chunk, audience, or dependency
+row references a channel, room message, or room attachment.
+
+- **Authority.** Every read resolves live rows: the viewer exists, the owner exists, both accounts may use
+  knowledge, and the collection is either the viewer's own or `visibility='shared'` with
+  `audienceIncludes("knowledge", id)` for that viewer. No audience row means everyone only while the
+  collection is shared; a private collection is never published by an absent row. Selected-empty means no
+  readers. Group membership is live. Admin status is not a passage-reading grant.
+- **No shared project.** A shared collection must have `project_id IS NULL`; publishing a project-bound
+  collection returns 409 and setting a project on a shared one does too. A reader may attach a shared
+  global collection to any of their own chats, including one in their own project.
+- **Reader projections.** `GET /knowledge/collections?scope=owned|shared|attachable` pages by
+  `(updated_at,id)`. Shared rows omit bytes, project, embedding settings/providers/models, audience,
+  owner email/photo, and access revision. Reader source lists use `KnowledgeSourceSummary` only: no URL,
+  bytes, mime, progress, error, or upload id. Detailed failures stay owner-only.
+- **Readers retrieve lexically.** A reader query never constructs an embedder, reserves an owner
+  operation, or calls the owner's endpoint, even when the reader has the same provider/model or a shared
+  provider grant. Results carry per-collection `{collectionId,mode,degraded,reason}`; shared rows report
+  `shared_lexical` (or `not_configured`) and intentional shared lexical is not "degraded". Cross-account
+  vector queries are deferred.
+- **Embedding pin.** New non-lexical collections pin `(scope, createdAt, endpointHash)` for the exact
+  connection. The resolver never falls back between an own and a shared row. Every ingest batch and every
+  retrieval re-resolves and requires the same pin, a live owner, the owner's knowledge feature, and a
+  currently allowed endpoint/model. Legacy non-lexical rows keep their vectors (keyword retrieval still
+  works) but have no pin: ingestion refuses until the owner runs an explicit `POST /collections/:id/reindex`
+  (optionally with a new embedding setting). `PATCH` cannot change the embedding while sources exist.
+  A vector dimension mismatch fails that source instead of mixing spaces.
+- **Storage payer.** The owner pays originals, extracted text, chunks, vectors, ingestion operations, and
+  provider billing. A reader pays only their own chat context (bounded retrieved blocks/tool results),
+  messages, and generation. Retrieval itself writes nothing for a non-owner. Audience/dependency/audit
+  rows are operational metadata and are not charged.
+- **Durable restricted chats.** Attaching another account's collection inserts a
+  `knowledge_thread_dependencies` row (no FK, so deleting the collection leaves a deny-all tombstone), caps
+  a chat at 20 lifetime dependencies, disables automatic memory learning, and requires
+  `acceptSharedRestrictions: true` on the first transition. Detaching, archiving, or changing the model
+  never removes a dependency. While every dependency resolves, the chat may use only
+  `search_knowledge`/`read_knowledge_chunk`: no MCP, web, delegation/research, code, images, artifacts,
+  email, drafts, skills, custom tools, widgets, memory writes, agent targets, schedules, comparisons,
+  branching, shares, exports, archives, or copies into notes/drafts. If any dependency becomes unreadable,
+  the whole chat is locked: list rows keep only id/status/pinned/timestamps with a generic translated
+  title, detail returns metadata without title/tags/attachments/compaction, and history, edit, undo,
+  translation, bookmark, feedback, search, memory-recall, share, export, archive, and scheduled runs
+  refuse. Deletion and archiving remain allowed. A regrant restores it; a deleted collection never does.
+- **Revocation.** `knowledge/revocation.ts` keeps live registrations for retrievals, restricted turns, and
+  owner ingests. Permission revisions, group edits/deletes, collection publication/private/delete,
+  source deletion/reindex, provider connection changes, and account/demotion paths abort affected work.
+  Retrieval rechecks before FTS/vector access, after each await, and before returning; chat holds a lease
+  that aborts the provider stream and rechecks before every step; ingestion rechecks its exact pin and
+  source generation before each batch. Aborting a reader's work never cancels legitimate owner indexing.
+- **Citations.** `GET /knowledge/chunks/:id` resolves chunk → source → collection with matching owner
+  columns and then the live predicate. Unknown, deleted, revoked, and forged ids all answer the same
+  `Passage not found`. The UI revalidates while open and every 2 s, clears the passage first, and shows a
+  generic unavailable notice; this is a UI courtesy, not a recall of already delivered bytes.
+- **Admin cleanup.** `GET /admin/knowledge` lists shared metadata only (id, owner id, visibility, status,
+  counts, bytes, revision) and `DELETE /admin/knowledge/:id` requires a 1–500 character reason, rejects
+  private/unknown rows, and writes the audit row before deleting. There is no passage inspector and no
+  private collection inventory. Owner deletion removes index/originals/audience and leaves dependent
+  tombstones.
+- **Upgrade behavior.** The migration defaults every existing collection to private and leaves all pin
+  columns NULL. No historical turn context, tool result, or chat is republished. Existing non-lexical
+  collections show the reindex-required notice; their vectors/text are preserved.
+- **Shared content is untrusted.** Collection names, descriptions, source titles/URLs, and passages keep
+  the deterministic `wrapUntrusted` envelope, `scanForInjection`, and taint gate. A shared attachment
+  taints the turn up front; scanner results never substitute for an ACL check. Knowledge text is still
+  plaintext in SQLite; this increment does not add encryption at rest.

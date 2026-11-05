@@ -1,5 +1,6 @@
 // Knowledge collections, sources, chunks, retrieval, and citations. Shared by the server and the web
 // app; keep this module free of runtime imports (it is erased at build time).
+import type { ShareAudience } from "./types.js";
 
 /** A retrieval embedding backend. `none` means lexical (BM25) retrieval only. */
 export type KnowledgeEmbeddingProvider = "none" | "openai" | "google" | "ollama" | "compatible";
@@ -23,6 +24,25 @@ export interface KnowledgeEmbeddingOption {
 
 export type KnowledgeCollectionStatus = "empty" | "processing" | "ready" | "failed";
 
+export type KnowledgeVisibility = "private" | "shared";
+
+/**
+ * Why retrieval is what it is. `null` means the owner's configured embedding connection is working.
+ * `shared_lexical` is intentional for another account's collection: reader queries never spend the
+ * owner's credentials or embedding budget in this cycle.
+ */
+export type KnowledgeRetrievalReason =
+  | "not_configured"
+  | "shared_lexical"
+  | "embedding_unavailable"
+  | "reindex_required"
+  | null;
+
+export interface KnowledgeCollectionCapability {
+  mode: "hybrid" | "lexical";
+  reason: KnowledgeRetrievalReason;
+}
+
 export interface KnowledgeCollection {
   id: string;
   name: string;
@@ -37,6 +57,36 @@ export interface KnowledgeCollection {
   createdAt: number;
   updatedAt: number;
 }
+
+/** A collection the viewer owns. Embedding configuration, audience, and payer details are owner-only. */
+export interface KnowledgeOwnedCollection extends KnowledgeCollection {
+  access: "owner";
+  visibility: KnowledgeVisibility;
+  accessRevision: number;
+  /** `null` while private. */
+  audience: ShareAudience | null;
+  retrieval: KnowledgeCollectionCapability;
+  /** A non-lexical collection whose stored connection pin no longer matches; an explicit reindex binds it. */
+  embeddingNeedsReindex: boolean;
+}
+
+/** Another account's shared collection, reduced to what a reader needs. Never carries owner secrets. */
+export interface KnowledgeSharedCollection {
+  id: string;
+  name: string;
+  description: string;
+  status: KnowledgeCollectionStatus;
+  sourceCount: number;
+  chunkCount: number;
+  createdAt: number;
+  updatedAt: number;
+  access: "reader";
+  visibility: "shared";
+  owner: { id: string; displayName: string | null };
+  retrieval: KnowledgeCollectionCapability;
+}
+
+export type KnowledgeCollectionView = KnowledgeOwnedCollection | KnowledgeSharedCollection;
 
 export type KnowledgeSourceKind = "file" | "paste" | "url";
 
@@ -62,6 +112,12 @@ export interface KnowledgeSource {
   createdAt: number;
   updatedAt: number;
 }
+
+/** What a reader may see about a source: no progress, error, mime, bytes, URL, upload id, or text. */
+export type KnowledgeSourceSummary = Pick<
+  KnowledgeSource,
+  "id" | "collectionId" | "name" | "kind" | "status" | "chunkCount" | "createdAt" | "updatedAt"
+>;
 
 export interface KnowledgeChunk {
   id: string;
@@ -97,6 +153,14 @@ export interface KnowledgeSearchHit extends KnowledgeCitation {
 
 export type KnowledgeRetrievalMode = "hybrid" | "lexical";
 
+/** One collection's actual outcome for this query, so a hybrid label cannot imply vectors for shared rows. */
+export interface KnowledgeSearchCollectionOutcome {
+  collectionId: string;
+  mode: KnowledgeRetrievalMode;
+  degraded: boolean;
+  reason: KnowledgeRetrievalReason;
+}
+
 export interface KnowledgeSearchResult {
   mode: KnowledgeRetrievalMode;
   hits: KnowledgeSearchHit[];
@@ -106,6 +170,8 @@ export interface KnowledgeSearchResult {
    * connection, provider error, or timeout). The label stays `lexical` when no vectors were available.
    */
   degraded?: boolean;
+  /** Per-collection outcome; recomputed after access filtering. */
+  collections: KnowledgeSearchCollectionOutcome[];
 }
 
 /** One source passage shown in the citation panel. */
@@ -119,14 +185,22 @@ export interface KnowledgePassage {
 export interface KnowledgeAttachment {
   id: string;
   name: string;
+  access: "owner" | "reader";
+  visibility: KnowledgeVisibility;
 }
 
 export interface KnowledgeCollectionsResponse {
-  collections: KnowledgeCollection[];
+  collections: KnowledgeCollectionView[];
   embedding: KnowledgeEmbeddingOption[];
+  nextCursor: string | null;
 }
 
-export interface KnowledgeCollectionDetail {
-  collection: KnowledgeCollection;
-  sources: KnowledgeSource[];
+export type KnowledgeCollectionDetail =
+  | { collection: KnowledgeOwnedCollection; sources: KnowledgeSource[] }
+  | { collection: KnowledgeSharedCollection; sources: KnowledgeSourceSummary[] };
+
+/** Minimal directory entry for the sharing dialog. Never carries an email, member list, or count. */
+export interface KnowledgeAudienceTarget {
+  id: string;
+  label: string;
 }

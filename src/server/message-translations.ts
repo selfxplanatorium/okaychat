@@ -27,6 +27,7 @@ import { assertStorage } from "./quota.js";
 import { getSettings } from "./settings.js";
 import { threadBusy } from "./thread-runs.js";
 import { attachmentName, getThread, isTemporaryThread } from "./threads.js";
+import { assertThreadContentReadable, restrictedThreadSignal } from "./knowledge/thread-policy.js";
 import { costOf, normalizeUsage, recordUsage } from "./usage.js";
 
 // Per-message translations are derived text: a standalone model call whose answer is stored beside the
@@ -114,6 +115,7 @@ function cutBytes(text: string, max: number): { text: string; truncated: boolean
 
 /** Ownership → message → role → busy, then the text parts. Every lookup failure reads the same. */
 function inspect(userId: string, threadId: string, messageId: string) {
+  assertThreadContentReadable(userId, threadId);
   if (isTemporaryThread(threadId)) throw notFound(MESSAGE_NOT_FOUND);
   const thread = getThread(userId, threadId);
   if (!thread) throw notFound(MESSAGE_NOT_FOUND);
@@ -221,15 +223,24 @@ export async function translateMessage(
   const handle = createModel(model, conn, { userId });
   const system = resolvePrompt("translation", { userId, modelRef: model.ref }, { language: englishLanguageName(canonical) });
   const { source, truncated: sourceTruncated } = cutSource(message.source);
-  const result = await generateText({
-    model: handle.model,
-    providerOptions: handle.providerOptions,
-    maxRetries: 0,
-    maxOutputTokens: 6000,
-    abortSignal: signal,
-    system,
-    messages: [{ role: "user", content: wrapUntrusted(source, { kind: "message_translation", name: "chat message" }).text }],
-  });
+  // Restricted chats hold a live dependency lease for the provider call; a revoke aborts it before any
+  // translated text can be stored.
+  const lease = restrictedThreadSignal(userId, threadId, signal);
+  let result: Awaited<ReturnType<typeof generateText>>;
+  try {
+    result = await generateText({
+      model: handle.model,
+      providerOptions: handle.providerOptions,
+      maxRetries: 0,
+      maxOutputTokens: 6000,
+      abortSignal: lease.signal,
+      system,
+      messages: [{ role: "user", content: wrapUntrusted(source, { kind: "message_translation", name: "chat message" }).text }],
+    });
+  } finally {
+    lease.release();
+  }
+  assertThreadContentReadable(userId, threadId);
 
   // Recorded before storage: a quota refusal must not hide a request the provider was already paid for.
   const usage = normalizeUsage(result.totalUsage);

@@ -20,6 +20,7 @@ import { assertFeature } from "../permissions/guard.js";
 import { getProject } from "../projects.js";
 import { assertStorage } from "../quota.js";
 import { threadBusy } from "../thread-runs.js";
+import { isRestrictedKnowledgeThread } from "../knowledge/thread-policy.js";
 import { ftsMatchQuery, ftsTokens } from "../text-search.js";
 
 /**
@@ -343,6 +344,8 @@ interface SourceProjection {
 
 function sourceProjection(userId: string, input: NoteFromSource): SourceProjection {
   const { source } = input;
+  // A chat using shared knowledge cannot be copied into another workspace.
+  if (isRestrictedKnowledgeThread(source.threadId)) throw conflict("This action is unavailable for a chat that uses shared knowledge.", { reason: "shared_knowledge_restricted" });
   if (source.kind === "message") {
     const row = db
       .prepare(

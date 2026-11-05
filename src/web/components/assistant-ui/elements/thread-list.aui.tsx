@@ -29,6 +29,8 @@ import {
   PlusIcon,
   SearchIcon,
   ShareIcon,
+  ShieldCheckIcon,
+  ShieldOffIcon,
   SparklesIcon,
   TagIcon,
   TextCursorIcon,
@@ -630,6 +632,22 @@ const ThreadListItemTags: FC = () => {
   );
 };
 
+/** Restricted chats carry a shared-knowledge dependency; a revoked one is locked (readable by its owner only). */
+const ThreadKnowledgeFlag: FC = () => {
+  const custom = useAuiState((s) => s.threadListItem.custom) as { sharedKnowledgeRestricted?: boolean; knowledgeAccess?: string } | undefined;
+  if (!custom?.sharedKnowledgeRestricted) return null;
+  const locked = custom.knowledgeAccess === "revoked";
+  return (
+    <span
+      className={cn("shrink-0", locked ? "text-destructive" : "text-muted-foreground")}
+      title={locked ? t("knowledge.revokedTitle") : t("knowledge.restrictedHelp")}
+    >
+      {locked ? <ShieldOffIcon aria-hidden className="size-3.5" /> : <ShieldCheckIcon aria-hidden className="size-3.5" />}
+      <span className="sr-only">{t("knowledge.restrictedBadge")}</span>
+    </span>
+  );
+};
+
 export const ThreadListItem: FC = () => {
   const aui = useAui();
   const id = useAuiState((s) => s.threadListItem.id);
@@ -679,6 +697,7 @@ export const ThreadListItem: FC = () => {
           )}
           <ThreadListItemBranchIcon />
           <ThreadListItemTitle fallback={t("common.newChat")} />
+          <ThreadKnowledgeFlag />
           <ThreadListItemTags />
         </button>
       ) : isRenaming ? (

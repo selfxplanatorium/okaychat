@@ -1,13 +1,15 @@
-import { ArrowLeftIcon, BookOpenIcon, FileUpIcon, LinkIcon, Loader2Icon, PencilIcon, PlusIcon, RefreshCwIcon, SearchIcon, TrashIcon, XIcon } from "lucide-react";
+import { ArrowLeftIcon, BookOpenIcon, FileUpIcon, LinkIcon, Loader2Icon, PencilIcon, PlusIcon, RefreshCwIcon, SearchIcon, Share2Icon, TrashIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
-  KnowledgeCollection,
-  KnowledgeCollectionDetail,
+  KnowledgeCollectionView,
   KnowledgeEmbeddingOption,
   KnowledgeEmbeddingSetting,
+  KnowledgeOwnedCollection,
   KnowledgeSearchResult,
+  KnowledgeSharedCollection,
   KnowledgeSource,
   KnowledgeSourceStatus,
+  KnowledgeSourceSummary,
 } from "@shared/knowledge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -20,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 import { useKnowledgeCitationStore } from "@/state/chat-knowledge";
 import { KnowledgeCitationHost } from "./KnowledgeCitation";
+import { KnowledgeSharingDialog } from "./KnowledgeSharingDialog";
 import { useCommand } from "@/keyboard/registry";
 
 const SOURCE_STATUS: Record<KnowledgeSourceStatus, PlainMessageKey> = {
@@ -31,22 +34,23 @@ const SOURCE_STATUS: Record<KnowledgeSourceStatus, PlainMessageKey> = {
   cancelled: "knowledge.sourceStatusCancelled",
 };
 
-const COLLECTION_STATUS: Record<KnowledgeCollection["status"], PlainMessageKey> = {
+const COLLECTION_STATUS: Record<KnowledgeCollectionView["status"], PlainMessageKey> = {
   empty: "knowledge.statusEmpty",
   processing: "knowledge.statusProcessing",
   ready: "knowledge.statusReady",
   failed: "knowledge.statusFailed",
 };
 
-const processing = (source: KnowledgeSource) => source.status === "queued" || source.status === "extracting" || source.status === "embedding";
-const embeddingLabel = (collection: KnowledgeCollection) =>
+const processing = (source: { status: KnowledgeSourceStatus }) => source.status === "queued" || source.status === "extracting" || source.status === "embedding";
+const isOwned = (collection: KnowledgeCollectionView): collection is KnowledgeOwnedCollection => collection.access === "owner";
+const embeddingLabel = (collection: KnowledgeOwnedCollection) =>
   collection.embedding.provider === "none" ? t("knowledge.embeddingNone") : `${collection.embedding.provider}${collection.embedding.model ? ` · ${collection.embedding.model}` : ""}`;
 const embeddingKeyOf = (embedding: KnowledgeEmbeddingSetting) =>
   embedding.provider === "none" ? "none" : embedding.provider === "compatible" ? `compatible:${embedding.providerId ?? ""}` : embedding.provider;
 
 const projectName = (id: string | null) => (id ? useData.getState().projects.find((project) => project.id === id)?.name ?? "" : t("knowledge.noProject"));
 
-function StatusDot({ status }: { status: KnowledgeCollection["status"] }) {
+function StatusDot({ status }: { status: KnowledgeCollectionView["status"] }) {
   const tone =
     status === "ready" ? "bg-success" : status === "processing" ? "bg-warning" : status === "failed" ? "bg-destructive" : "bg-muted-foreground";
   return (
@@ -55,6 +59,10 @@ function StatusDot({ status }: { status: KnowledgeCollection["status"] }) {
       {t(COLLECTION_STATUS[status])}
     </span>
   );
+}
+
+function Badge({ children }: { children: string }) {
+  return <span className="border-border text-muted-foreground rounded border px-1 text-[10px] uppercase tracking-wide">{children}</span>;
 }
 
 function ConfirmButton({ label, confirmLabel, onConfirm, disabled, command }: { label: string; confirmLabel: string; onConfirm: () => void; disabled?: boolean; command?: string }) {
@@ -76,28 +84,38 @@ function ConfirmButton({ label, confirmLabel, onConfirm, disabled, command }: { 
   );
 }
 
+type Tab = "mine" | "shared";
+
 export function KnowledgePage() {
-  const [collections, setCollections] = useState<KnowledgeCollection[] | null>(null);
+  const [collections, setCollections] = useState<KnowledgeCollectionView[] | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("mine");
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const projects = useData((s) => s.projects);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (scope: Tab, cursor?: string) => {
     try {
-      const { collections: rows } = await api<{ collections: KnowledgeCollection[] }>("/knowledge/collections");
-      setCollections(rows);
+      const query = `scope=${scope === "mine" ? "owned" : "shared"}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+      const page = await api<{ collections: KnowledgeCollectionView[]; nextCursor: string | null }>(`/knowledge/collections?${query}`);
+      setCollections((previous) => (cursor && previous ? [...previous, ...page.collections] : page.collections));
+      setNextCursor(page.nextCursor);
       setError(null);
     } catch {
       setError(t("knowledge.loadFailed"));
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { setSelected(null); setCollections(null); void load(tab); }, [tab, load]);
   // A passage panel belongs to the page that opened it; leaving must not reopen it over a chat later.
   useEffect(() => () => useKnowledgeCitationStore.getState().close(), []);
-  useCommand("knowledge.newCollection", () => setCreating(true));
-  useCommand("knowledge.retryLoad", () => { setError(null); void load(); }, !!error);
+  useCommand("knowledge.newCollection", () => setCreating(true), tab === "mine");
+  useCommand("knowledge.retryLoad", () => { setError(null); void load(tab); }, !!error);
+  useCommand("knowledge.tabMine", () => { setSelected(null); setTab("mine"); });
+  useCommand("knowledge.tabShared", () => { setSelected(null); setTab("shared"); });
+
+  const selectedView = collections?.find((collection) => collection.id === selected) ?? null;
 
   return (
     <>
@@ -107,35 +125,80 @@ export function KnowledgePage() {
             <h1 className="text-xl font-semibold tracking-tight">{selected ? t("knowledge.title") : t("knowledge.collections")}</h1>
             <p className="text-muted-foreground mt-1 max-w-xl text-sm">{t("knowledge.intro")}</p>
           </div>
-          {!selected && (
+          {!selected && tab === "mine" && (
             <Button data-command="knowledge.newCollection" onClick={() => setCreating(true)}>
               <PlusIcon /> {t("knowledge.newCollection")}
             </Button>
           )}
         </header>
 
-        {selected ? (
-          <CollectionDetail id={selected} onBack={() => { setSelected(null); void load(); }} onChanged={() => void load()} />
+        {!selected && (
+          <div
+            role="tablist"
+            aria-label={t("knowledge.collections")}
+            className="flex gap-1 rounded-lg border p-1"
+            onKeyDown={(event) => {
+              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+              event.preventDefault();
+              const next = tab === "mine" ? "shared" : "mine";
+              setTab(next);
+              requestAnimationFrame(() => {
+                const node = (event.currentTarget as HTMLElement).querySelector<HTMLElement>(`[data-knowledge-tab="${next}"]`);
+                node?.focus();
+              });
+            }}
+          >
+            {(["mine", "shared"] as const).map((value) => (
+              <button
+                key={value}
+                role="tab"
+                data-knowledge-tab={value}
+                aria-selected={tab === value}
+                tabIndex={tab === value ? 0 : -1}
+                type="button"
+                onClick={() => setTab(value)}
+                className={cn("min-h-10 flex-1 rounded-md px-3 text-sm pointer-coarse:min-h-11", tab === value ? "bg-primary text-primary-foreground" : "hover:bg-muted")}
+              >
+                {value === "mine" ? t("knowledge.mine") : t("knowledge.sharedWithMe")}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {selected && selectedView ? (
+          isOwned(selectedView) ? (
+            <CollectionDetail
+              collection={selectedView}
+              onBack={() => { setSelected(null); void load(tab); }}
+              onChanged={() => void load(tab)}
+            />
+          ) : (
+            <SharedCollectionDetail collection={selectedView} onBack={() => setSelected(null)} />
+          )
         ) : (
           <>
             {error && (
               <div className="flex flex-wrap items-center gap-2">
                 <p role="alert" className="text-destructive text-sm">{error}</p>
-                <Button variant="outline" size="sm" data-command="knowledge.retryLoad" onClick={() => { setError(null); void load(); }}>
+                <Button variant="outline" size="sm" data-command="knowledge.retryLoad" onClick={() => { setError(null); void load(tab); }}>
                   <RefreshCwIcon /> {t("common.retry")}
                 </Button>
               </div>
             )}
             {!collections && !error && <p role="status" className="text-muted-foreground text-sm">{t("common.loading")}</p>}
             {collections && collections.length === 0 && (
-              <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-4 py-12 text-center">
-                <BookOpenIcon aria-hidden className="text-muted-foreground size-7" />
-                <h2 className="font-medium">{t("knowledge.emptyTitle")}</h2>
-                <p className="text-muted-foreground max-w-sm text-sm">{t("knowledge.emptyBody")}</p>
-                <Button onClick={() => setCreating(true)}>
-                  <PlusIcon /> {t("knowledge.createCollection")}
-                </Button>
-              </div>
+              tab === "mine" ? (
+                <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed px-4 py-12 text-center">
+                  <BookOpenIcon aria-hidden className="text-muted-foreground size-7" />
+                  <h2 className="font-medium">{t("knowledge.emptyTitle")}</h2>
+                  <p className="text-muted-foreground max-w-sm text-sm">{t("knowledge.emptyBody")}</p>
+                  <Button onClick={() => setCreating(true)}>
+                    <PlusIcon /> {t("knowledge.createCollection")}
+                  </Button>
+                </div>
+              ) : (
+                <p className="text-muted-foreground rounded-xl border border-dashed px-4 py-12 text-center text-sm">{t("knowledge.sharedEmpty")}</p>
+              )
             )}
             <ul className="grid gap-2 sm:grid-cols-2">
               {collections?.map((collection) => (
@@ -148,20 +211,36 @@ export function KnowledgePage() {
                     <span className="flex w-full items-start justify-between gap-2">
                       <span className="min-w-0">
                         <span className="block truncate font-medium">{collection.name}</span>
-                        <span className="text-muted-foreground block text-xs">{collection.projectId ? projectName(collection.projectId) : t("knowledge.noProject")}</span>
+                        <span className="text-muted-foreground block text-xs">
+                          {isOwned(collection)
+                            ? collection.projectId ? projectName(collection.projectId) : t("knowledge.noProject")
+                            : t("knowledge.ownerLabel", { name: collection.owner.displayName ?? t("knowledge.ownerUnknown") })}
+                        </span>
                       </span>
                       <StatusDot status={collection.status} />
                     </span>
-                    <span className="text-muted-foreground flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                    <span className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
                       <span>{t("knowledge.sources", { count: collection.sourceCount })}</span>
                       <span>{t("knowledge.chunks", { count: collection.chunkCount })}</span>
-                      <span>{t("knowledge.size")}: {formatBytes(collection.bytes)}</span>
+                      {isOwned(collection) ? (
+                        <>
+                          <span>{t("knowledge.size")}: {formatBytes(collection.bytes)}</span>
+                          <Badge>{collection.visibility === "shared" ? t("knowledge.sharedBadge") : t("knowledge.privateBadge")}</Badge>
+                        </>
+                      ) : <Badge>{t("knowledge.readerBadge")}</Badge>}
                     </span>
-                    <span className="text-muted-foreground line-clamp-1 text-xs">{embeddingLabel(collection)}</span>
+                    <span className="text-muted-foreground line-clamp-1 text-xs">
+                      {isOwned(collection) ? embeddingLabel(collection) : t("knowledge.sharedLexical")}
+                    </span>
                   </button>
                 </li>
               ))}
             </ul>
+            {nextCursor && (
+              <div className="flex justify-center">
+                <Button variant="outline" size="sm" onClick={() => void load(tab, nextCursor)}>{t("knowledge.loadMore")}</Button>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -169,7 +248,7 @@ export function KnowledgePage() {
         open={creating}
         onOpenChange={setCreating}
         projects={projects}
-        onSaved={(collection) => { setCreating(false); void load().then(() => setSelected(collection.id)); }}
+        onSaved={(collection) => { setCreating(false); void load(tab).then(() => setSelected(collection.id)); }}
       />
       <KnowledgeCitationHost />
     </>
@@ -186,8 +265,8 @@ function NewCollectionDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projects: Array<{ id: string; name: string }>;
-  collection?: KnowledgeCollection | null;
-  onSaved: (collection: KnowledgeCollection, reindex: boolean) => void;
+  collection?: KnowledgeOwnedCollection | null;
+  onSaved: (collection: KnowledgeOwnedCollection, reindex: boolean) => void;
 }) {
   const editing = !!collection;
   const [name, setName] = useState("");
@@ -265,9 +344,9 @@ function NewCollectionDialog({
             try {
               const body = { name, description, projectId: projectId || null, embedding: embeddingSetting() };
               const saved = editing
-                ? await api<KnowledgeCollection>(`/knowledge/collections/${encodeURIComponent(collection.id)}`, { method: "PATCH", json: body })
-                : await api<KnowledgeCollection>("/knowledge/collections", { method: "POST", json: body });
-              onSaved(saved, embeddingChanged);
+                ? await api<KnowledgeOwnedCollection>(`/knowledge/collections/${encodeURIComponent(collection.id)}`, { method: "PATCH", json: body })
+                : await api<KnowledgeOwnedCollection>("/knowledge/collections", { method: "POST", json: body });
+              onSaved(saved, embeddingChanged && !editing);
             } catch (cause) {
               setError(cause instanceof Error ? cause.message : t("knowledge.collectionSaveFailed"));
             } finally {
@@ -304,7 +383,7 @@ function NewCollectionDialog({
               }}
               options={selectOptions}
             />
-            <span className="text-muted-foreground">{t("knowledge.embeddingHelp")}</span>
+            <span className="text-muted-foreground">{editing && collection.sourceCount > 0 ? t("knowledge.embeddingLocked") : t("knowledge.embeddingHelp")}</span>
           </label>
           {provider !== "none" && (
             <label className="flex flex-col gap-1 text-xs">
@@ -312,11 +391,11 @@ function NewCollectionDialog({
               <Input required maxLength={200} value={model} onChange={(event) => setModel(event.target.value)} placeholder={t("knowledge.modelPlaceholder")} />
             </label>
           )}
-          {embeddingChanged && <p role="status" className="text-warning text-xs">{t("knowledge.embeddingChangeWarning")}</p>}
+          {embeddingChanged && editing && collection.sourceCount === 0 && <p role="status" className="text-warning text-xs">{t("knowledge.embeddingChangeWarning")}</p>}
           {error && <p role="alert" className="text-destructive text-xs">{error}</p>}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
-            <Button type="submit" disabled={busy || !name.trim()}>
+            <Button type="submit" disabled={busy || !name.trim() || (editing && embeddingChanged && collection.sourceCount > 0)}>
               {busy && <Loader2Icon className="animate-spin motion-reduce:animate-none" />} {editing ? t("common.save") : t("knowledge.createCollection")}
             </Button>
           </div>
@@ -326,8 +405,8 @@ function NewCollectionDialog({
   );
 }
 
-function CollectionDetail({ id, onBack, onChanged }: { id: string; onBack: () => void; onChanged: () => void }) {
-  const [detail, setDetail] = useState<KnowledgeCollectionDetail | null>(null);
+function CollectionDetail({ collection, onBack, onChanged }: { collection: KnowledgeOwnedCollection; onBack: () => void; onChanged: () => void }) {
+  const [detail, setDetail] = useState<{ collection: KnowledgeOwnedCollection; sources: KnowledgeSource[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -336,13 +415,15 @@ function CollectionDetail({ id, onBack, onChanged }: { id: string; onBack: () =>
   const [urlOpen, setUrlOpen] = useState(false);
   const [chunksOpen, setChunksOpen] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const projects = useData((s) => s.projects);
+  const id = collection.id;
 
   const load = useCallback(async () => {
     try {
-      setDetail(await api<KnowledgeCollectionDetail>(`/knowledge/collections/${encodeURIComponent(id)}`));
-      // Clear only a previous load failure; an upload or action error stays until the user acts again.
+      const value = await api<{ collection: KnowledgeOwnedCollection; sources: KnowledgeSource[] }>(`/knowledge/collections/${encodeURIComponent(id)}`);
+      setDetail(value);
       const loadFailed = t("knowledge.loadFailed");
       setError((previous) => (previous === loadFailed ? null : previous));
     } catch {
@@ -363,6 +444,7 @@ function CollectionDetail({ id, onBack, onChanged }: { id: string; onBack: () =>
   useCommand("knowledge.addUrl", () => setUrlOpen(true));
   useCommand("knowledge.previewChunks", () => setChunksOpen(true), !!detail?.collection.chunkCount);
   useCommand("knowledge.editCollection", () => setEditing(true), !!detail);
+  useCommand("knowledge.sharing", () => setSharing(true), !!detail);
   const runReindex = async () => {
     setBusy(true);
     try {
@@ -405,62 +487,65 @@ function CollectionDetail({ id, onBack, onChanged }: { id: string; onBack: () =>
     }
   };
 
-  const collection = detail?.collection;
+  const current = detail?.collection ?? collection;
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start gap-2">
         <Button variant="ghost" size="sm" className="shrink-0" onClick={onBack}><ArrowLeftIcon /> {t("knowledge.back")}</Button>
-        {collection && (
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h2 className="min-w-0 text-base font-semibold break-words">{collection.name}</h2>
-              <StatusDot status={collection.status} />
-            </div>
-            <p className="text-muted-foreground min-w-0 text-xs break-words">{embeddingLabel(collection)}</p>
-            <p className="text-muted-foreground flex min-w-0 flex-wrap gap-x-2 text-xs">
-              <span className="break-words">{collection.projectId ? projectName(collection.projectId) : t("knowledge.noProject")}</span>
-              <span>{formatBytes(collection.bytes)}</span>
-              <span>{t("knowledge.chunks", { count: collection.chunkCount })}</span>
-            </p>
-            {collection.description && <p className="text-muted-foreground min-w-0 text-xs break-words">{collection.description}</p>}
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h2 className="min-w-0 text-base font-semibold break-words">{current.name}</h2>
+            <StatusDot status={current.status} />
+            <Badge>{current.visibility === "shared" ? t("knowledge.sharedBadge") : t("knowledge.privateBadge")}</Badge>
           </div>
-        )}
-        {collection && (
-          <div className="flex shrink-0 flex-wrap gap-1.5">
-            <Button variant="outline" size="sm" data-command="knowledge.editCollection" disabled={busy} onClick={() => setEditing(true)}>
-              <PencilIcon /> {t("knowledge.editCollection")}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              data-command="knowledge.reindex"
-              disabled={busy || !collection.sourceCount}
-              onClick={() => void runReindex()}
-            >
-              <RefreshCwIcon /> {t("knowledge.reindex")}
-            </Button>
-            <ConfirmButton
-              label={t("knowledge.deleteCollection")}
-              confirmLabel={t("knowledge.reallyDeleteCollection")}
-              onConfirm={async () => {
-                try {
-                  await api(`/knowledge/collections/${encodeURIComponent(id)}`, { method: "DELETE" });
-                  onChanged();
-                  onBack();
-                } catch {
-                  setError(t("knowledge.deleteFailed"));
-                }
-              }}
-            />
-          </div>
-        )}
+          <p className="text-muted-foreground min-w-0 text-xs break-words">{embeddingLabel(current)}</p>
+          <p className="text-muted-foreground flex min-w-0 flex-wrap gap-x-2 text-xs">
+            <span className="break-words">{current.projectId ? projectName(current.projectId) : t("knowledge.noProject")}</span>
+            <span>{formatBytes(current.bytes)}</span>
+            <span>{t("knowledge.chunks", { count: current.chunkCount })}</span>
+            <span>{t("knowledge.ownerPays")}</span>
+          </p>
+          {current.description && <p className="text-muted-foreground min-w-0 text-xs break-words">{current.description}</p>}
+          {current.embeddingNeedsReindex && <p role="status" className="text-warning text-xs">{t("knowledge.reindexRequired")}</p>}
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-1.5">
+          <Button variant="outline" size="sm" data-command="knowledge.sharing" disabled={busy} onClick={() => setSharing(true)}>
+            <Share2Icon /> {t("knowledge.manageSharing")}
+          </Button>
+          <Button variant="outline" size="sm" data-command="knowledge.editCollection" disabled={busy} onClick={() => setEditing(true)}>
+            <PencilIcon /> {t("knowledge.editCollection")}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            data-command="knowledge.reindex"
+            disabled={busy || !current.sourceCount}
+            onClick={() => void runReindex()}
+            title={t("knowledge.reindexConfirm")}
+          >
+            <RefreshCwIcon /> {t("knowledge.reindex")}
+          </Button>
+          <ConfirmButton
+            label={t("knowledge.deleteCollection")}
+            confirmLabel={t("knowledge.reallyDeleteCollection")}
+            onConfirm={async () => {
+              try {
+                await api(`/knowledge/collections/${encodeURIComponent(id)}`, { method: "DELETE" });
+                onChanged();
+                onBack();
+              } catch {
+                setError(t("knowledge.deleteFailed"));
+              }
+            }}
+          />
+        </div>
       </div>
 
       {error && <p role="alert" className="text-destructive text-sm">{error}</p>}
       {notice && <p role="status" className="text-muted-foreground text-sm">{notice}</p>}
       {!detail && !error && <p role="status" className="text-muted-foreground text-sm">{t("common.loading")}</p>}
 
-      {collection && (
+      {detail && (
         <>
           <section aria-labelledby="knowledge-add-source" className="flex flex-col gap-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -498,7 +583,7 @@ function CollectionDetail({ id, onBack, onChanged }: { id: string; onBack: () =>
           <section aria-labelledby="knowledge-sources" className="flex flex-col gap-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 id="knowledge-sources" className="text-sm font-medium">{t("knowledge.sources", { count: detail.sources.length })}</h2>
-              <Button variant="outline" size="sm" data-command="knowledge.previewChunks" onClick={() => setChunksOpen(true)} disabled={!collection.chunkCount}>
+              <Button variant="outline" size="sm" data-command="knowledge.previewChunks" onClick={() => setChunksOpen(true)} disabled={!current.chunkCount}>
                 <BookOpenIcon /> {t("knowledge.chunkPreview")}
               </Button>
             </div>
@@ -507,38 +592,118 @@ function CollectionDetail({ id, onBack, onChanged }: { id: string; onBack: () =>
             ) : (
               <ul className="flex flex-col gap-2">
                 {detail.sources.map((source) => (
-                  <SourceRow key={source.id} source={source} onChanged={() => { onChanged(); void load(); }} onNotice={setNotice} />
+                  <OwnerSourceRow key={source.id} source={source} onChanged={() => { onChanged(); void load(); }} onNotice={setNotice} />
                 ))}
               </ul>
             )}
           </section>
 
           <SearchTest collectionId={id} />
-          <ChunkBrowser collection={collection} open={chunksOpen} onOpenChange={setChunksOpen} />
+          <ChunkBrowser collectionId={id} chunkCount={current.chunkCount} open={chunksOpen} onOpenChange={setChunksOpen} />
         </>
       )}
 
       <PasteDialog open={pasteOpen} onOpenChange={setPasteOpen} collectionId={id} onAdded={() => { setNotice(t("knowledge.sourceAdded")); onChanged(); void load(); }} />
       <UrlDialog open={urlOpen} onOpenChange={setUrlOpen} collectionId={id} onAdded={() => { setNotice(t("knowledge.sourceAdded")); onChanged(); void load(); }} />
-      {collection && (
-        <NewCollectionDialog
-          open={editing}
-          onOpenChange={setEditing}
-          projects={projects}
-          collection={collection}
-          onSaved={(_saved, reindex) => {
-            setEditing(false);
-            setNotice(reindex ? t("knowledge.collectionUpdatedReindexed") : t("knowledge.collectionUpdated"));
-            onChanged();
-            void load();
-          }}
-        />
+      <NewCollectionDialog
+        open={editing}
+        onOpenChange={setEditing}
+        projects={projects}
+        collection={current}
+        onSaved={() => {
+          setEditing(false);
+          setNotice(t("knowledge.collectionUpdated"));
+          onChanged();
+          void load();
+        }}
+      />
+      <KnowledgeSharingDialog
+        open={sharing}
+        onOpenChange={setSharing}
+        collection={current}
+        onSaved={() => { onChanged(); void load(); }}
+      />
+    </div>
+  );
+}
+
+/** Reader detail: safe source summaries, search, and passage browsing; no owner commands at all. */
+function SharedCollectionDetail({ collection, onBack }: { collection: KnowledgeSharedCollection; onBack: () => void }) {
+  const [detail, setDetail] = useState<{ collection: KnowledgeSharedCollection; sources: KnowledgeSourceSummary[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [chunksOpen, setChunksOpen] = useState(false);
+  const id = collection.id;
+
+  useEffect(() => {
+    let live = true;
+    void api<{ collection: KnowledgeSharedCollection; sources: KnowledgeSourceSummary[] }>(`/knowledge/collections/${encodeURIComponent(id)}`)
+      .then((value) => { if (live) setDetail(value); })
+      .catch(() => { if (live) setError(t("knowledge.loadFailed")); });
+    return () => { live = false; };
+  }, [id]);
+  useCommand("knowledge.previewChunks", () => setChunksOpen(true), !!detail?.collection.chunkCount);
+
+  const current = detail?.collection ?? collection;
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-start gap-2">
+        <Button variant="ghost" size="sm" className="shrink-0" onClick={onBack}><ArrowLeftIcon /> {t("knowledge.back")}</Button>
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h2 className="min-w-0 text-base font-semibold break-words">{current.name}</h2>
+            <StatusDot status={current.status} />
+            <Badge>{t("knowledge.readerBadge")}</Badge>
+          </div>
+          <p className="text-muted-foreground min-w-0 text-xs break-words">
+            {t("knowledge.ownerLabel", { name: current.owner.displayName ?? t("knowledge.ownerUnknown") })} · {t("knowledge.sharedLexical")}
+          </p>
+          <p className="text-muted-foreground flex flex-wrap gap-x-2 text-xs">
+            <span>{t("knowledge.sources", { count: current.sourceCount })}</span>
+            <span>{t("knowledge.chunks", { count: current.chunkCount })}</span>
+          </p>
+          {current.description && <p className="text-muted-foreground min-w-0 text-xs break-words">{current.description}</p>}
+          <p className="text-muted-foreground text-xs">{t("knowledge.readerPays")}</p>
+          <p className="text-muted-foreground text-xs">{t("knowledge.sharedLexicalHelp")}</p>
+        </div>
+      </div>
+      {error && <p role="alert" className="text-destructive text-sm">{error}</p>}
+      {!detail && !error && <p role="status" className="text-muted-foreground text-sm">{t("common.loading")}</p>}
+      {detail && (
+        <>
+          <section aria-labelledby="knowledge-reader-sources" className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 id="knowledge-reader-sources" className="text-sm font-medium">{t("knowledge.sources", { count: detail.sources.length })}</h2>
+              <Button variant="outline" size="sm" data-command="knowledge.previewChunks" onClick={() => setChunksOpen(true)} disabled={!current.chunkCount}>
+                <BookOpenIcon /> {t("knowledge.chunkPreview")}
+              </Button>
+            </div>
+            <p className="text-muted-foreground text-xs">{t("knowledge.readOnlyHelp")}</p>
+            {detail.sources.length === 0 ? (
+              <p className="text-muted-foreground text-sm">{t("knowledge.noSources")}</p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {detail.sources.map((source) => (
+                  <li key={source.id} className="flex flex-col gap-1 rounded-xl border px-3 py-2">
+                    <p className="truncate text-sm font-medium">{source.name}</p>
+                    <p className="text-muted-foreground flex flex-wrap gap-x-2 text-xs">
+                      <span>{t(SOURCE_STATUS[source.status])}</span>
+                      <span>{t("knowledge.chunks", { count: source.chunkCount })}</span>
+                      {source.status === "failed" && <span>{t("knowledge.sourceFailedReader")}</span>}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          <SearchTest collectionId={id} />
+          <ChunkBrowser collectionId={id} chunkCount={current.chunkCount} open={chunksOpen} onOpenChange={setChunksOpen} />
+        </>
       )}
     </div>
   );
 }
 
-function SourceRow({ source, onChanged, onNotice }: { source: KnowledgeSource; onChanged: () => void; onNotice: (message: string) => void }) {
+function OwnerSourceRow({ source, onChanged, onNotice }: { source: KnowledgeSource; onChanged: () => void; onNotice: (message: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const act = async (path: string, method = "POST") => {
@@ -550,8 +715,7 @@ function SourceRow({ source, onChanged, onNotice }: { source: KnowledgeSource; o
       if (method === "DELETE") onNotice(t("knowledge.sourceDeleted"));
       onChanged();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("knowledge.sourceAddFailed"));
-      if (path.endsWith("/cancel")) setError(t("knowledge.cancelFailed"));
+      setError(path.endsWith("/cancel") ? t("knowledge.cancelFailed") : cause instanceof Error ? cause.message : t("knowledge.sourceAddFailed"));
     } finally {
       setBusy(false);
     }
@@ -568,7 +732,7 @@ function SourceRow({ source, onChanged, onNotice }: { source: KnowledgeSource; o
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-1">
-          {(source.status === "queued" || source.status === "extracting" || source.status === "embedding") && (
+          {processing(source) && (
             <Button variant="ghost" size="sm" disabled={busy} onClick={() => act(`/knowledge/sources/${encodeURIComponent(source.id)}/cancel`)}><XIcon /> {t("knowledge.cancel")}</Button>
           )}
           {(source.status === "failed" || source.status === "cancelled") && (
@@ -634,6 +798,9 @@ function SearchTest({ collectionId }: { collectionId: string }) {
           <p className="text-muted-foreground text-xs">
             {result.degraded ? t("knowledge.searchModeDegraded") : result.mode === "hybrid" ? t("knowledge.searchModeHybrid") : t("knowledge.searchModeLexical")} · {t("knowledge.searchResults", { count: result.hits.length, tokens: formatNumber(result.tokens) })}
           </p>
+          {result.collections.some((entry) => entry.reason === "shared_lexical") && (
+            <p className="text-muted-foreground text-xs">{t("knowledge.mixedRetrieval")} · {t("knowledge.sharedLexical")}</p>
+          )}
           {result.hits.length === 0 && <p className="text-muted-foreground text-sm">{t("knowledge.searchNoHits")}</p>}
           {result.hits.map((hit) => (
             <button
@@ -652,7 +819,7 @@ function SearchTest({ collectionId }: { collectionId: string }) {
   );
 }
 
-function ChunkBrowser({ collection, open, onOpenChange }: { collection: KnowledgeCollection; open: boolean; onOpenChange: (open: boolean) => void }) {
+function ChunkBrowser({ collectionId, chunkCount, open, onOpenChange }: { collectionId: string; chunkCount: number; open: boolean; onOpenChange: (open: boolean) => void }) {
   type PreviewChunk = { id: string; title: string; sourceName: string; start: number; end: number; excerpt: string; tokens: number };
   const [chunks, setChunks] = useState<PreviewChunk[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -660,20 +827,20 @@ function ChunkBrowser({ collection, open, onOpenChange }: { collection: Knowledg
     if (!open) return;
     setChunks(null);
     setError(null);
-    void api<{ chunks: PreviewChunk[] }>(`/knowledge/collections/${encodeURIComponent(collection.id)}/chunks?limit=20`)
+    void api<{ chunks: PreviewChunk[] }>(`/knowledge/collections/${encodeURIComponent(collectionId)}/chunks?limit=20`)
       .then(({ chunks: rows }) => setChunks(rows))
       .catch(() => setError(t("knowledge.loadFailed")));
-  }, [open, collection.id]);
+  }, [open, collectionId]);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] gap-3 overflow-y-auto sm:max-w-2xl">
         <DialogTitle className="text-base">{t("knowledge.chunkPreview")}</DialogTitle>
-        <DialogDescription>{t("knowledge.chunksFor", { count: collection.chunkCount })}</DialogDescription>
+        <DialogDescription>{t("knowledge.chunksFor", { count: chunkCount })}</DialogDescription>
         {error && <p role="alert" className="text-destructive text-sm">{error}</p>}
         {!chunks && !error && <p role="status" className="text-muted-foreground text-sm">{t("common.loading")}</p>}
         {chunks?.length === 0 && <p className="text-muted-foreground text-sm">{t("knowledge.noChunks")}</p>}
-        {chunks && chunks.length > 0 && chunks.length < collection.chunkCount && (
-          <p className="text-muted-foreground text-sm">{t("knowledge.chunksShowing", { count: collection.chunkCount, shown: formatNumber(chunks.length) })}</p>
+        {chunks && chunks.length > 0 && chunks.length < chunkCount && (
+          <p className="text-muted-foreground text-sm">{t("knowledge.chunksShowing", { count: chunkCount, shown: formatNumber(chunks.length) })}</p>
         )}
         <ul className="flex flex-col gap-1.5">
           {chunks?.map((chunk) => (

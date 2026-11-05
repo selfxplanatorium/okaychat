@@ -180,6 +180,10 @@ test("the FTS addressing migration rebuilds a populated index, survives two reop
         const body = JSON.parse(row.content);
         fts.run(body.parts.filter((p) => p.type === 'text').map((p) => p.text).join(' '), row.thread_id, row.id);
       }
+      // Drop the later shared-knowledge additions so the appended migration can run again on this database.
+      db.exec("DROP TRIGGER IF EXISTS knowledge_audience_cleanup; DROP TRIGGER IF EXISTS knowledge_shared_project_insert; DROP TRIGGER IF EXISTS knowledge_shared_project_update");
+      db.exec("DROP TABLE IF EXISTS knowledge_thread_dependencies; DROP INDEX IF EXISTS knowledge_collections_visibility");
+      for (const column of ["visibility", "access_revision", "embedding_connection_scope", "embedding_connection_created_at", "embedding_endpoint_hash"]) db.exec("ALTER TABLE knowledge_collections DROP COLUMN " + column);
       db.exec("PRAGMA user_version = 35");
       console.log(JSON.stringify({ version: db.prepare("PRAGMA user_version").get().user_version, fts: db.prepare("SELECT text FROM messages_fts ORDER BY rowid").all() }));
       db.close();

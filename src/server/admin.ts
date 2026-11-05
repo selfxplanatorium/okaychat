@@ -25,6 +25,7 @@ import {
   setModelAccessPolicies,
 } from "./entitlements.js";
 import { createGroup, deleteGroup, getAudience, listGroups, setAudience, updateGroup } from "./groups.js";
+import { requestKnowledgeRevocation } from "./knowledge/revocation.js";
 import { abortChannelRunsForUser } from "./channels/worker.js";
 import { requestChannelRevocation } from "./channels/revocation.js";
 import { listPrompts, MAX_PROMPT_CHARS, setPrompt } from "./prompts.js";
@@ -108,7 +109,11 @@ export const adminRoutes = new Hono<AppEnv>()
       if (n <= 1) return c.json({ error: "Keep at least one admin." }, 400);
     }
     if (body.data.name) db.prepare("UPDATE users SET name = ? WHERE id = ?").run(body.data.name, id);
-    if (body.data.role) db.prepare("UPDATE users SET role = ? WHERE id = ?").run(body.data.role, id);
+    if (body.data.role) {
+      db.prepare("UPDATE users SET role = ? WHERE id = ?").run(body.data.role, id);
+      // A demoted owner may no longer use a private embedding host; its in-flight work must recheck.
+      requestKnowledgeRevocation();
+    }
     if (body.data.storageLimit !== undefined) db.prepare("UPDATE users SET storage_limit = ? WHERE id = ?").run(body.data.storageLimit, id);
     if (body.data.password) {
       const passwordHash = await hashPassword(body.data.password);
@@ -142,6 +147,7 @@ export const adminRoutes = new Hono<AppEnv>()
     // Media originals and their previews (the rows went with the user by cascade).
     removeUserMedia(id);
     removeArchiveStagingForUser(id);
+    requestKnowledgeRevocation();
     return c.json({ ok: true });
   })
   .get("/admin/settings", (c) => c.json({ allowSignup: signupAllowed() }))

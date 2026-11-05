@@ -25,13 +25,14 @@ after(() => { db.close(); rmSync(dataDir, { recursive: true, force: true }); });
 beforeEach(() => {
   db.exec("DELETE FROM knowledge_chunks; DELETE FROM knowledge_sources; DELETE FROM knowledge_collections; DELETE FROM turn_context; DELETE FROM messages; DELETE FROM threads; DELETE FROM uploads; DELETE FROM projects;");
   updateSettings("alice", { maxSteps: 1, maxSearches: 0, webTools: false, artifacts: false, generativeUI: false, subagents: false, autoCompactAt: 0, systemPrompt: "" });
+  db.prepare("INSERT OR REPLACE INTO provider_connections (user_id, provider_id, api_key_enc, base_url, config_json, enabled, created_at) VALUES ('alice', 'openai', NULL, NULL, '{}', 1, 1)").run();
 });
 
 const PASSAGE = "The quasar calibrates the starboard relay before every launch.";
 const COLLECTION_NAME = "Flight handbook";
 
-function seedCollection(): string {
-  const collection = createCollection("alice", { name: COLLECTION_NAME, embedding: { provider: "none" } });
+function seedCollection(embedding: { provider: "none" } | { provider: "openai"; model: string } = { provider: "none" }): string {
+  const collection = createCollection("alice", { name: COLLECTION_NAME, embedding });
   const text = `# Launch\n\n${PASSAGE}\n\n${"Routine checklist item. ".repeat(30)}`;
   const uploadId = storeUpload("alice", "handbook.md", "text/markdown", Buffer.from(text));
   const source = createSource("alice", collection.id, { name: "handbook.md", kind: "paste", mime: "text/markdown", uploadId, bytes: Buffer.byteLength(text), text });
@@ -143,14 +144,18 @@ test("a chat without attachments keeps the original tool and system blocks; temp
 
 
 test("detaching during new retrieval also revokes earlier replay blocks", async (t) => {
-  const collectionId = seedCollection();
+  const collectionId = seedCollection({ provider: "openai", model: "fake" });
   ensureThread("alice", "race-chat");
   updateThread("alice", "race-chat", { knowledgeIds: [collectionId] });
   const requests = provider(t);
+  const { setRetrievalEmbedderFactoryForTests } = await import("./knowledge/retrieval.js");
+  setRetrievalEmbedderFactoryForTests(() => ({
+    provider: "openai", providerId: "openai", model: "fake",
+    embed: async () => [new Float32Array([1, 0])],
+  }));
   const first = turn();
   await run("race-chat", [first]);
   assert.ok(userText(requests[0]!).includes(PASSAGE));
-  const { setRetrievalEmbedderFactoryForTests } = await import("./knowledge/retrieval.js");
   setRetrievalEmbedderFactoryForTests(() => ({
     provider: "openai", providerId: "openai", model: "fake",
     embed: async () => {

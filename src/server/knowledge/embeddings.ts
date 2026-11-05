@@ -287,12 +287,20 @@ function validateRow(value: unknown, provider: string): number[] {
   return value as number[];
 }
 
-/** Builds an embedder for a collection, or null for lexical-only mode. */
-export function createEmbedder(userId: string, setting: KnowledgeEmbeddingSetting, opts: Omit<RequestOptions, "signal"> = {}): Embedder | null {
+/**
+ * Builds an embedder for a collection, or null for lexical-only mode. `pinned` is the exact connection row a
+ * collection was pinned to; passing it avoids picking a different key of the same provider mid-collection.
+ */
+export function createEmbedder(
+  userId: string,
+  setting: KnowledgeEmbeddingSetting,
+  opts: Omit<RequestOptions, "signal"> = {},
+  pinned?: { connection: Connection; providerId: string },
+): Embedder | null {
   if (setting.provider === "none") return null;
   const providerId = setting.provider === "compatible" ? setting.providerId : setting.provider;
   if (!providerId) throw new EmbeddingError("Choose an embedding provider for this collection.");
-  const conn = getConnection(userId, providerId);
+  const conn = pinned?.connection ?? getConnection(userId, providerId);
   if (!conn?.enabled) throw new EmbeddingError(`The ${providerId} connection is not enabled. Reconnect it in Settings → Providers, or use keyword search only.`);
   const model = setting.model?.trim() || defaultEmbeddingModel(setting.provider);
   if (!model) throw new EmbeddingError("Enter the embedding model name for this collection.");

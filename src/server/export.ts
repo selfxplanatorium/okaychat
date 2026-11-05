@@ -11,6 +11,7 @@ import { htmlToPdf, rendererAvailable } from "./documents/render.js";
 import { AppError, errorJson, redactSecrets } from "./errors.js";
 import { serviceUnavailable } from "./services.js";
 import { attachmentName, currentBranch, getThread, isTemporaryThread } from "./threads.js";
+import { assertThreadRedistributable } from "./knowledge/thread-policy.js";
 import { db } from "./db.js";
 import { refUploadId } from "./media/refs.js";
 import { sniffRaster } from "./media/sniff.js";
@@ -176,6 +177,7 @@ export const exportRoutes = new Hono<AppEnv>().get("/threads/:id/export", async 
   if (isTemporaryThread(threadId)) return c.json({ error: "Temporary chats are not stored" }, 400);
   const thread = getThread(userId, threadId);
   if (!thread) return c.json({ error: "Thread not found" }, 404);
+  assertThreadRedistributable(threadId);
   const title = thread.title?.trim() || "Chat";
   const branch = currentBranch(userId, threadId);
   const headers = { "Cache-Control": "private, no-store" };

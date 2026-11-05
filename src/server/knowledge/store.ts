@@ -1,19 +1,26 @@
 import { HTTPException } from "hono/http-exception";
 import type {
   KnowledgeCollection,
+  KnowledgeCollectionCapability,
   KnowledgeCollectionStatus,
   KnowledgeEmbeddingSetting,
+  KnowledgeOwnedCollection,
   KnowledgeSource,
   KnowledgeSourceKind,
   KnowledgeSourceStatus,
+  KnowledgeVisibility,
 } from "../../shared/knowledge.js";
+import type { ShareAudience } from "../../shared/types.js";
 import { newId } from "../crypto.js";
 import { db, tx } from "../db.js";
 import type { RawChunk } from "./chunker.js";
-import { encodeVector } from "./embeddings.js";
+import { EmbeddingError, encodeVector } from "./embeddings.js";
 import { assertStorage } from "../quota.js";
 import { deleteUpload } from "../files.js";
 import { assertFeature } from "../permissions/guard.js";
+import { audiencesFor, clearAudience, getAudience } from "../groups.js";
+import { resolvePinnedConnection } from "../catalog/providers.js";
+import { requestKnowledgeRevocation } from "./revocation.js";
 
 // Account-owned collections, sources, and chunks. Every query carries `user_id`; a chat may only use a
 // collection that is global or bound to the chat's own project (docs/implementation/knowledge.md).
@@ -33,8 +40,21 @@ export interface CollectionRow {
   embedding_dim: number | null;
   status: KnowledgeCollectionStatus;
   vectors_revision: number;
+  visibility: KnowledgeVisibility;
+  access_revision: number;
+  embedding_connection_scope: "own" | "shared" | null;
+  embedding_connection_created_at: number | null;
+  embedding_endpoint_hash: string | null;
   created_at: number;
   updated_at: number;
+}
+
+export interface CollectionStats {
+  source_count: number;
+  chunk_count: number;
+  bytes: number;
+  processing: number;
+  failed: number;
 }
 
 export interface SourceRow {
@@ -58,13 +78,7 @@ export interface SourceRow {
   updated_at: number;
 }
 
-interface Stats {
-  source_count: number;
-  chunk_count: number;
-  bytes: number;
-  processing: number;
-  failed: number;
-}
+type Stats = CollectionStats;
 
 export const embeddingOf = (row: CollectionRow): KnowledgeEmbeddingSetting =>
   row.embedding_provider === "none"
@@ -92,7 +106,7 @@ export const sourceOf = (row: SourceRow): KnowledgeSource => ({
   updatedAt: row.updated_at,
 });
 
-function statsFor(userId: string, rows: CollectionRow[]): Map<string, Stats> {
+export function statsFor(userId: string, rows: CollectionRow[]): Map<string, Stats> {
   const ids = rows.map((row) => row.id);
   const out = new Map<string, Stats>();
   if (!ids.length) return out;
@@ -137,7 +151,32 @@ function statusOf(stats: Stats): KnowledgeCollectionStatus {
   return "empty";
 }
 
-export function toCollection(row: CollectionRow, stats?: Stats): KnowledgeCollection {
+/**
+ * A non-lexical collection needs a stored pin that still identifies the connection a query would use. Legacy
+ * rows have no pin, so they keep their vectors (lexical search still works) but cannot ingest or embed until
+ * the owner runs an explicit reindex that binds the connection.
+ */
+export const embeddingNeedsReindex = (row: CollectionRow): boolean =>
+  row.embedding_provider !== "none" && (!row.embedding_connection_scope || row.embedding_connection_created_at === null || !row.embedding_endpoint_hash);
+
+/**
+ * The stored pin still names the exact live connection. A deleted/re-added row, a changed endpoint, or a
+ * different scope means the vectors belong to another space and the owner must run a full reindex.
+ */
+export function pinMatches(row: CollectionRow): boolean {
+  if (row.embedding_provider === "none") return true;
+  const providerId = row.embedding_provider === "compatible" ? row.embedding_provider_id : row.embedding_provider;
+  if (!providerId || embeddingNeedsReindex(row)) return false;
+  const pin = resolvePinnedConnection(row.user_id, providerId);
+  return !!pin && pin.scope === row.embedding_connection_scope && pin.createdAt === row.embedding_connection_created_at && pin.endpointHash === row.embedding_endpoint_hash;
+}
+
+export function retrievalCapabilityOf(row: CollectionRow): KnowledgeCollectionCapability {
+  if (row.embedding_provider === "none") return { mode: "lexical", reason: "not_configured" };
+  return embeddingNeedsReindex(row) ? { mode: "lexical", reason: "reindex_required" } : { mode: "hybrid", reason: null };
+}
+
+export function toOwnedView(row: CollectionRow, stats: Stats | undefined, audience: ShareAudience | null): KnowledgeOwnedCollection {
   const s = stats ?? { source_count: 0, chunk_count: 0, bytes: 0, processing: 0, failed: 0 };
   return {
     id: row.id,
@@ -151,6 +190,12 @@ export function toCollection(row: CollectionRow, stats?: Stats): KnowledgeCollec
     bytes: s.bytes,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    access: "owner",
+    visibility: row.visibility,
+    accessRevision: row.access_revision,
+    audience,
+    retrieval: retrievalCapabilityOf(row),
+    embeddingNeedsReindex: embeddingNeedsReindex(row),
   };
 }
 
@@ -158,9 +203,9 @@ export function getCollectionRow(userId: string, id: string): CollectionRow | un
   return db.prepare("SELECT * FROM knowledge_collections WHERE user_id = ? AND id = ?").get(userId, id) as CollectionRow | undefined;
 }
 
-export function getCollection(userId: string, id: string): KnowledgeCollection | null {
+export function getCollection(userId: string, id: string): KnowledgeOwnedCollection | null {
   const row = getCollectionRow(userId, id);
-  return row ? toCollection(row, statsFor(userId, [row]).get(row.id)) : null;
+  return row ? toOwnedView(row, statsFor(userId, [row]).get(row.id), row.visibility === "shared" ? getAudience("knowledge", id) : null) : null;
 }
 
 /** A collection is usable from a chat when it is global or bound to that chat's project. */
@@ -177,17 +222,32 @@ export function accessibleCollections(userId: string, ids: readonly string[], pr
   });
 }
 
-export function listCollections(userId: string): KnowledgeCollection[] {
+export function listCollections(userId: string): KnowledgeOwnedCollection[] {
   const rows = db
     .prepare("SELECT * FROM knowledge_collections WHERE user_id = ? ORDER BY updated_at DESC, id")
     .all(userId) as unknown as CollectionRow[];
-  const stats = statsFor(userId, rows);
-  return rows.map((row) => toCollection(row, stats.get(row.id)));
+  return ownedViews(userId, rows);
 }
 
-/** Collections the selector may attach to a chat in this project. */
-export function attachableCollections(userId: string, projectId: string | null): KnowledgeCollection[] {
+/** Projects the owner's rows with one audience query for the whole page. */
+export function ownedViews(userId: string, rows: CollectionRow[]): KnowledgeOwnedCollection[] {
+  const stats = statsFor(userId, rows);
+  const audiences = audiencesFor("knowledge", rows.map((row) => row.id));
+  return rows.map((row) => toOwnedView(row, stats.get(row.id), row.visibility === "shared" ? audiences.get(row.id) ?? { mode: "all", userIds: [], groupIds: [] } : null));
+}
+
+/** Collections the selector may attach to a chat in this project (own rows; shared rows come from access.ts). */
+export function attachableCollections(userId: string, projectId: string | null): KnowledgeOwnedCollection[] {
   return listCollections(userId).filter((collection) => collection.projectId === null || collection.projectId === projectId);
+}
+
+/** The pin for a new or explicitly reindexed embedding choice, or null when none can be resolved yet. */
+export function embeddingPin(userId: string, embedding: KnowledgeEmbeddingSetting): { scope: "own" | "shared"; createdAt: number; endpointHash: string } | null {
+  if (embedding.provider === "none") return null;
+  const providerId = embedding.provider === "compatible" ? embedding.providerId : embedding.provider;
+  if (!providerId) return null;
+  const pin = resolvePinnedConnection(userId, providerId);
+  return pin ? { scope: pin.scope, createdAt: pin.createdAt, endpointHash: pin.endpointHash } : null;
 }
 
 function invalid(message: string, status: 400 | 404 | 409 = 400): never {
@@ -222,18 +282,23 @@ function validateEmbedding(embedding: KnowledgeEmbeddingSetting): KnowledgeEmbed
   return { provider: embedding.provider, ...(embedding.providerId ? { providerId: embedding.providerId } : {}), model };
 }
 
-export function createCollection(userId: string, input: CollectionInput): KnowledgeCollection {
+export function createCollection(userId: string, input: CollectionInput): KnowledgeOwnedCollection {
   assertFeature(userId, "knowledge");
   const now = Date.now();
   const id = newId("knc");
   const name = validateName(input.name);
   const projectId = validateProject(userId, input.projectId);
   const embedding = validateEmbedding(input.embedding);
+  const pin = embeddingPin(userId, embedding);
   if (db.prepare("SELECT 1 FROM knowledge_collections WHERE user_id = ? AND name = ?").get(userId, name)) invalid("A collection with that name exists.", 409);
   db.prepare(
-    `INSERT INTO knowledge_collections (id, user_id, name, description, project_id, embedding_provider, embedding_provider_id, embedding_model, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'empty', ?, ?)`,
-  ).run(id, userId, name, (input.description ?? "").slice(0, 500), projectId, embedding.provider, embedding.providerId ?? null, embedding.model ?? null, now, now);
+    `INSERT INTO knowledge_collections (id, user_id, name, description, project_id, embedding_provider, embedding_provider_id, embedding_model,
+       embedding_connection_scope, embedding_connection_created_at, embedding_endpoint_hash, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'empty', ?, ?)`,
+  ).run(
+    id, userId, name, (input.description ?? "").slice(0, 500), projectId, embedding.provider, embedding.providerId ?? null, embedding.model ?? null,
+    pin?.scope ?? null, pin?.createdAt ?? null, pin?.endpointHash ?? null, now, now,
+  );
   return getCollection(userId, id)!;
 }
 
@@ -244,11 +309,16 @@ export interface CollectionPatch {
   embedding?: KnowledgeEmbeddingSetting;
 }
 
-/** Returns whether the embedding choice changed, so the caller can queue a reindex. */
-export function updateCollection(userId: string, id: string, patch: CollectionPatch): { collection: KnowledgeCollection; reindex: boolean } {
+/**
+ * Metadata and (only while empty) embedding changes. Changing the embedding of a collection with sources
+ * must go through the explicit reindex command, so vectors of two spaces can never mix. Renaming a shared
+ * collection to a project-bound one is refused: a shared collection must stay global.
+ */
+export function updateCollection(userId: string, id: string, patch: CollectionPatch): { collection: KnowledgeOwnedCollection; reindex: boolean } {
   assertFeature(userId, "knowledge");
   const row = getCollectionRow(userId, id);
   if (!row) invalid("Collection not found", 404);
+  if (row.visibility === "shared" && patch.projectId !== undefined && patch.projectId !== null) invalid("Shared knowledge must stay global.", 409);
   const sets: string[] = [];
   const values: Array<string | number | null> = [];
   if (patch.name !== undefined) {
@@ -267,28 +337,45 @@ export function updateCollection(userId: string, id: string, patch: CollectionPa
       next.providerId !== current.providerId ||
       (next.model ?? "") !== (current.model ?? "");
     if (reindex) {
-      sets.push("embedding_provider = ?", "embedding_provider_id = ?", "embedding_model = ?", "embedding_dim = NULL", "vectors_revision = vectors_revision + 1");
-      values.push(next.provider, next.providerId ?? null, next.model ?? null);
+      const sourceCount = (db.prepare("SELECT COUNT(*) AS n FROM knowledge_sources WHERE user_id = ? AND collection_id = ?").get(userId, id) as { n: number }).n;
+      if (sourceCount > 0) invalid("Reindex this collection to change its embedding connection.", 409);
+      const pin = embeddingPin(userId, next);
+      sets.push(
+        "embedding_provider = ?", "embedding_provider_id = ?", "embedding_model = ?", "embedding_dim = NULL",
+        "embedding_connection_scope = ?", "embedding_connection_created_at = ?", "embedding_endpoint_hash = ?",
+        "vectors_revision = vectors_revision + 1",
+      );
+      values.push(next.provider, next.providerId ?? null, next.model ?? null, pin?.scope ?? null, pin?.createdAt ?? null, pin?.endpointHash ?? null);
     }
   }
   if (sets.length) {
     sets.push("updated_at = ?");
     values.push(Date.now());
-    db.prepare(`UPDATE knowledge_collections SET ${sets.join(", ")} WHERE user_id = ? AND id = ?`).run(...values, userId, id);
+    tx(() => {
+      db.prepare(`UPDATE knowledge_collections SET ${sets.join(", ")} WHERE user_id = ? AND id = ?`).run(...values, userId, id);
+    });
+    requestKnowledgeRevocation();
   }
   return { collection: getCollection(userId, id)!, reindex };
 }
 
-/** Deletes rows, chunks, and the original uploads; quota is released with the bytes. */
+/**
+ * Deletes rows, chunks, audience, and the original uploads; quota is released with the bytes. Dependent
+ * reader chats keep their tombstone dependency rows (no foreign key), so they stay locked rather than
+ * silently becoming ordinary chats.
+ */
 export function deleteCollection(userId: string, id: string): boolean {
-  return tx(() => {
+  const deleted = tx(() => {
     const row = getCollectionRow(userId, id);
     if (!row) return false;
     const uploads = db.prepare("SELECT upload_id FROM knowledge_sources WHERE user_id = ? AND collection_id = ? AND upload_id IS NOT NULL").all(userId, id) as Array<{ upload_id: string }>;
+    clearAudience("knowledge", id);
     db.prepare("DELETE FROM knowledge_collections WHERE user_id = ? AND id = ?").run(userId, id);
     for (const { upload_id } of uploads) deleteUpload(userId, upload_id);
     return true;
   });
+  if (deleted) requestKnowledgeRevocation();
+  return deleted;
 }
 
 export function sourceRow(userId: string, id: string): SourceRow | undefined {
@@ -317,6 +404,10 @@ export function createSource(userId: string, collectionId: string, input: Source
   assertFeature(userId, "knowledge");
   const collection = getCollectionRow(userId, collectionId);
   if (!collection) invalid("Collection not found", 404);
+  // A legacy non-lexical collection cannot ingest into an unbound space; the owner must reindex first.
+  if (collection.embedding_provider !== "none" && embeddingNeedsReindex(collection)) {
+    invalid("Reindex this collection to bind its embedding connection before adding sources.", 409);
+  }
   const sourceCount = (db.prepare("SELECT COUNT(*) AS n FROM knowledge_sources WHERE user_id = ? AND collection_id = ?").get(userId, collectionId) as { n: number }).n;
   if (sourceCount >= 2_000) invalid("This collection has the maximum of 2,000 sources.", 409);
   const now = Date.now();
@@ -373,6 +464,8 @@ export function requeueSource(userId: string, sourceId: string): boolean {
   return tx(() => {
     const row = sourceRow(userId, sourceId);
     if (!row) return false;
+    const collection = getCollectionRow(userId, row.collection_id);
+    if (collection && embeddingNeedsReindex(collection)) invalid("Reindex this collection to bind its embedding connection.", 409);
     const chunks = db.prepare("SELECT COALESCE(SUM(length(CAST(text AS BLOB)) + COALESCE(length(embedding), 0)), 0) AS bytes FROM knowledge_chunks WHERE user_id = ? AND source_id = ?").get(userId, sourceId) as { bytes: number };
     db.prepare("DELETE FROM knowledge_chunks WHERE user_id = ? AND source_id = ?").run(userId, sourceId);
     assertStorage(userId, -chunks.bytes);
@@ -383,23 +476,34 @@ export function requeueSource(userId: string, sourceId: string): boolean {
   });
 }
 
-/** Rebuilds every chunk in a collection, e.g. after the embedding model changed. */
-export function requeueCollection(userId: string, collectionId: string): number {
+/**
+ * Explicit full reindex. It is also the only way to change the embedding setting of a collection that has
+ * sources: the new choice is validated and pinned, every old chunk is cleared, and every source gets a new
+ * generation so a stale job cannot write old-space vectors afterwards.
+ */
+export function requeueCollection(userId: string, collectionId: string, embedding?: KnowledgeEmbeddingSetting): number {
   return tx(() => {
     const collection = getCollectionRow(userId, collectionId);
     if (!collection) invalid("Collection not found", 404);
+    const next = embedding ? validateEmbedding(embedding) : embeddingOf(collection);
+    const pin = embeddingPin(userId, next);
+    if (next.provider !== "none" && !pin) invalid("This embedding connection is unavailable. Repair it in Settings → Providers, then reindex.", 409);
     const bytes = db.prepare("SELECT COALESCE(SUM(length(CAST(text AS BLOB)) + COALESCE(length(embedding), 0)), 0) AS bytes FROM knowledge_chunks WHERE user_id = ? AND collection_id = ?").get(userId, collectionId) as { bytes: number };
     db.prepare("DELETE FROM knowledge_chunks WHERE user_id = ? AND collection_id = ?").run(userId, collectionId);
     assertStorage(userId, -bytes.bytes);
+    db.prepare(
+      `UPDATE knowledge_collections SET embedding_provider = ?, embedding_provider_id = ?, embedding_model = ?, embedding_dim = NULL,
+        embedding_connection_scope = ?, embedding_connection_created_at = ?, embedding_endpoint_hash = ?,
+        vectors_revision = vectors_revision + 1, updated_at = ? WHERE user_id = ? AND id = ?`,
+    ).run(next.provider, next.providerId ?? null, next.model ?? null, pin?.scope ?? null, pin?.createdAt ?? null, pin?.endpointHash ?? null, Date.now(), userId, collectionId);
     const sources = db.prepare("UPDATE knowledge_sources SET status = 'queued', progress = 0, error = NULL, chunk_count = 0, generation = generation + 1, updated_at = ? WHERE user_id = ? AND collection_id = ?")
       .run(Date.now(), userId, collectionId);
-    db.prepare("UPDATE knowledge_collections SET vectors_revision = vectors_revision + 1, updated_at = ? WHERE user_id = ? AND id = ?").run(Date.now(), userId, collectionId);
     return Number(sources.changes);
   });
 }
 
 export function deleteSource(userId: string, sourceId: string): boolean {
-  return tx(() => {
+  const deleted = tx(() => {
     const row = sourceRow(userId, sourceId);
     if (!row) return false;
     const bytes = db.prepare("SELECT COALESCE(SUM(length(CAST(text AS BLOB)) + COALESCE(length(embedding), 0)), 0) AS bytes FROM knowledge_chunks WHERE user_id = ? AND source_id = ?").get(userId, sourceId) as { bytes: number };
@@ -409,6 +513,9 @@ export function deleteSource(userId: string, sourceId: string): boolean {
     db.prepare("UPDATE knowledge_collections SET vectors_revision = vectors_revision + 1, updated_at = ? WHERE user_id = ? AND id = ?").run(Date.now(), userId, row.collection_id);
     return true;
   });
+  // A removed source's passages become unavailable immediately, including for an in-flight retrieval.
+  if (deleted) requestKnowledgeRevocation();
+  return deleted;
 }
 
 export interface StoredChunk {
@@ -424,6 +531,13 @@ export function replaceChunks(userId: string, sourceId: string, generation: numb
   return tx(() => {
     const source = sourceRow(userId, sourceId);
     if (!source || source.generation !== generation) return false;
+    const collection = getCollectionRow(userId, collectionId);
+    if (!collection) return false;
+    // A vector of a different width cannot be compared with the collection's existing space; the source
+    // fails visibly and needs a full reindex instead of mixing dimensions.
+    if (dimensions !== null && collection.embedding_dim !== null && dimensions !== collection.embedding_dim) {
+      throw new EmbeddingError("The embedding model returned a different vector size. Reindex the collection to rebuild every source.");
+    }
     const old = db.prepare("SELECT COALESCE(SUM(length(CAST(text AS BLOB)) + COALESCE(length(embedding), 0)), 0) AS bytes FROM knowledge_chunks WHERE user_id = ? AND source_id = ?").get(userId, sourceId) as { bytes: number };
     const next = chunks.reduce((sum, row) => sum + Buffer.byteLength(row.chunk.text) + (row.vector ? row.vector.byteLength : 0), 0);
     assertStorage(userId, next - old.bytes);

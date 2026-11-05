@@ -343,6 +343,9 @@ test("migration adds the edit columns and leaves existing rows unedited", () => 
       db.exec("DROP INDEX IF EXISTS usage_channel_run; ALTER TABLE usage DROP COLUMN channel_id; ALTER TABLE usage DROP COLUMN channel_run_id");
       db.exec("DROP TABLE IF EXISTS api_requests; DROP TABLE IF EXISTS api_rate_windows; DROP TABLE IF EXISTS api_key_audit; DROP TABLE IF EXISTS api_telemetry_floors; DROP TABLE IF EXISTS api_keys");
       db.exec("DROP INDEX IF EXISTS usage_api_request; DROP INDEX IF EXISTS usage_api_key_time; ALTER TABLE usage DROP COLUMN api_key_id; ALTER TABLE usage DROP COLUMN api_request_id");
+      db.exec("DROP TRIGGER IF EXISTS knowledge_audience_cleanup; DROP TRIGGER IF EXISTS knowledge_shared_project_insert; DROP TRIGGER IF EXISTS knowledge_shared_project_update");
+      db.exec("DROP TABLE IF EXISTS knowledge_thread_dependencies; DROP INDEX IF EXISTS knowledge_collections_visibility");
+      for (const column of ["visibility", "access_revision", "embedding_connection_scope", "embedding_connection_created_at", "embedding_endpoint_hash"]) db.exec("ALTER TABLE knowledge_collections DROP COLUMN " + column);
       db.exec("PRAGMA user_version = 32");
       db.close();`);
     const result = JSON.parse(run(`const { db } = await import(${JSON.stringify(dbUrl)});

@@ -11,6 +11,7 @@ import { assertStorage, messageBytes } from "./quota.js";
 import { getSettings } from "./settings.js";
 import { threadBusy } from "./thread-runs.js";
 import { ancestry, getThread, isTemporaryThread, setCompaction } from "./threads.js";
+import { assertThreadContentReadable } from "./knowledge/thread-policy.js";
 
 // User edits of finished assistant replies. Only text parts change; every other part (reasoning, tools, files,
 // sources), the id, the parent, and the position stay as stored. The first original text parts are kept
@@ -49,6 +50,8 @@ function editableReply(userId: string, threadId: string, messageId: string): Edi
   if (isTemporaryThread(threadId)) throw invalid("Temporary chats are not stored, so their replies cannot be edited.");
   const thread = getThread(userId, threadId);
   if (!thread) throw new AppError({ code: "not_found", message: "Thread not found" });
+  // An owned locked chat refuses before touching a row; foreign/missing ids keep their original answer.
+  assertThreadContentReadable(userId, threadId);
   // The client stores a turn when it ends, so an edit now could be overwritten or parent a missing message.
   if (threadBusy(threadId)) throw conflict("A reply is still being written in this chat. Wait for it to finish, then edit.");
   const rows = db

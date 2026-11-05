@@ -17,6 +17,7 @@ import { serviceUnavailable } from "./services.js";
 import { convertToPdf } from "./tools/sandbox.js";
 import { MAX_SHOTS_PER_TURN } from "./tools/screenshots.js";
 import { getThread } from "./threads.js";
+import { assertThreadContentReadable } from "./knowledge/thread-policy.js";
 import { assertFeature } from "./permissions/guard.js";
 import { reserveOperation } from "./permissions/limits.js";
 
@@ -509,12 +510,14 @@ const fileHeaders = (filename: string, mime: string) => ({
 
 export const artifactRoutes = new Hono<AppEnv>()
   .get("/threads/:id/artifacts/:artifactId", (c) => {
+    assertThreadContentReadable(c.get("user").id, c.req.param("id"));
     const thread = getThread(c.get("user").id, c.req.param("id"));
     if (!thread) return c.json({ error: "Not found" }, 404);
     const versions = artifactVersions(thread.id, c.req.param("artifactId"));
     return versions.length ? c.json(versions) : c.json({ error: "Not found" }, 404);
   })
   .get("/threads/:id/artifacts/:artifactId/file", (c) => {
+    assertThreadContentReadable(c.get("user").id, c.req.param("id"));
     const thread = getThread(c.get("user").id, c.req.param("id"));
     if (!thread) return c.json({ error: "Not found" }, 404);
     const id = c.req.param("artifactId");
@@ -526,6 +529,7 @@ export const artifactRoutes = new Hono<AppEnv>()
     return new Response(data as unknown as BodyInit, { headers: fileHeaders(documentFilename(artifact.title, kind), DOCUMENT_MIME[kind]) });
   })
   .get("/threads/:id/artifacts/:artifactId/preview", async (c) => {
+    assertThreadContentReadable(c.get("user").id, c.req.param("id"));
     const thread = getThread(c.get("user").id, c.req.param("id"));
     if (!thread) return c.json({ error: "Not found" }, 404);
     const id = c.req.param("artifactId");

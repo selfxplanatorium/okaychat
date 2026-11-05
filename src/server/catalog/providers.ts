@@ -4,13 +4,14 @@ import { createHash } from "node:crypto";
 import { HTTPException } from "hono/http-exception";
 import type { ModelInfo, ProviderConnectionInput, ProviderInfo } from "../../shared/types.js";
 import { decrypt, encrypt } from "../crypto.js";
-import { db } from "../db.js";
+import { afterCommit, db } from "../db.js";
 import { modelAccessMessage, sharedModelAccess, type SharedModelAccess } from "../entitlements.js";
 import { audienceIncludes, clearAudience, getAudience } from "../groups.js";
 import { USER_AGENT } from "../env.js";
 import { assertPublicHost, BlockedAddressError, publicFetch } from "../public-fetch.js";
 import { CHATGPT, CHATGPT_BASE_URL, CHATGPT_NAME, chatgptConnected, chatgptModels } from "./chatgpt.js";
 import { getCatalog, isChatModelId, isSupportedProvider, resolveRoute, toModelInfo, unknownModel, type RawProvider } from "./models-dev.js";
+import { requestKnowledgeRevocation } from "../knowledge/revocation.js";
 import { forgetOllamaModels, OLLAMA, OLLAMA_DEFAULT_URL, OLLAMA_DOC, OLLAMA_NAME, ollamaModels } from "./ollama.js";
 
 export const OPENCODE_GO = "opencode-go";
@@ -116,6 +117,75 @@ export function getOwnConnection(userId: string, providerId: string): Connection
   return readScope(userId).get(providerId);
 }
 
+export interface PinnedConnection {
+  connection: Connection;
+  scope: "own" | "shared";
+  createdAt: number;
+  /** SHA-256 of the effective embedding base endpoint; never sent to a reader. */
+  endpointHash: string;
+}
+
+const EMBEDDING_DEFAULT_ENDPOINT: Record<string, string> = {
+  openai: "https://api.openai.com/v1",
+  google: "https://generativelanguage.googleapis.com/v1beta",
+  ollama: "http://127.0.0.1:11434",
+};
+
+/** Canonical, credential-free endpoint used for a pin: scheme+host+path, no query, fragment, or userinfo. */
+export function embeddingEndpoint(providerId: string, baseURL: string | undefined): string {
+  const raw = (baseURL || EMBEDDING_DEFAULT_ENDPOINT[providerId] || "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    return `${url.protocol}//${url.host.toLowerCase()}${url.pathname.replace(/\/+$/, "")}`;
+  } catch {
+    return raw.replace(/\/+$/, "");
+  }
+}
+
+/**
+ * Resolves the exact connection a collection is pinned to, rather than whatever `getConnection` would pick
+ * for a reader. An own row wins; a shared row is used only when there is no own row at all, so a private key
+ * never silently falls back to a shared one (or the reverse). Missing, disabled, out-of-audience, or
+ * demoted rows return null and the caller must refuse or degrade.
+ */
+export function resolvePinnedConnection(ownerId: string, providerId: string): PinnedConnection | null {
+  const own = db
+    .prepare("SELECT provider_id, api_key_enc, base_url, config_json, enabled, created_at FROM provider_connections WHERE user_id = ? AND provider_id = ?")
+    .get(ownerId, providerId) as (ConnectionRow & { created_at: number }) | undefined;
+  const shared = own
+    ? undefined
+    : (db
+        .prepare(
+          `SELECT provider_id, api_key_enc, base_url, config_json, enabled, created_at FROM shared_connections
+           WHERE provider_id = ? AND ${audienceIncludes("provider", "provider_id")}`,
+        )
+        .get(providerId, ownerId, ownerId) as (ConnectionRow & { created_at: number }) | undefined);
+  const row = own ?? shared;
+  if (!row || row.enabled !== 1) return null;
+  const config = JSON.parse(row.config_json) as { name?: string };
+  const guarded = !mayUsePrivateHosts(ownerId);
+  const scope = own ? "own" : "shared";
+  return {
+    connection: {
+      providerId: row.provider_id,
+      apiKey: row.api_key_enc ? decrypt(row.api_key_enc) : undefined,
+      baseURL: row.base_url ?? undefined,
+      name: config.name,
+      enabled: true,
+      ...(scope === "shared" ? { shared: true } : {}),
+      ...(guarded && (row.base_url || row.provider_id === OLLAMA) ? { guarded: true } : {}),
+    },
+    scope,
+    createdAt: row.created_at,
+    endpointHash: createHash("sha256").update(embeddingEndpoint(row.provider_id, row.base_url ?? undefined)).digest("hex").slice(0, 32),
+  };
+}
+
 /** A server-wide connection as an admin sees it, for the Admin → Providers page. */
 export function getSharedConnection(providerId: string): Connection | undefined {
   return readScope(null).get(providerId);
@@ -174,6 +244,7 @@ export function saveConnection(scope: ConnectionScope, providerId: string, input
     ).run(scope, ...values);
   }
   liveCache.clear();
+  afterCommit(requestKnowledgeRevocation);
   if (providerId === OLLAMA) forgetOllamaModels();
 }
 
@@ -192,6 +263,8 @@ export function deleteConnection(scope: ConnectionScope, providerId: string) {
   } else db.prepare("DELETE FROM provider_connections WHERE user_id = ? AND provider_id = ?").run(scope, providerId);
   // A deleted row must not leave its live list (and key fingerprint) cached for another connection.
   liveCache.clear();
+  // Knowledge pins to this exact row: an owner ingest or reader retrieval must stop before its next batch.
+  afterCommit(requestKnowledgeRevocation);
   if (providerId === OLLAMA) forgetOllamaModels();
 }
 
