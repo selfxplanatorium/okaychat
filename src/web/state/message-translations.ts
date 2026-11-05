@@ -76,6 +76,21 @@ export function dropThreadTranslations(threadId: string) {
   });
 }
 
+/** An edited or restored reply has new text: every cached translation now describes the old one. */
+export function invalidateMessageTranslations(threadId: string, messageId: string) {
+  const key = translationKey(threadId, messageId);
+  if (!useTranslations.getState().messages[key]) return;
+  // A request still running translates the old text, so it must not land as current.
+  controllers.get(key)?.abort();
+  bump(key);
+  loaded.delete(key);
+  useTranslations.setState((s) => {
+    const current = entry(key);
+    const entries = Object.fromEntries(Object.entries(current.entries).map(([lang, value]) => [lang, { ...value, stale: true }]));
+    return { messages: { ...s.messages, [key]: { ...current, entries, active: null } } };
+  });
+}
+
 /** Shares a request in flight. `force` refetches after the previous request settled. */
 export function loadTranslations(threadId: string, messageId: string, force = false): Promise<void> {
   const key = translationKey(threadId, messageId);
