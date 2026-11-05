@@ -27,7 +27,8 @@ function isZip(data: Uint8Array): boolean {
 /** Image signatures OCR can read beyond the chat rasters: BMP, TIFF, and HEIF brands. */
 function imageMagic(data: Uint8Array): boolean {
   if (sniffRaster(data)) return true;
-  if (data.length >= 2 && data[0] === 0x42 && data[1] === 0x4d) return true;
+  // "BM" alone starts plenty of text ("BMW", "BMI"); a real header also has its four reserved bytes at zero.
+  if (data.length >= 26 && data[0] === 0x42 && data[1] === 0x4d && data[6] === 0 && data[7] === 0 && data[8] === 0 && data[9] === 0) return true;
   if (startsWith(data, [0x49, 0x49, 0x2a, 0x00]) || startsWith(data, [0x4d, 0x4d, 0x00, 0x2a])) return true;
   return data.length >= 12 && ascii(data, 4, 8) === "ftyp" && /^(heic|heix|hevc|hevx|mif1|msf1)$/.test(ascii(data, 8, 12));
 }

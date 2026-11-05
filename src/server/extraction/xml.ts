@@ -1,6 +1,7 @@
 import path from "node:path";
 import { DOMParser, type Document as XmlDocument, type Element as XmlElement, type Node as XmlNode } from "@xmldom/xmldom";
-import { ExtractionError } from "./errors.js";
+import { ExtractionError, TOO_LARGE_PART } from "./errors.js";
+import { MAX_XML_MARKUP } from "./limits.js";
 
 export const A = "http://schemas.openxmlformats.org/drawingml/2006/main";
 export const P = "http://schemas.openxmlformats.org/presentationml/2006/main";
@@ -19,8 +20,19 @@ const ELEMENT_NODE = 1;
 const TEXT_NODE = 3;
 const CDATA_NODE = 4;
 
-/** Parses one package part. Fatal parser errors and `parsererror` documents are `damaged` with the caller's message. */
+/** Tags and attributes, each a DOM node: every `<` and `=`. Text containing `=` only counts a little high. */
+function markupCount(bytes: Uint8Array): number {
+  let count = 0;
+  for (let i = 0; i < bytes.length && count <= MAX_XML_MARKUP; i++) if (bytes[i] === 0x3c || bytes[i] === 0x3d) count++;
+  return count;
+}
+
+/**
+ * Parses one package part. Fatal parser errors and `parsererror` documents are `damaged` with the caller's message;
+ * a part with more than MAX_XML_MARKUP tags and attributes is `too_large` before any node is built.
+ */
 export function parseXml(bytes: Uint8Array, damaged: string): XmlDocument {
+  if (markupCount(bytes) > MAX_XML_MARKUP) throw new ExtractionError("too_large", TOO_LARGE_PART);
   let doc: XmlDocument;
   try {
     doc = new DOMParser({ onError: () => {} }).parseFromString(new TextDecoder("utf-8", { fatal: false }).decode(bytes), "text/xml");

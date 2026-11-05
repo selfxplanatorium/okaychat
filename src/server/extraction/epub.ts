@@ -2,7 +2,7 @@ import path from "node:path";
 import { ExtractionError } from "./errors.js";
 import { hasHeading, htmlToText } from "./html.js";
 import type { ExtractContext, PartResult } from "./index.js";
-import { MAX_EPUB_DOCUMENTS, MAX_METADATA_BYTES, MAX_SELECTED_BYTES, MAX_XML_PART_BYTES } from "./limits.js";
+import { MAX_EPUB_DOCUMENTS, MAX_EXTRACTED_CHARS, MAX_METADATA_BYTES, MAX_SELECTED_BYTES, MAX_XML_PART_BYTES } from "./limits.js";
 import { attr, CONTAINER, elements, OPF, parseXml } from "./xml.js";
 import { assertZipBounds, inflateSelected, readZipEntry, zipEntryNames } from "./zip.js";
 import { decodeUtf8 } from "./text.js";
@@ -71,13 +71,19 @@ export async function extractEpub(data: Uint8Array, ctx: ExtractContext): Promis
   const wanted = new Set(read);
   const parts = inflateSelected(data, (name) => wanted.has(name), MAX_XML_PART_BYTES, MAX_SELECTED_BYTES);
   const out: string[] = [];
+  let length = 0;
   for (let i = 0; i < read.length; i++) {
     ctx.check();
+    // Past the character cap the rest cannot be kept; the dispatcher marks the text truncated.
+    if (length > MAX_EXTRACTED_CHARS) break;
     const bytes = parts.get(read[i]!);
     if (bytes) {
-      const chapter = await htmlToText(decodeUtf8(bytes));
+      const chapter = await htmlToText(decodeUtf8(bytes), { check: ctx.check, maxChars: MAX_EXTRACTED_CHARS - length });
       const text = chapter.title && chapter.text && !hasHeading(chapter.text) ? `## ${chapter.title}\n\n${chapter.text}` : chapter.text;
-      if (text) out.push(text);
+      if (text) {
+        out.push(text);
+        length += text.length + 2;
+      }
     }
     ctx.progress(i + 1, read.length);
   }

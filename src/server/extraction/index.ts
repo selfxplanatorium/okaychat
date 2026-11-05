@@ -64,8 +64,8 @@ export function capText(text: string, max: number): { text: string; truncated: b
   return { text: text.slice(0, end), truncated: true };
 }
 
-async function extractHtml(data: Uint8Array): Promise<PartResult> {
-  const { text, title } = await htmlToText(decodeUtf8(data));
+async function extractHtml(data: Uint8Array, ctx: ExtractContext, maxChars: number): Promise<PartResult> {
+  const { text, title } = await htmlToText(decodeUtf8(data), { check: ctx.check, maxChars });
   return { text: title && !hasHeading(text) ? (text ? `# ${title}\n\n${text}` : `# ${title}`) : text };
 }
 
@@ -113,7 +113,7 @@ export async function extract(name: string, type: string, data: Uint8Array, opti
       part = await extractOdt(data);
       break;
     case "html":
-      part = await extractHtml(data);
+      part = await extractHtml(data, ctx, maxChars);
       break;
     case "image":
       part = { text: "", needsOcr: "image" };

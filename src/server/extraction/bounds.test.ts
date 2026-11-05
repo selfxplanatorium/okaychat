@@ -138,6 +138,97 @@ test("PPTX: a 70 MiB slide part is too large for the selected-part cap", async (
   );
 });
 
+/**
+ * A stored-only ZIP whose central directory adds `copies` entries that all point at the slide's local header and
+ * declare originalSize 1 with the slide's full compressed size. fflate copies a stored entry at its compressed
+ * size, so each copy allocates the whole slide.
+ */
+function overlappingStoredPptx(slide: Uint8Array, copies: number): Uint8Array {
+  const locals: Buffer[] = [];
+  const central: Buffer[] = [];
+  let offset = 0;
+  const entry = (name: string, size: number, originalSize: number, at: number) => {
+    const header = Buffer.alloc(46);
+    header.writeUInt32LE(0x02014b50, 0);
+    header.writeUInt16LE(20, 4);
+    header.writeUInt16LE(20, 6);
+    header.writeUInt32LE(size, 20);
+    header.writeUInt32LE(originalSize, 24);
+    header.writeUInt16LE(Buffer.byteLength(name), 28);
+    header.writeUInt32LE(at, 42);
+    central.push(header, Buffer.from(name));
+  };
+  const add = (name: string, data: Uint8Array) => {
+    const header = Buffer.alloc(30);
+    header.writeUInt32LE(0x04034b50, 0);
+    header.writeUInt16LE(20, 4);
+    header.writeUInt32LE(data.length, 18);
+    header.writeUInt32LE(data.length, 22);
+    header.writeUInt16LE(Buffer.byteLength(name), 26);
+    locals.push(header, Buffer.from(name), Buffer.from(data));
+    entry(name, data.length, data.length, offset);
+    const at = offset;
+    offset += 30 + Buffer.byteLength(name) + data.length;
+    return at;
+  };
+  add("[Content_Types].xml", xml(PPTX_TYPES));
+  add("ppt/presentation.xml", xml(PPTX_PRESENTATION));
+  add("ppt/_rels/presentation.xml.rels", xml(PPTX_RELS));
+  const at = add("ppt/slides/slide1.xml", slide);
+  for (let i = 0; i < copies; i++) entry(`ppt/slides/copy${i}.xml`, slide.length, 1, at);
+  const directory = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(4 + copies, 8);
+  end.writeUInt16LE(4 + copies, 10);
+  end.writeUInt32LE(directory.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return new Uint8Array(Buffer.concat([...locals, directory, end]));
+}
+
+test("ZIP: overlapping stored entries count at the size fflate copies, not their declared size", async () => {
+  // Three 24 MiB copies are 72 MiB, over the 64 MiB selected cap; declared as 1 byte each they used to pass.
+  const slide = new Uint8Array(24 * 1024 * 1024).fill(0x20);
+  await expectExtractionError(extract("overlap.pptx", "", overlappingStoredPptx(slide, 3)), "too_large");
+  // One stored entry over the 32 MiB part cap that declares 1 byte.
+  const wide = new Uint8Array(33 * 1024 * 1024).fill(0x20);
+  await expectExtractionError(extract("overlap.pptx", "", overlappingStoredPptx(wide, 1)), "too_large");
+});
+
+test("PPTX: one shape with 20,000 paragraphs is read in linear time", async () => {
+  const paragraphs = "<a:p><a:r><a:t>x</a:t></a:r></a:p>".repeat(20_000);
+  const slide = slideXml("Shape Token").replace("<a:p>", `${paragraphs}<a:p>`);
+  const started = Date.now();
+  const result = await extract("dense.pptx", "", pptxWithSlide(xml(slide)));
+  // The placeholder lookup was once quadratic here: about 100 s.
+  assert.ok(Date.now() - started < 10_000, `took ${Date.now() - started} ms`);
+  assert.match(result.text, /Shape Token/);
+});
+
+test("XML: a part with more than 300,000 tags and attributes is too large before parsing", async () => {
+  const slide = slideXml("Tiny").replace("<a:p>", `${"<a:p/>".repeat(300_001)}<a:p>`);
+  await expectExtractionError(
+    extract("nodes.pptx", "", pptxWithSlide(xml(slide))),
+    "too_large",
+    "A part of this file is too large to read. Split it into smaller files.",
+  );
+});
+
+test("ODT: text:s spaces are bounded across the whole document", async () => {
+  // 100,000 elements asking for 1,000 spaces each would be 100 million characters.
+  const spaces = 'x<text:s text:c="1000"/>'.repeat(100_000);
+  const archive = odtBytes({
+    "content.xml": xml(`<?xml version="1.0"?><office:document-content
+      xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+      xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+      <office:body><office:text><text:p>${spaces}end</text:p></office:text></office:body>
+    </office:document-content>`),
+  });
+  const result = await extract("spaces.odt", "", archive, { maxChars: 10_000_000 });
+  assert.ok(result.text.length <= 400_000 + 200_000 + 3, `kept ${result.text.length} characters`);
+  assert.ok(result.text.endsWith("end"));
+});
+
 test("A ZIP with 10,001 entries is refused", async () => {
   const files: Record<string, Uint8Array> = {};
   for (let i = 0; i <= 10_000; i++) files[`part-${i}.txt`] = new Uint8Array();
