@@ -7,6 +7,8 @@ import { emailConnectTarget } from "./accounts.js";
 import { EmailError, mapEmailError } from "./errors.js";
 import { htmlToText, sanitizeFilename, sanitizeMime } from "./mime.js";
 import { verifySmtp } from "./smtp.js";
+import { assertFeature } from "../permissions/guard.js";
+import { reserveOperation } from "../permissions/limits.js";
 
 // IMAP reading through imapflow. Connections always use TLS or a required STARTTLS upgrade; a
 // STARTTLS-capable server that fails or omits the upgrade is refused (doSTARTTLS), so credentials
@@ -49,6 +51,13 @@ function clientFor(secrets: EmailSecrets, target: { host: string; servername?: s
 }
 
 async function withClient<T>(secrets: EmailSecrets, run: (client: ImapFlow) => Promise<T>, tls?: ConnectionOptions): Promise<T> {
+  // Every mailbox action is gated here, before DNS or a socket: list, search, read, attachment
+  // download, reply's original read, and the settings test all pass through this boundary.
+  assertFeature(secrets.userId, "email");
+  return withClientWork(secrets, run, tls);
+}
+
+async function withClientWork<T>(secrets: EmailSecrets, run: (client: ImapFlow) => Promise<T>, tls?: ConnectionOptions): Promise<T> {
   // Slots are per user: the unsaved-settings test uses a synthetic id shared by every user.
   const id = `${secrets.userId}:${secrets.account.id}`;
   // Re-check the live admin role and resolve/pin the host immediately before every connection,
@@ -62,6 +71,9 @@ async function withClient<T>(secrets: EmailSecrets, run: (client: ImapFlow) => P
     throw new EmailError("connections", "This email account already has two open connections. Wait for the current request to finish and try again.");
   }
   active.set(id, count + 1);
+  // Charged after the destination is authorized (so a refused host never costs an operation) and before
+  // the socket is opened.
+  const lease = reserveOperation({ userId: secrets.userId }, "email.remote");
   const client = clientFor(secrets, target, tls);
   // After connect, imapflow reports socket and timeout failures only as an "error" event; without a
   // listener that event throws and takes the process down.
@@ -81,6 +93,7 @@ async function withClient<T>(secrets: EmailSecrets, run: (client: ImapFlow) => P
     } catch {
       client.close();
     }
+    lease.release();
     const left = (active.get(id) ?? 1) - 1;
     if (left > 0) active.set(id, left);
     else active.delete(id);

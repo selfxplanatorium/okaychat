@@ -13,6 +13,7 @@ import { getMedia, mediaPath } from "./media/store.js";
 import { serveImage } from "./media/variants.js";
 import { imagePath } from "./tools/image.js";
 import { currentBranch, getThread } from "./threads.js";
+import { assertFeature, featureAllowed } from "./permissions/guard.js";
 
 // Read-only public links. A link is live: it shows the thread's current branch, and revoking deletes it.
 // Only text, generated images, artifacts, and generative UI (final widget code and specs) are exposed. Reasoning, tool inputs, usage, and costs stay private.
@@ -26,6 +27,15 @@ interface ShareRow {
 const byThread = (userId: string, threadId: string) =>
   db.prepare("SELECT token FROM shares WHERE user_id = ? AND thread_id = ?").get(userId, threadId) as { token: string } | undefined;
 const byToken = (token: string) => db.prepare("SELECT * FROM shares WHERE token = ?").get(token) as ShareRow | undefined;
+
+/**
+ * A public link is only served while its owner's current all-model sharing permission allows it. A revoke
+ * makes every existing link a plain 404, and re-allowing the same link works again.
+ */
+const liveShare = (token: string): ShareRow | undefined => {
+  const share = byToken(token);
+  return share && featureAllowed(share.user_id, "sharing") ? share : undefined;
+};
 
 const toolName = (part: { type: string; toolName?: string }) => part.toolName ?? part.type.replace(/^tool-/, "");
 
@@ -143,6 +153,7 @@ export const shareRoutes = new Hono<AppEnv>()
     return c.json({ token: row?.token ?? null });
   })
   .post("/threads/:id/share", (c) => {
+    assertFeature(c.get("user").id, "sharing");
     const user = c.get("user");
     const thread = getThread(user.id, c.req.param("id"));
     if (!thread) return c.json({ error: "Not found" }, 404);
@@ -157,23 +168,29 @@ export const shareRoutes = new Hono<AppEnv>()
     return c.json({ ok: true });
   });
 
-/** No login. The token is the only key. */
+/** No login. The token is the only key, and authorization is rechecked on every request. */
 export const publicShareRoutes = new Hono()
   .get("/:token", (c) => {
-    const share = byToken(c.req.param("token"));
+    const share = liveShare(c.req.param("token"));
     const thread = share && getThread(share.user_id, share.thread_id);
-    if (!share || !thread) return c.json({ error: "This link was revoked or never existed." }, 404);
+    if (!share || !thread) {
+      c.header("Cache-Control", "no-store");
+      return c.json({ error: "This link was revoked or never existed." }, 404);
+    }
     const body: SharedThread = { title: thread.title, createdAt: thread.createdAt, messages: sharedMessages(share) };
+    c.header("Cache-Control", "no-store");
     return c.json(body);
   })
   .get("/:token/artifacts/:id", (c) => {
-    const share = byToken(c.req.param("token"));
+    const share = liveShare(c.req.param("token"));
     if (!share) return c.json({ error: "Not found" }, 404);
     const versions = sharedVersions(share, c.req.param("id"));
-    return versions.length ? c.json(versions) : c.json({ error: "Not found" }, 404);
+    if (!versions.length) return c.json({ error: "Not found" }, 404);
+    c.header("Cache-Control", "no-store");
+    return c.json(versions);
   })
   .get("/:token/artifacts/:id/file", (c) => {
-    const share = byToken(c.req.param("token"));
+    const share = liveShare(c.req.param("token"));
     if (!share) return c.json({ error: "Not found" }, 404);
     const id = c.req.param("id");
     const version = c.req.query("version") ? Number(c.req.query("version")) : undefined;
@@ -191,7 +208,7 @@ export const publicShareRoutes = new Hono()
     });
   })
   .get("/:token/artifacts/:id/preview", async (c) => {
-    const share = byToken(c.req.param("token"));
+    const share = liveShare(c.req.param("token"));
     if (!share) return c.json({ error: "Not found" }, 404);
     const id = c.req.param("id");
     const version = c.req.query("version") ? Number(c.req.query("version")) : undefined;
@@ -205,7 +222,7 @@ export const publicShareRoutes = new Hono()
   // Every response and revalidation re-checks the live share and that the shared branch shows the image,
   // so revoking a link or editing the branch away ends access; `no-cache` keeps caches from bypassing that.
   .get("/:token/images/:id", async (c) => {
-    const share = byToken(c.req.param("token"));
+    const share = liveShare(c.req.param("token"));
     const id = c.req.param("id");
     // The image must belong to the shared thread (generated there, or referenced by this fork), not just to the same user.
     const image = share && sharedAssets(share).images.has(id) && (db.prepare(`SELECT i.id, i.mime, i.size FROM images i
@@ -215,7 +232,7 @@ export const publicShareRoutes = new Hono()
     return serveImage(c, { userId: share.user_id, key: image.id, file: imagePath(share.user_id, image.id), mime: image.mime, size: image.size, etag: image.id });
   })
   .get("/:token/uploads/:id", async (c) => {
-    const share = byToken(c.req.param("token"));
+    const share = liveShare(c.req.param("token"));
     const id = c.req.param("id");
     const upload = share && sharedAssets(share).uploads.has(id) && (db.prepare("SELECT media_id FROM uploads WHERE id = ? AND user_id = ?").get(id, share.user_id) as { media_id: string | null } | undefined);
     const media = upload && upload.media_id ? getMedia(upload.media_id) : undefined;

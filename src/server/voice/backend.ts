@@ -13,6 +13,7 @@ import { credentialFor, upstream, type ResolvedCredential } from "../speech/engi
 import { speechWorkerConfigured, fetchWorkerHealth, workerRelease, workerSpeak, workerTranscribePcm, workerWarm } from "../speech/worker.js";
 import { currentBranch, getThread } from "../threads.js";
 import { callLimits } from "./limits.js";
+import { featureAllowed, modelAllowed } from "../permissions/guard.js";
 
 // What a call needs from the outside world, behind small interfaces so the session can be tested with fakes:
 // the local pipeline (speech worker Whisper + Piper) and the OpenAI Realtime signalling exchange.
@@ -184,6 +185,9 @@ export function realtimeTarget(userId: string): Availability<RealtimeTarget> {
     const access = sharedModelAccess(userId, "openai");
     if (!access.visible || (!access.all && !access.ids.has(model))) return { ok: false, code: "unavailable", detail: modelAccessMessage(`openai/${model}`) };
   }
+  // The Realtime model is not in the text catalog, but an exact-model policy row still governs it.
+  const ref = `${cred.conn?.providerId ?? "openai"}/${model}`;
+  if (!modelAllowed(userId, ref)) return { ok: false, code: "unavailable", detail: modelAccessMessage(ref) };
   const wanted = prefs?.call?.realtimeVoice ?? prefs?.tts?.voices?.["openai-realtime"];
   const voice = wanted && def.voices.includes(wanted) ? wanted : (def.voices.includes("marin") ? "marin" : def.voices[0]!);
   return { ok: true, value: { cred, model, voice, ...(prefs?.stt?.language ? { language: prefs.stt.language } : {}) } };
@@ -275,6 +279,20 @@ async function workerCallFailure(): Promise<CallAvailability["localReason"]> {
 export async function voiceAvailability(userId: string): Promise<CallAvailability> {
   const admin = adminSpeech();
   const limits = callLimits();
+  // A denied account learns why locally; the worker is not probed for a capability it cannot use.
+  if (!featureAllowed(userId, "voice")) {
+    const detail = "Voice is disabled for this account.";
+    return {
+      local: false,
+      realtime: false,
+      worker: false,
+      voice: callVoice(userId),
+      maxSeconds: limits.maxSeconds,
+      maxUtteranceSeconds: Math.max(5, Math.min(limits.maxUtteranceSeconds, admin.maxRecordingSeconds)),
+      localReason: { code: "unavailable", detail },
+      realtimeReason: { code: "unavailable", detail },
+    };
+  }
   const local = workerLocal(userId);
   const target = realtimeTarget(userId);
   // A configured worker may be down; `/health` is cheap, downloads nothing, and does not start a model. If it

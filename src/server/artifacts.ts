@@ -17,6 +17,8 @@ import { serviceUnavailable } from "./services.js";
 import { convertToPdf } from "./tools/sandbox.js";
 import { MAX_SHOTS_PER_TURN } from "./tools/screenshots.js";
 import { getThread } from "./threads.js";
+import { assertFeature } from "./permissions/guard.js";
+import { reserveOperation } from "./permissions/limits.js";
 
 // Artifacts are versioned per thread. The model addresses them by a short id it picks, so it can edit
 // them in later turns without the content being repeated in the conversation.
@@ -281,6 +283,7 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
         content: z.string().describe("Full content"),
       }),
       execute: async ({ id, title, kind, language, content }) => {
+        assertFeature(userId, "artifacts");
         let key = slug(id);
         // Creating an id that exists would silently overwrite it, so give the new artifact its own id.
         for (let n = 2; latestArtifact(threadId, key); n++) key = `${slug(id)}-${n}`;
@@ -298,6 +301,7 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
         content: z.string().optional().describe("Full new content. Use instead of edits for rewrites"),
       }),
       execute: async ({ id, title, edits, content }) => {
+        assertFeature(userId, "artifacts");
         const prev = latestArtifact(threadId, id);
         if (!prev) throw new Error(`No artifact with id \`${id}\` in this chat.`);
         if (prev.size) throw new Error(`\`${id}\` is a document. Use edit_document.`);
@@ -340,8 +344,15 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
           ),
       }),
       execute: async ({ id, title, kind, content }, { abortSignal }) => {
-        const data = await buildDocument(kind, content, title, abortSignal);
-        return createDocument(threadId, turn, { id, title, kind, source: content, data });
+        assertFeature(userId, "artifacts");
+        // PDF is built by the browser worker; Word and Excel are built in-process.
+        const lease = kind === "pdf" ? reserveOperation({ userId }, "browser.render") : null;
+        try {
+          const data = await buildDocument(kind, content, title, abortSignal);
+          return createDocument(threadId, turn, { id, title, kind, source: content, data });
+        } finally {
+          lease?.release();
+        }
       },
     }),
     edit_document: tool({
@@ -360,6 +371,7 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
         pdf_ops: z.array(pdfOp).optional().describe("PDF edits: rotate_pages, delete_pages, move_page, add_text, fill_form, set_metadata"),
       }),
       execute: async ({ id, title, edits, content, docx_ops, xlsx_ops, pdf_ops }, { abortSignal }) => {
+        assertFeature(userId, "artifacts");
         const prev = latestArtifact(threadId, id);
         if (!prev) throw new Error(`No artifact with id \`${id}\` in this chat.`);
         const kind = prev.kind;
@@ -369,8 +381,13 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
         const changedSource = content ?? (edits?.length ? applyEdits(prev.content, edits) : undefined);
 
         if (changedSource !== undefined) {
-          const data = await buildDocument(docKind, changedSource, title ?? prev.title, abortSignal);
-          return saveVersion(threadId, { ...prev, title: title ?? prev.title, content: changedSource, data }, turn);
+          const lease = docKind === "pdf" ? reserveOperation({ userId }, "browser.render") : null;
+          try {
+            const data = await buildDocument(docKind, changedSource, title ?? prev.title, abortSignal);
+            return saveVersion(threadId, { ...prev, title: title ?? prev.title, content: changedSource, data }, turn);
+          } finally {
+            lease?.release();
+          }
         }
         if (!ops?.length) throw new Error("Pass `edits`, `content`, or the format's `ops`.");
         const old = artifactData(threadId, id);
@@ -413,6 +430,7 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
               sheet: z.string().optional().describe("Spreadsheet sheet name. Default the first sheet."),
             }),
             execute: async ({ id, page, sheet }, { toolCallId }) => {
+              assertFeature(userId, "artifacts");
               // Reserve before rendering, so parallel calls cannot all pass the limit.
               if (shots.size + shotsPending.value >= MAX_SHOTS_PER_TURN) {
                 throw new Error(`This reply has used its ${MAX_SHOTS_PER_TURN} screenshots. Finish from what you have already seen, or ask the user to check the artifact.`);
@@ -421,11 +439,13 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
               if (!artifact) throw new Error(`No artifact with id \`${id}\` in this chat.`);
               const data = artifact.size ? artifactData(threadId, id) : null;
               shotsPending.value++;
+              const lease = reserveOperation({ userId }, "browser.render");
               let shot: VisualShot;
               try {
                 shot = await screenshotArtifact({ kind: artifact.kind, content: artifact.content, data, page, sheet });
               } finally {
                 shotsPending.value--;
+                lease.release();
               }
               shots.set(toolCallId, shot);
               return {
@@ -452,6 +472,7 @@ export function artifactTools(threadId: string, userId: string, visual: Artifact
         title: z.string().describe("Human-readable title; also the download filename"),
       }),
       execute: async ({ file_id, name, id, title }, { abortSignal }) => {
+        assertFeature(userId, "artifacts");
         if (!file_id && !name) throw new Error("Pass the attachment's file_id or name.");
         const source = sourceBytes(userId, { fileId: file_id, name });
         const key = `${file_id ?? `name:${name}`}\u0000${slug(id)}\u0000${createHash("sha256").update(source.data).digest("hex")}`;

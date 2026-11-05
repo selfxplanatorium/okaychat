@@ -13,6 +13,7 @@ import type { RawChunk } from "./chunker.js";
 import { encodeVector } from "./embeddings.js";
 import { assertStorage } from "../quota.js";
 import { deleteUpload } from "../files.js";
+import { assertFeature } from "../permissions/guard.js";
 
 // Account-owned collections, sources, and chunks. Every query carries `user_id`; a chat may only use a
 // collection that is global or bound to the chat's own project (docs/implementation/knowledge.md).
@@ -222,6 +223,7 @@ function validateEmbedding(embedding: KnowledgeEmbeddingSetting): KnowledgeEmbed
 }
 
 export function createCollection(userId: string, input: CollectionInput): KnowledgeCollection {
+  assertFeature(userId, "knowledge");
   const now = Date.now();
   const id = newId("knc");
   const name = validateName(input.name);
@@ -244,6 +246,7 @@ export interface CollectionPatch {
 
 /** Returns whether the embedding choice changed, so the caller can queue a reindex. */
 export function updateCollection(userId: string, id: string, patch: CollectionPatch): { collection: KnowledgeCollection; reindex: boolean } {
+  assertFeature(userId, "knowledge");
   const row = getCollectionRow(userId, id);
   if (!row) invalid("Collection not found", 404);
   const sets: string[] = [];
@@ -311,6 +314,7 @@ export interface SourceInput {
 
 /** Inserts a queued source and its already-stored original upload reference. */
 export function createSource(userId: string, collectionId: string, input: SourceInput): KnowledgeSource {
+  assertFeature(userId, "knowledge");
   const collection = getCollectionRow(userId, collectionId);
   if (!collection) invalid("Collection not found", 404);
   const sourceCount = (db.prepare("SELECT COUNT(*) AS n FROM knowledge_sources WHERE user_id = ? AND collection_id = ?").get(userId, collectionId) as { n: number }).n;

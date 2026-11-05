@@ -160,6 +160,8 @@ export interface RetryingFetchOptions {
   fetchImpl?: typeof fetch;
   /** Streams "Retrying in Ns…" into the chat while a wait is in progress. */
   onRetry?: (notice: RetryNotice) => void;
+  /** Recheck authorization and reserve retries immediately before external dispatch. */
+  beforeAttempt?: (attempt: number) => void;
 }
 
 /** One fetch wrapper for every model provider call. Non-replayable bodies are never retried. */
@@ -185,6 +187,8 @@ export function createRetryingFetch(options: RetryingFetchOptions = {}): typeof 
     for (let attempt = 1; ; attempt++) {
       let response: Response;
       try {
+        signal?.throwIfAborted();
+        options.beforeAttempt?.(attempt);
         response = await send(input, init);
       } catch (error) {
         // A caller's abort, including an AbortSignal.timeout() that already fired, is final.

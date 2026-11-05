@@ -9,6 +9,7 @@ import { injectionMetadata, riskMetadata, scanForInjection, wrapUntrusted } from
 import { storeUpload } from "../files.js";
 import { sendApproved, sendApprovedReply } from "./send.js";
 import { isEmailAddress } from "./mime.js";
+import { assertFeature } from "../permissions/guard.js";
 
 // Model tools for email. Reads re-check the account's live read switch on every call; sends re-check
 // the send switch and always need approval. Headers, folder names, subjects, senders, and bodies are
@@ -84,6 +85,8 @@ export function emailTools(opts: { userId: string; temporary?: boolean; signal?:
   if (opts.temporary) return { tools: {}, subTools: {} };
   const { userId } = opts;
 
+  // Rechecked on every execution, so the feature and the account's read/send switches are both live.
+  const guard = () => assertFeature(userId, "email");
   const readAccount = (id?: string) => accountForRead(userId, id);
 
   const email_folders = tool({
@@ -91,6 +94,7 @@ export function emailTools(opts: { userId: string; temporary?: boolean; signal?:
       "List the user's connected email accounts and, for one account, its folders (mailboxes). Call it with no accountId to see every owned account (id, label, address, default, read/send switches, signature). Then pass accountId to list folders before listing or searching a non-inbox folder. Omits message contents.",
     inputSchema: z.object({ accountId: readAccountId }),
     execute: async ({ accountId: id }) => {
+      guard();
       const accounts = safeAccounts(userId);
       if (!accounts.length) throw new EmailError("protocol", "No email account is connected. Add one in Settings → Email.");
       if (!id) {
@@ -131,6 +135,7 @@ export function emailTools(opts: { userId: string; temporary?: boolean; signal?:
       unreadOnly: z.boolean().optional().describe("Only messages without the \\Seen flag."),
     }),
     execute: async ({ accountId: id, mailbox, limit, unreadOnly }) => {
+      guard();
       const account = readAccount(id);
       const listed = await listMessages(accountSecrets(userId, account.id), { mailbox, limit, unreadOnly }, opts.tls);
       const output = { account: publicAccount(account), ...listed };
@@ -155,6 +160,7 @@ export function emailTools(opts: { userId: string; temporary?: boolean; signal?:
       limit: z.number().int().min(1).max(50).optional().describe("Max results, default 15."),
     }).refine((value) => value.query || value.from || value.subject || value.since || value.unseen, "Give at least one search field."),
     execute: async ({ accountId: id, ...query }) => {
+      guard();
       const account = readAccount(id);
       const { query: text, ...rest } = query;
       const found = await searchMessages(accountSecrets(userId, account.id), { ...rest, text }, opts.tls);
@@ -179,6 +185,7 @@ export function emailTools(opts: { userId: string; temporary?: boolean; signal?:
         .describe("Attachment part ids from a previous email_read of this message. Only pass ids the user explicitly wants."),
     }),
     execute: async ({ accountId: id, messageId: message, downloadAttachments }) => {
+      guard();
       const account = readAccount(id);
       const secrets = accountSecrets(userId, account.id);
       const result = await readMessage(secrets, message, opts.tls);
@@ -257,8 +264,10 @@ export function emailTools(opts: { userId: string; temporary?: boolean; signal?:
     }).refine((value) => value.to.length + (value.cc?.length ?? 0) <= MAX_RECIPIENTS, `At most ${MAX_RECIPIENTS} recipients.`),
     metadata: riskMetadata("outbound"),
     needsApproval: true,
-    execute: async ({ accountId: id, from, to, cc, subject, body }) =>
-      sendApproved(userId, { accountId: id, from, to: getEmails(to), cc: cc ? getEmails(cc) : undefined, subject, body }, { tls: opts.tls }),
+    execute: async ({ accountId: id, from, to, cc, subject, body }) => {
+      guard();
+      return sendApproved(userId, { accountId: id, from, to: getEmails(to), cc: cc ? getEmails(cc) : undefined, subject, body }, { tls: opts.tls });
+    },
   });
 
   const email_reply = tool({
@@ -275,8 +284,10 @@ export function emailTools(opts: { userId: string; temporary?: boolean; signal?:
     }).refine((value) => value.to.length + (value.cc?.length ?? 0) <= MAX_RECIPIENTS, `At most ${MAX_RECIPIENTS} recipients.`),
     metadata: riskMetadata("outbound"),
     needsApproval: true,
-    execute: async ({ accountId: id, from, messageId: message, to, cc, subject, body }) =>
-      sendApprovedReply(userId, { accountId: id, from, messageId: message, to: getEmails(to), cc: cc ? getEmails(cc) : undefined, subject, body }, { tls: opts.tls }),
+    execute: async ({ accountId: id, from, messageId: message, to, cc, subject, body }) => {
+      guard();
+      return sendApprovedReply(userId, { accountId: id, from, messageId: message, to: getEmails(to), cc: cc ? getEmails(cc) : undefined, subject, body }, { tls: opts.tls });
+    },
   });
 
   // Read tools are safe for delegates; anything that sends is never exposed to them.

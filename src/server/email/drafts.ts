@@ -17,6 +17,7 @@ import { newId } from "../crypto.js";
 import { db, tx } from "../db.js";
 import { accountForSend, getAccount } from "./accounts.js";
 import { mapEmailError } from "./errors.js";
+import { assertFeature } from "../permissions/guard.js";
 import { buildMime, isEmailAddress } from "./mime.js";
 import { sendApproved, sendApprovedReply, type ApprovedMail, type SendOptions } from "./send.js";
 
@@ -181,6 +182,8 @@ export function createDraft(
   meta: { toolCallId?: string; by: "user" | "model"; kind?: "email" | "text" },
 ): EmailDraft {
   assertThread(userId, threadId);
+  // Email drafts are part of the email feature; text drafts (draft_text) are separate.
+  if (meta.kind !== "text") assertFeature(userId, "email");
   const parsed = parseInput(draftFieldsSchema.partial(), input);
   const fields: EmailDraftFields = { ...emptyDraftFields(), ...parsed };
   if (meta.kind === "text") assertTextFields(fields);
@@ -209,6 +212,7 @@ export function createDraft(
 export function updateDraft(userId: string, threadId: string, id: string, input: unknown, by: "user" | "model"): EmailDraft {
   const patch = parseInput(draftPatchSchema, input);
   const row = rowOf(userId, threadId, id);
+  if (row.kind !== "text") assertFeature(userId, "email");
   if (row.status === "sending") fail(409, "This draft is being sent and cannot be edited.");
   if (row.status === "sent") fail(409, "This email was already sent. A sent draft is read-only.");
   if (patch.revision !== row.revision) fail(409, `This draft changed since it was loaded (now revision ${row.revision}).`);
@@ -342,6 +346,7 @@ function sameHash(a: string, b: string): boolean {
  * this revision and this payload. A new review replaces any earlier one; any content write clears it.
  */
 export function reviewDraft(userId: string, threadId: string, id: string, revision: number): EmailDraftReview {
+  assertFeature(userId, "email");
   const row = rowOf(userId, threadId, id);
   if (row.status === "sending") fail(409, "This draft is being sent.");
   if (row.revision !== revision) fail(409, `This draft changed since it was loaded (now revision ${row.revision}).`);
@@ -368,6 +373,8 @@ export const sendInputSchema = z.object({ reviewId: z.string().min(16).max(200),
 
 /** Step two: sends exactly the reviewed revision, once. */
 export async function sendDraft(userId: string, threadId: string, id: string, input: unknown, opts: SendOptions = {}): Promise<EmailDraftSendResult> {
+  // Rechecked after the user's review; the SMTP boundary checks again.
+  assertFeature(userId, "email");
   const { reviewId, revision } = parseInput(sendInputSchema, input);
   const row = rowOf(userId, threadId, id);
   if (row.status === "sending") fail(409, "This draft is already being sent.");

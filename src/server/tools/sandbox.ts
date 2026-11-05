@@ -15,6 +15,8 @@ import { scanForInjection, wrapUntrusted } from "../prompt-injection.js";
 import { getThread } from "../threads.js";
 import { resultPaths } from "../sandbox-paths.js";
 import { assertServiceAvailable, reportServiceFailure, reportServiceSuccess, serviceStatus, serviceUnavailable } from "../services.js";
+import { assertFeature, featureAllowed } from "../permissions/guard.js";
+import { reserveOperation } from "../permissions/limits.js";
 
 // run_code executes model-written Python and Bash in the sandbox container (sandbox/runner.py). Each chat
 // has its own workspace; the container wipes idle workspaces, so every produced file is copied into
@@ -223,6 +225,17 @@ async function storeOutputs(userId: string, threadId: string, ws: string, files:
 }
 
 export async function runCode(opts: { userId: string; threadId: string; language: "python" | "bash"; code: string; timeoutS?: number; inputFiles?: string[]; signal?: AbortSignal; turn?: SandboxTurn }): Promise<RunCodeResult> {
+  // Nothing reaches the runner before the account allows code execution and the operation is admitted.
+  assertFeature(opts.userId, "code");
+  const lease = reserveOperation({ userId: opts.userId }, "sandbox.run");
+  try {
+    return await runCodeWork(opts);
+  } finally {
+    lease.release();
+  }
+}
+
+async function runCodeWork(opts: { userId: string; threadId: string; language: "python" | "bash"; code: string; timeoutS?: number; inputFiles?: string[]; signal?: AbortSignal; turn?: SandboxTurn }): Promise<RunCodeResult> {
   opts.signal?.throwIfAborted();
   if (opts.threadId.startsWith("tmp_") || !getThread(opts.userId, opts.threadId)) throw new Error("Chat not found");
   const ws = workspaceId(opts.userId, opts.threadId);
@@ -356,6 +369,8 @@ const downloadHeaders = (name: string, mime: string, preview = false) => ({
 export const sandboxRoutes = new Hono<AppEnv>()
   // The registry's cached probe, so Settings → General and /api/services never probe the runner twice.
   .get("/sandbox", async (c) => {
+    // A denied capability reports local status and never probes the runner.
+    if (!featureAllowed(c.get("user").id, "code")) return c.json({ configured: sandboxConfigured(), reachable: false, refuses: false });
     if (!sandboxConfigured()) return c.json({ configured: false, reachable: false });
     const status = await serviceStatus("sandbox");
     return c.json({

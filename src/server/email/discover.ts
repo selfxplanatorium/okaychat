@@ -13,6 +13,8 @@ import type {
 import { publicFetch, readCapped } from "../public-fetch.js";
 import { canUsePrivateHosts, emailLookup, assertEmailHost } from "./accounts.js";
 import { EmailError, mapEmailError } from "./errors.js";
+import { assertFeature } from "../permissions/guard.js";
+import { reserveOperation } from "../permissions/limits.js";
 
 // Ordered server discovery. Each stage fills whichever side (IMAP/SMTP) is still missing; the first
 // result wins, so a known provider or a published autoconfig document is never overridden by a
@@ -682,6 +684,17 @@ export interface DiscoveryOptions {
 }
 
 export async function discoverEmail(opts: DiscoveryOptions): Promise<EmailDiscoveryResult> {
+  // Discovery is a remote probe of third-party servers.
+  assertFeature(opts.userId, "email");
+  const lease = reserveOperation({ userId: opts.userId }, "email.remote");
+  try {
+    return await discoverEmailWork(opts);
+  } finally {
+    lease.release();
+  }
+}
+
+async function discoverEmailWork(opts: DiscoveryOptions): Promise<EmailDiscoveryResult> {
   const email = normalizeEmail(opts.email);
   if (!email) throw new EmailError("protocol", "Enter a valid email address.");
   const attempts: EmailDiscoveryAttempt[] = [];

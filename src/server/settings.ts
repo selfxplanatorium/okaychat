@@ -37,7 +37,10 @@ export function updateSettings(userId: string, patch: Partial<UserSettings>): Us
   if (Object.hasOwn(patch, "defaultReasoningEffort") && !REASONING_EFFORTS.includes(patch.defaultReasoningEffort!)) {
     throw new HTTPException(400, { message: "defaultReasoningEffort must be a known reasoning level" });
   }
-  const next = { ...getSettings(userId), ...patch };
+  const current = getSettings(userId);
+  const next = { ...current, ...patch, instructionsRevision: current.instructionsRevision };
+  // Personal instructions share one revision with per-model rules (prompt-policy.ts) for compare-and-set.
+  if (Object.hasOwn(patch, "systemPrompt") && patch.systemPrompt !== current.systemPrompt) next.instructionsRevision = (current.instructionsRevision ?? 0) + 1;
   db.prepare(
     "INSERT INTO user_settings (user_id, json) VALUES (?, ?) ON CONFLICT (user_id) DO UPDATE SET json = excluded.json",
   ).run(userId, JSON.stringify(next));

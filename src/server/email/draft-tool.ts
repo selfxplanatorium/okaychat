@@ -4,6 +4,7 @@ import { EMAIL_DRAFT_LIMITS as LIMITS, type EmailDraft, type EmailDraftFields } 
 import { injectionMetadata, scanForInjection, wrapUntrusted } from "../prompt-injection.js";
 import { defaultAccount } from "./accounts.js";
 import { createDraft, draftForModel, getDraft, updateDraft } from "./drafts.js";
+import { assertFeature } from "../permissions/guard.js";
 
 // `draft_email` writes an editable draft that the chat shows as an inline card. It never sends: the
 // user sends from the card after reviewing the exact payload, or asks for email_send separately. The
@@ -49,6 +50,7 @@ export function draftTools(opts: { userId: string; threadId: string; temporary?:
       `Use this when asked to write, draft, or rewrite an email, including a sample email, unless the user explicitly requests plain text or Markdown. Write an editable draft card in the chat; it is never sent by this tool. No connected mailbox or real recipient is required; omit unknown recipients. The user can edit, copy, download, open it in their mail app, or send it after reviewing it. Call with no draftId to create a draft (empty subject or body are allowed). Call with only draftId to read the latest saved version, including the user's edits, before changing it. To change a draft pass draftId, the revision you last read, and only the fields to change; the user's edits win until you write again. Recipients are at most ${LIMITS.sendRecipients} in total when sending.`,
     inputSchema,
     execute: async (input, { toolCallId }): Promise<DraftToolOutput> => {
+      assertFeature(userId, "email");
       const fields = fieldsOf(input);
       let action: DraftToolOutput["action"];
       let draft: EmailDraft;

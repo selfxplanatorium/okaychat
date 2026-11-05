@@ -1,3 +1,4 @@
+import { assertModelAllowed, modelAllowed } from "../permissions/guard.js";
 import { createHash } from "node:crypto";
 import { HTTPException } from "hono/http-exception";
 import type { ModelInfo, ProviderConnectionInput, ProviderInfo } from "../../shared/types.js";
@@ -418,7 +419,7 @@ export async function listModels(userId: string): Promise<ModelInfo[]> {
       return access && !access.all ? models.filter((model) => access.ids.has(model.id)) : models;
     }),
   );
-  return lists.flat();
+  return lists.flat().filter((model) => modelAllowed(userId, model.ref));
 }
 
 /**
@@ -442,6 +443,7 @@ export function usableConnectionCount(userId: string): number {
 }
 
 export async function resolveModel(userId: string, ref: string): Promise<{ model: ModelInfo; conn: Connection }> {
+  assertModelAllowed(userId, ref);
   const slash = ref.indexOf("/");
   const providerId = ref.slice(0, slash);
   const modelId = ref.slice(slash + 1);
@@ -475,5 +477,6 @@ export async function resolveModel(userId: string, ref: string): Promise<{ model
     }
     throw new HTTPException(400, { message: `Unknown model ${ref}` });
   }
+  assertModelAllowed(userId, ref);
   return { model, conn };
 }

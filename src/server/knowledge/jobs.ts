@@ -5,6 +5,7 @@ import { db } from "../db.js";
 import { extract } from "../files.js";
 import { chunkDocument } from "./chunker.js";
 import { createEmbedder, EmbeddingError, type Embedder } from "./embeddings.js";
+import { featureAllowed } from "../permissions/guard.js";
 import { invalidateKnowledgeVectors } from "./retrieval.js";
 import {
   failSource,
@@ -82,6 +83,9 @@ function take(): Job | undefined {
       i--;
       continue;
     }
+    // A queued job of a denied account never reaches a provider. It stays queued (not failed) so a later
+    // re-allow resumes it through the normal retry/enqueue path.
+    if (!featureAllowed(job.userId, "knowledge")) continue;
     if (running.has(job.sourceId) || runningCollections.has(job.collectionId)) continue;
     if (!capacity(job.userId)) continue;
     return queue.splice(i, 1)[0];
@@ -272,6 +276,8 @@ async function runJob(job: Job, controller: AbortController) {
     if (embedder) {
       for (let i = 0; i < chunks.length; i += EMBED_SLICE) {
         abortIfStale(userId, sourceId, generation, signal);
+        // A revoke during a long ingest stops it before the next provider batch; the row is marked cancelled.
+        if (!featureAllowed(userId, "knowledge")) throw new DOMException("Superseded", "AbortError");
         const slice = chunks.slice(i, i + EMBED_SLICE);
         const vectors = await embedder.embed(slice.map((chunk) => chunk.text), signal);
         if (vectors.length !== slice.length) throw new EmbeddingError("The embedding provider returned the wrong number of vectors.");

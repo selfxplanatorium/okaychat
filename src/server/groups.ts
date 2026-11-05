@@ -27,7 +27,7 @@ export function createGroup(name: string, userIds: string[] = []): UserGroup {
   if (nameTaken(name)) throw new HTTPException(409, { message: "A group with that name exists." });
   const id = newId("grp");
   tx(() => {
-    db.prepare("INSERT INTO user_groups (id, name, created_at) VALUES (?, ?, ?)").run(id, name, Date.now());
+    db.prepare("INSERT INTO user_groups (id, name, created_at, prompt_order) VALUES (?, ?, ?, (SELECT COALESCE(MAX(prompt_order), 0) + 10 FROM user_groups))").run(id, name, Date.now());
     setMembers(id, userIds);
   });
   return listGroups().find((g) => g.id === id)!;

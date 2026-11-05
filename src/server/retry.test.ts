@@ -14,6 +14,7 @@ const { generateText } = await import("ai");
 const { createModel } = await import("./llm.js");
 const { computeRetryDelay, createRetryingFetch, PROVIDER_RETRY_POLICY, sleep } = await import("./retry.js");
 const { db } = await import("./db.js");
+db.exec("INSERT INTO users (id,email,name,password_hash,role,created_at) VALUES ('user','user@test.invalid','User','unused','user',1)");
 
 after(() => {
   db.close();
@@ -202,7 +203,7 @@ test("a caller timeout signal that already expired is never retried", async () =
     sleep: async () => {},
   });
   await assert.rejects(wrapper("https://provider.test/v1/chat/completions", { method: "POST", body: "{}", signal }), (error: { name?: string }) => error.name === "TimeoutError");
-  assert.equal(calls, 1);
+  assert.equal(calls, 0);
 });
 
 test("a permanent refusal inside a 5xx body is not retried", async () => {

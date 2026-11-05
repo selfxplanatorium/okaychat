@@ -5,6 +5,8 @@ import { USER_AGENT } from "../env.js";
 import { modelAccessMessage, sharedModelAccess } from "../entitlements.js";
 import { describeProviderError } from "../provider-errors.js";
 import { publicFetch, readCapped } from "../public-fetch.js";
+import { assertFeature } from "../permissions/guard.js";
+import { reserveOperation } from "../permissions/limits.js";
 
 // Embedding backends for knowledge collections. Every provider is called over plain fetch; Ollama uses
 // the existing native helper. A non-admin's custom endpoint keeps the same publicFetch rule as chat.
@@ -301,24 +303,32 @@ export function createEmbedder(userId: string, setting: KnowledgeEmbeddingSettin
     const out: Float32Array[] = [];
     for (let i = 0; i < texts.length; i += EMBED_BATCH) {
       signal?.throwIfAborted();
+      // Knowledge may be revoked while a job is running: each batch re-checks and charges one operation.
+      assertFeature(userId, "knowledge");
+      const lease = reserveOperation({ userId }, "knowledge.embed");
       const batch = texts.slice(i, i + EMBED_BATCH).map((text) => (text.length > MAX_INPUT_CHARS ? text.slice(0, MAX_INPUT_CHARS) : text));
-      const rows =
-        setting.provider === "ollama"
-          ? await withRetry(
-              async () => {
-                try {
-                  return await ollamaEmbed(conn, model, batch, requestSignal(signal, opts.timeoutMs));
-                } catch (error) {
-                  if (signal?.aborted) throw error;
-                  const safe = describeProviderError(error, { provider: "ollama", log: false });
-                  throw new EmbeddingError(`${safe.message} ${safe.hint}`, (error as { status?: number }).status);
-                }
-              },
-              { signal, sleep: opts.sleep },
-            )
-          : setting.provider === "google"
-            ? await googleEmbed(conn, model, batch, { ...requestOpts, signal })
-            : await openaiEmbed(conn, model, batch, { ...requestOpts, signal });
+      let rows: number[][];
+      try {
+        rows =
+          setting.provider === "ollama"
+            ? await withRetry(
+                async () => {
+                  try {
+                    return await ollamaEmbed(conn, model, batch, requestSignal(signal, opts.timeoutMs));
+                  } catch (error) {
+                    if (signal?.aborted) throw error;
+                    const safe = describeProviderError(error, { provider: "ollama", log: false });
+                    throw new EmbeddingError(`${safe.message} ${safe.hint}`, (error as { status?: number }).status);
+                  }
+                },
+                { signal, sleep: opts.sleep },
+              )
+            : setting.provider === "google"
+              ? await googleEmbed(conn, model, batch, { ...requestOpts, signal })
+              : await openaiEmbed(conn, model, batch, { ...requestOpts, signal });
+      } finally {
+        lease.release();
+      }
       if (rows.length !== batch.length) throw new EmbeddingError(`${providerId} returned ${rows.length} embeddings for ${batch.length} passages.`);
       out.push(...rows.map((row) => normalizeVector(row)));
     }

@@ -669,6 +669,92 @@ const migrations: Array<string | (() => void)> = [
   INSERT OR IGNORE INTO image_threads (image_id, thread_id)
     SELECT i.id, i.thread_id FROM images i JOIN threads t ON t.id = i.thread_id AND t.user_id = i.user_id;
   `,
+  // Granular permissions (docs/implementation/granular-permissions.md): admin policy documents and prompt rules per
+  // subject and model selector, personal per-model instructions, per-chat instructions, a global revision with an
+  // encrypted audit trail, and the rate windows / leases that enforce operation limits. Subjects are polymorphic,
+  // so user and group deletion remove their rows explicitly; resolvers also join live subjects.
+  () => {
+    db.exec(`
+    CREATE TABLE permission_state (
+      singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+      revision INTEGER NOT NULL CHECK (revision >= 0)
+    );
+    INSERT INTO permission_state VALUES (1, 1);
+    ALTER TABLE user_groups ADD COLUMN prompt_order INTEGER;
+    `);
+    // Stable id order, 10 apart so a later reorder never needs to renumber everything to insert one group.
+    const groups = db.prepare("SELECT id FROM user_groups ORDER BY id").all() as Array<{ id: string }>;
+    const order = db.prepare("UPDATE user_groups SET prompt_order = ? WHERE id = ?");
+    groups.forEach((group, index) => order.run((index + 1) * 10, group.id));
+    db.exec(`
+    CREATE UNIQUE INDEX user_groups_prompt_order ON user_groups(prompt_order);
+    CREATE TABLE permission_policies (
+      subject_kind TEXT NOT NULL CHECK (subject_kind IN ('everyone', 'group', 'user')),
+      subject_id TEXT NOT NULL,
+      model_ref TEXT NOT NULL DEFAULT '',
+      document TEXT NOT NULL CHECK (json_valid(document) AND json_type(document) = 'object'),
+      updated_at INTEGER NOT NULL,
+      updated_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+      PRIMARY KEY (subject_kind, subject_id, model_ref),
+      CHECK ((subject_kind = 'everyone' AND subject_id = '') OR (subject_kind <> 'everyone' AND length(subject_id) > 0))
+    );
+    CREATE INDEX permission_policies_model ON permission_policies(model_ref);
+    CREATE TABLE prompt_rules (
+      subject_kind TEXT NOT NULL CHECK (subject_kind IN ('everyone', 'group', 'user')),
+      subject_id TEXT NOT NULL,
+      model_ref TEXT NOT NULL DEFAULT '',
+      prompt_key TEXT NOT NULL,
+      mode TEXT NOT NULL CHECK (mode IN ('replace', 'append')),
+      text TEXT NOT NULL CHECK (length(text) <= 50000),
+      updated_at INTEGER NOT NULL,
+      updated_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+      PRIMARY KEY (subject_kind, subject_id, model_ref, prompt_key),
+      CHECK ((subject_kind = 'everyone' AND subject_id = '' AND model_ref <> '') OR (subject_kind IN ('group', 'user') AND length(subject_id) > 0)),
+      CHECK (mode <> 'append' OR length(trim(text)) > 0)
+    );
+    CREATE TABLE user_model_instructions (
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      model_ref TEXT NOT NULL CHECK (length(model_ref) > 0),
+      mode TEXT NOT NULL CHECK (mode IN ('replace', 'append')),
+      text TEXT NOT NULL CHECK (length(text) <= 50000),
+      revision INTEGER NOT NULL CHECK (revision >= 1),
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, model_ref),
+      CHECK (mode <> 'append' OR length(trim(text)) > 0)
+    );
+    ALTER TABLE threads ADD COLUMN custom_instructions TEXT NOT NULL DEFAULT '';
+    ALTER TABLE threads ADD COLUMN instructions_revision INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE permission_audit (
+      revision INTEGER PRIMARY KEY,
+      actor_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      occurred_at INTEGER NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('policy', 'prompt', 'audience', 'entitlement', 'membership', 'group_order', 'subject_delete', 'migration')),
+      summary_json TEXT NOT NULL CHECK (json_valid(summary_json)),
+      changes_enc TEXT NOT NULL
+    );
+    INSERT INTO permission_audit (revision, actor_id, occurred_at, kind, summary_json, changes_enc)
+      VALUES (1, NULL, CAST(strftime('%s', 'now') AS INTEGER) * 1000, 'migration', '{"groups":0}', '');
+    CREATE TABLE permission_rate_windows (
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      scope_key TEXT NOT NULL,
+      window_start INTEGER NOT NULL,
+      used INTEGER NOT NULL CHECK (used >= 0),
+      PRIMARY KEY (user_id, scope_key, window_start)
+    );
+    CREATE TABLE permission_leases (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      model_ref TEXT NOT NULL DEFAULT '',
+      kind TEXT NOT NULL CHECK (kind IN ('operation', 'turn')),
+      operation_key TEXT NOT NULL,
+      process_id TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      UNIQUE (user_id, kind, operation_key)
+    );
+    CREATE INDEX permission_leases_active ON permission_leases(user_id, kind, expires_at, model_ref);
+    `);
+    db.prepare("UPDATE permission_audit SET summary_json = ? WHERE revision = 1").run(JSON.stringify({ groups: groups.length }));
+  },
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

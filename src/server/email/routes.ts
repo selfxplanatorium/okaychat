@@ -3,6 +3,7 @@ import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import type { EmailDiscoveryEvent } from "../../shared/email.js";
 import type { AppEnv } from "../auth.js";
+import { assertFeature } from "../permissions/guard.js";
 import {
   accountSecrets,
   authMethods,
@@ -73,6 +74,7 @@ export const emailRoutes = new Hono<AppEnv>()
   .get("/accounts", (c) => c.json(listAccounts(c.get("user").id)))
   .get("/auth-methods", (c) => c.json(authMethods()))
   .post("/discover", bodyLimit({ maxSize: 64 * 1024 }), async (c) => {
+    assertFeature(c.get("user").id, "email");
     const parsed = discoverInput.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "Enter the email address to look up." }, 400);
     const userId = c.get("user").id;
@@ -115,6 +117,7 @@ export const emailRoutes = new Hono<AppEnv>()
     });
   })
   .post("/test", bodyLimit({ maxSize: 64 * 1024 }), async (c) => {
+    assertFeature(c.get("user").id, "email");
     const raw = await c.req.json().catch(() => null);
     const parsed = testDraftInput.safeParse(raw);
     if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? "Check the server settings." }, 400);
@@ -127,10 +130,12 @@ export const emailRoutes = new Hono<AppEnv>()
     }
   })
   .post("/accounts", async (c) => {
+    assertFeature(c.get("user").id, "email");
     const account = await createAccount(c.get("user").id, await c.req.json().catch(() => null));
     return c.json(account, 201);
   })
   .patch("/accounts/:id", async (c) => {
+    assertFeature(c.get("user").id, "email");
     const account = await updateAccount(c.get("user").id, c.req.param("id"), await c.req.json().catch(() => null));
     return c.json(account);
   })
@@ -141,6 +146,7 @@ export const emailRoutes = new Hono<AppEnv>()
   .post("/accounts/:id/default", (c) => c.json(setDefaultAccount(c.get("user").id, c.req.param("id"))))
   .post("/accounts/:id/test", async (c) => {
     const userId = c.get("user").id;
+    assertFeature(userId, "email");
     // getAccount enforces ownership before any secret is decrypted.
     getAccount(userId, c.req.param("id"));
     // An edit during the test must not be marked with the old configuration's result.

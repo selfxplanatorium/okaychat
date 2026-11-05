@@ -1,3 +1,7 @@
+import { clampRequested } from "../shared/permissions.js";
+import { assertFeature, featureAllowed, assertModelAllowed } from "./permissions/guard.js";
+import { resolvePrompt, personalInstructions } from "./prompt-policy.js";
+import { guardTools } from "./permissions/tool-policy.js";
 import {
   convertToModelMessages,
   createUIMessageStream,
@@ -125,7 +129,8 @@ const chatBody = z.object({
  * the tool definitions after the first system message, so anything per chat or per day here would
  * invalidate the whole tool block. Per-chat context goes in `chatContext`, the date in the turn context.
  */
-function systemPrompt(model: ModelInfo, userPrompt: string, mcpInstructions: string[], artifacts: boolean, clientSystem?: string, memory?: string): string {
+function systemPrompt(userId: string, model: ModelInfo, userPrompt: string, mcpInstructions: string[], artifacts: boolean, clientSystem?: string, memory?: string): string {
+  const promptText = (key: Parameters<typeof resolvePrompt>[0], values?: Record<string, string | number>) => resolvePrompt(key, { userId, modelRef: model.ref }, values);
   const identity = promptText("modelIdentity", { name: model.name, id: model.id, provider: model.providerId, knowledge: model.knowledge ?? "unknown" });
   const parts = [promptText("chat"), promptText("dataSafety"), identity].filter((part) => part.trim());
   if (artifacts) parts.push(promptText("artifacts"));
@@ -177,8 +182,16 @@ export async function turnStream(opts: TurnOptions) {
   const uiMessages = temporary ? opts.uiMessages : withStoredEdits(userId, threadId, opts.uiMessages);
   const personalized = !temporary || opts.temporaryPersonalization === true;
   const user = { id: userId };
-  const settings = getSettings(userId);
-  const { model, conn } = await resolveModel(userId, modelRef);
+  const settings = { ...getSettings(userId) };
+  const actor = { userId, modelRef };
+  const policy = assertModelAllowed(userId, modelRef);
+  if (temporary) assertFeature(actor, "temporaryChats");
+  if (opts.deepResearch) assertFeature(actor, "research");
+  settings.maxSteps = clampRequested("maxSteps", settings.maxSteps, policy.limits.maxSteps);
+  settings.maxSearches = clampRequested("maxSearches", settings.maxSearches, policy.limits.maxSearches);
+  const allowed = (feature: Parameters<typeof assertFeature>[1]) => featureAllowed(actor, feature);
+  const { model: rawModel, conn } = await resolveModel(userId, modelRef);
+  const model = { ...rawModel, context: Math.min(rawModel.context, policy.limits.contextTokens ?? Infinity) };
   const effort = resolveReasoningEffort(model, settings, opts.effort);
   const describeError = (error: unknown) => {
     const wire = describeProviderError(error, { log: !temporary, model: model.ref, provider: model.providerId });
@@ -234,16 +247,16 @@ export async function turnStream(opts: TurnOptions) {
       // mid-turn cannot change the cached prefix. A new user message probes once, through the shared cache.
       const continuation = uiMessages.at(-1)?.role !== "user";
       const priorUnavailable = continuation ? turnUnavailableOf(uiMessages.at(-1)) : [];
-      const useArtifacts = model.toolCall && settings.artifacts && !temporary;
+      const useArtifacts = model.toolCall && settings.artifacts && !temporary && allowed("artifacts");
       // Ask only about services whose tools this turn could actually offer. A plain reply, a temporary chat,
       // a non-tool model, or artifacts/code execution switched off must not probe or repeat a down note.
       const wantsBrowser = useArtifacts && canViewImages && rendererAvailable();
-      const wantsSandbox = model.toolCall && !temporary && settings.codeExecution && sandboxConfigured();
+      const wantsSandbox = model.toolCall && !temporary && allowed("code") && settings.codeExecution && sandboxConfigured();
       const sidecarIds: FixedServiceId[] = [...(wantsBrowser ? ["browser" as const] : []), ...(wantsSandbox ? ["sandbox" as const] : [])];
       const sidecars = continuation || !sidecarIds.length
         ? Promise.resolve(new Map<FixedServiceId, ServiceStatus | undefined>())
         : turnServiceStates(sidecarIds);
-      const mcp = model.toolCall && !temporary
+      const mcp = model.toolCall && !temporary && allowed("mcp")
         ? await toolsForUser(user.id, { threadId, images: canViewImages ? toolImages : undefined, interactive: opts.interactive === true })
         : { tools: {}, subTools: {}, instructions: [], servers: [] };
       const sidecarStates = await sidecars;
@@ -275,23 +288,23 @@ export async function turnStream(opts: TurnOptions) {
       const builtInWeb = model.toolCall && settings.webTools ? webTools({ searchBudget, search: opts.deepResearch !== true && (opts.webSearch ?? true) }) : {};
       const lastUser = uiMessages.findLast((message) => message.role === "user");
       const query = lastUser?.parts.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n") ?? "";
-      const memory: ReturnType<typeof conversationMemory> = temporary
+      const memory: ReturnType<typeof conversationMemory> = !allowed("memory") ? { context: "", instructions: undefined, tools: {} } : temporary
         ? personalized ? temporaryMemory(userId, query) : { context: "", instructions: undefined, tools: {} }
         : conversationMemory(userId, threadId, query);
       // Sub-agents get the read-only pair (load/read) but never source search, install, or create.
-      const skills = turnSkills(user.id, { temporary, canCallTools: model.toolCall });
+      const skills = turnSkills(user.id, { temporary, canCallTools: model.toolCall && allowed("skills") });
       // Email tools exist only for stored chats with at least one account. Read/send toggles are
       // re-checked inside each call, so a switch flipped mid-turn takes effect immediately.
-      const email = model.toolCall && !temporary && hasAccounts(user.id)
+      const email = model.toolCall && !temporary && allowed("email") && hasAccounts(user.id)
         ? emailTools({ userId: user.id, signal })
         : { tools: {}, subTools: {} };
       // Drafts need no mailbox (the card can copy, download, or open them in a mail app), so the tool
       // is offered in every stored chat and the tool block stays the same when an account is added.
-      const drafts = model.toolCall && !temporary ? draftTools({ userId: user.id, threadId }) : {};
+      const drafts = model.toolCall && !temporary && allowed("email") ? draftTools({ userId: user.id, threadId }) : {};
       // Attached knowledge is read from the thread, never from the request body, so a forged list cannot
       // widen scope. Retrieval runs only for a new user message; continuations replay the stored block.
       const memoryRevision = temporary ? null : memory.instructions !== undefined ? memoryPreferences(userId).revision : null;
-      const knowledgeScope = temporary ? [] : attachedCollectionIds(userId, threadId);
+      const knowledgeScope = temporary || !allowed("knowledge") ? [] : attachedCollectionIds(userId, threadId);
       const stored = temporary
         ? new Map()
         : storedTurnContexts(userId, threadId, { memoryRevision, skills: !!skills.context, knowledge: new Set(knowledgeScope) });
@@ -300,7 +313,7 @@ export async function turnStream(opts: TurnOptions) {
         : await conversationKnowledge(user.id, threadId, query, { retrieve: !!lastUser && !stored.has(lastUser.id) });
       // Retrieval can await a provider while attachments change. Revoke earlier replay blocks too,
       // not just the freshly retrieved passages checked by conversationKnowledge.
-      const currentKnowledgeScope = new Set(temporary ? [] : attachedCollectionIds(userId, threadId));
+      const currentKnowledgeScope = new Set(temporary || !allowed("knowledge") ? [] : attachedCollectionIds(userId, threadId));
       for (const [id, block] of stored) {
         if (block.knowledgeIds.some((collectionId: string) => !currentKnowledgeScope.has(collectionId))) {
           stored.set(id, { ...block, knowledge: "", knowledgeIds: [] });
@@ -314,8 +327,8 @@ export async function turnStream(opts: TurnOptions) {
         // Sub-agents run unattended, so they get no tool that waits for approval.
         ...mcp.subTools,
       };
-      const subagentModels = model.toolCall && settings.subagents && !temporary ? await allowedSubagentModels(user.id, settings, model.ref) : [];
-      const useGenerativeUI = model.toolCall && settings.generativeUI && !!opts.clientTools && !temporary;
+      const subagentModels = model.toolCall && settings.subagents && !temporary && allowed("delegation") ? await allowedSubagentModels(user.id, settings, model.ref) : [];
+      const useGenerativeUI = false;
       const subagents = subagentModels.length
         ? subagentTools({ userId: user.id, threadId, allowed: subagentModels, subTools: readOnlyTools, maxSteps: settings.maxSteps, searchBudget, signal: signal })
         : {};
@@ -323,8 +336,8 @@ export async function turnStream(opts: TurnOptions) {
       const shots = new Map<string, VisualShot>();
       const injectedShots = new Set<string>();
       const sandboxTurn = new SandboxTurn();
-      const imageServices = model.toolCall && !temporary ? enabledImageServices(user.id, settings) : [];
-      const tools: ToolSet = {
+      const imageServices = model.toolCall && !temporary && allowed("images") ? enabledImageServices(user.id, settings) : [];
+      const tools: ToolSet = guardTools(actor, {
         ...builtInWeb,
         ...(model.toolCall ? memory.tools : {}),
         ...(model.toolCall ? knowledge.tools : {}),
@@ -335,14 +348,14 @@ export async function turnStream(opts: TurnOptions) {
         ...subagents,
         ...(useArtifacts ? artifactTools(threadId, user.id, { shots, canViewImages: model.inputModalities.includes("image"), savedThisTurn: artifactsInCurrentTurn(uiMessages), shotsThisTurn: screenshotsInCurrentTurn(uiMessages), browserDown }) : {}),
         ...(imageServices.length ? imageTools(user.id, threadId, imageServices, signal) : {}),
-        ...(model.toolCall && !temporary && settings.codeExecution && sandboxConfigured() && !sandboxDown ? sandboxTools(user.id, threadId, signal, sandboxTurn) : {}),
+        ...(model.toolCall && !temporary && allowed("code") && settings.codeExecution && sandboxConfigured() && !sandboxDown ? sandboxTools(user.id, threadId, signal, sandboxTurn) : {}),
         ...(useGenerativeUI ? frontendTools(opts.clientTools!) : {}),
         ...mcp.tools,
         // Only trimmed chats point the model at removed attachments, so others keep their tool list (and cache).
         ...(compaction?.trim ? attachmentTools(user.id, canViewImages ? toolImages : undefined) : {}),
         // From a chat's first research on, so its tool block changes once, not with every toggle.
         ...(model.toolCall && (research || hasResearch(uiMessages)) ? researchTool() : {}),
-      };
+      }, new Set(Object.keys(mcp.tools)));
       const applied = applyCompaction(uiMessages, compaction);
       const { messages: live, summary } = applied;
       const handle = createModel(model, conn, {
@@ -369,7 +382,7 @@ export async function turnStream(opts: TurnOptions) {
       // Retrieved facts change with the query, so they sit beside the user message they were retrieved for,
       // never in the system prefix. Stored chats replay each earlier block verbatim to keep the prefix cached.
       let converted = modelMessages;
-      const date = promptText("date", { date: new Date().toISOString().slice(0, 10) });
+      const date = resolvePrompt("date", actor, { date: new Date().toISOString().slice(0, 10) });
       if (temporary) {
         // Nothing is stored, so the date goes once before the first user message: the same bytes every turn,
         // and not beside every new message. Memory retrieved for the latest message stays beside that message.
@@ -379,7 +392,7 @@ export async function turnStream(opts: TurnOptions) {
         const dateAt = firstUserIndex < 0 ? converted.length : firstUserIndex;
         const latestContext = [
           contextText({ date: dateAt === latestAt ? date : "", memory: memory.context, skills: skills.context, knowledge: "", knowledgeIds: [] }),
-          lastUser && isVoiceTurn(lastUser) ? promptText("voiceCall") : "",
+          lastUser && isVoiceTurn(lastUser) ? resolvePrompt("voiceCall", actor) : "",
         ].filter(Boolean).join("\n\n");
         if (latestContext) converted.splice(latestAt, 0, turnBlock(latestContext));
         if (dateAt !== latestAt) converted.splice(dateAt, 0, turnBlock(date));
@@ -455,9 +468,9 @@ export async function turnStream(opts: TurnOptions) {
         tainted = tainted || messagesHaveUntrustedContent(converted);
       }
       const remainingSteps = stepBudget.remaining;
-      const memoryInstructions = [temporary ? promptText("temporary") : "", memory.instructions].filter(Boolean).join("\n\n");
+      const memoryInstructions = [temporary ? resolvePrompt("temporary", actor) : "", memory.instructions].filter(Boolean).join("\n\n");
       const messages = handle.markCache([
-        systemPrompt(model, personalized ? settings.systemPrompt : "", mcp.instructions, useArtifacts, useGenerativeUI ? opts.clientSystem : undefined, memoryInstructions),
+        systemPrompt(userId, model, personalized ? personalInstructions(userId, modelRef) : "", mcp.instructions, useArtifacts, useGenerativeUI ? opts.clientSystem : undefined, memoryInstructions),
         chatContext(temporary ? "" : projectContext(userId, thread.projectId), memory.summary ? wrapUntrusted(memory.summary, { kind: "past_chat", name: "saved memory summary" }).text : undefined),
       ], [
         ...(summary ? summaryMessages(summary) : []),
@@ -770,7 +783,7 @@ export const chatRoutes = new Hono<AppEnv>()
           providerOptions: handle.providerOptions,
           maxRetries: 0,
           maxOutputTokens: 400,
-          prompt: promptText("title", { message: text.slice(0, 4000) }),
+          prompt: resolvePrompt("title", { userId: user.id, modelRef: model.ref }, { message: text.slice(0, 4000) }),
         });
         const usage = normalizeUsage(result.totalUsage);
         recordUsage({ userId: user.id, threadId, providerId: model.providerId, modelId: model.id, kind: "title", usage, cost: costOf(model.cost, usage) });

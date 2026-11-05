@@ -5,6 +5,8 @@ import type { EmailSecrets } from "./accounts.js";
 import { emailConnectTarget } from "./accounts.js";
 import { EmailError, mapEmailError } from "./errors.js";
 import { assertAddressList, assertHeaderValue, buildMime } from "./mime.js";
+import { assertFeature } from "../permissions/guard.js";
+import { reserveOperation } from "../permissions/limits.js";
 
 // SMTP sending through nodemailer. A STARTTLS endpoint always requires the upgrade (requireTLS), so
 // a server that cannot provide TLS fails instead of receiving credentials in cleartext. The raw
@@ -64,6 +66,12 @@ function validate(mail: OutgoingMail): void {
 }
 
 export async function sendEmail(secrets: EmailSecrets, mail: OutgoingMail, opts: { tls?: ConnectionOptions } = {}): Promise<EmailSendResult> {
+  // Rechecked at the actual send, after the approval flow has already run.
+  assertFeature(secrets.userId, "email");
+  return sendEmailWork(secrets, mail, opts);
+}
+
+async function sendEmailWork(secrets: EmailSecrets, mail: OutgoingMail, opts: { tls?: ConnectionOptions } = {}): Promise<EmailSendResult> {
   validate(mail);
   const from = secrets.account.address;
   const text = mail.text;
@@ -82,6 +90,8 @@ export async function sendEmail(secrets: EmailSecrets, mail: OutgoingMail, opts:
   const target = await emailConnectTarget(secrets.userId, secrets.smtp.host).catch((error: unknown) => {
     throw mapEmailError(error, "SMTP server");
   });
+  // Charged after the destination is authorized and before the socket.
+  const lease = reserveOperation({ userId: secrets.userId }, "email.remote");
   const transport = transportFor(secrets, target, opts.tls);
   try {
     const info = await transport.sendMail({ envelope: { from, to: recipients }, raw });
@@ -98,21 +108,29 @@ export async function sendEmail(secrets: EmailSecrets, mail: OutgoingMail, opts:
   } catch (error) {
     throw mapEmailError(error, "SMTP server");
   } finally {
+    lease.release();
     transport.close();
   }
 }
 
 /** SMTP-only connection check for the settings Test button. */
 export async function verifySmtp(secrets: EmailSecrets, tls?: ConnectionOptions): Promise<void> {
+  assertFeature(secrets.userId, "email");
+  return verifySmtpWork(secrets, tls);
+}
+
+async function verifySmtpWork(secrets: EmailSecrets, tls?: ConnectionOptions): Promise<void> {
   const target = await emailConnectTarget(secrets.userId, secrets.smtp.host).catch((error: unknown) => {
     throw mapEmailError(error, "SMTP server");
   });
+  const lease = reserveOperation({ userId: secrets.userId }, "email.remote");
   const transport = transportFor(secrets, target, tls);
   try {
     await transport.verify();
   } catch (error) {
     throw mapEmailError(error, "SMTP server");
   } finally {
+    lease.release();
     transport.close();
   }
 }

@@ -4,6 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { AppEnv } from "../auth.js";
 import { db } from "../db.js";
+import { assertFeature } from "../permissions/guard.js";
 import { deleteUpload, MAX_BYTES, storeUpload } from "../files.js";
 import { excerpt } from "./chunker.js";
 import { embeddingOptions } from "./embeddings.js";
@@ -89,7 +90,10 @@ export const knowledgeRoutes = new Hono<AppEnv>()
     await next();
   })
   // Registered before `/collections/:id` so the literal path is not shadowed.
-  .get("/embedding-options", async (c) => c.json({ options: await embeddingOptions(c.get("user").id) }))
+  .get("/embedding-options", async (c) => {
+    assertFeature(c.get("user").id, "knowledge");
+    return c.json({ options: await embeddingOptions(c.get("user").id) });
+  })
   .get("/collections", (c) => {
     const project = c.req.query("project");
     const userId = c.get("user").id;
@@ -99,6 +103,7 @@ export const knowledgeRoutes = new Hono<AppEnv>()
     return c.json({ collections });
   })
   .post("/collections", async (c) => {
+    assertFeature(c.get("user").id, "knowledge");
     const parsed = collectionInput.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? "Invalid collection" }, 400);
     return c.json(createCollection(c.get("user").id, parsed.data));
@@ -110,6 +115,7 @@ export const knowledgeRoutes = new Hono<AppEnv>()
     return c.json({ collection, sources: listSources(userId, collection.id) });
   })
   .patch("/collections/:id", async (c) => {
+    assertFeature(c.get("user").id, "knowledge");
     const parsed = collectionPatch.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? "Invalid collection" }, 400);
     const userId = c.get("user").id;
@@ -130,6 +136,7 @@ export const knowledgeRoutes = new Hono<AppEnv>()
   })
   .post("/collections/:id/sources/file", async (c) => {
     const userId = c.get("user").id;
+    assertFeature(userId, "knowledge");
     const collectionId = c.req.param("id");
     if (!getCollectionRow(userId, collectionId)) return c.json({ error: "Collection not found" }, 404);
     const form = await c.req.formData();
@@ -149,6 +156,7 @@ export const knowledgeRoutes = new Hono<AppEnv>()
     return c.json(source, 201);
   })
   .post("/collections/:id/sources/paste", async (c) => {
+    assertFeature(c.get("user").id, "knowledge");
     const parsed = z.object({ name: z.string().trim().min(1).max(200), text: z.string().min(1).max(MAX_TEXT) }).safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: `Pasted text must be 1–${MAX_TEXT} characters with a name.` }, 400);
     const userId = c.get("user").id;
@@ -163,6 +171,7 @@ export const knowledgeRoutes = new Hono<AppEnv>()
     return c.json(source, 201);
   })
   .post("/collections/:id/sources/url", async (c) => {
+    assertFeature(c.get("user").id, "knowledge");
     const parsed = z.object({ url: z.string().url().max(2000) }).safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "Enter a valid http or https URL." }, 400);
     const userId = c.get("user").id;
@@ -189,6 +198,7 @@ export const knowledgeRoutes = new Hono<AppEnv>()
   })
   .post("/collections/:id/reindex", (c) => {
     const userId = c.get("user").id;
+    assertFeature(userId, "knowledge");
     const collectionId = c.req.param("id");
     if (!getCollectionRow(userId, collectionId)) return c.json({ error: "Collection not found" }, 404);
     cancelCollectionIngestion(userId, collectionId);
@@ -198,6 +208,7 @@ export const knowledgeRoutes = new Hono<AppEnv>()
     return c.json({ queued: sources.length });
   })
   .post("/collections/:id/search", async (c) => {
+    assertFeature(c.get("user").id, "knowledge");
     const parsed = z.object({ query: z.string().trim().min(1).max(1000), k: z.number().int().min(1).max(12).optional() }).safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "Enter a search query." }, 400);
     const userId = c.get("user").id;
@@ -247,6 +258,7 @@ export const knowledgeRoutes = new Hono<AppEnv>()
   })
   .post("/sources/:id/retry", (c) => {
     const userId = c.get("user").id;
+    assertFeature(userId, "knowledge");
     const sourceId = c.req.param("id");
     if (!requeueSource(userId, sourceId)) return c.json({ error: "Source not found" }, 404);
     enqueueSource(userId, sourceId);
@@ -254,6 +266,7 @@ export const knowledgeRoutes = new Hono<AppEnv>()
   })
   .post("/sources/:id/reindex", (c) => {
     const userId = c.get("user").id;
+    assertFeature(userId, "knowledge");
     const sourceId = c.req.param("id");
     if (!requeueSource(userId, sourceId)) return c.json({ error: "Source not found" }, 404);
     enqueueSource(userId, sourceId);

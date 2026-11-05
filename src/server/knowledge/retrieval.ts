@@ -2,6 +2,7 @@ import type { KnowledgeRetrievalMode, KnowledgeSearchHit, KnowledgeSearchResult 
 import { db } from "../db.js";
 import { cosine, createEmbedder, decodeVector, embeddingKey, type Embedder } from "./embeddings.js";
 import { getCollectionRow, type CollectionRow } from "./store.js";
+import { assertFeature } from "../permissions/guard.js";
 
 // Hybrid retrieval: FTS5 BM25 over chunks and cosine over normalized embeddings, fused with reciprocal
 // rank fusion. Vectors are never scanned table-wide per query: the per-collection cache is bounded and
@@ -272,6 +273,8 @@ export interface RetrievalOutcome extends KnowledgeSearchResult {
  * best first, with overlapping passages from the same document collapsed to the better one.
  */
 export async function searchKnowledge(opts: SearchOptions): Promise<RetrievalOutcome> {
+  // Retrieval itself is the denied action, including the query embedding it may send.
+  assertFeature(opts.userId, "knowledge");
   const k = Math.max(1, Math.min(20, Math.floor(opts.k ?? DEFAULT_K)));
   const budget = Math.max(200, Math.min(12_000, Math.floor(opts.budgetTokens ?? DEFAULT_BUDGET_TOKENS)));
   const collections = [...new Set(opts.collectionIds)]

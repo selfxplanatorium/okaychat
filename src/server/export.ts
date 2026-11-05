@@ -17,6 +17,8 @@ import { sniffRaster } from "./media/sniff.js";
 import { getMedia, mediaPath } from "./media/store.js";
 import { renderVariant, variantFile, type ImageSource } from "./media/variants.js";
 import { imagePath } from "./tools/image.js";
+import { assertFeature } from "./permissions/guard.js";
+import { reserveOperation } from "./permissions/limits.js";
 
 /** An image the conversation showed: an attached image, or a generated/MCP image card. */
 export interface ExportImage {
@@ -182,7 +184,10 @@ export const exportRoutes = new Hono<AppEnv>().get("/threads/:id/export", async 
     return c.body(markdown, 200, { ...headers, "Content-Type": "text/markdown; charset=utf-8", "Content-Disposition": disposition(title, "md") });
   }
   // PDF needs the browser worker. Markdown export never does, so this is the only affected format.
+  // Exporting your own data stays available; rendering a PDF through the worker is an artifact action.
+  assertFeature(userId, "artifacts");
   if (!rendererAvailable()) return errorJson(c, serviceUnavailable("browser"));
+  const lease = reserveOperation({ userId }, "browser.render");
   try {
     // Copy into a plain ArrayBuffer view; Hono's body type rejects ArrayBufferLike.
     const images: ExportImage[] = [];
@@ -202,5 +207,7 @@ export const exportRoutes = new Hono<AppEnv>().get("/threads/:id/export", async 
     console.error("[export]", redactSecrets(String((error as Error)?.message ?? error)).slice(0, 500));
     // A failed render is still this server's rendering service failing, never a raw worker message.
     return errorJson(c, serviceUnavailable("browser"));
+  } finally {
+    lease.release();
   }
 });

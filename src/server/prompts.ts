@@ -281,11 +281,26 @@ function override(key: PromptKey): string | null {
   return row ? row.value : null;
 }
 
-/** The effective prompt with `{name}` placeholders filled. Unknown placeholders stay as written. */
-export function promptText(key: PromptKey, values: Record<string, string | number> = {}): string {
-  const text = override(key) ?? DEFS[key].defaultValue;
+export const isPromptKey = isKey;
+export const compiledPrompt = (key: PromptKey): string => DEFS[key].defaultValue;
+export const promptPlaceholders = (key: PromptKey): string[] => DEFS[key].placeholders;
+/** The compiled default with the server-wide override applied: the everyone/all-model layer. */
+export const serverPrompt = (key: PromptKey): string => override(key) ?? DEFS[key].defaultValue;
+export const serverOverride = override;
+
+/** Fills known `{name}` placeholders. Unknown placeholders stay as written (documents use a literal `{page}`). */
+export function fillPrompt(key: PromptKey, text: string, values: Record<string, string | number> = {}): string {
   const filled: Record<string, string | number> = key === "artifacts" ? { maxShots: MAX_SHOTS_PER_TURN, ...values } : values;
   return text.replace(/\{(\w+)\}/g, (match, name: string) => (Object.hasOwn(filled, name) ? String(filled[name]) : match));
+}
+
+/**
+ * The server-wide prompt with `{name}` placeholders filled. Only for prompts no model receives on behalf of
+ * an account (or tests); model-bound callers use `resolvePrompt()` in prompt-policy.ts, which applies the
+ * admin's group, user, and model rules.
+ */
+export function promptText(key: PromptKey, values: Record<string, string | number> = {}): string {
+  return fillPrompt(key, serverPrompt(key), values);
 }
 
 export function listPrompts(): AdminPrompt[] {

@@ -44,6 +44,10 @@ export interface CallDeps {
   stillSignedIn: () => boolean;
   /** The admin's longest recording, in seconds. */
   maxRecordingSeconds: () => number;
+  /** Live voice permission: rechecked when a call starts, on SDP signalling, and by the watchdog. */
+  featureAllowed?: (userId: string) => boolean;
+  /** Charges and holds the call's operation lease; returns the release. Throws when admission is denied. */
+  admit?: () => () => void;
   /**
    * Called once when a call ends, with counters only (no audio, no text). The chat model's own usage is recorded
    * by the normal chat path; this is the speech half, like the counters the speech routes keep.
@@ -116,6 +120,7 @@ export class CallSession {
   private ttsChars = 0;
   private sttSeconds = 0;
   private registered = false;
+  private releaseOperation: (() => void) | undefined;
   private readonly now: () => number;
 
   constructor(private readonly userId: string, private readonly socket: CallSocket, private readonly deps: CallDeps) {
@@ -196,6 +201,8 @@ export class CallSession {
     if (this.phase === "ended") return;
     const now = this.now();
     if (!this.deps.stillSignedIn()) return this.end("unauthorized");
+    // Revocation closes the open call on the next watchdog tick, not only the next start.
+    if (!this.policyAllows()) return this.end("unavailable");
     if (this.phase === "waiting") {
       if (now - this.createdAt > this.deps.limits.startSeconds * 1000) this.fail("protocol", "No start message.", true);
       return;
@@ -222,6 +229,8 @@ export class CallSession {
   private cleanup() {
     if (this.phase === "ended") return;
     this.phase = "ended";
+    this.releaseOperation?.();
+    this.releaseOperation = undefined;
     this.lifetime.abort();
     this.speaking?.abort();
     this.speaking = null;
@@ -250,8 +259,14 @@ export class CallSession {
     if (fatal) this.end(code);
   }
 
+  /** No policy check installed means no restriction (unit tests build sessions with fakes). */
+  private policyAllows() {
+    return !this.deps.featureAllowed || this.deps.featureAllowed(this.userId);
+  }
+
   private async start(threadId: string, requested: CallEngine, takeover: boolean) {
     if (this.phase !== "waiting") return this.fail("protocol", "The call has already started.", false);
+    if (!this.policyAllows()) return this.fail("unavailable", "Voice is disabled for this account.", true);
     this.phase = "preparing";
     this.preparingSince = this.now();
     if (!this.deps.threadOwned(this.userId, threadId)) return this.fail("thread", "That chat does not exist.", true);
@@ -263,6 +278,12 @@ export class CallSession {
     this.deps.registry.set(this.userId, this);
     this.registered = true;
     this.threadId = threadId;
+    // One operation lease for the whole session, released when the call ends or the socket closes.
+    try {
+      this.releaseOperation = this.deps.admit?.();
+    } catch (error) {
+      return this.fail("rate", error instanceof Error ? error.message : "Voice is not admitted right now.", true);
+    }
 
     const local = this.deps.backends.local(this.userId);
     const choice = selectEngine(requested, local, () => this.deps.backends.realtime(this.userId, this.threadId));
@@ -333,6 +354,7 @@ export class CallSession {
   // ---- Realtime signalling ----
 
   private async offer(sdp: string) {
+    if (!this.policyAllows()) return this.fail("unavailable", "Voice is disabled for this account.", true);
     if (this.phase !== "active" || this.engine !== "realtime" || !this.realtime) return this.fail("protocol", "This call does not use Realtime.", false);
     if (this.realtimeOffered) return this.fail("protocol", "The Realtime session was already set up.", false);
     if (!sdp.startsWith("v=0")) return this.fail("protocol", "That is not a session description.", false);

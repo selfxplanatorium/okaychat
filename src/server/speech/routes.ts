@@ -24,6 +24,7 @@ import { adminSpeech, adminSpeechSchema, deleteRecordings, recordingStats, retai
 import { credentialFor, MAX_AUDIO_BYTES, MAX_TTS_CHARS, sniffAudio, synthesize, transcribe } from "./engines.js";
 import { speechOptions } from "./options.js";
 import { speechWorkerConfigured, workerHealth, workerModels, workerPreload } from "./worker.js";
+import { assertFeature } from "../permissions/guard.js";
 
 // Speech API. Recordings arrive as multipart uploads, are transcribed in memory, and are dropped when the
 // request ends unless an admin set a retention period. See docs/implementation/speech.md.
@@ -138,6 +139,7 @@ export const speechRoutes = new Hono<AppEnv>()
     bodyLimit({ maxSize: MAX_AUDIO_BYTES + 64 * 1024, onError: (c) => c.json({ error: "Recordings are limited to 25 MB." }, 413) }),
     async (c) => {
       const user = c.get("user");
+      assertFeature(user.id, "voice");
       const form = await c.req.formData().catch(() => null);
       const file = form?.get("file");
       if (!(file instanceof File) || file.size === 0) return c.json({ error: "Send the recording as `file`." }, 400);
@@ -170,6 +172,7 @@ export const speechRoutes = new Hono<AppEnv>()
   )
   .post("/speech/synthesize", async (c) => {
     const user = c.get("user");
+    assertFeature(user.id, "voice");
     const body = synthInput.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json({ error: body.error.issues[0]?.message ?? "Invalid request." }, 400);
     const prefs = getSettings(user.id).speech?.tts ?? {};
@@ -186,6 +189,7 @@ export const speechRoutes = new Hono<AppEnv>()
     return new Response(speech.audio as Uint8Array<ArrayBuffer>, { headers: { "Content-Type": speech.mime, "Cache-Control": "private, no-store" } });
   })
   .get("/speech/options", async (c) => {
+    assertFeature(c.get("user").id, "voice");
     const kind = c.req.query("kind");
     const what = c.req.query("what");
     if ((kind !== "stt" && kind !== "tts") || (what !== "models" && what !== "voices")) return c.json({ error: "kind must be stt or tts, what models or voices" }, 400);

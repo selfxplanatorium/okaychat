@@ -11,6 +11,7 @@ import { AppError } from "./errors.js";
 import { getProject } from "./projects.js";
 import { describeBoundaryError } from "./provider-errors.js";
 import { appendMessage, currentBranch, ensureThread, getThread, updateThread } from "./threads.js";
+import { assertFeature, assertModelAllowed, featureAllowed } from "./permissions/guard.js";
 
 // Scheduled prompts run on the server with nobody watching: append the prompt to the schedule's thread (or a new
 // one per run), run one turn, and persist both messages in the client's history format so the thread opens normally.
@@ -100,6 +101,19 @@ const running = new Set<string>();
  */
 export async function runSchedule(row: Row, reserved?: () => void): Promise<void> {
   if (running.has(row.id)) return reserved?.();
+  // Pickup re-checks the feature and the schedule's own model, so a revoke after creation stops future
+  // runs without a provider call. The record stays, the failure is safe, and the next due time is normal
+  // (never a rapid retry).
+  if (!featureAllowed({ userId: row.user_id, modelRef: row.model_ref }, "schedules")) {
+    recordSkipped(row, "Scheduled prompts are disabled for this account.");
+    return reserved?.();
+  }
+  try {
+    assertModelAllowed(row.user_id, row.model_ref);
+  } catch {
+    recordSkipped(row, "This schedule's model is not allowed for this account.");
+    return reserved?.();
+  }
   const release = reserved ?? reserveTurn(row.user_id);
   if (!release) return;
   running.add(row.id);
@@ -162,6 +176,16 @@ export async function runSchedule(row: Row, reserved?: () => void): Promise<void
     running.delete(row.id);
     release();
   }
+}
+
+/** A permission failure leaves a normal record and the next regular due time, never an immediate retry. */
+function recordSkipped(row: Row, message: string) {
+  db.prepare("UPDATE schedules SET last_run_at = ?, last_status = 'error', last_error = ?, next_run_at = ? WHERE id = ?").run(
+    Date.now(),
+    message,
+    nextRun(JSON.parse(row.spec_json) as ScheduleSpec, Date.now()),
+    row.id,
+  );
 }
 
 const withoutId = ({ id: _id, ...rest }: UIMessage) => rest;
@@ -251,6 +275,7 @@ export const scheduleRoutes = new Hono<AppEnv>()
     return c.json(rows.map(toSchedule));
   })
   .post("/schedules", async (c) => {
+    assertFeature(c.get("user").id, "schedules");
     const body = input.safeParse(await c.req.json());
     if (!body.success) return c.json({ error: body.error.issues[0]?.message }, 400);
     const { n } = db.prepare("SELECT COUNT(*) AS n FROM schedules WHERE user_id = ?").get(c.get("user").id) as { n: number };
@@ -266,6 +291,7 @@ export const scheduleRoutes = new Hono<AppEnv>()
     return c.json(toSchedule(getRow(c.get("user").id, id)!));
   })
   .put("/schedules/:id", async (c) => {
+    assertFeature(c.get("user").id, "schedules");
     const prev = getRow(c.get("user").id, c.req.param("id"));
     if (!prev) return c.json({ error: "Not found" }, 404);
     const body = input.safeParse(await c.req.json());
@@ -279,6 +305,7 @@ export const scheduleRoutes = new Hono<AppEnv>()
     return c.json(toSchedule(getRow(c.get("user").id, prev.id)!));
   })
   .post("/schedules/:id/run", (c) => {
+    assertFeature(c.get("user").id, "schedules");
     const row = getRow(c.get("user").id, c.req.param("id"));
     if (!row) return c.json({ error: "Not found" }, 404);
     if (blocked(row)) return c.json({ error: "Its chat is replying. Try again when it finishes." }, 409);

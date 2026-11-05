@@ -13,6 +13,7 @@ import { riskMetadata, scanForInjection, wrapUntrusted } from "./prompt-injectio
 import { handleAppError } from "./errors.js";
 import { assertStorage } from "./quota.js";
 import { fetchSkillSource, skillSourceUrl } from "./skill-fetch.js";
+import { assertFeature, featureAllowed } from "./permissions/guard.js";
 
 // Agent Skills (anthropic.dev/agent-skills) as per-account instruction packages: a SKILL.md with
 // `name` + `description` frontmatter and a Markdown body, plus optional reference files. The model
@@ -197,6 +198,8 @@ interface SkillDraft {
 }
 
 export function saveSkill(userId: string, draft: SkillDraft, origin: SkillOrigin, sourceId?: string | null, existingId?: string): SkillDetail {
+  // Creating or changing a skill is a skills action; deleting an installed one and reading one stay allowed.
+  assertFeature(userId, "skills");
   const { name, description, body } = validateSkill(draft.name, draft.description, draft.body);
   const files = (draft.files ?? []).map((f) => ({ ...f, name: validateSkillFileName(f.name) }));
   if (files.length > MAX_FILES) invalid(`A skill can hold up to ${MAX_FILES} files.`);
@@ -628,6 +631,7 @@ export function deleteSource(userId: string, id: string): void {
 
 /** Lists every installable skill of one stored source without installing anything. */
 export async function listSkillsInSource(userId: string, source: SkillSource, signal?: AbortSignal): Promise<SkillSourceListing> {
+  assertFeature(userId, "skills");
   const row = findSource(userId, source.id);
   const token = tokenOf(row);
   try {
@@ -649,6 +653,7 @@ export async function listSkillsInSource(userId: string, source: SkillSource, si
  * This is the shared path of the model's install_skill tool and the Skills page install button.
  */
 export async function installSkillFromSource(userId: string, sourceRef: string, entryName: string, signal?: AbortSignal, beforeSave?: () => void): Promise<{ skill: SkillDetail; skipped: string[] }> {
+  assertFeature(userId, "skills");
   const row = findSource(userId, sourceRef);
   const source = toSource(row);
   const token = tokenOf(row);
@@ -709,12 +714,14 @@ const EMPTY_TURN: TurnSkills = { context: "", tools: {}, subTools: {} };
  */
 export function turnSkills(userId: string, opts: { temporary: boolean; canCallTools: boolean }): TurnSkills {
   if (opts.temporary || !opts.canCallTools) return EMPTY_TURN;
+  // A denied account gets neither the index nor the tools, even with skills enabled in preferences.
+  if (!featureAllowed(userId, "skills")) return EMPTY_TURN;
   const prefs = skillPreferences(userId);
   if (!prefs.enabled) return EMPTY_TURN;
   const indexRevision = prefs.revision;
   const allowed = () => {
     const current = skillPreferences(userId);
-    return current.enabled && current.revision === indexRevision;
+    return current.enabled && current.revision === indexRevision && featureAllowed(userId, "skills");
   };
   const canUse = () => { if (!allowed()) invalid("Skills were disabled. Continue without them until the next reply.", 409); };
   const enabledByName = (name: string): SkillDetail | undefined => {
@@ -855,28 +862,40 @@ export const skillRoutes = new Hono<AppEnv>()
     return c.json(setSkillPreferences(c.get("user").id, parsed.data));
   })
   .get("/sources", (c) => c.json(listSources(c.get("user").id)))
-  .post("/sources", async (c) => c.json(saveSource(c.get("user").id, await c.req.json().catch(() => null))))
-  .put("/sources/:id", async (c) => c.json(saveSource(c.get("user").id, await c.req.json().catch(() => null), c.req.param("id"))))
+  .post("/sources", async (c) => {
+    assertFeature(c.get("user").id, "skills");
+    return c.json(saveSource(c.get("user").id, await c.req.json().catch(() => null)));
+  })
+  .put("/sources/:id", async (c) => {
+    assertFeature(c.get("user").id, "skills");
+    return c.json(saveSource(c.get("user").id, await c.req.json().catch(() => null), c.req.param("id")));
+  })
   .delete("/sources/:id", (c) => {
     deleteSource(c.get("user").id, c.req.param("id"));
     return c.json({ ok: true });
   })
   .get("/sources/:id/skills", async (c) => {
     const userId = c.get("user").id;
+    assertFeature(userId, "skills");
     const row = findSource(userId, c.req.param("id"));
     return c.json(await listSkillsInSource(userId, toSource(row), c.req.raw.signal));
   })
   .post("/sources/:id/install", async (c) => {
     const userId = c.get("user").id;
+    assertFeature(userId, "skills");
     const parsed = z.object({ name: z.string().trim().min(1).max(120) }).safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "Choose a skill to install." }, 400);
     const { skill, skipped } = await installSkillFromSource(userId, c.req.param("id"), parsed.data.name, c.req.raw.signal);
     return c.json({ ...skill, skipped });
   })
   .get("/", (c) => c.json(listSkills(c.get("user").id)))
-  .post("/", async (c) => c.json(saveSkill(c.get("user").id, parseSkillInput(await c.req.json().catch(() => null)), "manual")))
+  .post("/", async (c) => {
+    assertFeature(c.get("user").id, "skills");
+    return c.json(saveSkill(c.get("user").id, parseSkillInput(await c.req.json().catch(() => null)), "manual"));
+  })
   .post("/import", async (c) => {
     const userId = c.get("user").id;
+    assertFeature(userId, "skills");
     const file = (await c.req.formData()).get("file");
     if (!(file instanceof File)) return c.json({ error: "No file" }, 400);
     if (file.size > MAX_UPLOAD_BYTES) return c.json({ error: "File is larger than 10 MB" }, 413);
@@ -890,6 +909,7 @@ export const skillRoutes = new Hono<AppEnv>()
   .get("/:id", (c) => c.json(getSkill(c.get("user").id, c.req.param("id"))))
   .put("/:id", async (c) => {
     const userId = c.get("user").id;
+    assertFeature(userId, "skills");
     const existing = getSkill(userId, c.req.param("id"));
     const draft = parseSkillInput(await c.req.json().catch(() => null));
     if (draft.name !== existing.name && db.prepare("SELECT 1 FROM skills WHERE user_id = ? AND name = ?").get(userId, draft.name)) {
@@ -899,6 +919,7 @@ export const skillRoutes = new Hono<AppEnv>()
     return c.json(getSkill(userId, existing.id));
   })
   .patch("/:id", async (c) => {
+    assertFeature(c.get("user").id, "skills");
     const parsed = z.object({ enabled: z.boolean() }).strict().safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) return c.json({ error: "Invalid skill settings" }, 400);
     return c.json(setSkillEnabled(c.get("user").id, c.req.param("id"), parsed.data.enabled));
