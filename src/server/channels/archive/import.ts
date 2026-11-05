@@ -73,6 +73,7 @@ interface StoredPlan extends ImportPlan {
 }
 
 interface PromotionAttachment {
+  key: string;
   id: string;
   asset: string;
   ext: string;
@@ -452,6 +453,7 @@ function promote(row: RoomArchiveJobRow, plan: StoredPlan, name: string, existin
   }
   const targetChannelId = existing?.channelId ?? newId("chn");
   const journal: PromotionJournal = existing ?? { v: 1, channelId: targetChannelId, attachments: [] };
+  writeJournal(row, journal);
   const byHash = new Map(plan.assets.map((asset) => [asset.hash, asset]));
   for (const message of plan.manifest.messages) {
     for (const attachment of message.attachments) {
@@ -464,13 +466,15 @@ function promote(row: RoomArchiveJobRow, plan: StoredPlan, name: string, existin
         }
         continue;
       }
-      const id = journal.attachments.find((entry) => entry.asset === asset.hash)?.id ?? newId("cat");
+      const id = journal.attachments.find((entry) => entry.key === attachment.key)?.id ?? newId("cat");
       const source = stagePath(row.user_id, row.id, `assets/${asset.hash}`);
       if (!existsSync(source)) throw new RoomArchiveFormatError("invalid_archive", "An attachment original is missing.", attachment.key);
       if (statSync(source).size !== asset.size) throw new RoomArchiveFormatError("invalid_archive", "An attachment original changed.", attachment.key);
       const ext = RASTER_EXTENSION[asset.mime as RasterMime] ?? "bin";
+      if (!journal.attachments.some((entry) => entry.key === attachment.key)) journal.attachments.push({ key: attachment.key, id, asset: asset.hash, ext });
+      // Persist the destination before writing so recovery can remove a partial promotion.
+      writeJournal(row, journal);
       writeStageFile(channelAttachmentPath(targetChannelId, id, asset.mime), new Uint8Array(readFileSync(source)));
-      if (!journal.attachments.some((entry) => entry.asset === asset.hash)) journal.attachments.push({ id, asset: asset.hash, ext });
     }
   }
   // The journal is durable before any destination row can exist and before the media dir is trusted.
@@ -517,7 +521,12 @@ export function commitImport(row: RoomArchiveJobRow, name: string, journal: Prom
   const identityIds = new Map(manifest.identities.map((identity) => [identity.key, newId("cimp")]));
   const messageIds = new Map(manifest.messages.map((message) => [message.key, newId("cmsg")]));
   const attachmentIds = new Map<string, string>();
-  for (const message of manifest.messages) for (const attachment of message.attachments) attachmentIds.set(attachment.key, newId("cat"));
+  for (const message of manifest.messages) {
+    for (const attachment of message.attachments) {
+      const promoted = journal.attachments.find((entry) => entry.key === attachment.key);
+      attachmentIds.set(attachment.key, promoted?.id ?? newId("cat"));
+    }
+  }
 
   const now = Date.now();
   const meta = importedMetaJson({
