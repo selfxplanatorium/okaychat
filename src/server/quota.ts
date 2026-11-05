@@ -86,6 +86,10 @@ export function storageUsedSql(user: string): string {
       FROM n8n_agent_sessions WHERE user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(length(CAST(text AS BLOB))), 0) FROM user_model_instructions WHERE user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(length(CAST(custom_instructions AS BLOB))), 0) FROM threads WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(length(CAST(name AS BLOB)) + length(CAST(shortcut AS BLOB)) + length(CAST(body AS BLOB))), 0)
+      FROM saved_prompts WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(length(CAST(f.comment_enc AS BLOB))), 0)
+      FROM message_feedback f JOIN threads t ON t.id = f.thread_id WHERE t.user_id = ${user}
   )), 0)`;
 }
 

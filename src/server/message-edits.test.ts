@@ -323,6 +323,7 @@ test("migration adds the edit columns and leaves existing rows unedited", () => 
       // Recreate schema 32, before reply editing (33), writing drafts (34), and media (35).
       // A fixed historical version stays valid when future migrations are appended.
       db.exec("ALTER TABLE email_drafts DROP COLUMN kind");
+      db.exec("DROP TABLE message_feedback; DROP TABLE message_bookmarks; DROP TABLE saved_prompts");
       db.exec("DROP TABLE image_threads; DROP TABLE media; DROP INDEX uploads_media; DROP INDEX sandbox_files_media");
       for (const table of ["uploads", "sandbox_files", "user_avatars"]) db.exec("ALTER TABLE " + table + " DROP COLUMN media_id");
       // Tables added by later migrations must be absent before the historical replay.

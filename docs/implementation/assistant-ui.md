@@ -174,3 +174,9 @@ Select in a row's menu starts sidebar multi-selection (`state/thread-selection.t
 ## n8n agents
 
 n8n agents extend chat targets, not ModelInfo. Explicit missing n8n refs must stay unavailable rather than falling back to an LLM. Agent turns reuse the chat UI stream/resume/persistence path. See [n8n agents](n8n-agents.md).
+
+## Message persistence gate and bookmark jumps
+
+History is written by the client's history adapter after a run ends, so `thread.isRunning === false` does not prove the server has the row. `runtime/message-persistence.ts` records ids only from a trustworthy GET and from acknowledged appends/edits; IndexedDB cache hits never count. `useStoredMessage()` reads that set through `useSyncExternalStore`, and annotation controls use it beside the existing idle/sync/editor gates. This is bookkeeping only: no extra request per message and no retry loop.
+
+The message list stays windowed, so a bookmark jump cannot assume its target is mounted. `state/message-jump.ts` holds a transient `{threadId, messageId, requestId}` and a registry of message roots keyed by chat and id. `WindowedMessages` resolves the id only against the runtime's current ordered ids, lowers both `start` and `floor` when the target is older, suppresses only that jump's bottom-distance restoration, then focuses the registered root and scrolls it to the center. A short `message-jump-highlight` outline fades after 1.5 s (no animation under reduced motion). A request never switches branches; a missing id says the message is no longer in the displayed branch. Ordinary incremental reveal is unchanged.

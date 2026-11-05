@@ -938,6 +938,43 @@ const migrations: Array<string | (() => void)> = [
     `);
     db.prepare("UPDATE permission_audit SET summary_json = ? WHERE revision = 1").run(JSON.stringify({ groups: groups.length }));
   },
+  // Personal saved prompts and private message annotations (docs/implementation/saved-prompts.md,
+  // message-annotations.md). Annotations have no user_id: ownership comes from the thread, and the composite
+  // foreign key removes them with their message. A feedback row with a NULL rating is a removal kept for its revision.
+  `
+  CREATE TABLE saved_prompts (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    shortcut TEXT NOT NULL COLLATE NOCASE,
+    body TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE (user_id, shortcut)
+  );
+  CREATE INDEX saved_prompts_user ON saved_prompts(user_id, updated_at DESC, id);
+  CREATE TABLE message_bookmarks (
+    thread_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (thread_id, message_id),
+    FOREIGN KEY (thread_id, message_id) REFERENCES messages(thread_id, id) ON DELETE CASCADE
+  );
+  CREATE TABLE message_feedback (
+    thread_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    rating TEXT CHECK (rating IN ('positive', 'negative')),
+    comment_enc TEXT,
+    message_edited_at INTEGER,
+    revision INTEGER NOT NULL CHECK (revision > 0),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (thread_id, message_id),
+    FOREIGN KEY (thread_id, message_id) REFERENCES messages(thread_id, id) ON DELETE CASCADE,
+    CHECK (rating IS NOT NULL OR comment_enc IS NULL)
+  );
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

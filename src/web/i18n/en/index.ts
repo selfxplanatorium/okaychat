@@ -2,6 +2,7 @@
 import account from "./account";
 import agents from "./agents";
 import admin from "./admin";
+import annotations from "./annotations";
 import appearance from "./appearance";
 import artifacts from "./artifacts";
 import audience from "./audience";
@@ -19,8 +20,10 @@ import knowledge from "./knowledge";
 import library from "./library";
 import mcp from "./mcp";
 import memory from "./memory";
+import messageDetails from "./messageDetails";
 import projects from "./projects";
 import providers from "./providers";
+import savedPrompts from "./savedPrompts";
 import schedules from "./schedules";
 import services from "./services";
 import settings from "./settings";
@@ -40,6 +43,7 @@ export const en = {
   account,
   admin,
   agents,
+  annotations,
   appearance,
   artifacts,
   audience,
@@ -57,8 +61,10 @@ export const en = {
   library,
   mcp,
   memory,
+  messageDetails,
   projects,
   providers,
+  savedPrompts,
   schedules,
   services,
   settings,

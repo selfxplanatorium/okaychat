@@ -28,6 +28,8 @@ import { knowledgeRoutes } from "./knowledge/routes.js";
 import { collectionAccessible } from "./knowledge/store.js";
 import { libraryRoutes } from "./library.js";
 import { messageEditRoutes } from "./message-edits.js";
+import { messageAnnotationRoutes } from "./message-annotations.js";
+import { savedPromptRoutes } from "./saved-prompts.js";
 import { clearAudience, setAudience } from "./groups.js";
 import { getProject, projectRoutes } from "./projects.js";
 import { scheduleRoutes } from "./schedules.js";
@@ -227,6 +229,8 @@ const api = new Hono<AppEnv>()
     return c.json({ ok: true, images: imagePartUpdates(row.content) });
   })
   .route("/", messageEditRoutes)
+  .route("/", messageAnnotationRoutes)
+  .route("/saved-prompts", savedPromptRoutes)
 
   // Usage
   .get("/usage", (c) => {

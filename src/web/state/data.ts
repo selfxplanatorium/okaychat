@@ -4,6 +4,13 @@ import { isAgentRef } from "@shared/n8n-agents";
 import { api, prefetch } from "@/lib/api";
 import { setLibraryAccount } from "./library-cache";
 import { clearMessageEdits } from "./message-edits";
+import { setAnnotationsAccount } from "./message-annotations";
+import { setSavedPromptsAccount } from "./saved-prompts";
+import { closePromptPicker } from "./prompt-picker";
+import { closeFeedback } from "./feedback-dialog";
+import { closeBookmarks } from "./bookmark-dialog";
+import { useMessageJump } from "./message-jump";
+import { clearStoredMessages } from "@/runtime/message-persistence";
 import { useServices } from "./services";
 import { startAgentAccount } from "./n8n-agents";
 import { warmThreadCache } from "@/runtime/threadCache";
@@ -213,7 +220,17 @@ export function preloadData(userId: string) {
   // account must never paint the new one.
   startAgentAccount(userId);
   // A new account must not inherit the previous one's edited-reply badges or open editor.
-  if (preloaded?.userId !== userId) clearMessageEdits();
+  if (preloaded?.userId !== userId) {
+    clearMessageEdits();
+    clearStoredMessages();
+    // Private prompts and annotations belong to the account that fetched them, never the next session.
+    setSavedPromptsAccount(userId);
+    setAnnotationsAccount(userId);
+    closePromptPicker();
+    closeFeedback();
+    closeBookmarks();
+    useMessageJump.getState().clear();
+  }
   // The service registry is optional data: it starts alongside the rest and never holds up the chat.
   useServices.getState().start(userId);
   // Once per signed-in user: a later status check for the same session must not refetch under a mounted shell.
