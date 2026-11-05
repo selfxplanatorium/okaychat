@@ -24,6 +24,8 @@ import { CreateChannelDialog } from "./CreateChannelDialog";
 import { ChannelJoinDialog } from "./ChannelJoinDialog";
 import { ChannelDmDialog } from "./ChannelDmDialog";
 import { ChannelThreadPanel } from "./ChannelThreadPanel";
+import { RoomArchiveDialog } from "./RoomArchiveDialog";
+import { startRoomArchiveAccount } from "@/state/room-archives";
 import type { MessageActions } from "./ChannelMessageRow";
 
 // A stable empty list: a fresh `[]` from a selector re-renders forever (React error 185).
@@ -61,6 +63,7 @@ export function ChannelsPage({ channelId, threadRootId }: { channelId?: string; 
   const [searchOpen, setSearchOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [archiveMode, setArchiveMode] = useState<"export" | "import" | null>(null);
   const [joinTarget, setJoinTarget] = useState<ChannelDirectoryEntry | ChannelInviteSummary | null>(null);
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const grid = useRef<HTMLDivElement>(null);
@@ -71,7 +74,10 @@ export function ChannelsPage({ channelId, threadRootId }: { channelId?: string; 
   const meId = me?.id ?? null;
 
   useEffect(() => {
-    if (me) void useChannels.getState().start(me.id);
+    if (me) {
+      startRoomArchiveAccount(me.id);
+      void useChannels.getState().start(me.id);
+    }
   }, [me]);
 
   useEffect(() => {
@@ -153,6 +159,10 @@ export function ChannelsPage({ channelId, threadRootId }: { channelId?: string; 
   });
   useCommand("channels.attach", () => document.querySelector<HTMLButtonElement>("[data-channel-attach]")?.click());
   useCommand("channels.newDm", () => setDmOpen(true));
+  useCommand("channels.exportRoom", () => {
+    if (room && room.kind !== "dm" && room.membership?.role === "owner") setArchiveMode("export");
+  });
+  useCommand("channels.importRoom", () => setArchiveMode("import"));
 
   const askAi = async (message: ChannelMessage) => {
     if (!room) return;
@@ -243,6 +253,7 @@ export function ChannelsPage({ channelId, threadRootId }: { channelId?: string; 
       onDecline={(id) => void useChannels.getState().decline(id)}
       onCreate={() => setCreateOpen(true)}
       onNewDm={() => setDmOpen(true)}
+      onImport={() => setArchiveMode("import")}
       onLoadMore={() => void useChannels.getState().loadDiscover(undefined, true)}
       hasMore={!!discoverCursor}
     />
@@ -354,6 +365,7 @@ export function ChannelsPage({ channelId, threadRootId }: { channelId?: string; 
         onOpenChange={setSettingsOpen}
         onSave={(input) => useChannels.getState().update(input)}
         onArchive={(archived) => useChannels.getState().archive(archived)}
+        onExport={() => { setSettingsOpen(false); setArchiveMode("export"); }}
         onDelete={(revision) => useChannels.getState().removeRoom(revision)}
         onLeave={() => useChannels.getState().leave()}
       />
@@ -400,6 +412,17 @@ export function ChannelsPage({ channelId, threadRootId }: { channelId?: string; 
         onOpenChange={setDmOpen}
         onCreated={(id) => {
           setMode("dm");
+          navigateRoom(id);
+        }}
+      />
+      <RoomArchiveDialog
+        open={archiveMode !== null}
+        mode={archiveMode ?? "import"}
+        channel={room ?? undefined}
+        onOpenChange={(open) => { if (!open) setArchiveMode(null); }}
+        onImported={(id) => {
+          setMode("joined");
+          void useChannels.getState().loadSync();
           navigateRoom(id);
         }}
       />

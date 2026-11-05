@@ -11,6 +11,8 @@ const RTL_CHECKED_FILES = [
   "components/chat/TranslationDialog.tsx",
   "components/channels/ChannelPresenceDot.tsx",
   "components/channels/ChannelTypingIndicator.tsx",
+  "components/channels/RoomArchiveDialog.tsx",
+  "components/channels/RoomArchiveRoster.tsx",
 ];
 
 const FORBIDDEN = [

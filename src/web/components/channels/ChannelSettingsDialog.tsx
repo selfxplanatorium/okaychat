@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { DownloadIcon } from "lucide-react";
 import { llmTargets } from "@shared/n8n-agents";
 import { CHANNEL_ICONS, CHANNEL_LIMITS, type ChannelIcon, type ChannelSummary } from "@shared/channels";
 import { t } from "@/i18n";
@@ -21,6 +22,7 @@ export function ChannelSettingsDialog({
   onOpenChange,
   onSave,
   onArchive,
+  onExport,
   onDelete,
   onLeave,
 }: {
@@ -29,6 +31,7 @@ export function ChannelSettingsDialog({
   onOpenChange: (open: boolean) => void;
   onSave: (input: { revision: number; name: string; description: string; icon: ChannelIcon; groupIds: string[]; ai?: ChannelBindingRequest | null }) => Promise<boolean>;
   onArchive: (archived: boolean) => Promise<void>;
+  onExport: () => void;
   onDelete: (revision: number) => Promise<void>;
   onLeave: () => Promise<void>;
 }) {
@@ -272,6 +275,11 @@ export function ChannelSettingsDialog({
               )}
               <p className="text-muted-foreground text-xs">{t("channels.storageTransfer")}</p>
             </fieldset>
+          )}
+          {room.membership?.role === "owner" && (
+            <Button type="button" variant="outline" className="self-start" onClick={onExport}>
+              <DownloadIcon aria-hidden /> {t("roomArchives.exportRoom")}
+            </Button>
           )}
           {canModerate && (
             <div className="flex flex-wrap gap-1">

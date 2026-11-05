@@ -44,6 +44,8 @@ export default {
   cmdChannelsReact: "React to the focused channel message",
   cmdChannelsAskAi: "Ask the assistant about the focused message",
   cmdChannelsStopAi: "Stop the channel AI reply",
+  cmdChannelsExportRoom: "Export this room archive",
+  cmdChannelsImportRoom: "Import a room archive",
   cmdNavEvaluations: "Open evaluations",
   cmdNavNotes: "Open notes",
   cmdNavCalendar: "Open calendar",

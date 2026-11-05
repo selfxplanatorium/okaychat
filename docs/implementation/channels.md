@@ -282,7 +282,7 @@ attachment byte caps beyond the owner quota, deduplication of identical attachme
 PDF thumbnails, audio/video playback, per-DM AI bindings, DM topics/names/icons/invite links/
 discoverability/cross-room search/retention/admin inspection/export, blocking scoped per DM, read
 receipts, forwarding, guests, federation, custom emoji, everyone/group mentions, rich
-text, pins, room export/import/sharing, schedule targets, tools/MCP/knowledge/memory/delegation in room AI,
+text, pins, public room sharing, schedule targets, tools/MCP/knowledge/memory/delegation in room AI,
 autonomous AI triggers, in-place regeneration/continuation, owner credential lending, custom room prompts
 beyond the reduced snapshot, retention/legal hold, edit history/undo, delivery receipts, offline send,
 push digests, multiple app writers, cross-tab leader election, and a global search union.

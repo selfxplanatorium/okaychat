@@ -3,9 +3,11 @@ import { newId } from "../crypto.js";
 import { AppError } from "../errors.js";
 import { assertStorage } from "../quota.js";
 import { CHANNEL_LIMITS } from "../../shared/channels.js";
+import { ROOM_ARCHIVE_LIMITS } from "../../shared/room-archive.js";
 import type { ChannelAiBinding, ChannelMentionInput } from "../../shared/channels.js";
 import { assertChannelMember, assertRoom, assertWritable, requireChannelsFeature, channelRow, conflict, exclusionRow, groupEligible, inviteRow, memberRow, notFound, type ChannelRow, type MemberRow } from "./access.js";
 import { requestChannelRevocation } from "./revocation.js";
+import { requestCancel } from "./archive/jobs.js";
 import { insertEvent, insertSync } from "./events.js";
 import { clearChannelActivityAfterPost, clearChannelActivityForChannel, clearChannelActivityForMember } from "./activity.js";
 import { chargeRate } from "./rate.js";
@@ -240,6 +242,11 @@ export function deleteChannel(userId: string, channelId: string, revision: numbe
     assertChannelRevision(channel, revision);
     db.prepare("UPDATE channel_create_keys SET channel_id = NULL WHERE channel_id = ?").run(channelId);
     db.prepare("DELETE FROM channel_ai_runs WHERE channel_id = ?").run(channelId);
+    // A pending export loses its source now; the durable flag prevents a stale worker publishing it.
+    const exports = db
+      .prepare("SELECT id, user_id FROM room_archive_jobs WHERE source_channel_id = ? AND state IN ('queued','preparing','ready','committing')")
+      .all(channelId) as Array<{ id: string; user_id: string }>;
+    for (const job of exports) db.prepare("UPDATE room_archive_jobs SET cancel_requested = 1, updated_at = ? WHERE id = ?").run(Date.now(), job.id);
     db.prepare("DELETE FROM channels WHERE id = ?").run(channelId);
     audit(userId, channelId, "delete", null, reason);
     // The room is gone, so the invalidation has no private metadata and reaches every client.
@@ -247,6 +254,15 @@ export function deleteChannel(userId: string, channelId: string, revision: numbe
     // Files go after the commit: a rollback must leave every row's bytes in place.
     afterCommit(() => removeChannelMedia(channelId));
     afterCommit(() => clearChannelActivityForChannel(channelId));
+    afterCommit(() => {
+      for (const job of exports) {
+        try {
+          requestCancel(job.user_id, job.id);
+        } catch {
+          // The row is already terminal or gone; its stage is swept by the janitor.
+        }
+      }
+    });
   });
 }
 
@@ -272,6 +288,20 @@ export function transferOwner(userId: string, channelId: string, revision: numbe
     const next = bumpRevision(channelId);
     audit(userId, channelId, "transfer", targetId, "");
     insertEvent({ channelId, kind: "members.changed", entityId: targetId, version: next });
+    // The former owner's pending export is no longer authorized; an admin job remains its own.
+    const stale = db
+      .prepare("SELECT id, user_id FROM room_archive_jobs WHERE source_channel_id = ? AND authority = 'owner' AND user_id = ? AND state IN ('queued','preparing','ready','committing')")
+      .all(channelId, channel.owner_id) as Array<{ id: string; user_id: string }>;
+    for (const job of stale) db.prepare("UPDATE room_archive_jobs SET cancel_requested = 1, updated_at = ? WHERE id = ?").run(Date.now(), job.id);
+    afterCommit(() => {
+      for (const job of stale) {
+        try {
+          requestCancel(job.user_id, job.id);
+        } catch {
+          // Already terminal.
+        }
+      }
+    });
     return channelRow(channelId)!;
   });
 }
@@ -642,9 +672,12 @@ export function editHumanMessage(userId: string, channelId: string, messageId: s
   tx(() => {
     const channel = channelRow(channelId);
     const message = db.prepare("SELECT * FROM channel_messages WHERE channel_id = ? AND id = ?").get(channelId, messageId) as
-      | { id: string; author_id: string | null; kind: string; revision: number; deleted_at: number | null; body: string; thread_root: string | null }
+      | { id: string; author_id: string | null; kind: string; revision: number; deleted_at: number | null; body: string; thread_root: string | null; imported_json: string | null }
       | undefined;
     if (!channel || !message) throw notFound();
+    if (message.imported_json !== null) {
+      throw conflict("imported_read_only", "Imported history is read-only. Reply to it or moderate it instead.");
+    }
     if (message.kind !== "human" || message.author_id !== userId) throw new AppError({ code: "forbidden", message: "You can only edit your own messages." });
     if (message.deleted_at !== null) throw conflict("revision", "That message was deleted.");
     if (message.revision !== revision) throw conflict("revision", "This message changed. Reload and try again.");
@@ -677,17 +710,22 @@ export function deleteHumanMessage(userId: string, channelId: string, messageId:
   return tx(() => {
     const channel = channelRow(channelId);
     const message = db.prepare("SELECT * FROM channel_messages WHERE channel_id = ? AND id = ?").get(channelId, messageId) as
-      | { id: string; author_id: string | null; kind: string; revision: number; deleted_at: number | null; seq: number; thread_root: string | null }
+      | { id: string; author_id: string | null; kind: string; revision: number; deleted_at: number | null; seq: number; thread_root: string | null; imported_json: string | null }
       | undefined;
     if (!channel || !message) throw notFound();
     if (message.deleted_at !== null) throw conflict("revision", "That message is already deleted.");
     if (message.revision !== revision) throw conflict("revision", "This message changed. Reload and try again.");
-    if (message.kind !== "human") throw new AppError({ code: "forbidden", message: "Stop the reply instead of deleting it." });
-    if (message.author_id !== userId && !options.moderator) throw new AppError({ code: "forbidden", message: "You can only delete your own messages." });
+    const imported = message.imported_json !== null;
+    if (!imported && message.kind !== "human") throw new AppError({ code: "forbidden", message: "Stop the reply instead of deleting it." });
+    // Imported rows have no native author, so only a live moderator may tombstone them.
+    if (imported ? !options.moderator : message.author_id !== userId && !options.moderator) {
+      throw new AppError({ code: "forbidden", message: "You can only delete your own messages." });
+    }
     chargeRate(userId, "write");
     const now = Date.now();
     const tombstone = (id: string) => {
-      db.prepare("UPDATE channel_messages SET body = '', deleted_at = ?, revision = revision + 1 WHERE channel_id = ? AND id = ?").run(now, channelId, id);
+      // Clearing imported_json removes the historical author, mentions, and reactions with the text.
+      db.prepare("UPDATE channel_messages SET body = '', deleted_at = ?, revision = revision + 1, imported_json = NULL WHERE channel_id = ? AND id = ?").run(now, channelId, id);
       db.prepare("DELETE FROM channel_mentions WHERE message_id = ?").run(id);
       db.prepare("DELETE FROM channel_reactions WHERE message_id = ?").run(id);
       db.prepare("UPDATE channel_attachments SET deleted_at = ? WHERE message_id = ? AND deleted_at IS NULL").run(now, id);
@@ -817,10 +855,18 @@ export function createRunInTx(
   assertRoom(current);
   assertWritable(current);
   if (current.ai_json !== channel.ai_json) throw conflict("binding_unavailable", "This room's AI binding changed.");
-  const sourceRow = db.prepare("SELECT kind, deleted_at, thread_root FROM channel_messages WHERE channel_id = ? AND id = ?").get(channel.id, source.messageId) as
-    | { kind: string; deleted_at: number | null; thread_root: string | null }
+  const sourceRow = db.prepare("SELECT kind, deleted_at, thread_root, imported_json FROM channel_messages WHERE channel_id = ? AND id = ?").get(channel.id, source.messageId) as
+    | { kind: string; deleted_at: number | null; thread_root: string | null; imported_json: string | null }
     | undefined;
   if (!sourceRow || sourceRow.deleted_at !== null || sourceRow.kind !== "human") throw notFound();
+  if (sourceRow.imported_json !== null) {
+    throw new AppError({
+      code: "conflict",
+      status: 409,
+      message: "Imported history is read-only. Ask the assistant about a new message instead.",
+      details: { reason: "imported_source" },
+    });
+  }
   if (sourceRow.thread_root !== null) {
     throw new AppError({ code: "validation", status: 422, message: "Assistant replies are not available in threads.", details: { reason: "thread_ai" } });
   }
@@ -980,14 +1026,16 @@ export function channelStorageBytes(channelId: string): number {
     .prepare(
       `SELECT
         (SELECT length(CAST(name AS BLOB)) + length(CAST(description AS BLOB)) + COALESCE(length(CAST(ai_json AS BLOB)), 0)
+           + COALESCE(length(CAST(imported_meta_json AS BLOB)), 0)
            FROM channels WHERE id = ?) +
-        (SELECT COALESCE(SUM(length(CAST(body AS BLOB))), 0) FROM channel_messages WHERE channel_id = ?) +
+        (SELECT COALESCE(SUM(length(CAST(body AS BLOB)) + COALESCE(length(CAST(imported_json AS BLOB)), 0)), 0) FROM channel_messages WHERE channel_id = ?) +
+        (SELECT COALESCE(SUM(${ROOM_ARCHIVE_LIMITS.identityReservationBytes}), 0) FROM channel_import_identities WHERE channel_id = ?) +
         (SELECT COALESCE(SUM(length(CAST(config_json AS BLOB)) + COALESCE(length(CAST(input_enc AS BLOB)), 0) + 1024
            + CASE WHEN r.state IN ('queued', 'running') THEN MAX(0, 65536 - length(CAST(m.body AS BLOB))) ELSE 0 END), 0)
            FROM channel_ai_runs r JOIN channel_messages m ON m.id = r.message_id WHERE r.channel_id = ?) +
         (SELECT COALESCE(SUM(size), 0) FROM channel_attachments WHERE channel_id = ?) AS bytes`,
     )
-    .get(channelId, channelId, channelId, channelId) as { bytes: number };
+    .get(channelId, channelId, channelId, channelId, channelId) as { bytes: number };
   return row.bytes;
 }
 

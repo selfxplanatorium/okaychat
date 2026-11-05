@@ -21,6 +21,7 @@ import { generationBusy, interruptOpenRuns } from "./generation-runs.js";
 import { initEvaluations } from "./evaluations/worker.js";
 import { setUnresolvedRunReader } from "./thread-runs.js";
 import { resetArchiveJobsAtStartup, startArchiveMaintenance } from "./archive-jobs.js";
+import { recoverRoomArchiveJobs, startRoomArchiveMaintenance } from "./channels/archive/maintenance.js";
 import { publicShareRoutes } from "./shares.js";
 import { startRecordingPurge } from "./speech/config.js";
 import { startCompareMaintenance } from "./compare.js";
@@ -92,6 +93,8 @@ if (existsSync(webDir)) {
 
 // The first page load after a restart must not wait for the 6 MB catalog or the OpenCode Go model list.
 void warmCatalog().catch(() => {});
+// Room archive recovery runs before the listener accepts a request; the interval starts with the server.
+recoverRoomArchiveJobs();
 
 // `/api/voice/call` upgrades through this server; the codec lives in voice/ws.ts so no `ws` dependency is needed.
 serve({ fetch: app.fetch, port: env.port, hostname: env.host, websocket: { server: voiceWebSocketServer } }, (info) => {
@@ -105,6 +108,8 @@ serve({ fetch: app.fetch, port: env.port, hostname: env.host, websocket: { serve
   // Archive jobs never resume across a restart: open work fails, prepared bytes expire, staging is swept.
   resetArchiveJobsAtStartup();
   startArchiveMaintenance();
+  // No room archive resumes across a restart; only the bounded janitor starts here.
+  startRoomArchiveMaintenance();
   startMemoryWorker();
   startRecordingPurge();
   startCompareMaintenance();

@@ -1,6 +1,7 @@
 import { ArrowLeftIcon, BookOpenIcon, CodeIcon, CoffeeIcon, HashIcon, LightbulbIcon, MegaphoneIcon, MessagesSquareIcon, SearchIcon, SettingsIcon, UserIcon, UsersIcon } from "lucide-react";
 import type { ChannelSummary } from "@shared/channels";
 import { t } from "@/i18n";
+import { formatDate } from "@/i18n/format";
 import { Button } from "@/components/ui/button";
 import { dmTitle } from "@/state/channels-derive";
 import { useChannelActivity } from "@/state/channel-activity";
@@ -77,6 +78,11 @@ export function ChannelHeader({
         <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-[0.7rem]">
           <ChannelConnectionNotice state={connection} lastSync={lastSync} onRetry={onRetry} />
           <span className="shrink-0">{dm ? t("channels.dmMemberCount", { count: room.memberCount }) : t("channels.memberCount", { count: room.memberCount })}</span>
+          {room.imported && (
+            <span className="truncate">
+              {t("roomArchives.importedHistory")} · {formatDate(room.imported.sourceCreatedAt)} – {formatDate(room.imported.sourceUpdatedAt)}
+            </span>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-0.5">

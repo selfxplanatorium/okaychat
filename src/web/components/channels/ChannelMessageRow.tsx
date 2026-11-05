@@ -49,8 +49,15 @@ export function ChannelMessageRow({
   const { copyToClipboard } = useCopyToClipboard();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.body);
-  const own = message.kind === "human" && message.author?.id === meId;
-  const canDelete = !message.deletedAt && message.kind === "human" && (own || room.capabilities.moderate);
+  const imported = message.imported === true;
+  const historical = message.historicalAuthor ?? null;
+  const own = !imported && message.kind === "human" && message.author?.id === meId;
+  const canDelete = !message.deletedAt && (imported ? room.capabilities.moderate : message.kind === "human" && (own || room.capabilities.moderate));
+  const authorName = imported
+    ? historical?.kind === "known"
+      ? historical.name
+      : t("roomArchives.unknownAuthor")
+    : message.author?.name ?? t("channels.deletedAccount");
   const pending = message.aiRun?.state === "queued" || message.aiRun?.state === "running";
   const canStop = !!message.aiRun && pending && (message.aiRun.requesterId === meId || room.capabilities.moderate);
 
@@ -67,7 +74,7 @@ export function ChannelMessageRow({
       data-message-id={message.id}
       tabIndex={0}
       onFocus={onFocus}
-      aria-label={message.kind === "ai" ? message.aiLabel ?? t("channels.aiAsk") : message.author?.name ?? t("channels.deletedAccount")}
+      aria-label={message.kind === "ai" ? message.aiLabel ?? t("channels.aiAsk") : authorName}
       className={cn(
         "group/message relative rounded-xl px-3 py-2 outline-none transition-colors focus-visible:ring-1 focus-visible:ring-ring",
         message.kind === "ai" ? "bg-muted/30 border-border/60 border" : "hover:bg-muted/30",
@@ -80,10 +87,12 @@ export function ChannelMessageRow({
             <BotIcon aria-hidden className="text-primary size-3.5 shrink-0" />
             <span className="text-sm font-medium">{message.aiLabel ?? t("channels.aiAsk")}</span>
             {message.aiRequester && <span className="text-muted-foreground truncate text-xs">{t("channels.aiRequestedBy", { name: message.aiRequester.name })}</span>}
+            {imported && <span className="text-muted-foreground shrink-0 text-[0.65rem]">{t("roomArchives.importedHistory")}</span>}
           </>
         ) : (
           <>
-            <span className="truncate text-sm font-medium">{message.author?.name ?? t("channels.deletedAccount")}</span>
+            <span className="truncate text-sm font-medium">{authorName}</span>
+            {imported && <span className="text-muted-foreground shrink-0 text-[0.65rem]">{t("roomArchives.importedHistory")}</span>}
             <time className="text-muted-foreground text-xs" dateTime={new Date(message.createdAt).toISOString()}>{formatTime(message.createdAt)}</time>
           </>
         )}
@@ -110,7 +119,7 @@ export function ChannelMessageRow({
               <MenuItem onClick={() => copyToClipboard(message.body)}>
                 <CopyIcon aria-hidden /> {t("channels.copy")}
               </MenuItem>
-              {own && room.capabilities.post && (
+              {own && !imported && room.capabilities.post && (
                 <MenuItem onClick={() => { setDraft(message.body); setEditing(true); }}>
                   <PencilIcon aria-hidden /> {t("channels.edit")}
                 </MenuItem>
@@ -125,7 +134,7 @@ export function ChannelMessageRow({
                   <Trash2Icon aria-hidden /> {t("channels.deleteMessage")}
                 </MenuItem>
               )}
-              {message.kind === "human" && room.capabilities.requestAi && (
+              {message.kind === "human" && !imported && room.capabilities.requestAi && (
                 <MenuItem onClick={() => actions.onAskAi(message)}>
                   <SparklesIcon aria-hidden /> {t("channels.aiAsk")}
                 </MenuItem>
@@ -156,9 +165,14 @@ export function ChannelMessageRow({
       ) : pending ? (
         <p className="text-muted-foreground text-sm italic">{t("channels.aiQueued")}</p>
       ) : null}
-      {message.attachments.length > 0 && <ChannelAttachmentList attachments={message.attachments} authorName={message.author?.name ?? null} />}
+      {message.attachments.length > 0 && <ChannelAttachmentList attachments={message.attachments} authorName={imported ? authorName : message.author?.name ?? null} />}
       {showThreadChip && <ChannelThreadChip message={message} expanded={threadOpen} onOpen={(rootId, focusId) => actions.onOpenThread?.(rootId, focusId)} />}
-      <ChannelReactionMenu message={message} onToggle={(emoji, add) => actions.onReact(message.id, emoji, add)} disabled={!room.capabilities.post} />
+      <ChannelReactionMenu
+        message={message}
+        onToggle={(emoji, add) => actions.onReact(message.id, emoji, add)}
+        disabled={!room.capabilities.post}
+        historical={message.historicalReactions}
+      />
       {message.kind === "ai" && (
         <ChannelAiStatus
           message={message}

@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import type { ArchiveJob, ArchiveJobKind, ArchiveJobState, ArchiveSummary } from "../shared/chat-archive.js";
 import { ARCHIVE_LIMITS } from "../shared/chat-archive.js";
@@ -6,6 +6,7 @@ import { db } from "./db.js";
 import { env } from "./env.js";
 import { AppError } from "./errors.js";
 import { newId } from "./crypto.js";
+import { assertStagingCapacity, personalStagingBytes } from "./archive-staging-budget.js";
 
 /**
  * Archive jobs and staging. Only server-generated ids name a staging directory; a client never supplies a
@@ -69,22 +70,8 @@ export function jobDir(userId: string, jobId: string): string {
   return path.join(ARCHIVE_ROOT, userId, jobId);
 }
 
-function directoryBytes(dir: string): number {
-  try {
-    let total = 0;
-    for (const name of readdirSync(dir)) {
-      const file = path.join(dir, name);
-      const stat = statSync(file);
-      total += stat.isDirectory() ? directoryBytes(file) : stat.size;
-    }
-    return total;
-  } catch {
-    return 0;
-  }
-}
-
 export function stagingBytes(): number {
-  return directoryBytes(ARCHIVE_ROOT);
+  return personalStagingBytes();
 }
 
 /** 0700 directories and 0600 files: staging is private to this process's user. */
@@ -102,7 +89,8 @@ export function removeJobDir(userId: string, jobId: string): void {
 export function createJob(userId: string, kind: ArchiveJobKind): JobRow {
   const active = db.prepare("SELECT id FROM archive_jobs WHERE user_id = ? AND state IN ('preparing', 'ready', 'committing')").get(userId);
   if (active) throw new AppError({ code: "rate_limited", message: errorMessage("busy") });
-  if (stagingBytes() >= ARCHIVE_LIMITS.stagingTotalBytes) throw new AppError({ code: "storage_quota", message: "Archive staging is full. Try again shortly." });
+  // A room archive reservation counts against the same physical budget; reserve the worst case here too.
+  assertStagingCapacity(ARCHIVE_LIMITS.stagingJobBytes);
   const now = Date.now();
   const id = newId("arc");
   db.prepare(

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { MoreHorizontalIcon, UserPlusIcon } from "lucide-react";
 import { Link } from "wouter";
-import type { ChannelMemberSummary, ChannelSummary } from "@shared/channels";
+import type { ChannelImportedRosterEntry, ChannelMemberSummary, ChannelSummary } from "@shared/channels";
 import { t } from "@/i18n";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -51,6 +51,8 @@ export function ChannelMemberPanel({
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<Array<{ id: string; name: string }>>([]);
   const [excluded, setExcluded] = useState<Array<{ id: string; name: string }>>([]);
+  const [historical, setHistorical] = useState<ChannelImportedRosterEntry[]>([]);
+  const [historicalAfter, setHistoricalAfter] = useState<string | null>(null);
   const canModerate = room.capabilities.moderate;
   const canManage = room.capabilities.manage;
 
@@ -61,7 +63,19 @@ export function ChannelMemberPanel({
   };
   useEffect(() => {
     if (open) refreshLists();
-  }, [open, room.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!open || !room.imported) {
+      setHistorical([]);
+      setHistoricalAfter(null);
+      return;
+    }
+    void channelsApi.importedRoster(room.id).then((page) => {
+      setHistorical(page.items);
+      setHistoricalAfter(page.nextAfter);
+    }).catch(() => {
+      setHistorical([]);
+      setHistoricalAfter(null);
+    });
+  }, [open, room.id, room.imported]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const lookup = async () => {
     setCandidate(null);
@@ -196,6 +210,38 @@ export function ChannelMemberPanel({
               </li>
             ))}
           </ul>
+          {room.imported && historical.length > 0 && (
+            <section className="mt-3 flex flex-col gap-1" aria-label={t("roomArchives.importedRoster")}>
+              <h3 className="text-muted-foreground text-xs font-medium">{t("roomArchives.importedRoster")}</h3>
+              <ul className="flex flex-col gap-0.5">
+                {historical.map((entry) => (
+                  <li key={entry.key} className="flex min-w-0 items-center gap-2 rounded-lg px-2 py-1 text-sm">
+                    <span className="min-w-0 flex-1 truncate">
+                      {entry.author.kind === "known" ? entry.author.name : t("roomArchives.unknownAuthor")}
+                    </span>
+                    <span className="text-muted-foreground shrink-0 text-xs">
+                      {t(entry.role === "owner" ? "channels.owner" : entry.role === "moderator" ? "channels.moderator" : "channels.member")}
+                    </span>
+                    <span className="text-muted-foreground shrink-0 text-[0.65rem]">{t("roomArchives.importedHistory")}</span>
+                  </li>
+                ))}
+              </ul>
+              {historicalAfter && (
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost"
+                  className="self-start"
+                  onClick={() => void channelsApi.importedRoster(room.id, historicalAfter).then((page) => {
+                    setHistorical((current) => [...current, ...page.items]);
+                    setHistoricalAfter(page.nextAfter);
+                  })}
+                >
+                  {t("roomArchives.showMore")}
+                </Button>
+              )}
+            </section>
+          )}
         </div>
       </DialogContent>
     </Dialog>

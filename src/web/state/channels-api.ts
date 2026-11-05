@@ -19,6 +19,7 @@ import type {
   ChannelNotifyMode,
   ChannelMentionInput,
   ChannelRunProjection,
+  ChannelImportedRosterPage,
 } from "@shared/channels";
 
 /** Typed adapter over the channel REST API. All authorization stays server-side. */
@@ -58,6 +59,8 @@ export const channelsApi = {
   exclusions: (id: string) => api<{ items: Array<{ id: string; name: string; createdAt: number }> }>(path(id, "/exclusions")),
   members: (id: string, after?: string | null) =>
     api<{ items: ChannelMemberSummary[]; nextCursor: string | null }>(path(id, `/members${after ? `?after=${encodeURIComponent(after)}` : ""}`)),
+  importedRoster: (id: string, after?: string | null) =>
+    api<ChannelImportedRosterPage>(path(id, `/imported-roster${after ? `?after=${encodeURIComponent(after)}` : ""}`)),
   candidates: (id: string, email: string) => api<{ items: Array<{ id: string; name: string }> }>(path(id, `/candidates?q=${encodeURIComponent(email)}`)),
   invite: (id: string, userIds: string[]) => api<{ added: string[]; pending: string[] }>(path(id, "/invites"), { method: "POST", json: { userIds } }),
   revokeInvite: (id: string, userId: string) => api<{ ok: true }>(path(id, `/invites/${encodeURIComponent(userId)}`), { method: "DELETE" }),

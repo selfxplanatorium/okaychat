@@ -1949,6 +1949,56 @@ CREATE INDEX notifications_calendar ON notifications(calendar_event_id) WHERE ca
     const broken = db.prepare("PRAGMA foreign_key_check").all();
     if (broken.length) throw new Error(`Knowledge migration left ${broken.length} broken foreign keys`);
   },
+  // Room archive v1 (docs/implementation/room-archives.md). Append-only: imported rooms reuse the native
+  // channels/channel_messages tables, keep provenance beside them, and job receipts live in their own
+  // table. Existing channel/event tables are never rebuilt, so live cursors and the event high-water stand.
+  `
+  ALTER TABLE channels ADD COLUMN imported_meta_json TEXT;
+  ALTER TABLE channel_messages ADD COLUMN imported_json TEXT;
+
+  CREATE TABLE channel_import_identities (
+    id TEXT PRIMARY KEY,
+    channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    local_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    historical_role TEXT CHECK(historical_role IN ('owner','moderator','member')),
+    historical_joined_at INTEGER,
+    UNIQUE(channel_id,id)
+  );
+  CREATE INDEX channel_import_identities_room ON channel_import_identities(channel_id,id);
+  CREATE INDEX channel_import_identities_user ON channel_import_identities(local_user_id);
+
+  CREATE TABLE room_archive_jobs (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK(kind IN ('export','import')),
+    authority TEXT NOT NULL CHECK(authority IN ('owner','admin','importer')),
+    source_channel_id TEXT REFERENCES channels(id) ON DELETE SET NULL,
+    admin_reason TEXT NOT NULL DEFAULT '',
+    state TEXT NOT NULL CHECK(state IN
+      ('uploading','queued','preparing','ready','committing','done','failed','cancelled','expired')),
+    phase TEXT NOT NULL CHECK(phase IN
+      ('upload','snapshot','zip','validate','inspect','promote','commit','download','cleanup','complete')),
+    cancel_requested INTEGER NOT NULL DEFAULT 0 CHECK(cancel_requested IN (0,1)),
+    reservation_bytes INTEGER NOT NULL DEFAULT 0 CHECK(reservation_bytes>=0),
+    staged_bytes INTEGER NOT NULL DEFAULT 0 CHECK(staged_bytes>=0),
+    progress_done INTEGER NOT NULL DEFAULT 0 CHECK(progress_done>=0),
+    progress_total INTEGER CHECK(progress_total IS NULL OR progress_total>=0),
+    request_json TEXT,
+    summary_json TEXT,
+    review_digest TEXT,
+    confirm_hash TEXT,
+    target_channel_id TEXT,
+    result_json TEXT,
+    error_code TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+  );
+  CREATE UNIQUE INDEX room_archive_one_active ON room_archive_jobs(user_id)
+    WHERE state IN ('uploading','queued','preparing','ready','committing');
+  CREATE INDEX room_archive_expiry ON room_archive_jobs(expires_at,id);
+  CREATE INDEX room_archive_queue ON room_archive_jobs(state,created_at,id);
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

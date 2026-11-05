@@ -5,7 +5,7 @@ import { AppError } from "../errors.js";
  * Durable fixed-window rate buckets for channels. They are separate from model operation limits:
  * local reads and reconnects are never `llm.call`, and an SSE stream is not a costly operation.
  */
-export type ChannelBucket = "write" | "membership" | "create" | "ai" | "read" | "search" | "candidate" | "connect" | "attach" | "people";
+export type ChannelBucket = "write" | "membership" | "create" | "ai" | "read" | "search" | "candidate" | "connect" | "attach" | "people" | "archive" | "archive_read" | "archive_confirm";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -21,6 +21,9 @@ const BUCKETS: Record<ChannelBucket, { limit: number; windowMs: number }> = {
   connect: { limit: 12, windowMs: MINUTE },
   attach: { limit: 20, windowMs: MINUTE },
   people: { limit: 10, windowMs: MINUTE },
+  archive: { limit: 6, windowMs: HOUR },
+  archive_read: { limit: 60, windowMs: MINUTE },
+  archive_confirm: { limit: 10, windowMs: MINUTE },
 };
 
 export function chargeRate(userId: string, bucket: ChannelBucket): void {

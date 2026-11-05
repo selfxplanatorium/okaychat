@@ -12,6 +12,9 @@ import { CHANNEL_LIMITS, type ChannelAiBinding } from "../../shared/channels.js"
 import type { ChannelBindingInput } from "../../shared/channels.js";
 import type { ChannelRow } from "./access.js";
 import { reducedBinding } from "./schema.js";
+import { parseImportedProvenance } from "./archive/history.js";
+import { importedAuthor } from "./archive/identity.js";
+import type { ChannelHistoricalAuthor } from "../../shared/channels.js";
 
 /**
  * Channel AI binding and frozen context. A binding is either a plain model or a reduced copy of an
@@ -96,6 +99,16 @@ export interface ChannelInputSnapshot {
 
 const CURRENT_TRANSCRIPT_VERSION = 1;
 
+/**
+ * Imported authors enter the frozen transcript as data with no live identity unless the local link still
+ * validates. The fixed English label is model-facing and deliberately not a translated client string.
+ */
+function importedTranscriptLabel(channelId: string, importedJson: string | null): { applied: boolean; author: ChannelHistoricalAuthor | null } {
+  if (importedJson === null) return { applied: false, author: null };
+  const provenance = parseImportedProvenance(importedJson);
+  return { applied: true, author: provenance.authorIdentityId ? importedAuthor(channelId, provenance.authorIdentityId) : null };
+}
+
 export function buildSnapshot(channel: ChannelRow, sourceId: string, requesterId: string): ChannelInputSnapshot {
   const source = db.prepare("SELECT id, seq, body, author_id, deleted_at FROM channel_messages WHERE channel_id = ? AND id = ?").get(channel.id, sourceId) as
     | { id: string; seq: number; body: string; author_id: string | null; deleted_at: number | null }
@@ -104,7 +117,7 @@ export function buildSnapshot(channel: ChannelRow, sourceId: string, requesterId
   const sourceAuthor = source.author_id ? (db.prepare("SELECT name FROM users WHERE id = ?").get(source.author_id) as { name: string } | undefined)?.name ?? null : null;
   const rows = db
     .prepare(
-      `SELECT m.id, m.seq, m.author_id, u.name AS author_name, m.kind, m.body, m.reply_to
+      `SELECT m.id, m.seq, m.author_id, u.name AS author_name, m.kind, m.body, m.reply_to, m.imported_json
        FROM channel_messages m
        LEFT JOIN users u ON u.id = m.author_id
        LEFT JOIN channel_ai_runs r ON r.message_id = m.id
@@ -120,38 +133,43 @@ export function buildSnapshot(channel: ChannelRow, sourceId: string, requesterId
     kind: "human" | "ai";
     body: string;
     reply_to: string | null;
+    imported_json: string | null;
   }>;
   const entries: TranscriptEntry[] = rows
     .filter((row) => row.id !== source.id)
     .reverse()
-    .map((row) => ({
-      messageId: row.id,
-      seq: row.seq,
-      authorId: row.author_id,
-      authorName: row.author_name,
-      kind: row.kind,
-      body: row.body,
-      replyTo: row.reply_to,
-    }));
+    .map((row) => {
+      const label = importedTranscriptLabel(channel.id, row.imported_json);
+      return {
+        messageId: row.id,
+        seq: row.seq,
+        authorId: label.applied ? label.author?.kind === "known" ? label.author.id : null : row.author_id,
+        authorName: label.applied ? (label.author?.kind === "known" ? label.author.name : "Imported member") : row.author_name,
+        kind: row.kind,
+        body: row.body,
+        replyTo: row.reply_to,
+      };
+    });
   // One referenced quote may be included when it is not already in the selected transcript.
   let note: string | null = null;
   const sourceRow = db.prepare("SELECT reply_to FROM channel_messages WHERE id = ?").get(source.id) as { reply_to: string | null } | undefined;
   if (sourceRow?.reply_to && !entries.some((entry) => entry.messageId === sourceRow.reply_to)) {
     const quoted = db
       .prepare(
-        `SELECT m.id, m.seq, m.author_id, u.name AS author_name, m.kind, m.body, m.reply_to
+        `SELECT m.id, m.seq, m.author_id, u.name AS author_name, m.kind, m.body, m.reply_to, m.imported_json
          FROM channel_messages m LEFT JOIN users u ON u.id = m.author_id
          WHERE m.channel_id = ? AND m.id = ? AND m.deleted_at IS NULL`,
       )
       .get(channel.id, sourceRow.reply_to) as
-      | { id: string; seq: number; author_id: string | null; author_name: string | null; kind: "human" | "ai"; body: string; reply_to: string | null }
+      | { id: string; seq: number; author_id: string | null; author_name: string | null; kind: "human" | "ai"; body: string; reply_to: string | null; imported_json: string | null }
       | undefined;
     if (quoted) {
+      const label = importedTranscriptLabel(channel.id, quoted.imported_json);
       entries.push({
         messageId: quoted.id,
         seq: quoted.seq,
-        authorId: quoted.author_id,
-        authorName: quoted.author_name,
+        authorId: label.applied ? label.author?.kind === "known" ? label.author.id : null : quoted.author_id,
+        authorName: label.applied ? (label.author?.kind === "known" ? label.author.name : "Imported member") : quoted.author_name,
         kind: quoted.kind,
         body: quoted.body,
         replyTo: quoted.reply_to,
