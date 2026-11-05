@@ -3,7 +3,18 @@
 // Kept out of chat.ts so light modules can check it without loading the chat stack.
 const busyThreads = new Map<string, number>();
 
-export const threadBusy = (threadId: string) => busyThreads.has(threadId);
+/**
+ * A logical reply can wait for a tool result or approval with no HTTP stream attached. `chat.ts` injects
+ * a synchronous receipt reader at startup, so config edits and schedules stay blocked until it resolves
+ * or is cancelled, without importing the chat stack into this module.
+ */
+let unresolvedRuns: ((threadId: string) => boolean) | null = null;
+
+export function setUnresolvedRunReader(reader: (threadId: string) => boolean): void {
+  unresolvedRuns = reader;
+}
+
+export const threadBusy = (threadId: string) => busyThreads.has(threadId) || unresolvedRuns?.(threadId) === true;
 
 /** Marks the thread busy until the returned release runs (once). `release` runs with it. */
 export function markBusy(threadId: string, release: () => void = () => {}): () => void {

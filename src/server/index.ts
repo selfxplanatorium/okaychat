@@ -17,6 +17,9 @@ import { env } from "./env.js";
 import { resumeKnowledgeIngestion } from "./knowledge/jobs.js";
 import { startMemoryWorker } from "./memory-learn.js";
 import { api, mcpOAuthCallback } from "./routes.js";
+import { generationBusy, interruptOpenRuns } from "./generation-runs.js";
+import { setUnresolvedRunReader } from "./thread-runs.js";
+import { resetArchiveJobsAtStartup, startArchiveMaintenance } from "./archive-jobs.js";
 import { publicShareRoutes } from "./shares.js";
 import { startRecordingPurge } from "./speech/config.js";
 import { speechToken, speechWorkerConfigured } from "./speech/worker.js";
@@ -81,6 +84,13 @@ void warmCatalog().catch(() => {});
 // `/api/voice/call` upgrades through this server; the codec lives in voice/ws.ts so no `ws` dependency is needed.
 serve({ fetch: app.fetch, port: env.port, hostname: env.host, websocket: { server: voiceWebSocketServer } }, (info) => {
   console.log(`okaychat listening on http://${env.host}:${info.port}`);
+  // Receipts are a ledger, not restart-safe generation: an open row from a previous process is interrupted,
+  // never resumed or billed again. Waiting rows still gate config edits and schedules until cancelled.
+  interruptOpenRuns();
+  setUnresolvedRunReader(generationBusy);
+  // Archive jobs never resume across a restart: open work fails, prepared bytes expire, staging is swept.
+  resetArchiveJobsAtStartup();
+  startArchiveMaintenance();
   startMemoryWorker();
   startRecordingPurge();
   // Moves legacy image BLOBs/inline chat images to files in small steps, then collects orphaned media.

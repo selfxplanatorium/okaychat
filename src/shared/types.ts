@@ -1,4 +1,6 @@
 import type { UserAppearance } from "./appearance.js";
+import type { AssistantIcon } from "./assistant-presets.js";
+import type { GenerationSummary } from "./generation.js";
 import type { ImageServiceSettings } from "./image-services.js";
 import type { TurnUnavailable } from "./services.js";
 import type { SpeechSettings } from "./speech.js";
@@ -278,6 +280,8 @@ export interface AssistantMetadata {
   /** Text written by an outside agent. Model-bound copies are enveloped as data. */
   provenance?: { kind: "n8n_agent"; agentId: string; name: string };
   injection?: InjectionReport;
+  /** Trustworthy receipt projection; only a server-written `finished`/`length` enables Continue. */
+  generation?: GenerationSummary;
 }
 
 export interface CompactionState {
@@ -312,8 +316,22 @@ export interface ThreadSummary {
   knowledgeIds: string[];
   /** The chat this one was forked from, while that chat still exists. */
   branchedFrom: { id: string; title: string | null } | null;
+  /** Selected assistant snapshot label. Only `GET /threads/:id` fills it; sidebar rows leave it out. */
+  assistant?: ThreadAssistantSummary | null;
+  /** Snapshot CAS revision. Only `GET /threads/:id` fills it. */
+  assistantRevision?: number;
+  /** Import hint: the archived visible leaf. Only `GET /threads/:id` fills it. */
+  preferredHead?: string | null;
   createdAt: number;
   updatedAt: number;
+}
+
+/** The parts of a copied assistant a chat shows without shipping its private instructions. */
+export interface ThreadAssistantSummary {
+  name: string;
+  icon: AssistantIcon;
+  revision: number;
+  modelRef: string | null;
 }
 
 export type McpTransport = "http" | "sse" | "stdio";
@@ -614,7 +632,8 @@ export type PromptKey =
   | "voiceRealtime"
   | "memory"
   | "memoryExtract"
-  | "memorySummary";
+  | "memorySummary"
+  | "assistantInstructions";
 
 /** A server-wide system prompt as the admin page shows it. */
 export interface AdminPrompt {
@@ -661,6 +680,8 @@ export interface StoredMessageRow {
   format: string;
   content: unknown;
   edited_at?: number;
+  /** An inert message restored from a portable archive; its tool records never execute. */
+  imported?: true;
 }
 
 /** Answer of `PATCH /threads/:id/messages/:messageId` and of undoing an edit. */
@@ -670,4 +691,7 @@ export interface MessageEditResult {
   editedAt: number | null;
 }
 
+export type * from "./assistant-presets.js";
+export type * from "./chat-archive.js";
+export type * from "./generation.js";
 export type * from "./chatgpt.js";

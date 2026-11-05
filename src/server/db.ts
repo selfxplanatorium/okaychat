@@ -975,6 +975,75 @@ const migrations: Array<string | (() => void)> = [
     CHECK (rating IS NOT NULL OR comment_enc IS NULL)
   );
   `,
+  // Parity wave 2 (docs/implementation/assistant-presets.md, continuation.md, chat-archives.md): named
+  // assistant presets with a per-chat copied snapshot, generation receipts/segments for trustworthy
+  // finish reasons and explicit continuation, and portable archive jobs. One append-only migration.
+  () => {
+    db.exec(`
+    CREATE TABLE assistant_presets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      icon TEXT NOT NULL DEFAULT 'sparkles',
+      config_json TEXT NOT NULL,
+      visibility TEXT NOT NULL DEFAULT 'private' CHECK (visibility IN ('private', 'published')),
+      revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX assistant_presets_owner ON assistant_presets(user_id, updated_at DESC, id);
+    CREATE INDEX assistant_presets_published ON assistant_presets(visibility, updated_at DESC, id);
+    ALTER TABLE threads ADD COLUMN assistant_json TEXT;
+    ALTER TABLE threads ADD COLUMN assistant_revision INTEGER NOT NULL DEFAULT 0 CHECK (assistant_revision >= 0);
+    ALTER TABLE threads ADD COLUMN imported_assistant_json TEXT;
+    ALTER TABLE threads ADD COLUMN preferred_head TEXT;
+    ALTER TABLE messages ADD COLUMN imported INTEGER NOT NULL DEFAULT 0 CHECK (imported IN (0, 1));
+    CREATE TABLE generation_runs (
+      id TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+      user_message_id TEXT NOT NULL,
+      assistant_message_id TEXT NOT NULL,
+      config_json TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('running', 'waiting', 'finished', 'aborted', 'error', 'interrupted')),
+      finish_reason TEXT CHECK (finish_reason IN ('stop', 'length', 'tool-calls', 'content-filter', 'error', 'other', 'unknown')),
+      usage_json TEXT NOT NULL DEFAULT '{}',
+      cost REAL NOT NULL DEFAULT 0,
+      context_tokens INTEGER,
+      duration_ms INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE (thread_id, assistant_message_id)
+    );
+    CREATE INDEX generation_runs_thread_user ON generation_runs(thread_id, user_message_id, created_at);
+    CREATE INDEX generation_runs_open ON generation_runs(state, thread_id);
+    -- A protected Continue double-click cannot create two receipts for the same request turn.
+    CREATE UNIQUE INDEX generation_runs_continue ON generation_runs(thread_id, user_message_id)
+      WHERE json_extract(config_json, '$.requestKind') = 'continue';
+    CREATE TABLE generation_segments (
+      run_id TEXT NOT NULL REFERENCES generation_runs(id) ON DELETE CASCADE,
+      id TEXT NOT NULL,
+      usage_json TEXT NOT NULL,
+      cost REAL NOT NULL,
+      PRIMARY KEY (run_id, id)
+    );
+    CREATE TABLE archive_jobs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK (kind IN ('import', 'export')),
+      state TEXT NOT NULL CHECK (state IN ('preparing', 'ready', 'committing', 'done', 'failed', 'cancelled')),
+      summary_json TEXT,
+      result_json TEXT,
+      error_code TEXT,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+    CREATE INDEX archive_jobs_owner ON archive_jobs(user_id, created_at DESC);
+    CREATE UNIQUE INDEX archive_jobs_active ON archive_jobs(user_id)
+      WHERE state IN ('preparing', 'ready', 'committing');
+    `);
+    if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "parity-wave2") throw new Error("Injected migration failure");
+  },
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

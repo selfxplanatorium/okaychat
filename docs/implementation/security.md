@@ -75,3 +75,20 @@ SIWC identities and tokens are separately encrypted and bound to user/registrati
 ## n8n agents
 
 n8n webhook configurations (entire URL and auth header) are encrypted; shared recipients cannot read details or test hidden credentials. All destinations, including admins, use pinned public HTTPS, no redirects and no automatic retries. See [n8n agents](n8n-agents.md).
+
+## Wave 2
+
+- Assistant instructions are third-party data even when the owner is the current user: they go through the
+  provenance envelope and taint the approval gate. A published snapshot's `origin` is stored but never used
+  as trust. Presets grant no model, MCP, provider, or knowledge permission; entitlement, ownership, project,
+  and live revocation always narrow them.
+- Archive ZIPs are read with streaming caps and full hash/size rechecks. Imported tool records are inert
+  `data-imported-tool` parts, never tool calls, approvals, drafts, widgets, callbacks, or install actions.
+  They are excluded from public projections the same way other raw tool input/output is, and model requests
+  receive only an enveloped text summary.
+- Archive jobs are owner-scoped rows whose file paths derive from server-generated ids; a foreign id is 404,
+  and no client path or filename reaches disk. Staging is deleted on cancel, expiry, completion, restart, and
+  account deletion.
+- A generated assistant reply's finish state is a server receipt, not client metadata. `appendMessage`
+  strips client generation objects, and Continue requires the stored `finished`/`length` receipt plus the
+  stored message graph.

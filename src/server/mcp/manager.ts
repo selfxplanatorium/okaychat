@@ -531,6 +531,11 @@ export interface McpTurnOptions {
   images?: Map<string, ToolImage[]>;
   /** A user watches this turn and can answer elicitation forms. False for scheduled runs. */
   interactive?: boolean;
+  /**
+   * A restrictive assistant: connect only servers that own a selected tool, build only those tools, and
+   * omit resources. Identity stays exact so two servers with the same tool name cannot widen the grant.
+   */
+  select?: Array<{ serverId: string; toolName: string }>;
 }
 
 async function presentResult(
@@ -806,17 +811,33 @@ export interface McpToolBundle {
   subTools: ToolSet;
   instructions: string[];
   servers: Array<{ name: string; status: McpStatus; error?: string }>;
+  /** Exposed name → exact server/tool pair, so a restrictive policy can verify identity, not a label. */
+  identities: Map<string, { serverId: string; toolName: string }>;
 }
 
 /** Tools from every enabled server for this user, ready for streamText. Sorted so the prompt prefix stays cacheable. */
 export async function toolsForUser(userId: string, opts: McpTurnOptions = {}): Promise<McpToolBundle> {
   // A denied feature means no new connection, no discovery, and no tools. Spreads nothing to the model.
-  if (!featureAllowed(userId, "mcp")) return { tools: {}, subTools: {}, instructions: [], servers: [] };
-  const servers = visibleServers(userId).filter((s) => s.enabled);
+  if (!featureAllowed(userId, "mcp")) return { tools: {}, subTools: {}, instructions: [], servers: [], identities: new Map() };
+  const selected = opts.select?.length
+    ? new Map<string, Set<string>>()
+    : null;
+  for (const entry of opts.select ?? []) {
+    const set = selected!.get(entry.serverId) ?? new Set<string>();
+    set.add(entry.toolName);
+    selected!.set(entry.serverId, set);
+  }
+  if (selected && !selected.size) {
+    // Selected with no MCP tools means no MCP at all: no connection, no instructions, no resources.
+    return { tools: {}, subTools: {}, instructions: [], servers: [], identities: new Map() };
+  }
+  // Under a selected policy, only servers that own a chosen tool are connected at all.
+  const servers = visibleServers(userId).filter((s) => s.enabled && (!selected || selected.has(s.id)));
   const ready = await Promise.all(servers.map(async (s) => ({ server: s, entry: await ensure(s) })));
   const tools: ToolSet = {};
   const subTools: ToolSet = {};
   const instructions: string[] = [];
+  const identities = new Map<string, { serverId: string; toolName: string }>();
   const build = (server: McpServerRecord, raw: RawTool, interactive: boolean) => {
     const thirdPartyDescription = raw.description?.trim();
     return dynamicTool({
@@ -862,19 +883,25 @@ export async function toolsForUser(userId: string, opts: McpTurnOptions = {}): P
     if (entry.status !== "connected") continue;
     if (entry.instructions) instructions.push(`## ${server.name}\n${entry.instructions}`);
     const sorted = [...entry.tools].sort((a, b) => a.name.localeCompare(b.name));
+    const chosen = selected?.get(server.id);
     for (const raw of sorted) {
+      if (chosen && !chosen.has(raw.name)) continue;
       if (server.disabledTools.includes(raw.name) || !uiMeta(raw).visibility.includes("model")) continue;
       let name = exposedToolName(server.name, raw.name);
       // Sanitizing is lossy ("a.b" and "a b" both become "a_b"); a collision must not silently replace
       // another server's tool, so the later one gets a hash of its real pair.
       if (tools[name]) name = `${name.slice(0, 55)}_${createHash("sha256").update(`${server.id}\0${raw.name}`).digest("hex").slice(0, 8)}`;
       tools[name] = build(server, raw, opts.interactive === true);
+      identities.set(name, { serverId: server.id, toolName: raw.name });
       // Sub-agents run unattended: no tool that waits for approval, and no destructive tool even when
       // the account's policy is "never" (the output of a web or MCP read must not reach one).
       if (!needsApproval(server, raw) && !isDestructive(raw)) subTools[name] = build(server, raw, false);
     }
   }
-  const resources = resourceTools(userId, ready.filter(({ entry }) => entry.status === "connected" && entry.capabilities.resources).map(({ server }) => server), opts);
+  // A selected policy omits resources entirely: their server argument could otherwise bypass tool selectors.
+  const resources = selected
+    ? {}
+    : resourceTools(userId, ready.filter(({ entry }) => entry.status === "connected" && entry.capabilities.resources).map(({ server }) => server), opts);
   Object.assign(tools, resources);
   Object.assign(subTools, resources);
   return {
@@ -882,6 +909,7 @@ export async function toolsForUser(userId: string, opts: McpTurnOptions = {}): P
     subTools,
     instructions,
     servers: ready.map(({ server, entry }) => ({ name: server.name, status: entry.status, error: entry.error })),
+    identities,
   };
 }
 

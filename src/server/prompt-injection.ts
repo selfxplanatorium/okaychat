@@ -24,7 +24,8 @@ export type UntrustedKind =
   | "code_output"
   | "email"
   | "email_draft"
-  | "text_draft";
+  | "text_draft"
+  | "assistant";
 
 export interface UntrustedSource {
   kind: UntrustedKind;

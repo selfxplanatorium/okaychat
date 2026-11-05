@@ -4,6 +4,7 @@ import { clearOwnedAgentAudiences, abortRevokedAgentRuns } from "./n8n/store.js"
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { env } from "./env.js";
+import { removeArchiveStagingForUser } from "./archive-jobs.js";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AdminUser, ModelAccessPolicy } from "../shared/types.js";
@@ -125,6 +126,7 @@ export const adminRoutes = new Hono<AppEnv>()
     await rm(path.join(env.dataDir, "images", id), { recursive: true, force: true });
     // Media originals and their previews (the rows went with the user by cascade).
     removeUserMedia(id);
+    removeArchiveStagingForUser(id);
     return c.json({ ok: true });
   })
   .get("/admin/settings", (c) => c.json({ allowSignup: signupAllowed() }))

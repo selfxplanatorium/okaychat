@@ -22,17 +22,22 @@ export interface KnowledgeTurn {
   tools: ToolSet;
 }
 
-export function attachedCollectionIds(userId: string, threadId: string): string[] {
+export function attachedCollectionIds(userId: string, threadId: string, restrict?: readonly string[]): string[] {
   const thread = getThread(userId, threadId);
   if (!thread) return [];
   const parsed = thread.knowledgeIds ?? [];
-  return accessibleCollections(userId, parsed, thread.projectId).map((row) => row.id);
+  return accessibleCollections(userId, parsed, thread.projectId)
+    .filter((row) => !restrict || restrict.includes(row.id))
+    .map((row) => row.id);
 }
 
-function scope(userId: string, threadId: string): { collections: CollectionRow[]; projectId: string | null } {
+function scope(userId: string, threadId: string, restrict?: readonly string[]): { collections: CollectionRow[]; projectId: string | null } {
   const thread = getThread(userId, threadId);
   if (!thread) return { collections: [], projectId: null };
-  return { collections: accessibleCollections(userId, thread.knowledgeIds ?? [], thread.projectId), projectId: thread.projectId };
+  return {
+    collections: accessibleCollections(userId, thread.knowledgeIds ?? [], thread.projectId).filter((row) => !restrict || restrict.includes(row.id)),
+    projectId: thread.projectId,
+  };
 }
 
 const citation = (hit: KnowledgeSearchHit) => ({
@@ -63,12 +68,12 @@ function contextParts(collections: CollectionRow[], hits: KnowledgeSearchHit[], 
 }
 
 /** Per-turn knowledge context and tools. Retrieval is skipped for continuations that replay a stored block. */
-export async function conversationKnowledge(userId: string, threadId: string, query: string, opts: { retrieve: boolean }): Promise<KnowledgeTurn> {
+export async function conversationKnowledge(userId: string, threadId: string, query: string, opts: { retrieve: boolean; restrictIds?: readonly string[] }): Promise<KnowledgeTurn> {
   const empty: KnowledgeTurn = { collections: [], context: "", names: "", passages: "", tools: {} };
   // A denied account gets no retrieval and no tools for an attachment it still owns; the metadata itself
   // stays visible in the sidebar.
   if (!featureAllowed(userId, "knowledge")) return empty;
-  let { collections, projectId } = scope(userId, threadId);
+  let { collections, projectId } = scope(userId, threadId, opts.restrictIds);
   if (!collections.length) return empty;
   const initialIds = new Set(collections.map((row) => row.id));
   let hits: KnowledgeSearchHit[] = [];
@@ -93,8 +98,9 @@ export async function conversationKnowledge(userId: string, threadId: string, qu
       hits = [];
     }
     // The chat may have detached or moved during the awaited embedding request. Narrow to collections
-    // that are still attached now; never add one that was attached mid-flight.
-    const current = scope(userId, threadId);
+    // that are still attached now; never add one that was attached mid-flight. A restrictive assistant's
+    // captured allowlist still applies, so a newly attached collection outside it stays out.
+    const current = scope(userId, threadId, opts.restrictIds);
     collections = current.collections.filter((row) => initialIds.has(row.id));
     const allowed = new Set(collections.map((row) => row.id));
     hits = hits.filter((hit) => allowed.has(hit.collectionId));
@@ -106,16 +112,16 @@ export async function conversationKnowledge(userId: string, threadId: string, qu
     context: [parts.names, parts.passages].filter(Boolean).join("\n"),
     names: parts.names,
     passages: parts.passages,
-    tools: knowledgeTools(userId, threadId),
+    tools: knowledgeTools(userId, threadId, opts.restrictIds),
   };
 }
 
-/** Rechecks the chat's current attachments on every execution. */
-function currentScope(userId: string, threadId: string): { collections: CollectionRow[]; projectId: string | null } {
-  return scope(userId, threadId);
+/** Rechecks the chat's current attachments on every execution, plus the assistant's captured allowlist. */
+function currentScope(userId: string, threadId: string, restrict?: readonly string[]): { collections: CollectionRow[]; projectId: string | null } {
+  return scope(userId, threadId, restrict);
 }
 
-export function knowledgeTools(userId: string, threadId: string): ToolSet {
+export function knowledgeTools(userId: string, threadId: string, restrict?: readonly string[]): ToolSet {
   return {
     search_knowledge: tool({
       description:
@@ -127,7 +133,7 @@ export function knowledgeTools(userId: string, threadId: string): ToolSet {
       }),
       execute: async ({ query, collections: requested, k }) => {
         assertFeature(userId, "knowledge");
-        const current = currentScope(userId, threadId);
+        const current = currentScope(userId, threadId, restrict);
         if (!current.collections.length) return { mode: "lexical" as const, degraded: false, hits: [], tokens: 0, citations: [], note: "No knowledge collections are attached to this chat." };
         const ids = requested?.length
           ? current.collections.filter((row) => requested.includes(row.id)).map((row) => row.id)
@@ -135,7 +141,7 @@ export function knowledgeTools(userId: string, threadId: string): ToolSet {
         const result = await searchKnowledge({ userId, collectionIds: ids, query, projectId: current.projectId, k: k ?? DEFAULT_K, budgetTokens: DEFAULT_BUDGET_TOKENS });
         // Re-read attachments after the awaited embedding call: a detach or project move during retrieval
         // narrows the result instead of returning a collection the chat no longer has.
-        const after = currentScope(userId, threadId);
+        const after = currentScope(userId, threadId, restrict);
         if (!after.collections.length) return { mode: "lexical" as const, degraded: false, hits: [], tokens: 0, citations: [], note: "No knowledge collections are attached to this chat." };
         const allowed = new Set(after.collections.map((row) => row.id));
         const hits = result.hits.filter((hit) => allowed.has(hit.collectionId));
@@ -170,7 +176,7 @@ export function knowledgeTools(userId: string, threadId: string): ToolSet {
       inputSchema: z.object({ chunkId: z.string().trim().min(1).max(200) }),
       execute: async ({ chunkId }) => {
         assertFeature(userId, "knowledge");
-        const current = currentScope(userId, threadId);
+        const current = currentScope(userId, threadId, restrict);
         const row = chunkRow(userId, chunkId);
         if (!row || !current.collections.some((collection) => collection.id === row.collection_id)) {
           return {

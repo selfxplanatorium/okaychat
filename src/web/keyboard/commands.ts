@@ -82,10 +82,14 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "chat.trimContext", labelKey: "keyboard.cmdChatTrimContext", group: "Chat", keys: [] },
   { id: "chat.loadImage", labelKey: "keyboard.cmdChatLoadImage", group: "Chat", keys: [] },
   { id: "chat.retryImage", labelKey: "keyboard.cmdChatRetryImage", group: "Chat", keys: [] },
+  { id: "chat.continue", labelKey: "keyboard.cmdChatContinue", group: "Chat", keys: [] },
+  { id: "chat.exportArchive", labelKey: "keyboard.cmdChatExportArchive", group: "Chat", keys: [] },
   { id: "chat.voiceCall", labelKey: "keyboard.cmdChatVoiceCall", group: "Chat", keys: [] },
   { id: "chat.resetAgentSession", labelKey: "keyboard.cmdChatResetAgentSession", group: "Chat", keys: [] },
 
   { id: "composer.model", labelKey: "keyboard.cmdComposerModel", group: "Composer", keys: ["Alt+Shift+M"] },
+  { id: "composer.assistant", labelKey: "keyboard.cmdComposerAssistant", group: "Composer", keys: [] },
+  { id: "composer.manageAssistants", labelKey: "keyboard.cmdComposerManageAssistants", group: "Composer", keys: [] },
   { id: "composer.effort", labelKey: "keyboard.cmdComposerEffort", group: "Composer", keys: ["Alt+Shift+T"] },
   { id: "composer.search", labelKey: "keyboard.cmdComposerSearch", group: "Composer", keys: ["Alt+Shift+W"] },
   { id: "composer.research", labelKey: "keyboard.cmdComposerResearch", group: "Composer", keys: ["Alt+Shift+D"] },
@@ -112,6 +116,7 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "message.bookmark", labelKey: "keyboard.cmdMessageBookmark", group: "Messages", keys: [], scope: "message", palette: false },
   { id: "message.feedback", labelKey: "keyboard.cmdMessageFeedback", group: "Messages", keys: [], scope: "message", palette: false },
   { id: "message.details", labelKey: "keyboard.cmdMessageDetails", group: "Messages", keys: [], scope: "message", palette: false },
+  { id: "message.continue", labelKey: "keyboard.cmdMessageContinue", group: "Messages", keys: [], scope: "message", palette: false },
   { id: "message.exit", labelKey: "keyboard.cmdMessageExit", group: "Messages", keys: ["Escape"], scope: "message", palette: false },
 
   { id: "settings.compaction", labelKey: "ux.compactionSettings", group: "Settings", keys: [] },

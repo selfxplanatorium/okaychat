@@ -51,6 +51,7 @@ Status as of 2026-11-05. Update this file when a feature ships or a plan changes
 ## Pass 2: completed
 
 - Resumable streams and selected-chat restoration after reload.
+- Named assistant presets with copied snapshots, server-validated sampling, and restrictive tool/knowledge policies; explicit continuation of length-limited replies with generation receipts; portable native chat archives with bounded import/export. See `docs/implementation/assistant-presets.md`, `continuation.md`, and `chat-archives.md`.
 - Per-user appearance sync, including custom theme libraries, with first-device migration and offline edit recovery.
 - Code-split authenticated chat, public shares, and settings, with separate cacheable library chunks. Sign-in does not load the authenticated chat runtime. See `docs/implementation/web-bundle.md` for the boundaries and measurement method.
 

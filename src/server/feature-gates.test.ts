@@ -149,7 +149,7 @@ test("code, images, and delegation stop before their network boundaries", async 
 test("MCP gives a denied account no tools and never connects", async (t) => {
   const network = countedFetch(t);
   setFeatures("gated", { mcp: false });
-  assert.deepEqual(await toolsForUser("gated"), { tools: {}, subTools: {}, instructions: [], servers: [] });
+  assert.deepEqual(await toolsForUser("gated"), { tools: {}, subTools: {}, instructions: [], servers: [], identities: new Map() });
   await assert.rejects(testServer("gated", "srv"), /disabled MCP servers/);
   await assert.rejects(listPrompts("gated"), /disabled MCP servers/);
   assert.equal(network.count(), 0);
