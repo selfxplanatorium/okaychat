@@ -214,4 +214,14 @@ export default {
   dmMemberCount: { one: "{count} person", other: "{count} people" },
   emptyDms: "No direct messages yet. Start one with New message.",
   adminDmExcluded: "Direct messages are private and are never listed or inspectable here.",
+
+  presenceOnline: "Online",
+  presenceAway: "Away",
+  presenceOffline: "Offline or not sharing status",
+  presenceUnavailable: "Status unavailable",
+  presenceLabel: "{name}: {status}",
+  typingOne: "{name} is typing…",
+  typingTwo: "{names} are typing…",
+  typingMany: { one: "{count} person is typing…", other: "{count} people are typing…" },
+  activitySettings: "Activity settings",
 } as const;

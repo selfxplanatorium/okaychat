@@ -2,9 +2,12 @@ import { canonicalLocaleTag } from "../shared/locale-tag.js";
 import { REASONING_EFFORTS } from "../shared/reasoning.js";
 import { imageServiceDef } from "../shared/image-services.js";
 import { DEFAULT_USER_SETTINGS, SIDEBAR_ITEMS, type UserSettings } from "../shared/types.js";
+import { DEFAULT_CHANNEL_ACTIVITY_SETTINGS, isChannelActivitySettings } from "../shared/channel-activity.js";
 import { HTTPException } from "hono/http-exception";
 import { db } from "./db.js";
 import { validSpeechSettings } from "./speech/config.js";
+import { notifyChannelActivitySettingsChange } from "./channels/activity-hooks.js";
+import type { ChannelActivitySettings } from "../shared/channel-activity.js";
 
 export function getSettings(userId: string): UserSettings {
   const row = db.prepare("SELECT json FROM user_settings WHERE user_id = ?").get(userId) as { json: string } | undefined;
@@ -26,6 +29,8 @@ export function getSettings(userId: string): UserSettings {
   if (settings.imageServices !== undefined && !validImageServices(settings.imageServices)) delete settings.imageServices;
   if (settings.speech !== undefined && !validSpeechSettings(settings.speech)) delete settings.speech;
   if (settings.notifications !== undefined && !validNotificationSettings(settings.notifications)) delete settings.notifications;
+  // A hand-edited or legacy value falls back to the documented default instead of hiding the switch.
+  if (!isChannelActivitySettings(settings.channelActivity)) settings.channelActivity = { ...DEFAULT_CHANNEL_ACTIVITY_SETTINGS };
   // A tag stored by an older client (or a hand-edited row) follows the browser instead of blocking settings.
   for (const key of ["locale", "translationTarget"] as const) {
     const value = settings[key];
@@ -55,6 +60,9 @@ export function updateSettings(userId: string, patch: Partial<UserSettings>): Us
   if (Object.hasOwn(patch, "notifications") && !validNotificationSettings(patch.notifications)) {
     throw new HTTPException(400, { message: "notifications must set browser and scheduleSuccess to true or false" });
   }
+  if (Object.hasOwn(patch, "channelActivity") && !isChannelActivitySettings(patch.channelActivity)) {
+    throw new HTTPException(400, { message: "channelActivity must set sharePresence and shareTyping to true or false" });
+  }
   const normalized: Partial<UserSettings> = { ...patch };
   for (const key of ["locale", "translationTarget"] as const) {
     const value = patch[key];
@@ -71,7 +79,17 @@ export function updateSettings(userId: string, patch: Partial<UserSettings>): Us
   db.prepare(
     "INSERT INTO user_settings (user_id, json) VALUES (?, ?) ON CONFLICT (user_id) DO UPDATE SET json = excluded.json",
   ).run(userId, JSON.stringify(next));
+  // The write is synchronous and not inside a transaction, so commit has already happened. Live
+  // connections learn about a disable immediately; other devices are corrected on their next request
+  // and by the projection's own preference check.
+  if (Object.hasOwn(patch, "channelActivity")) notifyChannelActivitySettingsChange(userId);
   return next;
+}
+
+/** The validated preference pair the activity service reads; never exposes another account's value. */
+export function channelActivitySettings(userId: string): ChannelActivitySettings {
+  const value = getSettings(userId).channelActivity;
+  return isChannelActivitySettings(value) ? value : DEFAULT_CHANNEL_ACTIVITY_SETTINGS;
 }
 
 function validLimit(value: unknown, min: number): value is number {

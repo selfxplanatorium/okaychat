@@ -7,6 +7,7 @@ import { t } from "@/i18n";
 import { useData } from "@/state/data";
 import { useChannels } from "@/state/channels";
 import { channelsApi } from "@/state/channels-api";
+import { setChannelWatch } from "@/state/channel-activity";
 import { useCommand } from "@/keyboard/registry";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { channelError } from "@/lib/channel-error";
@@ -83,6 +84,13 @@ export function ChannelsPage({ channelId, threadRootId }: { channelId?: string; 
     if (!threadRootId && activeThreadId) useChannels.getState().closeThread();
   }, [activeThreadId, channelId, room?.id, room?.kind, threadRootId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // One live watch per stream: the open room, plus one thread root. Leaving releases it.
+  useEffect(() => {
+    if (!room || room.id !== channelId) setChannelWatch(null);
+    else setChannelWatch(room.id, room.kind === "dm" ? null : activeThreadId);
+  }, [activeRoomId, channelId, room?.id, room?.kind, activeThreadId]);
+  useEffect(() => () => setChannelWatch(null), []);
+
   useEffect(() => {
     if (mode === "discover" && !discover.length) void useChannels.getState().loadDiscover("");
   }, [mode, discover.length]);
@@ -116,7 +124,10 @@ export function ChannelsPage({ channelId, threadRootId }: { channelId?: string; 
     const next = nextUnreadAfter(joined, activeRoomId);
     if (next) navigateRoom(next.id);
   });
-  useCommand("channels.focusComposer", () => document.getElementById("channel-composer")?.focus());
+  useCommand("channels.focusComposer", () => {
+    const id = activeThreadId ? `channel-composer-thread-${activeThreadId}` : activeRoomId ? `channel-composer-room-${activeRoomId}` : null;
+    if (id) document.getElementById(id)?.focus();
+  });
   useCommand("channels.reply", () => {
     const message = messages.find((item) => item.id === focusedId);
     if (message) useChannels.getState().setReply(message);
@@ -308,6 +319,8 @@ export function ChannelsPage({ channelId, threadRootId }: { channelId?: string; 
             room={room}
             members={members}
             composerKey={`room:${room.id}`}
+            rootId={null}
+            announceTyping={!activeThreadId}
             draft={drafts[room.id] ?? ""}
             reply={replyTo[room.id] ?? null}
             aiArmed={aiArmed[room.id] === true}

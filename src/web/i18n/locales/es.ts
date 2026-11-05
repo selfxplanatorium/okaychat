@@ -624,6 +624,11 @@ const es: Translation = {
     customInstructions: "Instrucciones propias",
     customInstructionsDescription: "Se añaden al prompt del sistema de cada chat. Cambiarlas restablece la caché del prompt una vez.",
     customInstructionsPlaceholder: "p. ej. Sé conciso. Soy desarrollador backend. Prefiere ejemplos en TypeScript.",
+    channelActivityTitle: "Indicadores de actividad",
+    channelSharePresence: "Compartir mi estado en línea",
+    channelShareTyping: "Mostrar cuando estoy escribiendo",
+    channelActivityHelp: "El estado es aproximado y solo lo ven las personas de tus conversaciones. Las conexiones inactivas pueden dejar de compartir el estado. La escritura se puede compartir por separado.",
+    channelActivityFailed: "No se pudo guardar la configuración de actividad. Inténtalo de nuevo.",
   },
   account: {
     storage: "Almacenamiento",
@@ -864,6 +869,17 @@ const es: Translation = {
     loadFailed: "No se pudieron cargar las etiquetas.",
     searchTags: "Buscar etiquetas",
     selectedTags: "Etiquetas seleccionadas",
+  },
+  channels: {
+    presenceOnline: "En línea",
+    presenceAway: "Ausente",
+    presenceOffline: "Sin conexión o sin compartir estado",
+    presenceUnavailable: "Estado no disponible",
+    presenceLabel: "{name}: {status}",
+    typingOne: "{name} está escribiendo…",
+    typingTwo: "{names} están escribiendo…",
+    typingMany: { one: "{count} persona está escribiendo…", other: "{count} personas están escribiendo…" },
+    activitySettings: "Ajustes de actividad",
   },
 };
 

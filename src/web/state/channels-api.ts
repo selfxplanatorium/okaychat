@@ -117,6 +117,15 @@ export const channelsApi = {
   aiStatus: (id: string, runId: string) => api<{ run: ChannelRunProjection }>(path(id, `/ai-runs/${encodeURIComponent(runId)}`)),
   cancelAi: (id: string, runId: string) => api<{ run: ChannelRunProjection }>(path(id, `/ai-runs/${encodeURIComponent(runId)}/cancel`), { method: "POST", json: {} }),
   changes: (cursor: string) => api<ChannelChangesPage | ChannelChangesReset>(`/channels/changes?cursor=${encodeURIComponent(cursor)}`),
+  /** Ephemeral activity: the connection id lives only in memory for the life of one stream. */
+  activity: (
+    input: { connectionId: string; seq: number; state: "active" | "idle"; watch: { channelId: string; rootId: string | null } | null },
+    signal?: AbortSignal,
+  ) => api<{ acceptedSeq: number; watchRevision: number }>("/channels/activity", { method: "POST", json: input, signal }),
+  typing: (
+    input: { connectionId: string; seq: number; channelId: string; rootId: string | null; typing: boolean },
+    signal?: AbortSignal,
+  ) => api<{ acceptedSeq: number }>("/channels/typing", { method: "POST", json: input, signal }),
   adminList: (before?: string | null) =>
     api<{ items: Array<{ id: string; name: string; visibility: ChannelVisibility; archivedAt: number | null; ownerId: string; ownerName: string; memberCount: number; messageCount: number; revision: number; createdAt: number; updatedAt: number }>; nextCursor: string | null }>(
       `/admin/channels${before ? `?before=${encodeURIComponent(before)}` : ""}`,

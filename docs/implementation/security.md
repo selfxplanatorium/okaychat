@@ -136,6 +136,19 @@ pair, and a non-shared group, so the endpoint is not an account directory. Threa
 same room and one-level depth inside the write transaction; a reply cannot be a root, and replies never
 enter the room AI transcript.
 
+### Presence and typing
+
+Presence and typing are process-local, advisory, and never stored. A connection id is bound to one live
+stream and the exact session token hash, is not an alternative credential, and never appears in a URL,
+browser storage, or a durable row. Every projected subject/viewer pair is rechecked against the live
+feature, membership, group eligibility, archive/root state, and a block in either direction; admin rights
+grant nothing, and suppressed presence is simply `offline`. `clear` frames carry no room, user, or root
+identifiers, frames never advance a durable cursor, and a projection is serialized again after any
+backpressure wait so a revoked watch cannot emit a stale roster. Private-room and DM membership is never
+inferred from a status: only members of the watched channel receive a projection, and presence in a shared
+room never reveals a DM partner. The in-memory request windows and registries are bounded and vanish on
+restart; no activity path writes SQLite.
+
 ## External API access
 
 `/v1` is a separate authentication surface. A bearer credential never sets `user` or `session`, so it cannot

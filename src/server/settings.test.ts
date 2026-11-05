@@ -128,3 +128,26 @@ test("notification preferences round-trip and a malformed stored object is dropp
   // Dropped, so clients fall back to DEFAULT_USER_SETTINGS.notifications.
   assert.equal(getSettings("alice").notifications, undefined);
 });
+
+test("activity indicator preferences default, validate strictly and survive unrelated patches", async () => {
+  assert.deepEqual(getSettings("alice").channelActivity, { sharePresence: true, shareTyping: true });
+  db.prepare("INSERT INTO user_settings VALUES (?, ?)").run("alice", JSON.stringify({ channelActivity: { sharePresence: "yes", shareTyping: true } }));
+  assert.deepEqual(getSettings("alice").channelActivity, { sharePresence: true, shareTyping: true });
+
+  const patch = async (body: unknown) => app.request("http://app/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  for (const invalid of [
+    { sharePresence: false },
+    { sharePresence: false, shareTyping: true, extra: true },
+    { sharePresence: "no", shareTyping: true },
+    null,
+    "off",
+  ]) {
+    assert.equal((await patch({ channelActivity: invalid })).status, 400, JSON.stringify(invalid));
+  }
+  assert.equal((await patch({ channelActivity: { sharePresence: false, shareTyping: true } })).status, 200);
+  assert.deepEqual(getSettings("alice").channelActivity, { sharePresence: false, shareTyping: true });
+  // An absent property leaves the pair unchanged.
+  assert.equal((await patch({ maxSteps: 7 })).status, 200);
+  assert.deepEqual(getSettings("alice").channelActivity, { sharePresence: false, shareTyping: true });
+  assert.deepEqual(getSettings("bob").channelActivity, { sharePresence: true, shareTyping: true });
+});

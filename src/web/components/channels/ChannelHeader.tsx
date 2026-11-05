@@ -3,6 +3,8 @@ import type { ChannelSummary } from "@shared/channels";
 import { t } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { dmTitle } from "@/state/channels-derive";
+import { useChannelActivity } from "@/state/channel-activity";
+import { ChannelPresenceDot, presenceStatusText } from "./ChannelPresenceDot";
 import { ChannelNotificationPreferences } from "./ChannelNotificationPreferences";
 import { ChannelConnectionNotice } from "./ChannelConnectionNotice";
 import type { TransportState } from "@/state/channels-events";
@@ -17,6 +19,17 @@ const ICONS = {
   lightbulb: LightbulbIcon,
   coffee: CoffeeIcon,
 } as const;
+
+/** The other person's status in a pair DM, labeled for screen readers without changing the title. */
+function DmPresence({ userId, name }: { userId: string; name: string }) {
+  const state = useChannelActivity((view) => view.presence[userId]);
+  return (
+    <span className="text-muted-foreground inline-flex shrink-0 items-center gap-1">
+      <ChannelPresenceDot state={state} />
+      <span className="sr-only">{t("channels.presenceLabel", { name, status: presenceStatusText(state) })}</span>
+    </span>
+  );
+}
 
 export function ChannelHeader({
   room,
@@ -44,6 +57,8 @@ export function ChannelHeader({
   const dm = room.kind === "dm";
   const Icon = dm ? (room.memberCount > 2 ? UsersIcon : UserIcon) : ICONS[room.icon] ?? HashIcon;
   const title = dm ? dmTitle(room, meId) : room.name;
+  const dmMembers = dm ? (room.dmMembers?.filter((member) => member.id !== meId) ?? []) : [];
+  const other = dmMembers.length === 1 ? dmMembers[0]! : null;
   return (
     <header className="bg-background/85 supports-backdrop-filter:bg-background/70 border-border flex shrink-0 items-center gap-2 border-b px-2 py-2 backdrop-blur-md sm:px-3">
       <Button type="button" size="icon-sm" variant="ghost" aria-label={t("channels.back")} onClick={onBack} className="md:hidden">
@@ -53,6 +68,7 @@ export function ChannelHeader({
       <div className="min-w-0 flex-1">
         <h1 className="flex min-w-0 items-center gap-1.5 text-sm font-semibold">
           <span className="truncate">{title}</span>
+          {dm && other && <DmPresence userId={other.id} name={other.name} />}
           <span className="text-muted-foreground shrink-0 text-[0.65rem] font-normal">
             {dm ? t("channels.directMessages") : t(room.visibility === "public" ? "channels.public" : room.visibility === "private" ? "channels.private" : "channels.group")}
           </span>

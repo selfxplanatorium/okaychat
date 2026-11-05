@@ -164,6 +164,8 @@ export function ChannelThreadPanel({
         room={threadRoom}
         members={members}
         composerKey={`thread:${rootId}`}
+        rootId={rootId}
+        announceTyping
         draft={draft}
         reply={reply}
         aiArmed={false}

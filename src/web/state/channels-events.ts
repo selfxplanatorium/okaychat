@@ -64,6 +64,12 @@ export function parseFrame(raw: string): SseFrame | null {
   return { ...(id ? { id } : {}), ...(event ? { event } : {}), data: data.join("\n") };
 }
 
+export interface EphemeralCapability {
+  connectionId: string;
+  activityLeaseMs: number;
+  typingLeaseMs: number;
+}
+
 export interface TransportHandlers {
   /** The cursor a reconnect should resume from. */
   getCursor: () => string | undefined;
@@ -72,18 +78,50 @@ export interface TransportHandlers {
   onRevoked: () => void;
   onState: (state: TransportState) => void;
   onSyncRequested: () => void;
+  /** The negotiated ephemeral capability, or null when this server does not offer one. */
+  onReady?: (capability: EphemeralCapability | null) => void;
+  /** A validated-by-the-caller ephemeral payload. Never enters the durable cursor. */
+  onEphemeral?: (payload: unknown) => void;
+  /** A malformed or oversized ephemeral frame: clear indicators, never touch durable state. */
+  onEphemeralInvalid?: () => void;
+  /** Any bytes arrived, including a heartbeat; resets the separate stream-stall deadline. */
+  onBytes?: () => void;
+}
+
+export interface ChannelTransportHandle {
+  stop: () => void;
+  /** Asks the transport to try SSE again now, e.g. after a stale presence window. */
+  reconnect: () => void;
 }
 
 const POLL_VISIBLE_MS = 5_000;
 const POLL_HIDDEN_MS = 60_000;
 const HIDDEN_CLOSE_MS = 30_000;
+const COOLDOWN_MS = 60_000;
 
-export function startChannelTransport(handlers: TransportHandlers): () => void {
+/** Routing a durable cursor needs an id; an ephemeral frame never carries one. */
+function parseReadyCapability(data: string): EphemeralCapability | null {
+  try {
+    const parsed = JSON.parse(data) as { v?: unknown; ephemeral?: unknown };
+    if (parsed.v !== 1 || !parsed.ephemeral || typeof parsed.ephemeral !== "object") return null;
+    const capability = parsed.ephemeral as { v?: unknown; connectionId?: unknown; activityLeaseMs?: unknown; typingLeaseMs?: unknown };
+    if (capability.v !== 1) return null;
+    if (typeof capability.connectionId !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(capability.connectionId)) return null;
+    if (typeof capability.activityLeaseMs !== "number" || typeof capability.typingLeaseMs !== "number") return null;
+    if (!Number.isInteger(capability.activityLeaseMs) || !Number.isInteger(capability.typingLeaseMs)) return null;
+    return { connectionId: capability.connectionId, activityLeaseMs: capability.activityLeaseMs, typingLeaseMs: capability.typingLeaseMs };
+  } catch {
+    return null;
+  }
+}
+
+export function startChannelTransport(handlers: TransportHandlers): ChannelTransportHandle {
   let stopped = false;
   let controller: AbortController | null = null;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let hiddenTimer: ReturnType<typeof setTimeout> | null = null;
+  let cooldownTimer: ReturnType<typeof setTimeout> | null = null;
   let failureTimes: number[] = [];
   let pollUntil = 0;
 
@@ -96,9 +134,31 @@ export function startChannelTransport(handlers: TransportHandlers): () => void {
     if (pollTimer) clearTimeout(pollTimer);
     if (reconnectTimer) clearTimeout(reconnectTimer);
     if (hiddenTimer) clearTimeout(hiddenTimer);
-    pollTimer = reconnectTimer = hiddenTimer = null;
+    if (cooldownTimer) clearTimeout(cooldownTimer);
+    pollTimer = reconnectTimer = hiddenTimer = cooldownTimer = null;
   };
   const visible = () => typeof document === "undefined" || document.visibilityState !== "hidden";
+
+  const schedulePoll = (delay: number) => {
+    if (stopped) return;
+    if (pollTimer) clearTimeout(pollTimer);
+    // Jitter only lengthens the interval, so a visible tab never polls more often than every 5 s.
+    pollTimer = setTimeout(() => void poll(), delay * (1 + Math.random() * 0.1));
+  };
+
+  /** A cooldown polls the durable fallback only, then tries SSE again instead of polling forever. */
+  const enterCooldown = (ms = COOLDOWN_MS) => {
+    if (stopped) return;
+    pollUntil = Date.now() + ms;
+    setState("polling");
+    schedulePoll(visible() ? POLL_VISIBLE_MS : POLL_HIDDEN_MS);
+    if (cooldownTimer) clearTimeout(cooldownTimer);
+    cooldownTimer = setTimeout(() => {
+      cooldownTimer = null;
+      pollUntil = 0;
+      if (!stopped) void connect();
+    }, ms);
+  };
 
   const scheduleReconnect = (immediate = false) => {
     if (stopped) return;
@@ -110,9 +170,7 @@ export function startChannelTransport(handlers: TransportHandlers): () => void {
     const now = Date.now();
     failureTimes = [...failureTimes.filter((at) => now - at < 60_000), now];
     if (failureTimes.length >= 3 || now < pollUntil) {
-      pollUntil = now + 60_000;
-      setState("polling");
-      schedulePoll(POLL_VISIBLE_MS, true);
+      enterCooldown();
       return;
     }
     setState(navigator.onLine === false ? "offline" : "reconnecting");
@@ -120,19 +178,32 @@ export function startChannelTransport(handlers: TransportHandlers): () => void {
     reconnectTimer = setTimeout(() => void connect(), delay);
   };
 
-  const schedulePoll = (delay: number, immediate = false) => {
-    if (stopped) return;
-    if (pollTimer) clearTimeout(pollTimer);
-    if (immediate) void poll();
-    else pollTimer = setTimeout(() => void poll(), delay * (0.8 + Math.random() * 0.4));
-  };
-
   const handleFrames = (frames: SseFrame[]): "continue" | "reset" | "revoked" => {
     if (!frames.length) return "continue";
     const events: ChannelEventFrame[] = [];
     let cursor = handlers.getCursor();
     for (const frame of frames) {
-      if (frame.event === "ready") continue;
+      if (frame.event === "ready") {
+        handlers.onReady?.(parseReadyCapability(frame.data));
+        continue;
+      }
+      if (frame.event === "ephemeral") {
+        // A durability marker on an ephemeral frame would let a reconnect replay it; drop it whole.
+        if (frame.id) {
+          handlers.onEphemeralInvalid?.();
+          continue;
+        }
+        if (new TextEncoder().encode(frame.data).byteLength > 64 * 1024) {
+          handlers.onEphemeralInvalid?.();
+          continue;
+        }
+        try {
+          handlers.onEphemeral?.(JSON.parse(frame.data));
+        } catch {
+          handlers.onEphemeralInvalid?.();
+        }
+        continue;
+      }
       if (frame.event === "reset") {
         let reason = "history_expired";
         try {
@@ -175,7 +246,7 @@ export function startChannelTransport(handlers: TransportHandlers): () => void {
     controller = new AbortController();
     const cursor = handlers.getCursor();
     try {
-      const res = await fetch(`/api/channels/events${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`, {
+      const res = await fetch(`/api/channels/events?ephemeral=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, {
         credentials: "same-origin",
         headers: { Accept: "text/event-stream" },
         signal: controller.signal,
@@ -186,14 +257,14 @@ export function startChannelTransport(handlers: TransportHandlers): () => void {
           return;
         }
         if (res.status === 429) {
-          setState("polling");
-          schedulePoll(POLL_VISIBLE_MS, true);
+          const retryAfter = Number(res.headers.get("retry-after"));
+          enterCooldown(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1_000 : COOLDOWN_MS);
           return;
         }
         if (res.status === 400) {
           handlers.onReset("history_expired");
           handlers.onSyncRequested();
-          schedulePoll(POLL_VISIBLE_MS, true);
+          enterCooldown();
           return;
         }
         scheduleReconnect();
@@ -206,12 +277,14 @@ export function startChannelTransport(handlers: TransportHandlers): () => void {
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
+        // Any transport byte, heartbeat included, proves the stream is alive.
+        handlers.onBytes?.();
         const frames = parser.push(decoder.decode(value, { stream: true }));
         const outcome = handleFrames(frames);
         if (outcome === "reset") {
           controller.abort();
           handlers.onSyncRequested();
-          schedulePoll(POLL_VISIBLE_MS, true);
+          enterCooldown();
           return;
         }
         if (outcome === "revoked") {
@@ -253,10 +326,9 @@ export function startChannelTransport(handlers: TransportHandlers): () => void {
       } else if (body.events?.length) {
         handlers.onFrames(body.events);
       }
-      if (!stopped) {
-        if (Date.now() < pollUntil) schedulePoll(POLL_VISIBLE_MS, true);
-        else schedulePoll(visible() ? POLL_VISIBLE_MS : POLL_HIDDEN_MS);
-      }
+      // Never reschedule immediately: a cooldown is a polling interval, not a request loop. The
+      // cooldown timer is what returns to SSE.
+      if (!stopped) schedulePoll(visible() ? POLL_VISIBLE_MS : POLL_HIDDEN_MS);
     } catch {
       if (!stopped) schedulePoll(visible() ? 10_000 : POLL_HIDDEN_MS);
     }
@@ -272,27 +344,42 @@ export function startChannelTransport(handlers: TransportHandlers): () => void {
       }, HIDDEN_CLOSE_MS);
     } else {
       if (hiddenTimer) clearTimeout(hiddenTimer);
+      if (pollTimer) clearTimeout(pollTimer);
       hiddenTimer = null;
+      pollTimer = null;
       pollUntil = 0;
       failureTimes = [];
-      if (pollTimer) clearTimeout(pollTimer);
-      pollTimer = null;
       void connect();
     }
   };
   const onOnline = () => { failureTimes = []; pollUntil = 0; void connect(); };
-  const onOffline = () => { controller?.abort(); setState("offline"); };
+  const onOffline = () => {
+    clear();
+    failureTimes = [];
+    pollUntil = 0;
+    if (stopped) return;
+    setState("offline");
+  };
 
   document.addEventListener("visibilitychange", onVisibility);
   window.addEventListener("online", onOnline);
   window.addEventListener("offline", onOffline);
   void connect();
 
-  return () => {
-    stopped = true;
-    clear();
-    document.removeEventListener("visibilitychange", onVisibility);
-    window.removeEventListener("online", onOnline);
-    window.removeEventListener("offline", onOffline);
+  return {
+    stop: () => {
+      stopped = true;
+      clear();
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    },
+    reconnect: () => {
+      if (stopped) return;
+      failureTimes = [];
+      pollUntil = 0;
+      clear();
+      void connect();
+    },
   };
 }

@@ -7,6 +7,7 @@ import type { ChannelAiBinding, ChannelMentionInput } from "../../shared/channel
 import { assertChannelMember, assertRoom, assertWritable, requireChannelsFeature, channelRow, conflict, exclusionRow, groupEligible, inviteRow, memberRow, notFound, type ChannelRow, type MemberRow } from "./access.js";
 import { requestChannelRevocation } from "./revocation.js";
 import { insertEvent, insertSync } from "./events.js";
+import { clearChannelActivityAfterPost, clearChannelActivityForChannel, clearChannelActivityForMember } from "./activity.js";
 import { chargeRate } from "./rate.js";
 import { notifyAiFinished, notifyHumanMessage, notifyInvite, notifyThreadReply, purgeMessageNotices, purgeThreadNotices } from "./notifications.js";
 import { markChannelNoticesReadThrough, purgeChannelNotices } from "../notifications.js";
@@ -225,6 +226,7 @@ export function archiveChannel(userId: string, channelId: string, revision: numb
     const next = bumpRevision(channelId);
     audit(userId, channelId, archived ? "archive" : "unarchive", null, "");
     insertEvent({ channelId, kind: "channel.changed", entityId: channelId, version: next });
+    afterCommit(() => clearChannelActivityForChannel(channelId));
     return channelRow(channelId)!;
   });
 }
@@ -244,6 +246,7 @@ export function deleteChannel(userId: string, channelId: string, revision: numbe
     insertSync();
     // Files go after the commit: a rollback must leave every row's bytes in place.
     afterCommit(() => removeChannelMedia(channelId));
+    afterCommit(() => clearChannelActivityForChannel(channelId));
   });
 }
 
@@ -316,6 +319,7 @@ export function joinChannel(userId: string, channelId: string): StoreResult<Memb
     const revision = bumpRevision(channelId);
     insertEvent({ channelId, kind: "members.changed", entityId: userId, version: revision });
     insertEvent({ targetUserId: userId, kind: "sync" });
+    afterCommit(() => clearChannelActivityForChannel(channelId));
     return { value: memberRow(channelId, userId)!, replay: false };
   });
 }
@@ -346,6 +350,7 @@ export function acceptInvite(userId: string, channelId: string): MemberRow {
     const revision = bumpRevision(channelId);
     insertEvent({ channelId, kind: "members.changed", entityId: userId, version: revision });
     insertEvent({ targetUserId: userId, kind: "sync" });
+    afterCommit(() => clearChannelActivityForChannel(channelId));
     return memberRow(channelId, userId)!;
   });
 }
@@ -378,6 +383,7 @@ export function leaveChannel(userId: string, channelId: string): void {
     insertEvent({ channelId, kind: "members.changed", entityId: userId, version: revision });
     insertEvent({ targetUserId: userId, kind: "sync" });
     afterCommit(requestChannelRevocation);
+    afterCommit(() => clearChannelActivityForMember(channelId, userId));
   });
 }
 
@@ -455,6 +461,7 @@ export function removeMember(userId: string, channelId: string, targetId: string
     insertEvent({ channelId, kind: "members.changed", entityId: targetId, version: revision });
     insertEvent({ targetUserId: targetId, kind: "sync" });
     afterCommit(requestChannelRevocation);
+    afterCommit(() => clearChannelActivityForMember(channelId, targetId));
   });
 }
 
@@ -626,6 +633,7 @@ export function postHumanMessage(
     }
     insertEvent({ channelId, kind: "message.changed", entityId: id, version: 1, rootId: threadRoot });
     insertEvent({ channelId, kind: "channel.changed", entityId: channelId, version: channel.revision });
+    afterCommit(() => clearChannelActivityAfterPost(channelId, threadRoot, userId));
     return { value: { messageId: id, seq, runId, replay: false }, replay: false };
   });
 }
@@ -705,6 +713,11 @@ export function deleteHumanMessage(userId: string, channelId: string, messageId:
       const version = (db.prepare("SELECT revision FROM channel_messages WHERE id = ?").get(reply.id) as { revision: number }).revision;
       insertEvent({ channelId, kind: "message.changed", entityId: reply.id, version, rootId: messageId });
     }
+    // Everyone composing in the deleted room line or thread line stops being shown as typing.
+    afterCommit(() => {
+      clearChannelActivityForChannel(channelId, null);
+      if (message.thread_root === null) clearChannelActivityForChannel(channelId, messageId);
+    });
     return { seq: message.seq };
   });
 }

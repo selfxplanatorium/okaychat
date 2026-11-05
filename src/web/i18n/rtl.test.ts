@@ -6,7 +6,12 @@ import { test } from "node:test";
 
 // RTL readiness ratchet. Logical properties (`ms-*`, `ps-*`, `start-*`, `text-start`) flip with `dir`,
 // physical ones (`ml-*`, `left-*`, `text-left`) do not. Every new UI file joins this list.
-const RTL_CHECKED_FILES = ["components/chat/MessageTranslation.tsx", "components/chat/TranslationDialog.tsx"];
+const RTL_CHECKED_FILES = [
+  "components/chat/MessageTranslation.tsx",
+  "components/chat/TranslationDialog.tsx",
+  "components/channels/ChannelPresenceDot.tsx",
+  "components/channels/ChannelTypingIndicator.tsx",
+];
 
 const FORBIDDEN = [
   /\b(?:ml|mr|pl|pr)-/,

@@ -8,8 +8,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 import { useChannels } from "@/state/channels";
+import { channelActivity } from "@/state/channel-activity";
 import { ChannelMentionPicker } from "./ChannelMentionPicker";
 import { ChannelAttachmentPicker } from "./ChannelAttachmentPicker";
+import { ChannelTypingIndicator } from "./ChannelTypingIndicator";
 
 interface SelectedMention extends ChannelMentionInput {
   name: string;
@@ -23,12 +25,14 @@ export function ChannelComposer({
   room,
   members,
   composerKey,
+  rootId = null,
   draft,
   reply,
   aiArmed,
   sending,
   showAi = true,
   threadMode = false,
+  announceTyping = true,
   onDraftChange,
   onSend,
   onCancelReply,
@@ -37,12 +41,15 @@ export function ChannelComposer({
   room: ChannelSummary;
   members: ChannelMemberSummary[];
   composerKey: string;
+  /** The explicit protocol scope: null for the room line, a live root for a thread line. */
+  rootId?: string | null;
   draft: string;
   reply: ChannelMessage | null;
   aiArmed: boolean;
   sending: boolean;
   showAi?: boolean;
   threadMode?: boolean;
+  announceTyping?: boolean;
   onDraftChange: (text: string) => void;
   onSend: (text: string, mentions: ChannelMentionInput[]) => void;
   onCancelReply: () => void;
@@ -50,6 +57,7 @@ export function ChannelComposer({
 }) {
   const sendWith = useData((state) => state.settings?.keyboard?.sendWith) ?? "enter";
   const ref = useRef<HTMLTextAreaElement>(null);
+  const composing = useRef(false);
   const [mentions, setMentions] = useState<SelectedMention[]>([]);
   const [picker, setPicker] = useState<{ start: number; query: string } | null>(null);
   const chips = useChannels((state) => state.pendingAttachments[composerKey] ?? NO_CHIPS);
@@ -58,10 +66,18 @@ export function ChannelComposer({
   const offline = typeof navigator !== "undefined" && navigator.onLine === false;
   const disabled = !room.capabilities.post || sending || offline;
   const canSend = !disabled && (draft.trim().length > 0 || ready > 0) && uploading === 0;
+  const scope = { channelId: room.id, rootId };
+  // A DOM id is never the protocol scope, but the room and thread composers need distinct targets.
+  const textareaId = rootId ? `channel-composer-thread-${rootId}` : `channel-composer-room-${room.id}`;
 
   useEffect(() => {
     if (!draft) setMentions([]);
   }, [draft]);
+
+  useEffect(() => {
+    const current = scope;
+    return () => channelActivity.typingStop(current);
+  }, [room.id, rootId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const update = (value: string, caret: number) => {
     const previous = draft;
@@ -74,6 +90,8 @@ export function ChannelComposer({
       }),
     );
     onDraftChange(value);
+    // Draft restore and focus never reach this path; only a real edit starts the typing lease.
+    channelActivity.typingInput(scope, value);
     const match = /@([^\s@]*)$/.exec(value.slice(0, caret));
     setPicker(match && members.length ? { start: caret - match[0].length, query: match[1] ?? "" } : null);
   };
@@ -101,6 +119,7 @@ export function ChannelComposer({
 
   const send = () => {
     if (!canSend) return;
+    channelActivity.submit(scope);
     const valid = mentions.filter((mention) => draft.slice(mention.start, mention.end) === `@${mention.name}`);
     onSend(draft, valid.map(({ userId, start, end }) => ({ userId, start, end })));
     setMentions([]);
@@ -133,6 +152,7 @@ export function ChannelComposer({
             </button>
           </div>
         )}
+        <ChannelTypingIndicator channelId={room.id} rootId={rootId} members={members} announce={announceTyping} className="-mb-1 px-1" />
         <div
           className="border-border bg-muted/40 focus-within:bg-background relative flex items-end gap-1 rounded-xl border p-1 transition-colors"
           onDragOver={(event) => {
@@ -163,7 +183,7 @@ export function ChannelComposer({
           </button>
           <Textarea
             ref={ref}
-            id="channel-composer"
+            id={textareaId}
             value={draft}
             disabled={disabled}
             rows={1}
@@ -171,6 +191,9 @@ export function ChannelComposer({
             aria-label={t("channels.composerPlaceholder")}
             placeholder={room.archivedAt ? t("channels.archivedReadOnly") : t("channels.composerPlaceholder")}
             onChange={(event) => update(event.target.value, event.target.selectionStart ?? event.target.value.length)}
+            onBlur={() => channelActivity.typingStop(scope)}
+            onCompositionStart={() => { composing.current = true; }}
+            onCompositionEnd={() => { composing.current = false; }}
             onPaste={(event) => {
               if (!room.capabilities.attach) return;
               const files = event.clipboardData.files;
@@ -181,6 +204,8 @@ export function ChannelComposer({
             }}
             onKeyDown={(event) => {
               if (picker) return;
+              // An IME Enter confirms the composition; it must never send the message.
+              if (composing.current || event.nativeEvent.isComposing) return;
               const mod = event.metaKey || event.ctrlKey;
               const shouldSend = (event.key === "Enter" && !event.shiftKey && (sendWith === "enter" || mod)) || (event.key === "Enter" && mod);
               if (shouldSend) {

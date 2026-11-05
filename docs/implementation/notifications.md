@@ -113,3 +113,11 @@ delete fail or drop unrelated notices.
 
 The channel panel link uses `settingsHref("notifications")`; the General settings browser-notification row
 carries `setting-notifications` for that deep link.
+
+## Presence and typing boundary
+
+Presence and typing are ephemeral and are **never** notices. An accepted activity or typing update
+creates no notice, suppresses none, marks nothing read, and changes no unread count; a viewer being
+active must not hide a durable mention or DM. Nothing polls them: they ride the existing channel event
+stream and vanish on reconnect. Disabling desktop notifications and disabling activity indicators are
+different switches in different sections and neither implies the other.

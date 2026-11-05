@@ -26,3 +26,12 @@ test("unknown settings keys are dropped instead of reaching user settings", () =
   assert.equal(parsed.success, true);
   assert.equal(Object.hasOwn(parsed.success ? parsed.data : {}, "notASetting"), false);
 });
+
+test("activity indicator preferences are a complete strict pair", () => {
+  assert.deepEqual(settingsPatch.parse({ channelActivity: { sharePresence: false, shareTyping: true } }), {
+    channelActivity: { sharePresence: false, shareTyping: true },
+  });
+  for (const value of [{ sharePresence: true }, { shareTyping: false }, { sharePresence: 1, shareTyping: true }, { sharePresence: true, shareTyping: true, extra: false }, null]) {
+    assert.equal(settingsPatch.safeParse({ channelActivity: value }).success, false, JSON.stringify(value));
+  }
+});
