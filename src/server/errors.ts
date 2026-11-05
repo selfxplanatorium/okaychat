@@ -2,7 +2,15 @@ import { randomBytes } from "node:crypto";
 import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import type { ErrorCode, ErrorWire } from "../shared/errors.js";
+import {
+  isFeatureCode,
+  isRecoveryAction,
+  safeProviderField,
+  type ErrorCode,
+  type ErrorWire,
+  type FeatureCode,
+  type RecoveryAction,
+} from "../shared/errors.js";
 import { redactSecrets } from "../shared/redact.js";
 
 export { redactSecrets } from "../shared/redact.js";
@@ -178,6 +186,14 @@ export interface AppErrorInit {
   model?: string;
   provider?: string;
   requestId?: string;
+  /** Authored detail for the ChatGPT plan surface; a value outside the union is dropped. */
+  featureCode?: FeatureCode;
+  /** Bounded upstream machine code for diagnostics, never a message or URL. */
+  providerCode?: string;
+  /** Bounded upstream parameter name for diagnostics. */
+  providerParam?: string;
+  /** Authored next step. Upstream URLs are never accepted here. */
+  recoveryAction?: RecoveryAction;
   cause?: unknown;
 }
 
@@ -195,6 +211,10 @@ export class AppError extends Error {
   readonly model?: string;
   readonly provider?: string;
   readonly requestId?: string;
+  readonly featureCode?: FeatureCode;
+  readonly providerCode?: string;
+  readonly providerParam?: string;
+  readonly recoveryAction?: RecoveryAction;
 
   constructor(init: AppErrorInit) {
     const entry = ERROR_CATALOG[init.code];
@@ -212,6 +232,14 @@ export class AppError extends Error {
     if (init.model) this.model = init.model;
     if (init.provider) this.provider = init.provider;
     if (init.requestId) this.requestId = init.requestId;
+    // Normalise here, not only at serialization: an invalid code or a URL-shaped action never
+    // exists on the error object, so no later consumer can accidentally trust it.
+    if (isFeatureCode(init.featureCode)) this.featureCode = init.featureCode;
+    const providerCode = safeProviderField(init.providerCode);
+    if (providerCode) this.providerCode = providerCode;
+    const providerParam = safeProviderField(init.providerParam);
+    if (providerParam) this.providerParam = providerParam;
+    if (isRecoveryAction(init.recoveryAction)) this.recoveryAction = init.recoveryAction;
   }
 
   static isInstance(error: unknown): error is AppError {
@@ -226,8 +254,18 @@ export const newErrorRef = () => randomBytes(4).toString("hex");
 
 const safeText = (value: string, max: number) => redactSecrets(value).slice(0, max);
 
+/** Logs may name what failed, never a code, state, verifier, or token carried in a query string. */
+const stripUrlSecrets = (value: string) =>
+  value.replace(/\bhttps?:\/\/[^\s"'<>]+/gi, (url) => url.split(/[?#]/)[0] ?? url);
+
 /** The safe client payload. `details`, the raw provider body, and the stack are never included. */
 export function toWireError(error: AppError): ErrorWire {
+  // Re-check the authored lists at the boundary as defense in depth, so a forged value can never
+  // reach the browser even if it was assigned somewhere other than the constructor.
+  const featureCode = isFeatureCode(error.featureCode) ? error.featureCode : undefined;
+  const providerCode = safeProviderField(error.providerCode);
+  const providerParam = safeProviderField(error.providerParam);
+  const recoveryAction = isRecoveryAction(error.recoveryAction) ? error.recoveryAction : undefined;
   return {
     code: error.code,
     message: safeText(error.message, 500),
@@ -238,6 +276,10 @@ export function toWireError(error: AppError): ErrorWire {
     ...(error.model ? { model: safeText(error.model, 200) } : {}),
     ...(error.provider ? { provider: safeText(error.provider, 100) } : {}),
     ...(error.requestId ? { requestId: safeText(error.requestId, 200) } : {}),
+    ...(featureCode ? { featureCode } : {}),
+    ...(providerCode ? { providerCode } : {}),
+    ...(providerParam ? { providerParam } : {}),
+    ...(recoveryAction ? { recoveryAction } : {}),
   };
 }
 
@@ -280,6 +322,6 @@ export function handleAppError(error: unknown, c: Context) {
   if (error instanceof HTTPException) return errorJson(c, appErrorFromStatus(error.status, error.message));
   // Raw messages can carry SQL, file paths, prompts, or upstream responses. Only the redacted log gets them.
   const ref = newErrorRef();
-  console.error(`[${c.req.method} ${c.req.path}] ref=${ref}`, redactSecrets(String((error as Error)?.stack ?? error)));
+  console.error(`[${c.req.method} ${c.req.path}] ref=${ref}`, stripUrlSecrets(redactSecrets(String((error as Error)?.stack ?? error))));
   return errorJson(c, appErrorFromStatus(500, `Something went wrong (ref ${ref}). The server log has details.`, { ref }));
 }

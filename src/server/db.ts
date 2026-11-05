@@ -6,9 +6,8 @@ import { resultPaths } from "./sandbox-paths.js";
 import { env } from "./env.js";
 
 export const db = new DatabaseSync(path.join(env.dataDir, "okaychat.db"));
-// synchronous = NORMAL is the WAL setting SQLite recommends: commits skip an fsync each, and a crash cannot corrupt
-// the database (a power loss can only drop the last commits).
-db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
+// FULL makes rotating-token sending markers durable; WAL still permits concurrent readers.
+db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
 
 /** SQL for the joined text parts of a stored UI message (`{ role, parts, metadata }`). */
 const MESSAGE_TEXT = (row: string) =>
@@ -713,6 +712,63 @@ const migrations: Array<string | (() => void)> = [
   // History reads order by (created_at,rowid) for every thread; the composite primary key cannot serve that
   // order, so SQLite sorted each thread's rows in a temporary B-tree.
   `CREATE INDEX messages_thread_time ON messages(thread_id, created_at);`,
+  // Sign in with ChatGPT for chat (docs/implementation/codex-chat.md), independent of codex_auth (images).
+  // One host id per user, saved registrations (one active), session-bound login attempts, and a durable
+  // control revision that disconnects and new attempts bump. Old personal chatgpt rows keep only their
+  // switch; a shared chatgpt row was never usable and is removed with its audience.
+  `
+  CREATE TABLE chatgpt_hosts (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    host_id TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE chatgpt_registrations (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    client_id TEXT NOT NULL,
+    identity_enc TEXT NOT NULL,
+    credentials_enc TEXT,
+    state TEXT NOT NULL CHECK (state IN ('ready', 'plan_disabled', 'reconnect_required', 'disconnected')),
+    active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1)),
+    generation INTEGER NOT NULL DEFAULT 1,
+    token_version INTEGER NOT NULL DEFAULT 0,
+    refresh_state TEXT NOT NULL DEFAULT 'idle' CHECK (refresh_state IN ('idle', 'sending', 'uncertain')),
+    access_expires_at INTEGER,
+    connected_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    last_error_code TEXT,
+    welcome_seen_at INTEGER,
+    UNIQUE (user_id, client_id)
+  );
+  CREATE UNIQUE INDEX chatgpt_one_active ON chatgpt_registrations(user_id) WHERE active = 1;
+  CREATE TABLE chatgpt_login_attempts (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    session_hash TEXT NOT NULL REFERENCES sessions(token_hash) ON DELETE CASCADE,
+    registration_id TEXT REFERENCES chatgpt_registrations(id) ON DELETE CASCADE,
+    state_hash TEXT NOT NULL UNIQUE,
+    secrets_enc TEXT,
+    helper_cap_hash TEXT NOT NULL UNIQUE,
+    helper_bound_hash TEXT,
+    redirect_uri TEXT,
+    status TEXT NOT NULL CHECK (status IN ('preparing', 'waiting', 'exchanging', 'succeeded', 'failed', 'cancelled')),
+    intent TEXT NOT NULL DEFAULT 'connect',
+    expected_generation INTEGER,
+    connection_revision INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    error_code TEXT
+  );
+  CREATE INDEX chatgpt_attempts_user ON chatgpt_login_attempts(user_id, status, expires_at);
+  CREATE TABLE chatgpt_controls (
+    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL DEFAULT 0
+  );
+  UPDATE provider_connections SET api_key_enc = NULL, base_url = NULL, config_json = '{}' WHERE provider_id = 'chatgpt';
+  DELETE FROM provider_model_policies WHERE provider_id = 'chatgpt';
+  DELETE FROM shared_connections WHERE provider_id = 'chatgpt';
+  DELETE FROM share_audiences WHERE kind = 'provider' AND resource_id = 'chatgpt';
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

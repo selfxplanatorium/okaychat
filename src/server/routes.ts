@@ -1,3 +1,4 @@
+import { chatgptRoutes } from "./chatgpt-oauth-routes.js";
 import { appearanceRoutes } from "./appearance.js";
 import { accountRoutes } from "./account.js";
 import { memoryRoutes } from "./memory.js";
@@ -100,6 +101,7 @@ function mergeSecrets(next?: Record<string, string>, prev?: Record<string, strin
 
 const api = new Hono<AppEnv>()
   .use(requireUser)
+  .route("/chatgpt", chatgptRoutes)
   .use(async (c, next) => {
     // Learn the OAuth redirect origin only from signed-in requests. Any anonymous request could otherwise
     // set a forged Host first and receive every user's authorization codes.

@@ -54,6 +54,8 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin || url.pathname.startsWith("/api/")) return;
+  // The desktop helper and its published checksum must match the running deployment, never a stale cache.
+  if (url.pathname === "/chatgpt-connect.mjs" || url.pathname === "/chatgpt-connect.mjs.sha256") return;
 
   // Pages: the network decides, so a deploy is picked up on the next load. The latest same-origin shell is
   // kept for offline deep links regardless of the route it came from. Offline, every route falls back to it.

@@ -1,5 +1,5 @@
-import type { ErrorCode } from "../shared/errors.js";
-import { parseErrorWire } from "../shared/errors.js";
+import type { ErrorCode, FeatureCode, RecoveryAction } from "../shared/errors.js";
+import { parseErrorWire, safeProviderField } from "../shared/errors.js";
 import { AppError, ERROR_CATALOG, newErrorRef, redactSecrets, toWireError } from "./errors.js";
 
 /**
@@ -77,6 +77,10 @@ interface BodyInfo {
   code: string;
   status: string;
   requestId?: string;
+  /** The upstream machine code exactly as sent, bounded and charset-checked. */
+  machineCode?: string;
+  /** The upstream parameter name, when the body names one. */
+  param?: string;
 }
 
 function bodyInfo(body: unknown): BodyInfo {
@@ -85,12 +89,16 @@ function bodyInfo(body: unknown): BodyInfo {
   const nested = typeof record.error === "object" && record.error !== null ? record.error as Record<string, unknown> : {};
   const direct = typeof record.error === "string" ? record.error : undefined;
   const requestId = [record.request_id, record.requestId, nested.request_id, nested.requestId].find((value) => typeof value === "string") as string | undefined;
+  const machineCode = safeProviderField(nested.code ?? record.code);
+  const param = safeProviderField(nested.param ?? record.param);
   return {
     message: [nested.message, direct, record.message, record.detail].find((value) => typeof value === "string") as string ?? "",
     type: lower(nested.type ?? record.type),
     code: lower(nested.code ?? record.code ?? record.status),
     status: lower(nested.status ?? record.status),
     ...(requestId ? { requestId } : {}),
+    ...(machineCode ? { machineCode } : {}),
+    ...(param ? { param } : {}),
   };
 }
 
@@ -140,8 +148,88 @@ function statusOf(error: ErrorShape): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+/**
+ * A structured ChatGPT-plan refusal. The upstream code picks the stable taxonomy, the authored
+ * recovery, and the bounded diagnostic; its message never reaches the browser.
+ */
+export interface StructuredFailure {
+  code: ErrorCode;
+  retryable: boolean;
+  featureCode?: FeatureCode;
+  recoveryAction?: RecoveryAction;
+  providerCode: string;
+  providerParam?: string;
+}
+
+/**
+ * The SIWC inference codes from docs section 9. `retryable` here means "another identical request
+ * can succeed", so an eligibility, scope, capability, or usage-limit refusal is final. A 401 keeps
+ * its single auth replay in the transport; this mapping runs only once that replay is exhausted.
+ */
+const STRUCTURED_FAILURES: Record<string, Omit<StructuredFailure, "providerCode" | "providerParam">> = {
+  subscription_sharing_user_not_eligible: { code: "forbidden", retryable: false, recoveryAction: "choose_provider" },
+  subscription_sharing_usage_limit_exceeded: { code: "provider_quota", retryable: false, recoveryAction: "manage_chatgpt_usage" },
+  subscription_sharing_usage_unavailable: { code: "provider_overloaded", retryable: true, recoveryAction: "retry" },
+  subscription_sharing_user_unavailable: { code: "provider_overloaded", retryable: true, recoveryAction: "retry" },
+  subscription_sharing_unsupported_capability: { code: "validation", retryable: false },
+  subscription_sharing_route_not_supported: {
+    code: "forbidden",
+    retryable: false,
+    featureCode: "chatgpt_protocol_error",
+    recoveryAction: "contact_admin",
+  },
+  subscription_sharing_invalid_user: {
+    code: "provider_auth",
+    retryable: false,
+    featureCode: "chatgpt_reconnect_required",
+    recoveryAction: "reconnect_chatgpt",
+  },
+  chatpass_v2_scope_not_authorized: {
+    code: "forbidden",
+    retryable: false,
+    featureCode: "chatgpt_plan_disabled",
+    recoveryAction: "enable_chatgpt_plan",
+  },
+  chatpass_v2_invalid_authorization_context: {
+    code: "forbidden",
+    retryable: false,
+    featureCode: "chatgpt_reconnect_required",
+    recoveryAction: "reconnect_chatgpt",
+  },
+};
+
+/** The structured refusal in a body, if it is one we know, with its bounded diagnostics. */
+export function structuredFailure(body: unknown): StructuredFailure | undefined {
+  const info = bodyInfo(body);
+  if (!info.machineCode) return undefined;
+  const mapped = STRUCTURED_FAILURES[info.machineCode.toLowerCase()];
+  if (!mapped) return undefined;
+  return {
+    ...mapped,
+    providerCode: info.machineCode,
+    ...(info.param ? { providerParam: info.param } : {}),
+  };
+}
+
+/**
+ * True when a failed response body names a structured refusal no retry can fix. The retry boundary
+ * reads this from the bounded peek, so a plan usage limit is not retried just because it is a 429.
+ */
+export function structuredRefusalText(text: string): boolean {
+  if (!text.trim() || text.length > 64 * 1024) return false;
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return false;
+  }
+  return structuredFailure(body)?.retryable === false;
+}
+
 /** Extracts a safe provider code from a plain status + body when no Error object carries them. */
 export function codeForProviderStatus(status: number | undefined, body: unknown, message = ""): ErrorCode {
+  const structured = structuredFailure(body);
+  if (structured) return structured.code;
   const info = bodyInfo(body);
   const combined = `${info.type} ${info.code} ${info.status} ${info.message} ${message}`.toLowerCase();
   if (status === 401 || status === 403) return "provider_auth";
@@ -184,25 +272,31 @@ function unwrap(error: unknown): ErrorShape {
 
 function summarize(error: ErrorShape, body: unknown, context: ProviderErrorContext, status: number | undefined): AppError {
   const info = bodyInfo(body);
+  const structured = structuredFailure(body);
   const combined = `${info.type} ${info.code} ${info.status} ${info.message} ${error.message ?? ""}`;
-  let code = codeForProviderStatus(status, body, error.message);
+  let code = structured?.code ?? codeForProviderStatus(status, body, error.message);
   // A 403 from a blocked outbound address is a configuration refusal, not a rejected provider key.
-  if (error.name === "BlockedAddressError") code = "forbidden";
-  let retryable: boolean | undefined;
-  if (code === "provider_overloaded" && (MEMORY_MESSAGE.test(combined) || STRICT_QUOTA.test(combined) || CONTEXT_MESSAGE.test(combined) || AUTH_CODE.test(combined))) retryable = false;
-  // A server status outside the transient set is a refusal, not a hiccup, even though it maps to overloaded.
-  if (status !== undefined && status >= 500 && status <= 599 && !transientStatus(status)) retryable = false;
-  // Network failures arrive as TypeError("fetch failed") with a cause code and no status.
-  if (status === undefined && code === "unknown") {
-    if (isTimeout(error)) code = "timeout";
-    else if (NETWORK_MESSAGE.test(combined) || NETWORK_MESSAGE.test(lower((error.cause as ErrorShape | undefined)?.code))) code = "network";
-    else if (context.kind === "tool") code = "tool_failed";
+  if (!structured && error.name === "BlockedAddressError") code = "forbidden";
+  // A structured refusal owns its retryability; the heuristics below only classify bare bodies.
+  let retryable: boolean | undefined = structured?.retryable;
+  if (!structured) {
+    if (code === "provider_overloaded" && (MEMORY_MESSAGE.test(combined) || STRICT_QUOTA.test(combined) || CONTEXT_MESSAGE.test(combined) || AUTH_CODE.test(combined))) retryable = false;
+    // A server status outside the transient set is a refusal, not a hiccup, even though it maps to overloaded.
+    if (status !== undefined && status >= 500 && status <= 599 && !transientStatus(status)) retryable = false;
+    // Network failures arrive as TypeError("fetch failed") with a cause code and no status.
+    if (status === undefined && code === "unknown") {
+      if (isTimeout(error)) code = "timeout";
+      else if (NETWORK_MESSAGE.test(combined) || NETWORK_MESSAGE.test(lower((error.cause as ErrorShape | undefined)?.code))) code = "network";
+      else if (context.kind === "tool") code = "tool_failed";
+    }
+    if (status === undefined && code === "validation" && context.kind === "tool") code = "tool_failed";
   }
-  if (status === undefined && code === "validation" && context.kind === "tool") code = "tool_failed";
   const retryAfterMs = code === "provider_rate_limit" || code === "provider_overloaded"
     ? retryAfterFromHeaders(error.responseHeaders)
     : undefined;
   const requestId = requestIdOf(error.responseHeaders, info);
+  const providerCode = structured?.providerCode ?? info.machineCode;
+  const providerParam = structured?.providerParam ?? info.param;
   const entry = ERROR_CATALOG[code];
   return new AppError({
     code,
@@ -214,9 +308,28 @@ function summarize(error: ErrorShape, body: unknown, context: ProviderErrorConte
     ...(context.model ? { model: context.model } : {}),
     ...(context.provider ? { provider: context.provider } : {}),
     ...(requestId ? { requestId } : {}),
+    ...(structured?.featureCode ? { featureCode: structured.featureCode } : {}),
+    ...(providerCode ? { providerCode } : {}),
+    ...(providerParam ? { providerParam } : {}),
+    ...(structured?.recoveryAction ? { recoveryAction: structured.recoveryAction } : {}),
     details: { name: error.name, status, body: body ?? error.responseBody, message: error.message },
     cause: error,
   });
+}
+
+/** OAuth parameters whose value must never reach a log, even outside a URL query string. */
+const OAUTH_PARAM = /\b(code_verifier|code_challenge|code|state|verifier|nonce|id_token_hint|helperSecret|helper_secret|helperCapability|client_secret)\b(\s*[:=]\s*['"]?)([^\s'",;}\]]{2,})/gi;
+
+/**
+ * A log line may name what failed, never the secret that failed. Whole query strings are dropped, so
+ * an authorization or callback URL cannot carry a code, state, verifier, nonce, or token into the
+ * application or reverse-proxy log. The body is a bounded prefix; the rest never leaves the process.
+ */
+function diagnosticText(value: string, max: number): string {
+  return redactSecrets(value)
+    .replace(/\bhttps?:\/\/[^\s"'<>]+/gi, (url) => url.split(/[?#]/)[0] ?? url)
+    .replace(OAUTH_PARAM, "$1$2[redacted]")
+    .slice(0, max);
 }
 
 function logFailure(app: AppError, error: unknown, context: ProviderErrorContext): void {
@@ -227,13 +340,15 @@ function logFailure(app: AppError, error: unknown, context: ProviderErrorContext
   const rawBody = typeof current.responseBody === "string" ? current.responseBody : current.responseBody ? JSON.stringify(current.responseBody) : "";
   const line = {
     code: app.code,
+    featureCode: app.featureCode,
+    providerCode: app.providerCode,
     status: app.status,
     provider: app.provider,
     model: app.model,
     requestId: app.requestId,
     name: current.name,
-    message: redactSecrets(String(current.message ?? "").slice(0, 2_000)).slice(0, 500),
-    body: redactSecrets(rawBody.slice(0, 4_000)).slice(0, 500),
+    message: diagnosticText(String(current.message ?? "").slice(0, 2_000), 500),
+    body: diagnosticText(rawBody.slice(0, 4_000), 500),
   };
   console.error(`[provider] ref=${ref}`, line);
 }

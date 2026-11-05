@@ -81,3 +81,7 @@ Deferred: a per-chat tools sheet (needs consolidated per-chat capability state),
 - Stream replay is kept in server memory for 15 minutes after the last update. Reload recovery works; pending generations do not survive a server restart.
 
 - No public usage/limits API for OpenCode Go was found. Go windows show our own recorded spend, not the remaining quota.
+
+## ChatGPT plan OAuth release gate
+
+SIWC desktop helper/store/transport implementation is in progress behind a default-off deployment flag. Live server-exchange admission, namespaced tool round trips, rotation, deployment eligibility, mobile resume and image independence must pass before enabling it. The CLI remains image-only; see `implementation/codex-chat.md`.

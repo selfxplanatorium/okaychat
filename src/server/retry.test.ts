@@ -80,6 +80,42 @@ test("a quota refusal served as 429 is not retried", async () => {
   assert.equal(calls, 1);
 });
 
+test("a plan usage-limit 429 is not retried even with a Retry-After", async () => {
+  let calls = 0;
+  const body = JSON.stringify({ error: { code: "subscription_sharing_usage_limit_exceeded", message: "You reached your plan limit" } });
+  const wrapper = createRetryingFetch({
+    fetchImpl: (async () => { calls++; return status(429, { "retry-after": "1" }, body); }) as typeof fetch,
+    sleep: async () => {},
+  });
+  const response = await wrapper("https://api.openai.test/v1/responses", { method: "POST", body: "{}" });
+  assert.equal(calls, 1);
+  assert.equal(response.status, 429);
+  assert.equal(await response.text(), body);
+});
+
+test("a temporary subscription-sharing 503 retries, but a structured refusal does not", async () => {
+  const temporaryBody = JSON.stringify({ error: { code: "subscription_sharing_usage_unavailable" } });
+  let calls = 0;
+  const temporary = createRetryingFetch({
+    fetchImpl: (async () => (++calls === 1 ? status(503, {}, temporaryBody) : ok())) as typeof fetch,
+    sleep: async () => {},
+    random: () => 0.5,
+  });
+  assert.equal((await temporary("https://api.openai.test/v1/responses", { method: "POST", body: "{}" })).status, 200);
+  assert.equal(calls, 2);
+
+  // The status alone looks transient; the structured code says this exact request is refused.
+  const refusalBody = JSON.stringify({ error: { code: "chatpass_v2_scope_not_authorized" } });
+  calls = 0;
+  const refusal = createRetryingFetch({
+    fetchImpl: (async () => { calls++; return status(503, {}, refusalBody); }) as typeof fetch,
+    sleep: async () => {},
+  });
+  const response = await refusal("https://api.openai.test/v1/responses", { method: "POST", body: "{}" });
+  assert.equal(calls, 1);
+  assert.equal(await response.text(), refusalBody);
+});
+
 test("three attempts cap a repeatedly overloaded provider", async () => {
   const waits: number[] = [];
   let calls = 0;

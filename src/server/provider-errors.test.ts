@@ -130,6 +130,98 @@ test("tool output error text is normalized without echoing raw strings", () => {
   assert.equal(JSON.parse(toolErrorWireText(unknownWire)).code, "tool_failed");
 });
 
+test("subscription-sharing refusals map to authored codes, actions, and bounded diagnostics", () => {
+  const quota = wire({
+    statusCode: 429,
+    message: "Usage limit",
+    responseHeaders: { "retry-after": "1", "x-request-id": "req_safe_2" },
+    responseBody: JSON.stringify({ error: { code: "subscription_sharing_usage_limit_exceeded", message: "PLAN_SECRET_TEXT", type: "invalid_request_error" } }),
+  });
+  assert.equal(quota.code, "provider_quota");
+  assert.equal(quota.retryable, false);
+  assert.equal(quota.recoveryAction, "manage_chatgpt_usage");
+  assert.equal(quota.providerCode, "subscription_sharing_usage_limit_exceeded");
+  assert.equal(quota.requestId, "req_safe_2");
+  assert.equal(quota.retryAfterMs, undefined, "a plan limit must not invent a reset time");
+  assert.ok(!JSON.stringify(quota).includes("PLAN_SECRET_TEXT"));
+
+  const notEligible = wire({ statusCode: 403, responseBody: JSON.stringify({ error: { code: "subscription_sharing_user_not_eligible" } }) });
+  assert.equal(notEligible.code, "forbidden");
+  assert.equal(notEligible.retryable, false);
+  assert.equal(notEligible.recoveryAction, "choose_provider");
+  assert.equal(notEligible.featureCode, undefined);
+
+  for (const code of ["subscription_sharing_usage_unavailable", "subscription_sharing_user_unavailable"]) {
+    const temporary = wire({ statusCode: 503, responseBody: JSON.stringify({ error: { code } }) });
+    assert.equal(temporary.code, "provider_overloaded", code);
+    assert.equal(temporary.retryable, true, code);
+    assert.equal(temporary.recoveryAction, "retry", code);
+  }
+
+  const capability = wire({
+    statusCode: 400,
+    responseBody: JSON.stringify({ error: { code: "subscription_sharing_unsupported_capability", param: "tools[0].name" } }),
+  });
+  assert.equal(capability.code, "validation");
+  assert.equal(capability.retryable, false);
+  assert.equal(capability.providerParam, "tools[0].name");
+  assert.equal(capability.providerCode, "subscription_sharing_unsupported_capability");
+
+  const route = wire({ statusCode: 403, responseBody: JSON.stringify({ error: { code: "subscription_sharing_route_not_supported" } }) });
+  assert.equal(route.code, "forbidden");
+  assert.equal(route.featureCode, "chatgpt_protocol_error");
+  assert.equal(route.recoveryAction, "contact_admin");
+
+  const invalidUser = wire({ statusCode: 401, responseBody: JSON.stringify({ error: { code: "subscription_sharing_invalid_user" } }) });
+  assert.equal(invalidUser.code, "provider_auth");
+  assert.equal(invalidUser.featureCode, "chatgpt_reconnect_required");
+  assert.equal(invalidUser.recoveryAction, "reconnect_chatgpt");
+
+  const scope = wire({ statusCode: 403, responseBody: JSON.stringify({ error: { code: "chatpass_v2_scope_not_authorized" } }) });
+  assert.equal(scope.code, "forbidden");
+  assert.equal(scope.featureCode, "chatgpt_plan_disabled");
+  assert.equal(scope.recoveryAction, "enable_chatgpt_plan");
+
+  const context = wire({
+    statusCode: 403,
+    responseHeaders: { "x-request-id": "req_ctx" },
+    responseBody: JSON.stringify({ error: { code: "chatpass_v2_invalid_authorization_context", message: "bad context" } }),
+  });
+  assert.equal(context.code, "forbidden");
+  assert.equal(context.featureCode, "chatgpt_reconnect_required");
+  assert.equal(context.requestId, "req_ctx");
+});
+
+test("a detail-only 403 is not promoted to a reconnect, and a code is never a URL", () => {
+  const denied = wire({ statusCode: 403, responseBody: JSON.stringify({ detail: "forbidden" }) });
+  assert.equal(denied.code, "provider_auth");
+  assert.equal(denied.featureCode, undefined);
+  assert.equal(denied.recoveryAction, undefined);
+  assert.equal(denied.providerCode, undefined);
+
+  const url = wire({ statusCode: 400, responseBody: JSON.stringify({ error: { code: "https://evil.test/x?token=SECRET_TOKEN" } }) });
+  assert.equal(url.providerCode, undefined);
+  assert.ok(!JSON.stringify(url).includes("SECRET_TOKEN"));
+  const long = wire({ statusCode: 400, responseBody: JSON.stringify({ error: { code: "c".repeat(201) } }) });
+  assert.equal(long.providerCode, undefined);
+  const spaced = wire({ statusCode: 400, responseBody: JSON.stringify({ error: { code: "not a code" } }) });
+  assert.equal(spaced.providerCode, undefined);
+});
+
+test("provider log lines drop OAuth query strings, codes, and bearer tokens", (t) => {
+  const logged = t.mock.method(console, "error", () => {});
+  describeProviderError({
+    statusCode: 401,
+    message: "POST https://auth.openai.com/api/accounts/oauth/token?code=SECRET_CODE&state=SECRET_STATE failed with Bearer sk-live-SECRETTOKEN",
+    responseBody: JSON.stringify({ error: { code: "invalid_user", message: "nonce=SECRET_NONCE code_verifier=SECRET_VERIFIER" } }),
+  }, { log: true, model: "chatgpt/mock", provider: "chatgpt" });
+  const line = JSON.stringify(logged.mock.calls[0]?.arguments ?? []);
+  for (const secret of ["SECRET_CODE", "SECRET_STATE", "SECRETTOKEN", "SECRET_NONCE", "SECRET_VERIFIER"]) {
+    assert.ok(!line.includes(secret), `${secret} leaked: ${line}`);
+  }
+  assert.match(line, /invalid_user/);
+});
+
 test("the serialized payload never carries provider text, keys, prompts, files, or a stack", () => {
   const responseBody = JSON.stringify({
     error: {

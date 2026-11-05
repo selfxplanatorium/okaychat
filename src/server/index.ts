@@ -1,3 +1,4 @@
+import { chatgptHelperRoutes } from "./chatgpt-oauth-routes.js";
 import { existsSync } from "node:fs";
 import { startMediaMaintenance } from "./media/maintenance.js";
 import path from "node:path";
@@ -22,7 +23,11 @@ import { speechToken, speechWorkerConfigured } from "./speech/worker.js";
 import { voiceWebSocketServer } from "./voice/routes.js";
 
 const app = new Hono();
-app.use("/api/*", logger());
+// Capability-bearing OAuth requests and query strings never enter the request logger.
+app.use("/api/*", async (c, next) => {
+  if (c.req.path.startsWith("/api/chatgpt")) return next();
+  return logger()(c, next);
+});
 // Cross-site form posts (which skip the CORS preflight) cannot reach the API, including login and logout.
 // Browsers send Sec-Fetch-Site; the Origin comparison covers clients that do not.
 const publicOrigin = process.env.OKAYCHAT_PUBLIC_URL ? new URL(process.env.OKAYCHAT_PUBLIC_URL).origin : undefined;
@@ -46,6 +51,7 @@ app.get("/api/health", (c) => c.json({ ok: true, version: env.version }));
 app.route("/api/auth", authRoutes);
 app.route("/api/mcp/oauth/callback", mcpOAuthCallback);
 app.route("/api/public/shares", publicShareRoutes);
+app.route("/api/chatgpt/helper", chatgptHelperRoutes);
 app.route("/api", api);
 
 // Production: serve the built SPA. In dev, Vite serves it and proxies /api here.

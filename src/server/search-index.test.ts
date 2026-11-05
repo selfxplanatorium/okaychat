@@ -162,6 +162,7 @@ test("the FTS addressing migration rebuilds a populated index, survives two reop
       insert.run('m1', null, JSON.stringify({ role: 'user', parts: [{ type: 'text', text: 'migration alpha' }] }), 1);
       insert.run('m2', 'm1', JSON.stringify({ role: 'assistant', parts: [{ type: 'text', text: 'migration beta' }] }), 2);
       db.exec("DROP TRIGGER messages_fts_insert; DROP TRIGGER messages_fts_update; DROP TRIGGER messages_fts_delete; DROP TABLE message_search_keys; DROP INDEX messages_thread_time; DELETE FROM messages_fts");
+      db.exec("DROP TABLE IF EXISTS chatgpt_login_attempts; DROP TABLE IF EXISTS chatgpt_registrations; DROP TABLE IF EXISTS chatgpt_controls; DROP TABLE IF EXISTS chatgpt_hosts");
       db.exec("CREATE TRIGGER messages_fts_insert AFTER INSERT ON messages BEGIN INSERT INTO messages_fts (text, thread_id, message_id) VALUES ('', new.thread_id, new.id); END");
       db.exec("CREATE TRIGGER messages_fts_update AFTER UPDATE OF content ON messages BEGIN DELETE FROM messages_fts WHERE thread_id = old.thread_id AND message_id = old.id; INSERT INTO messages_fts (text, thread_id, message_id) VALUES ('', new.thread_id, new.id); END");
       db.exec("CREATE TRIGGER messages_fts_delete AFTER DELETE ON messages BEGIN DELETE FROM messages_fts WHERE thread_id = old.thread_id AND message_id = old.id; END");

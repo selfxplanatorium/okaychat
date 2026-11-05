@@ -49,3 +49,5 @@ API services go through AI SDK `generateImage` with `maxRetries: 1` (each retry 
 The format is detected from magic bytes (PNG, JPEG, WebP, GIF, AVIF) and the image is then fully decoded by sharp within the 100-megapixel bound. Anything else is rejected, so a provider cannot make the server serve HTML or SVG. `images.mime` holds the detected type. Files keep the `<id>.png` name for every format so older paths stay valid. Width and height come from the decode (after orientation). The file is written via temp + rename, and the `images` row plus its `image_threads` reference are inserted in one transaction; a failure removes the file. Cards and the Library load previews (`?variant=`, see `media.md`); a fork keeps a generated image alive after its source chat is deleted.
 
 The prompt-fidelity rules in `codex-images.md` apply to every service.
+
+Chat plan SIWC credentials are not image-service credentials. The Codex image relay retains its independent CLI login; see `codex-chat.md` for the default-off desktop chat integration.

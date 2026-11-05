@@ -7,7 +7,7 @@ import { api } from "@/lib/api";
 
 type CodexStatus = { version: string | null; connected: boolean; login: { url?: string; code?: string; error?: string } | null };
 
-/** Connects the user's ChatGPT account through `codex login --device-auth` on the server. */
+/** Connects the ChatGPT account used for images through `codex login --device-auth` on the server. Chat has its own independent sign-in. */
 export function CodexConnect({ onChange }: { onChange?: () => void }) {
   const [status, setStatus] = useState<CodexStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -55,10 +55,10 @@ export function CodexConnect({ onChange }: { onChange?: () => void }) {
     return (
       <div className="animate-rise-in flex items-center gap-3">
         <span className="text-success flex items-center gap-1.5 text-sm">
-          <CheckIcon className="animate-pop-in size-4" /> {t("providers.connected")}
+          <CheckIcon className="animate-pop-in size-4" /> {t("providers.imagesConnected")}
         </span>
         <Button size="sm" variant="outline" onClick={disconnect}>
-          {t("common.disconnect")}
+          {t("providers.disconnectImages")}
         </Button>
       </div>
     );
@@ -75,7 +75,7 @@ export function CodexConnect({ onChange }: { onChange?: () => void }) {
           {isCopied ? <CheckIcon className="animate-pop-in size-4" /> : <CopyIcon className="text-muted-foreground size-4" />}
         </button>
         <span className="text-muted-foreground animate-pulse-soft flex items-center gap-1.5 text-xs">
-          <Loader2Icon className="size-3 animate-spin" /> {t("providers.waitingForApproval")}
+          <Loader2Icon className="size-3 animate-spin" /> {t("providers.waitingForImageApproval")}
         </span>
         <Button size="xs" variant="ghost" onClick={disconnect}>
           {t("common.cancel")}
@@ -88,7 +88,7 @@ export function CodexConnect({ onChange }: { onChange?: () => void }) {
     <div className="animate-rise-in flex flex-col items-end gap-1">
       <Button size="sm" variant="outline" onClick={connect} disabled={busy}>
         {busy && <Loader2Icon className="animate-spin" />}
-        {t("providers.connectChatgpt")}
+        {t("providers.connectImagesChatgpt")}
       </Button>
       {(error ?? status.login?.error) && <span className="text-error animate-fade-in text-xs">{error ?? status.login?.error}</span>}
     </div>

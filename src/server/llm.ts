@@ -92,14 +92,14 @@ export function createModel(info: ModelInfo, conn: Connection, opts: CreateModel
       const provider = createOpenAI(chatgpt
         ? { apiKey: "chatgpt-login", baseURL, headers, fetch: createRetryingFetch({ ...(opts.retry ?? {}), onRetry: opts.onRetry, fetchImpl: chatgptFetch(opts.userId) }) }
         : { apiKey, baseURL, headers, fetch });
-      const openai: Record<string, JSONValue> = { promptCacheKey: cacheKey, store: false };
+      const openai: Record<string, JSONValue> = { ...(chatgpt ? {} : { promptCacheKey: cacheKey }), store: false };
       if (effort) {
         openai.reasoningEffort = effort;
         openai.reasoningSummary = "auto";
       }
       // GPT-5.6+ cache only at breakpoints; the implicit one sits at the end of the conversation. An explicit
       // one after the shared system part lets new chats and changed chat context reuse tools + system.
-      // The ChatGPT backend rejects prompt_cache_breakpoint and caches by prompt_cache_key alone.
+      // Plan OAuth has no verified explicit cache-key compatibility profile.
       const markCache = !chatgpt && EXPLICIT_BREAKPOINTS.test(info.id)
         ? (system: string[], messages: ModelMessage[]) => [...systemMessages(system, OPENAI_BREAKPOINT), ...messages]
         : passthrough;

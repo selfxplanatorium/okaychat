@@ -324,6 +324,8 @@ test("migration adds the edit columns and leaves existing rows unedited", () => 
       // A fixed historical version stays valid when future migrations are appended.
       db.exec("ALTER TABLE email_drafts DROP COLUMN kind");
       db.exec("DROP TABLE image_threads; DROP TABLE media; DROP INDEX uploads_media; DROP INDEX sandbox_files_media");
+      // Tables added by later migrations must be absent before the historical replay.
+      db.exec("DROP TABLE IF EXISTS chatgpt_login_attempts; DROP TABLE IF EXISTS chatgpt_registrations; DROP TABLE IF EXISTS chatgpt_controls; DROP TABLE IF EXISTS chatgpt_hosts");
       for (const table of ["uploads", "sandbox_files", "user_avatars"]) db.exec("ALTER TABLE " + table + " DROP COLUMN media_id");
       db.exec("PRAGMA user_version = 32");
       db.close();`);

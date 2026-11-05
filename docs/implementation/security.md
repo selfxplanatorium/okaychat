@@ -68,3 +68,7 @@ Not defended against: an admin (who controls the server), anyone who can run cod
 3. Back up `OKAYCHAT_SECRET` separately from the data volume.
 4. Rebuild images when Dependabot updates base images, Chromium, or Scrapling. Debian security updates (FFmpeg, LibreOffice, Ghostscript, poppler in the sandbox) arrive only with a rebuild.
 5. Give admin rights only to people who may run code on the server (stdio MCP servers run as the app).
+
+## ChatGPT plan OAuth
+
+SIWC identities and tokens are separately encrypted and bound to user/registration rows; attempts are bound to the original live session. The desktop helper uses a single-use download capability and a second helper-generated secret. Browser writes require canonical HTTPS Origin and session CSRF. No public OAuth callback is mounted. Endpoints and JWKS are fixed, HTTPS, bounded and redirect-free. Rotating refresh uses durable sending/uncertain markers with WAL synchronous=FULL (additional write latency); only one writer is supported. Proxy logs must redact OAuth queries, cookies and Authorization. The integration stays disabled until live acceptance; see `codex-chat.md`.
