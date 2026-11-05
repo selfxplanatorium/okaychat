@@ -95,6 +95,27 @@ test("thread pages order ascending, page backwards, and focus a requested reply"
   assert.deepEqual(before.items.map((item) => item.seq), [replies[0]!.message.seq, replies[1]!.message.seq]);
 });
 
+test("a focus jump loads the page containing an old reply", async () => {
+  const id = await roomWithMembers();
+  const root = await postMessage(call, id, { body: "Root" }, "alice");
+  const replies = [];
+  for (let i = 0; i < 35; i++) replies.push(await postMessage(call, id, { body: `Reply ${i}`, threadRootId: root.message.id }, "bob"));
+  const page = (await (await call(`/channels/${id}/messages/${root.message.id}/thread?focus=${replies[0]!.message.id}&limit=30`)).json()) as {
+    items: Array<{ id: string }>;
+    focusId: string | null;
+    hasMore: boolean;
+  };
+  assert.equal(page.focusId, replies[0]!.message.id);
+  assert.ok(page.items.some((item) => item.id === replies[0]!.message.id), "the oldest reply is reachable by focus");
+
+  const middle = (await (await call(`/channels/${id}/messages/${root.message.id}/thread?focus=${replies[20]!.message.id}&limit=10`)).json()) as {
+    items: Array<{ id: string }>;
+    hasMore: boolean;
+  };
+  assert.ok(middle.items.some((item) => item.id === replies[20]!.message.id), "a middle reply is on the returned page");
+  assert.equal(middle.hasMore, true);
+});
+
 test("thread read cursors are monotonic and the room dot follows the newest reply author", async () => {
   const id = await roomWithMembers();
   const root = await postMessage(call, id, { body: "Root" }, "alice");

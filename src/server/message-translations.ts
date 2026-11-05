@@ -36,6 +36,7 @@ import { costOf, normalizeUsage, recordUsage } from "./usage.js";
 const MESSAGE_NOT_FOUND = "Message not found";
 const BUSY = "A reply is still being written in this chat. Wait for it to finish.";
 const OFF = "Message translation is off. Turn it on in Settings → General.";
+const SOURCE_CHANGED = "The message changed while it was being translated. Try again.";
 const INVALID_MESSAGE = "Only stored user and assistant messages can be translated.";
 const EMPTY_TEXT = "This message has no text to translate.";
 const INVALID_LANG = "That is not a language this app can translate into.";
@@ -234,6 +235,8 @@ export async function translateMessage(
   const usage = normalizeUsage(result.totalUsage);
   recordUsage({ userId, threadId, providerId: model.providerId, modelId: model.id, kind: "translation", usage, cost: costOf(model.cost, usage) });
 
+  // The message may have been edited while the model answered; storing this would label old text as new.
+  if (inspect(userId, threadId, messageId).sourceHash !== message.sourceHash) throw conflict(SOURCE_CHANGED);
   const answer = result.text.trim();
   if (answer === "") throw invalid(EMPTY_ANSWER);
   const output = cutBytes(answer, MAX_TRANSLATION_TEXT_BYTES);

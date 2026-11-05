@@ -125,6 +125,20 @@ test("translates an assistant reply and a user message with a canonical language
   assert.equal(translationRows().length, 2);
 });
 
+test("a message edited while the model answers is refused instead of stored stale", async (t) => {
+  const log = transport(t, "Hallo Welt", async () => {
+    // The reply changes during the provider call; the answer now describes text that is gone.
+    db.prepare("UPDATE messages SET content = ? WHERE thread_id = 'thr_1' AND id = 'a1'")
+      .run(JSON.stringify({ role: "assistant", parts: [{ type: "text", text: "Rewritten while translating." }] }));
+  });
+  seedPair();
+  const response = await put("thr_1", "a1", "de");
+  assert.equal(response.status, 409);
+  assert.equal(translationRows().length, 0, "the stale answer is never stored");
+  assert.equal(log.length, 1);
+  assert.equal(usageRows().some(([kind]) => kind === "translation"), true, "the provider call is still charged");
+});
+
 test("the provider request is one English system prompt, one enveloped user message, and no tools", async (t) => {
   const log = transport(t);
   seedPair();

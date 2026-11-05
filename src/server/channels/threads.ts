@@ -86,6 +86,8 @@ export interface ThreadQuery {
   beforeSeq?: number;
   afterSeq?: number;
   limit?: number;
+  /** A reply to land on; without a cursor it bounds the returned page around that reply. */
+  focusId?: string;
 }
 
 const existsOlder = (channelId: string, rootId: string, seq: number) =>
@@ -102,8 +104,14 @@ export function threadPage(channelId: string, requestedId: string, viewerId: str
   if (!channel) throw notFound();
   const requested = messageInChannel(channelId, requestedId);
   if (!requested) throw notFound();
-  const focusId = requested.thread_root !== null ? requested.id : null;
   const root = rootOf(channelId, requestedId);
+  // A jump names the reply to land on. Without a cursor, that reply's own position bounds the page so an
+  // old reply is loaded instead of the newest page where it does not appear.
+  const focusRow = query.focusId && query.beforeSeq === undefined && query.afterSeq === undefined
+    ? messageInChannel(channelId, query.focusId)
+    : undefined;
+  const focusId = focusRow && focusRow.thread_root === root.id ? focusRow.id : requested.thread_root !== null ? requested.id : null;
+  const beforeSeq = query.beforeSeq ?? (focusRow && focusRow.thread_root === root.id ? focusRow.seq + 1 : undefined);
   const readSeq = threadReadSeq(root.id, viewerId);
   const liveCount = (
     db.prepare("SELECT COUNT(*) AS n FROM channel_messages WHERE channel_id = ? AND thread_root = ? AND deleted_at IS NULL").get(channelId, root.id) as { n: number }
@@ -135,8 +143,8 @@ export function threadPage(channelId: string, requestedId: string, viewerId: str
   const fetched = replyRows(
     channelId,
     root.id,
-    query.beforeSeq === undefined ? "ORDER BY seq DESC LIMIT ?" : "AND seq < ? ORDER BY seq DESC LIMIT ?",
-    ...(query.beforeSeq === undefined ? [limit + 1] : [query.beforeSeq, limit + 1]),
+    beforeSeq === undefined ? "ORDER BY seq DESC LIMIT ?" : "AND seq < ? ORDER BY seq DESC LIMIT ?",
+    ...(beforeSeq === undefined ? [limit + 1] : [beforeSeq, limit + 1]),
   );
   const page = fetched.slice(0, limit).reverse();
   const projected = projectMessages([root, ...page], viewerId);

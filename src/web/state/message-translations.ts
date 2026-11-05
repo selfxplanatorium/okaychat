@@ -23,13 +23,15 @@ export interface MessageState {
   error: unknown;
   /** Language currently shown under the message; null hides the block. */
   active: string | null;
+  /** The list request failed; the dialog offers a retry instead of pretending there are no translations. */
+  listError: boolean;
 }
 
 interface TranslationsState {
   messages: Record<string, MessageState>;
 }
 
-const EMPTY: MessageState = { sourceHash: null, sourceChars: 0, entries: {}, status: "idle", error: null, active: null };
+const EMPTY: MessageState = { sourceHash: null, sourceChars: 0, entries: {}, status: "idle", error: null, active: null, listError: false };
 
 export const useTranslations = create<TranslationsState>(() => ({ messages: {} }));
 
@@ -126,16 +128,17 @@ export function loadTranslations(threadId: string, messageId: string, force = fa
                 active,
                 status: current.status === "translating" ? "translating" : "idle",
                 error: null,
+                listError: false,
               },
             },
           };
         });
       },
       () => {
-        // A list failure is not an error under the message: the dialog simply shows nothing until reopened.
+        // The block stays quiet, but the dialog shows a retry instead of an empty library.
         if (started !== generation) return;
         useTranslations.setState((s) => ({
-          messages: { ...s.messages, [key]: { ...entry(key), status: entry(key).status === "translating" ? "translating" : "idle" } },
+          messages: { ...s.messages, [key]: { ...entry(key), listError: true, status: entry(key).status === "translating" ? "translating" : "idle" } },
         }));
       },
     )
@@ -177,7 +180,8 @@ export async function translateMessage(
       json: input,
       signal: controller.signal,
     });
-    if (started !== generation) return;
+    // A newer Translate owns this entry now; this answer belongs to a cancelled request.
+    if (started !== generation || controllers.get(key) !== controller) return;
     bump(key);
     loaded.add(key);
     useTranslations.setState((s) => ({
@@ -193,7 +197,7 @@ export async function translateMessage(
       },
     }));
   } catch (error) {
-    if (started !== generation) return;
+    if (started !== generation || controllers.get(key) !== controller) return;
     // A cancel is not a failure: the block returns to idle and nothing is cached.
     if (aborted(error)) {
       useTranslations.setState((s) => ({ messages: { ...s.messages, [key]: { ...entry(key), status: "idle" } } }));

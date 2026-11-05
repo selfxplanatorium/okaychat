@@ -100,9 +100,9 @@ interface ChannelsState {
   attachFiles: (composerKey: string, files: File[]) => Promise<void>;
   removePendingAttachment: (composerKey: string, localId: string) => void;
   clearPendingAttachments: (composerKey: string) => void;
-  openThread: (rootId: string) => Promise<void>;
+  openThread: (rootId: string, focusId?: string) => Promise<void>;
   closeThread: () => void;
-  loadThread: (rootId: string, beforeSeq?: number) => Promise<void>;
+  loadThread: (rootId: string, beforeSeq?: number, focusId?: string) => Promise<void>;
   sendToThread: (rootId: string, input: { body: string; mentions?: ChannelMentionInput[]; replyTo?: string }) => Promise<void>;
   markThreadRead: (rootId: string, seq?: number) => Promise<void>;
   loadBlocks: () => Promise<void>;
@@ -655,9 +655,8 @@ export const useChannels = create<ChannelsState>((set, get) => {
       try {
         const { message } = await channelsApi.message(id, messageId);
         if (message.threadRootId) {
-          // A reply opens its thread panel; the room timeline never anchors on it.
-          await get().openThread(message.threadRootId);
-          set({ threadFocusId: message.id });
+          // A reply opens its thread panel around that reply; the room timeline never anchors on it.
+          await get().openThread(message.threadRootId, message.id);
           return;
         }
         const page = await channelsApi.messages(id, { aroundId: messageId });
@@ -809,20 +808,23 @@ export const useChannels = create<ChannelsState>((set, get) => {
       set((state) => ({ pendingAttachments: { ...state.pendingAttachments, [composerKey]: [] } }));
     },
 
-    openThread: async (rootId) => {
+    openThread: async (rootId, focusId) => {
       if (!get().activeRoomId) return;
-      set({ activeThreadId: rootId, threadStatus: "loading", threadFocusId: null });
-      await get().loadThread(rootId);
+      set({ activeThreadId: rootId, threadStatus: "loading", threadFocusId: focusId ?? null });
+      await get().loadThread(rootId, undefined, focusId);
     },
 
     closeThread: () => set({ activeThreadId: null, threadStatus: "idle", threadFocusId: null }),
 
-    loadThread: async (rootId, beforeSeq) => {
+    loadThread: async (rootId, beforeSeq, focusId) => {
       const id = get().activeRoomId;
       if (!id) return;
       const generation = get().generation;
       try {
-        const page = await channelsApi.thread(id, rootId, beforeSeq === undefined ? {} : { beforeSeq });
+        const page = await channelsApi.thread(id, rootId, {
+          ...(beforeSeq === undefined ? {} : { beforeSeq }),
+          ...(focusId === undefined ? {} : { focus: focusId }),
+        });
         if (generation !== get().generation || get().activeRoomId !== id) return;
         set((state) => {
           const threads = { ...state.threads, [rootId]: mergeThread(state.threads[rootId], page) };

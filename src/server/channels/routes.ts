@@ -87,6 +87,12 @@ function parse<T extends z.ZodTypeAny>(schema: T, value: unknown): z.output<T> {
   return result.data;
 }
 
+/** The reply a thread jump lands on; the store resolves it and 404s when it is not in this room. */
+function focusParam(value: string): string {
+  if (value.length === 0 || value.length > 200) throw invalid("Invalid focus message.");
+  return value;
+}
+
 const listCursor = (row: { updated_at: number; id: string }) => Buffer.from(JSON.stringify({ v: 1, u: row.updated_at, i: row.id }), "utf8").toString("base64url");
 function parseListCursor(raw: string | undefined): { updatedAt: number; id: string } | null {
   if (!raw) return null;
@@ -737,6 +743,7 @@ export const channelRoutes = new Hono<AppEnv>()
         ...(c.req.query("beforeSeq") !== undefined ? { beforeSeq: number(c.req.query("beforeSeq"), "beforeSeq") } : {}),
         ...(c.req.query("afterSeq") !== undefined ? { afterSeq: number(c.req.query("afterSeq"), "afterSeq") } : {}),
         ...(c.req.query("limit") !== undefined ? { limit: number(c.req.query("limit"), "limit") } : {}),
+        ...(c.req.query("focus") !== undefined ? { focusId: focusParam(c.req.query("focus")!) } : {}),
       }),
     );
   })

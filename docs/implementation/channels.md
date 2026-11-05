@@ -226,3 +226,6 @@ paging, read cursors, the room dot, AI exclusion, notices, and the reply cap. `d
 creation/idempotency, shared-group and block rules, member changes, leaving/deletion, admin exclusion,
 room-only refusals, AI refusal, and notices. Worker provider calls use a deterministic mocked HTTP
 transport through the real AI SDK.
+
+A thread jump may name the reply to land on (`?focus=`). Without a cursor the server bounds the page at
+that reply, so an old reply opens on its own page instead of the newest page where it does not appear.

@@ -102,3 +102,8 @@ Errors use existing codes only (`validation`, `conflict`, `not_found`, `forbidde
 ## Limits and privacy
 
 Translations are private account data. They are not encrypted at rest (they are derived from text that already is not), do not appear on public pages, and share the chat's lifetime. The model receives exactly one message, wrapped as untrusted data; no other chat content, memory, or tools are sent.
+
+A message edit or Undo during generation is detected before the write: the payload carries its source
+hash, and translate re-reads the message after the model answers. A changed message returns a conflict and
+stores nothing, while the paid usage is still recorded. The dialog also surfaces a failed translation-list
+load with a retry instead of an empty list.

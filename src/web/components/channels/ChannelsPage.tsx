@@ -166,8 +166,7 @@ export function ChannelsPage({ channelId, threadRootId }: { channelId?: string; 
 
   const openThread = useCallback(
     (rootId: string, focusId?: string) => {
-      void useChannels.getState().openThread(rootId);
-      if (focusId) useChannels.getState().setThreadFocus(focusId);
+      void useChannels.getState().openThread(rootId, focusId);
       if (room) navigate(`/channels/${room.id}/thread/${rootId}`);
     },
     [navigate, room],

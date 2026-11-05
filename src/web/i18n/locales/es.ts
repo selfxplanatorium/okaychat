@@ -509,6 +509,7 @@ const es: Translation = {
     removed: "Traducción quitada",
     cancelTranslation: "Cancelar la traducción",
     failed: "No se pudo traducir este mensaje.",
+    listFailed: "No se pudieron cargar las traducciones guardadas.",
     empty: "Este mensaje no tiene texto que traducir.",
     noModel: "Elige un modelo auxiliar en Ajustes para traducir mensajes.",
     off: "La traducción de mensajes está desactivada. Actívala en Ajustes → General.",

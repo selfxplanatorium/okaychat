@@ -19,6 +19,7 @@ export default {
   removed: "Translation removed",
   cancelTranslation: "Cancel translation",
   failed: "This message could not be translated.",
+  listFailed: "Saved translations could not be loaded.",
   empty: "This message has no text to translate.",
   noModel: "Choose a utility model in Settings to translate messages.",
   off: "Message translation is off. Turn it on in Settings → General.",

@@ -56,6 +56,14 @@ export function TranslationDialog() {
           <DialogDescription>{t("translation.dialogDescription")}</DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3">
+          {state.listError && (
+            <div role="alert" className="border-warning/40 bg-warning/10 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-xs">
+              <span>{t("translation.listFailed")}</span>
+              <Button size="sm" variant="outline" onClick={() => target && void loadTranslations(target.threadId, target.messageId)}>
+                {t("common.retry")}
+              </Button>
+            </div>
+          )}
           <Select
             aria-label={t("translation.languageLabel")}
             value={lang}

@@ -86,11 +86,12 @@ export const channelsApi = {
   },
   deleteAttachment: (id: string, attachmentId: string) =>
     api<{ ok: true }>(path(id, `/attachments/${encodeURIComponent(attachmentId)}`), { method: "DELETE" }),
-  thread: (id: string, messageId: string, query: { beforeSeq?: number; afterSeq?: number; limit?: number } = {}) => {
+  thread: (id: string, messageId: string, query: { beforeSeq?: number; afterSeq?: number; limit?: number; focus?: string } = {}) => {
     const params = new URLSearchParams();
     if (query.beforeSeq !== undefined) params.set("beforeSeq", String(query.beforeSeq));
     if (query.afterSeq !== undefined) params.set("afterSeq", String(query.afterSeq));
     if (query.limit !== undefined) params.set("limit", String(query.limit));
+    if (query.focus !== undefined) params.set("focus", query.focus);
     return api<ChannelThreadPage>(path(id, `/messages/${encodeURIComponent(messageId)}/thread${params.size ? `?${params}` : ""}`));
   },
   threadRead: (id: string, rootId: string, throughSeq: number) =>

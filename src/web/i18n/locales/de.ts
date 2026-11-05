@@ -509,6 +509,7 @@ const de: Translation = {
     removed: "Übersetzung entfernt",
     cancelTranslation: "Übersetzung abbrechen",
     failed: "Diese Nachricht konnte nicht übersetzt werden.",
+    listFailed: "Gespeicherte Übersetzungen konnten nicht geladen werden.",
     empty: "Diese Nachricht enthält keinen Text zum Übersetzen.",
     noModel: "Wähle in den Einstellungen ein Hilfsmodell, um Nachrichten zu übersetzen.",
     off: "Nachrichtenübersetzung ist aus. Aktiviere sie unter Einstellungen → Allgemein.",
