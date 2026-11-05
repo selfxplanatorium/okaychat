@@ -1,3 +1,4 @@
+import conversationImport from "./conversation-import";
 /** The English source catalog. One namespace per area; each file is owned by that area. */
 import account from "./account";
 import agents from "./agents";
@@ -57,6 +58,7 @@ import voice from "./voice";
 import webhooks from "./webhooks";
 
 export const en = {
+  conversationImport,
   account,
   admin,
   agents,

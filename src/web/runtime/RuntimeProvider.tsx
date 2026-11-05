@@ -573,6 +573,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     },
     adapter: threadListAdapter,
   });
+  useEffect(()=> {
+    const refresh=()=>{void runtime.threads.reload().catch(()=>{});};
+    window.addEventListener("okaychat:conversation-imported",refresh);
+    return ()=>window.removeEventListener("okaychat:conversation-imported",refresh);
+  },[runtime]);
   const config = useMemo(() => {
     const all: Record<string, object> = { ...toolkit, ...widgets.toolkit };
     for (const [name, render] of Object.entries(widgetHelperRenders)) {

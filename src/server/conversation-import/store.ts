@@ -6,7 +6,7 @@ import { env } from '../env.js';
 import { newId } from '../crypto.js';
 import { AppError } from '../errors.js';
 import { ImportFailure } from './json.js';
-import { assertStorage } from '../quota.js';
+import { assertStorage, storageUsed, userStorageLimit } from '../quota.js';
 import { assertStagingCapacity } from '../archive-staging-budget.js';
 import { IMPORT_LIMITS as L, type ImportCounts, type ImportItemState, type ImportJobState, type ImportWarning, type JobView, type PreviewItem, type SourceNamespace } from '../../shared/chat-import.js';
 
@@ -103,6 +103,8 @@ export function jobView(row:JobRow):JobView {
   for (const i of items) for (const w of previewItem(i).warnings) {const old=warnings.find((x)=>x.code===w.code);if(old) old.count+=w.count;else warnings.push({...w});}
   if (!row.model_ref && row.kind==='import' && !warnings.some((w)=>w.code==='model_unset')) warnings.push({code:'model_unset',count:1});
   if (row.kind==='export') warnings.push({code:'export_loss',count:1});
+  const next=items.find((i)=>i.state==='pending');
+  const quota=row.state==='paused' && next ? {neededBytes:next.normalized_bytes,availableBytes:Math.max(0,userStorageLimit(row.user_id)-(storageUsed(row.user_id)-Math.min(row.reservation_bytes,next.normalized_bytes)))} : null;
   const times=items.filter((i)=>i.created_at!==null && i.updated_at!==null);
   return {id:row.id,kind:row.kind,state:row.state,admissionAt:row.admission_at,expiresAt:row.expires_at,terminalAt:row.terminal_at,
     counts:{total:items.length,valid:items.filter((i)=>i.state!=='invalid').length,invalid:count('invalid'),selected:selected.length,processed,
@@ -110,5 +112,5 @@ export function jobView(row:JobRow):JobView {
     phase:row.state,errorCode:row.error_code,canCancel:!terminal(row.state),canConfirm:row.kind==='import' && row.state==='ready' && count('valid')>0,
     canResume:row.kind==='import' && row.state==='paused',canDownload:row.kind==='export' && row.state==='ready',adapter:row.adapter,adapterVersion:row.adapter_version,
     projectId:row.project_id,modelRef:row.model_ref,normalizedBytes:items.reduce((n,i)=>n+i.normalized_bytes,0),receivedBytes:row.received_bytes,totalBytes:row.total_bytes,
-    dateRange:times.length ? {from:Math.min(...times.map((i)=>i.created_at!)),to:Math.max(...times.map((i)=>i.updated_at!))} : null,warnings};
+    dateRange:times.length ? {from:Math.min(...times.map((i)=>i.created_at!)),to:Math.max(...times.map((i)=>i.updated_at!))} : null,warnings,quota};
 }

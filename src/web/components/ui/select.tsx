@@ -18,6 +18,7 @@ export function Select<T extends string>({
   onValueChange,
   options,
   className,
+  itemClassName,
   placeholder,
   disabled = false,
   onOpenChange,
@@ -27,6 +28,7 @@ export function Select<T extends string>({
   onValueChange: (value: T) => void;
   options: Array<SelectOption<T>>;
   className?: string;
+  itemClassName?: string;
   placeholder?: string;
   disabled?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -77,7 +79,7 @@ export function Select<T extends string>({
                 <SelectPrimitive.Item
                   key={o.value}
                   value={o.value}
-                  className="data-highlighted:depth-primary data-highlighted:text-primary-foreground data-highlighted:[&_.text-muted-foreground]:text-primary-foreground flex cursor-default items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 pointer-coarse:py-2.5 text-sm outline-none select-none transition-colors duration-[var(--motion-instant)] ease-out-quart"
+                  className={cn("data-highlighted:depth-primary data-highlighted:text-primary-foreground data-highlighted:[&_.text-muted-foreground]:text-primary-foreground flex cursor-default items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 pointer-coarse:py-2.5 text-sm outline-none select-none transition-colors duration-[var(--motion-instant)] ease-out-quart",itemClassName)}
                 >
                   <SelectPrimitive.ItemText>{o.label}</SelectPrimitive.ItemText>
                   <SelectPrimitive.ItemIndicator className="transition-[opacity,scale] duration-[var(--motion-base)] ease-spring data-[starting-style]:scale-0 data-[starting-style]:opacity-0">

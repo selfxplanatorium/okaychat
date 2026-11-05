@@ -1,3 +1,4 @@
+import { startConversationImportAccount } from "@/state/conversation-imports";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { AppLoading } from "@/components/AppLoading";
@@ -38,6 +39,7 @@ function AuthedApp() {
     setFailed(false);
     void api<AuthStatus>("/auth/status").then(
       (next) => {
+        startConversationImportAccount(next.user?.id??"");
         // Fetch the shell chunk and its data while the appearance request is in flight, not after it.
         if (next.user) {
           prefetch("/appearance");

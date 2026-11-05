@@ -47,7 +47,9 @@ function run(mode: 'parse' | 'export', bytes: Uint8Array, admissionTime: number,
   });
 }
 export function parseInWorker(bytes: Uint8Array, admissionTime: number, signal?: AbortSignal): Promise<NormalizedFile> { return run('parse',bytes,admissionTime,signal) as Promise<NormalizedFile>; }
-export function serializeInWorker(bytes: Uint8Array, admissionTime: number, signal?: AbortSignal): Promise<Uint8Array> { return run('export',bytes,admissionTime,signal) as Promise<Uint8Array>; }
+export interface SerializedExport {bytes:Uint8Array;identities:Array<{namespace:'mapping-v1'|'portable-v1';id:string;hash:string}>}
+export function serializeWithHashesInWorker(bytes:Uint8Array,admissionTime:number,signal?:AbortSignal):Promise<SerializedExport> {return run('export',bytes,admissionTime,signal) as Promise<SerializedExport>;}
+export async function serializeInWorker(bytes: Uint8Array, admissionTime: number, signal?: AbortSignal): Promise<Uint8Array> { return (await serializeWithHashesInWorker(bytes,admissionTime,signal)).bytes; }
 export async function stopImportWorkers(): Promise<void> {
   closed = true;
   for (const entry of waiting.splice(0)) entry.reject(new ImportFailure('cancelled'));

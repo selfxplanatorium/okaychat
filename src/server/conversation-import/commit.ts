@@ -4,7 +4,7 @@ import { db, tx } from '../db.js';
 import { newId } from '../crypto.js';
 import { assertStorage, messageBytes } from '../quota.js';
 import { IMPORT_LIMITS as L, type PortableConversation } from '../../shared/chat-import.js';
-import { normalizeFile } from './formats.js';
+import { validateNormalized } from './normalized.js';
 import { fail } from './json.js';
 
 export const payloadHash = (conversation: PortableConversation): string => createHash('sha256').update(JSON.stringify(conversation)).digest('hex');
@@ -17,7 +17,7 @@ export function commitConversation(userId: string, jobId: string, ordinal: numbe
     const item = db.prepare('SELECT state,selected,payload_sha256 FROM conversation_import_items WHERE job_id=? AND ordinal=?').get(jobId,ordinal) as {state:string;selected:number;payload_sha256:string}|undefined;
     if (!item || item.state !== 'pending' || !item.selected) fail('wrong_state');
     if (job.project_id && !db.prepare('SELECT id FROM projects WHERE id=? AND user_id=?').get(job.project_id,userId)) fail('target_missing');
-    const normalized = normalizeFile({format:'okaychat.conversations',version:1,exportedAt:job.admission_at,conversations:[conversation]},job.admission_at).items[0]?.conversation;
+    const normalized = validateNormalized(conversation,job.admission_at);
     if (!normalized || JSON.stringify(normalized) !== JSON.stringify(conversation)) fail('staging_unavailable');
     const hash = payloadHash(normalized); if (hash !== item.payload_sha256) fail('staging_unavailable');
     const existing = db.prepare('SELECT thread_id,payload_sha256 FROM conversation_source_ids WHERE user_id=? AND namespace=? AND source_id=?').get(userId,conversation.source.namespace,conversation.source.id) as {thread_id:string;payload_sha256:string}|undefined;

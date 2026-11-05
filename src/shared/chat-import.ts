@@ -38,6 +38,7 @@ export interface JobView extends JobSummary {
   adapter: SourceNamespace | null; adapterVersion: number | null; projectId: string | null; modelRef: string | null;
   normalizedBytes: number; receivedBytes: number; totalBytes: number | null;
   dateRange: { from: number; to: number } | null; warnings: ImportWarning[];
+  quota: { neededBytes: number; availableBytes: number } | null;
 }
 export interface PreviewItem {
   itemKey: string; ordinal: number; title: string | null; state: ImportItemState; selectable: boolean;

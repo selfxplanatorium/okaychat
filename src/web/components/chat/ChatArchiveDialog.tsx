@@ -1,3 +1,4 @@
+import { ConversationImportDialog } from "./ConversationImportDialog";
 import { DownloadIcon, FileArchiveIcon, Loader2Icon, UploadIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ArchiveWarning } from "@shared/chat-archive";
@@ -293,6 +294,7 @@ export function ChatArchiveDialog({
 
 /** Settings entry: export a selection or import a file. */
 export function ChatDataSection() {
+  const [jsonMode,setJsonMode] = useState<"import"|"export"|null>(null);
   const [mode, setMode] = useState<"export" | "import" | null>(null);
   const refreshStorage = useData((s) => s.refreshStorage);
   return (
@@ -304,6 +306,9 @@ export function ChatDataSection() {
         <UploadIcon /> {t("chatArchives.importArchive")}
       </Button>
       <p className="text-muted-foreground w-full text-xs">{t("chatArchives.archiveNotice")}</p>
+      <Button type="button" variant="outline" className="min-h-11" onClick={()=>setJsonMode("import")}><UploadIcon />{t("conversationImport.import")}</Button>
+      <Button type="button" variant="outline" className="min-h-11" onClick={()=>setJsonMode("export")}><DownloadIcon />{t("conversationImport.export")}</Button>
+      <ConversationImportDialog open={jsonMode!==null} mode={jsonMode??"import"} onOpenChange={(open)=>{if(!open) setJsonMode(null);}} />
       <ChatArchiveDialog
         open={mode !== null}
         mode={mode ?? "export"}

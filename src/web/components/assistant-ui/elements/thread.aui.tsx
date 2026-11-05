@@ -1,3 +1,5 @@
+import { CodeBlock } from "@/components/ui/code-block";
+import { ImportedQuarantineRecord, ImportedMissingAttachment } from "@/components/chat/ImportedQuarantineRecord";
 import { useGlassBackdrop } from "@/components/glass/GlassBackdrop";
 import { useGlassSurface } from "@/components/glass/GlassSurface";
 import { useCallback } from "react";
@@ -1400,7 +1402,7 @@ const ReasoningRow: FC<{ text: string; running: boolean }> = ({ text, running })
       </button>
       {open && (
         <div className="text-muted-foreground border-border animate-rise-in ms-2 mt-1 border-s ps-4">
-          <MarkdownText />
+          <TranscriptMarkdown />
         </div>
       )}
     </div>
@@ -1532,7 +1534,7 @@ const AssistantMessage: FC = () => {
               }
               case "text":
                 // The editor shows all text parts below the tools, so each section keeps its own field.
-                return editing ? null : <MarkdownText />;
+                return editing ? null : <TranscriptMarkdown />;
               case "reasoning":
                 return (
                   <ReasoningRow
@@ -1553,7 +1555,9 @@ const AssistantMessage: FC = () => {
                 );
               case "data":
                 // Restored archives are inert records, never a registered interactive data renderer.
-                return part.name === "imported-tool" ? <ImportedToolRecord data={part.data} /> : part.dataRendererUI;
+                return part.name === "imported-tool" ? <ImportedToolRecord data={part.data} />
+                  : part.name === "imported-quarantine" ? <ImportedQuarantineRecord data={part.data} />
+                  : part.name === "imported-missing-attachment" ? <ImportedMissingAttachment data={part.data} /> : part.dataRendererUI;
               case "file":
                 return (
                   <div data-slot="aui_assistant-message-file" className="py-1">
@@ -1714,8 +1718,18 @@ const UserImagePart: ImageMessagePartComponent = (part) => (
 );
 
 /** Typed text renders as Markdown; attachment parts render as tiles above the bubble instead. */
+// Imported code examples stay code, including languages normally interpreted as diagrams or math.
+const INERT_IMPORTED_LANGUAGES = { mermaid: { SyntaxHighlighter: CodeBlock }, math: { SyntaxHighlighter: CodeBlock } };
+const TranscriptMarkdown: FC<{lineBreaks?:boolean}> = ({lineBreaks}) => {
+  const imported=useAuiState((state)=> {
+    const metadata=state.message.metadata as {custom?:{importedTranscript?:unknown}} | undefined;
+    return !!metadata?.custom?.importedTranscript;
+  });
+  return <MarkdownText lineBreaks={lineBreaks} componentsByLanguage={imported ? INERT_IMPORTED_LANGUAGES : undefined} />;
+};
+
 const UserText: TextMessagePartComponent = ({ text }) =>
-  parseAttachmentText(text) ? null : <MarkdownText lineBreaks />;
+  parseAttachmentText(text) ? null : <TranscriptMarkdown lineBreaks />;
 
 const UserMessage: FC = () => {
   const entering = useContext(MessageEnteringContext);
@@ -1745,7 +1759,7 @@ const UserMessage: FC = () => {
         <div className="aui-user-message-content peer depth-bubble text-foreground rounded-(--composer-radius) rounded-ee-md px-4 py-2 wrap-break-word empty:hidden">
           <VoiceMessageIcon />
           <MessagePrimitive.Parts
-            components={{ Text: UserText, File: UserFilePart, Image: UserImagePart }}
+            components={{ Text: UserText, File: UserFilePart, Image: UserImagePart, data: { by_name: { "imported-missing-attachment": ImportedMissingAttachment } } }}
           />
         </div>
       </div>

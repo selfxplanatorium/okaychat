@@ -1,4 +1,4 @@
-# External conversation transfer core
+# External conversation transfer
 
 The text-only transfer engine accepts one locally extracted JSON file through the private
 `/api/conversation-imports` family. It never reads an account ZIP, resolves imported URLs, calls a
@@ -23,7 +23,9 @@ four waiting, 256 MiB old-generation heap, 4 MiB stack, and a 60-second running 
 timeout, worker failure and explicit shutdown terminate the worker and release its slot. Development
 registers the existing TypeScript loader inside each worker; production uses emitted ESM JavaScript.
 The worker imports no storage, network, model or tool code. The low-level pure parsers are test and
-worker interfaces, not request handlers.
+worker interfaces, not request handlers. Parent-side DTO validation uses fixed-depth schemas and hashes;
+it never repeats HTML/Markdown transforms on the event loop. Export identities are updated from the
+normalized hashes returned by the worker, so sanitization does not create false changed-source warnings.
 
 ## Storage foundation
 
@@ -50,8 +52,11 @@ source identity. Runtime hydration orders parents before children, independently
 `export.ts` snapshots the active branch without reading asset bytes and allocates persistent native
 portable identities. Imported identities and message keys survive export. Export runs as a reserved durable job. Native tools become inert historical text summaries.
 Reasoning, unsupported data, off-branch content and file bodies are omitted. Preview/download always
-warn that JSON is a lossy text-only transfer. SQL projection selects file descriptors without loading
-inline file URLs or reading asset stores. Explicit selected leaves are supported.
+warn that JSON is a lossy text-only transfer. Identity allocation runs in a short owned write transaction; a separate read transaction rechecks
+identity/thread snapshots before projection. Neither transaction awaits a worker. SQL projection selects file descriptors without loading
+inline file URLs or reading asset stores. Native source JSON inspected per snapshot is also capped at
+32 MiB; legacy inline-heavy chats may therefore need a smaller selected branch even when their text-only
+output would be small. This cap prevents legacy blobs from bypassing the bounded preparation path. Explicit selected leaves are supported.
 
 ## Trust and verification
 
@@ -113,3 +118,33 @@ jobs stay paused. Missing, tampered or incompatible staging fails closed. The 24
 admission and never extends. Maintenance every 60 seconds expires work, retries cleanup and retains
 terminal metadata seven days. Startup also sweeps orphan directories; account deletion aborts its work
 and removes staging. One app writer/process is supported.
+
+## Settings and inert history
+
+Settings → Account → Chat data offers JSON import/export beside the native archive actions. A labeled
+single-file picker gives an early size check. The dialog recovers retained jobs, displays phase/counts,
+dates, exact estimated storage, model policy and warning counters, and selects an owned project or no
+project. Only valid nonduplicate previews are selectable. All preview metadata is bounded to 1,000 rows;
+only 25 rows mount at a time, with batch selection independent of mounted rows. Export selection is
+capped at 100 chats and requires acknowledging the text-only losses before preparation/download.
+
+Polling runs only in a visible, open dialog, at one second during work or five seconds while ready or
+paused, with one refresh in flight. Focus/visibility refresh immediately. Closing aborts polling but
+leaves uploaded work running; explicit cancellation also stops a receiving upload. Account changes and
+sign-out abort requests and invalidate every result through an epoch. Source files, preview bodies and
+job state are never put in browser persistent storage. Import checkpoints refresh sidebar metadata,
+projects and storage. Result and duplicate links open owned chats; deleted chats have no link.
+
+The Base UI dialog keeps focus trapped/restored and Escape closes without cancellation. Errors focus a
+summary. Native checkboxes, labeled project selection, polite phase/count announcements, 44 px actions,
+logical spacing and a single scroll region support keyboard and narrow screens. Quarantine is a native
+collapsed details element containing escaped text only. Missing attachment labels are plain localized
+text. Neither renderer creates images, links, tool callbacks, approvals or installs. Imported transcript code
+blocks bypass the automatic diagram/math renderers and remain escaped code examples.
+
+The `conversationImport` namespace is complete in en/de/es/fr/it/pt-PT, including reasons, warnings,
+phase names, plural forms and missing-content labels. Date/number/byte display uses the shared locale
+formatters. State tests cover late responses at each account boundary; static renderer tests prove
+malicious labels and quarantined markup remain inert. The lifecycle matrix exercises the actual private
+API on a temporary database, plus a second-account portable round trip and the unchanged native ZIP
+exporter. No real account exports are used in verification.

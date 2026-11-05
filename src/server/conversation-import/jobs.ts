@@ -9,7 +9,7 @@ import { AppError } from '../errors.js';
 import { messageBytes } from '../quota.js';
 import { storedContent } from './stored-content.js';
 import { IMPORT_LIMITS as L, type PortableConversation, type NormalizedItem } from '../../shared/chat-import.js';
-import { parseInWorker, serializeInWorker, stopImportWorkers } from './worker-pool.js';
+import { parseInWorker, serializeWithHashesInWorker, stopImportWorkers } from './worker-pool.js';
 import { ImportFailure, parseJson } from './json.js';
 import { commitConversation, payloadHash } from './commit.js';
 import { snapshotConversations } from './export.js';
@@ -121,7 +121,8 @@ async function importItems(row:JobRow):Promise<void> {
 async function exportJob(row:JobRow,signal:AbortSignal):Promise<void> {
   db.prepare("UPDATE conversation_import_jobs SET state='validating' WHERE id=?").run(row.id);
   const bytes=readBounded(row,'input.json',L.inputBytes);if(hashBytes(bytes)!==row.input_sha256) throw new ImportFailure('staging_unavailable');
-  const output=await serializeInWorker(bytes,row.admission_at,signal);live(row);
+  const built=await serializeWithHashesInWorker(bytes,row.admission_at,signal);live(row);const output=built.bytes;
+  tx(()=> {for(const identity of built.identities) db.prepare("UPDATE conversation_source_ids SET payload_sha256=? WHERE user_id=? AND namespace=? AND source_id=? AND origin='export'").run(identity.hash,row.user_id,identity.namespace,identity.id);});
   rmSync(path.join(jobDir(row),'output.json.partial'),{force:true});atomicFile(row,'output.json',output);
   db.prepare("UPDATE conversation_import_jobs SET state='ready',adapter='portable-v1',adapter_version=1,manifest_sha256=?,updated_at=? WHERE id=?").run(hashBytes(output),Date.now(),row.id);
 }
