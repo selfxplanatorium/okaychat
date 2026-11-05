@@ -132,6 +132,8 @@ export default {
   featureDelegationHelp: "Allows delegate_task. A child inherits the parent's actor and constraints and cannot escalate.",
   featureSkillsLabel: "Skills",
   featureSkillsHelp: "Allows skill tools, source installs, and the contextual skill index. Install approvals are unchanged.",
+  featureEvaluationsLabel: "Evaluations",
+  featureEvaluationsHelp: "Allows private datasets and runs in the evaluation workspace. Every case and every judge verdict is a model request billed to the account.",
   limitMaxStepsLabel: "Agent steps per reply",
   limitMaxStepsHelp: "Counts tool-capable invocations; the final no-tools answer still happens. Effective value is the minimum of the request, policy, and application maximum.",
   limitMaxSearchesLabel: "Searches per reply",

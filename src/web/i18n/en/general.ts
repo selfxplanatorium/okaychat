@@ -9,6 +9,7 @@ export default {
   sidebarPlugins: "Plugins",
   sidebarProjects: "Projects",
   sidebarCompare: "Compare models",
+  sidebarEvaluations: "Evaluations",
   showInSidebar: "Show {item} in sidebar",
   modelsTitle: "Models",
   defaultModel: "Default model",

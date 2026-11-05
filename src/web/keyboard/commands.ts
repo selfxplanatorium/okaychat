@@ -61,6 +61,9 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "nav.createProject", labelKey: "keyboard.cmdNavCreateProject", group: "Navigation", keys: [] },
   { id: "nav.createSchedule", labelKey: "keyboard.cmdNavCreateSchedule", group: "Navigation", keys: [] },
   { id: "nav.compare", labelKey: "keyboard.cmdNavCompare", group: "Navigation", keys: [] },
+  { id: "nav.evaluations", labelKey: "keyboard.cmdNavEvaluations", group: "Navigation", keys: [] },
+  { id: "evaluations.stopRun", labelKey: "keyboard.cmdEvaluationsStop", group: "Chat", keys: [] },
+  { id: "evaluations.refreshRun", labelKey: "keyboard.cmdEvaluationsRefresh", group: "Chat", keys: [] },
   { id: "tags.filter", labelKey: "keyboard.cmdTagsFilter", group: "Navigation", keys: [] },
 
   { id: "chat.focusComposer", labelKey: "keyboard.cmdChatFocusComposer", group: "Chat", keys: ["Alt+Shift+I"] },

@@ -104,6 +104,24 @@ export function storageUsedSql(user: string): string {
     -- Frozen share snapshots are stored user content; live links hold no bytes of their own.
     UNION ALL SELECT COALESCE(SUM(COALESCE(length(CAST(snapshot_json AS BLOB)), 0) + COALESCE(length(CAST(snapshot_assets_json AS BLOB)), 0)), 0)
       FROM shares WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(length(CAST(d.name AS BLOB)) + length(CAST(d.description AS BLOB))), 0)
+      FROM evaluation_datasets d WHERE d.user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(
+        length(CAST(c.input AS BLOB)) + length(CAST(c.instructions AS BLOB)) + length(CAST(c.expected AS BLOB))
+        + length(CAST(c.notes AS BLOB)) + length(CAST(c.tags_json AS BLOB))), 0)
+      FROM evaluation_cases c JOIN evaluation_datasets d ON d.id = c.dataset_id WHERE d.user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(
+        length(CAST(r.target_json AS BLOB)) + length(CAST(r.label AS BLOB))
+        + COALESCE(length(CAST(r.judge_json AS BLOB)), 0)
+        + COALESCE(length(CAST(r.error_message AS BLOB)), 0)), 0)
+      FROM evaluation_runs r WHERE r.user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(
+        length(CAST(x.output AS BLOB)) + length(CAST(x.case_json AS BLOB))
+        + COALESCE(length(CAST(x.error_message AS BLOB)), 0)), 0)
+      FROM evaluation_results x JOIN evaluation_runs r ON r.id = x.run_id WHERE r.user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(
+        COALESCE(length(CAST(s.comment_enc AS BLOB)), 0) + COALESCE(length(CAST(s.rationale AS BLOB)), 0)), 0)
+      FROM evaluation_scores s JOIN evaluation_runs r ON r.id = s.run_id WHERE r.user_id = ${user}
   )), 0)`;
 }
 

@@ -43,6 +43,7 @@ import { shareRoutes } from "./shares.js";
 import { tagRoutes } from "./tags.js";
 import { notificationRoutes } from "./notifications.js";
 import { compareRoutes } from "./compare.js";
+import { evaluationRoutes } from "./evaluations/routes.js";
 import { skillRoutes } from "./skills.js";
 import { settingsPatch } from "./settings-schema.js";
 import { speechRoutes } from "./speech/routes.js";
@@ -431,6 +432,7 @@ const api = new Hono<AppEnv>()
   .route("/", tagRoutes)
   .route("/", notificationRoutes)
   .route("/", compareRoutes)
+  .route("/evaluations", evaluationRoutes)
   .route("/", shareRoutes)
   .route("/", adminRoutes)
   .route("/", permissionRoutes)

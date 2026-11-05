@@ -30,6 +30,7 @@ const SIDEBAR_LABELS = {
   plugins: "general.sidebarPlugins",
   projects: "general.sidebarProjects",
   compare: "general.sidebarCompare",
+  evaluations: "general.sidebarEvaluations",
 } as const;
 
 export function GeneralSettings() {

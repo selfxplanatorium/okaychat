@@ -15,6 +15,7 @@ import compare from "./compare";
 import entitlements from "./entitlements";
 import errors from "./errors";
 import email from "./email";
+import evaluations from "./evaluations";
 import format from "./format";
 import general from "./general";
 import generation from "./generation";
@@ -63,6 +64,7 @@ export const en = {
   entitlements,
   errors,
   email,
+  evaluations,
   format,
   general,
   generation,

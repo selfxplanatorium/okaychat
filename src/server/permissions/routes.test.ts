@@ -215,7 +215,7 @@ test("bootstrap exposes the registry, subjects, shared catalog, and stored selec
   );
   const body = await json(await request("GET", "/admin/permissions/bootstrap", TOKENS.admin));
   assert.equal(body.revision, 1);
-  assert.equal(body.registry.features.length, 17);
+  assert.equal(body.registry.features.length, 18);
   assert.equal(body.registry.limits.length, 7);
   assert.equal(body.registry.hardCaps.concurrentTurns, 4);
   assert.deepEqual(body.subjects.users.map((user: any) => user.id).sort(), ["admin", "alice", "bob", "carol"]);
