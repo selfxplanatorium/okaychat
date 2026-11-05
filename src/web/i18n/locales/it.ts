@@ -2013,7 +2013,7 @@ const it: Translation = {
     featureVoiceLabel: "Voce e parlato",
     featureVoiceHelp: "Consente chiamate vocali, dettatura, lettura ad alta voce e sintesi o trascrizione vocale su percorsi locali e cloud.",
     featureEmailLabel: "Email",
-    featureEmailHelp: "Consente il rilevamento, la lettura e l’invio delle caselle di posta. L’invio richiede comunque un’approvazione esplicita; la scrittura delle bozze è separata.",
+    featureEmailHelp: "Consente il rilevamento delle caselle di posta, la lettura e l’invio delle email. L’invio richiede comunque un’approvazione esplicita; la scrittura delle bozze è separata.",
     featureArtifactsLabel: "Artefatti e documenti",
     featureArtifactsHelp: "Consente di creare, importare, modificare e visualizzare artefatti. I byte già posseduti restano scaricabili.",
     featureGenerativeUIHelp: "Consente gli strumenti widget eseguiti nel browser. Richiede gli artefatti.",
