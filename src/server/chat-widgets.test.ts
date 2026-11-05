@@ -26,13 +26,16 @@ beforeEach(() => {
 
 const clientTools = { render_spec: { description: "Render a spec", parameters: { type: "object", properties: {} } } };
 
+const seenMessages: Array<Array<{ role: string; content: unknown }>> = [];
+
 function provider(t: TestContext) {
   const tools: string[][] = [];
   t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url === "http://mock.test/v1/models") return Response.json({ data: [{ id: "mock" }] });
-    const body = JSON.parse(init?.body as string) as { tools?: Array<{ function: { name: string } }> };
+    const body = JSON.parse(init?.body as string) as { tools?: Array<{ function: { name: string } }>; messages?: Array<{ role: string; content: unknown }> };
     tools.push((body.tools ?? []).map((tool) => tool.function.name));
+    seenMessages.push(body.messages ?? []);
     const chunks = [
       { id: "r", object: "chat.completion.chunk", created: 1, model: "mock", choices: [{ index: 0, delta: { role: "assistant", content: "Done." }, finish_reason: null }] },
       { id: "r", object: "chat.completion.chunk", created: 1, model: "mock", choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } },
@@ -42,14 +45,16 @@ function provider(t: TestContext) {
   return tools;
 }
 
-async function offered(t: TestContext): Promise<string[]> {
+async function offered(t: TestContext, clientSystem?: string): Promise<string[]> {
   const tools = provider(t);
+  seenMessages.length = 0;
   const stream = await turnStream({
     userId: "alice",
     threadId: "thr_widgets",
     modelRef: "custom-test/mock",
     uiMessages: [{ id: "u1", role: "user", parts: [{ type: "text", text: "Hi" }] }],
     clientTools,
+    ...(clientSystem ? { clientSystem } : {}),
   });
   for await (const chunk of stream) assert.notEqual(chunk.type, "error", JSON.stringify(chunk));
   return tools[0] ?? [];
@@ -65,4 +70,12 @@ test("the setting and the generativeUI permission each withhold browser widget t
   updateSettings("alice", settings);
   writePolicy({ kind: "user", id: "alice" }, null, { version: 1, features: { generativeUI: false } }, null);
   assert.ok(!(await offered(t)).includes("render_spec"));
+});
+
+test("browser widget instructions stay out of the cached first system message", async (t) => {
+  await offered(t, "WIDGET SYSTEM MARKER");
+  const system = seenMessages[0]!.filter((message) => message.role === "system");
+  assert.ok(system.length >= 2, "the request needs the shared and per-chat system messages");
+  assert.ok(!String(system[0]!.content).includes("WIDGET SYSTEM MARKER"));
+  assert.ok(system.slice(1).some((message) => String(message.content).includes("WIDGET SYSTEM MARKER")));
 });
