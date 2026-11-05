@@ -17,6 +17,7 @@ import { editStoredMessage, undoStoredMessage } from "@/runtime/RuntimeProvider"
 import { isTemporaryChat } from "@/state/chat-privacy";
 import { useData } from "@/state/data";
 import { closeReplyEditor, editKey, openReplyEditor, setEditedAt, useMessageEdits } from "@/state/message-edits";
+import { invalidateMessageTranslations } from "@/state/message-translations";
 import { useThreadMetaStore } from "@/state/thread-meta";
 import { useThreadSync } from "@/state/thread-sync";
 
@@ -182,6 +183,7 @@ export function ReplyEditorProvider({ threadId, messageId, parts, children }: { 
         ? { text: drafts[0]! }
         : { parts: drafts.map((text) => ({ type: "text" as const, text })) });
       setEditedAt(threadId, messageId, result.editedAt);
+      invalidateMessageTranslations(threadId, messageId);
       apply(result);
       // The server may have shifted a trim estimate; the context meter owner re-reads it explicitly.
       void useThreadMetaStore.getState().refresh(threadId);
@@ -309,6 +311,7 @@ function EditedReplyBadgeContent({ threadId, messageId, editedAt }: { threadId: 
       const result = await undoStoredMessage(threadId, messageId);
       const root = buttonRef.current?.closest<HTMLElement>("[data-message-root]");
       setEditedAt(threadId, messageId, null);
+      invalidateMessageTranslations(threadId, messageId);
       // The badge unmounts with the edit; keep focus in the message unless the user moved it elsewhere.
       if (root?.isConnected && (root.contains(document.activeElement) || document.activeElement === document.body)) root.focus({ preventScroll: true });
       apply(result);

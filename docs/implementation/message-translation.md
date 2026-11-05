@@ -18,7 +18,7 @@ A per-message machine translation the reader can ask for. It is **derived text**
 | `MAX_TRANSLATIONS_PER_THREAD` | 5,000 | Rows per chat, so one long thread cannot exhaust storage quietly. |
 | `TRANSLATION_BODY_LIMIT` | 8 KiB | `PUT` body cap checked before JSON parsing. |
 
-`sourceHash` is `sha256(JSON.stringify(texts))` over the message's text parts in order, attachment placeholders removed. An edit changes it, which is how a stale row is detected without a hook into the editor.
+`sourceHash` is `sha256(JSON.stringify(texts))` over the message's text parts in order, attachment placeholders removed. An edit changes it, which is how the server detects a stale row; the web store is invalidated by the editor (see the interaction table).
 
 ## Storage
 
@@ -90,7 +90,7 @@ Errors use existing codes only (`validation`, `conflict`, `not_found`, `forbidde
 | Area | Behavior |
 | --- | --- |
 | Chat prefix / prompt cache | A translation never touches `messages`, `turn_context`, the system prefix, tools, or `threads.updated_at`. |
-| Edit a reply | The source hash changes, so the old row is stale and the next Translate regenerates and replaces it. Undo changes the hash back and regenerates too. |
+| Edit a reply | The source hash changes, so the old row is stale and the next Translate regenerates and replaces it. Undo changes the hash back and regenerates too. On the page, a saved edit or Undo calls `invalidateMessageTranslations()`, which hides the block, marks cached rows stale, aborts a running Translate, and makes the dialog refetch. |
 | Compaction and trim | Reads the stored message text, so messages inside a summary or trim still translate. |
 | Branch / fork | Rows are not copied: derived text, and copying would double-charge. |
 | Delete chat | FK cascade removes rows and frees quota. |

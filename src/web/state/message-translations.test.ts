@@ -32,6 +32,7 @@ Object.defineProperty(globalThis, "localStorage", {
 
 const {
   cancelTranslation,
+  invalidateMessageTranslations,
   loadTranslations,
   removeTranslation,
   setTranslationsAccount,
@@ -140,4 +141,26 @@ test("an account switch clears every entry", async () => {
   assert.ok(stateOf());
   setTranslationsAccount("bob");
   assert.deepEqual(useTranslations.getState().messages, {});
+});
+
+test("an edited reply hides its translation, marks rows stale, and refetches the list", async () => {
+  const request = translateMessage("thr_1", "msg_1", "de");
+  pending[0]!.resolve(entry("de"));
+  await request;
+  assert.equal(stateOf()?.active, "de");
+
+  invalidateMessageTranslations("thr_1", "msg_1");
+  assert.equal(stateOf()?.active, null);
+  assert.equal(stateOf()?.entries.de?.stale, true);
+  void loadTranslations("thr_1", "msg_1");
+  assert.equal(pending.length, 2, "the dialog asks the server again");
+});
+
+test("an edit during a running translate cancels it", async () => {
+  const request = translateMessage("thr_1", "msg_1", "de");
+  invalidateMessageTranslations("thr_1", "msg_1");
+  await request;
+  assert.equal(stateOf()?.status, "idle");
+  assert.equal(stateOf()?.active, null);
+  assert.equal(stateOf()?.entries.de, undefined);
 });
