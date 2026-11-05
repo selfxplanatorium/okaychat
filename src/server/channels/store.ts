@@ -643,7 +643,8 @@ export function editHumanMessage(userId: string, channelId: string, messageId: s
     if (db.prepare("SELECT 1 FROM channel_ai_runs WHERE source_id = ? AND state IN ('queued', 'running')").get(messageId)) {
       throw conflict("source_busy", "A reply to this message is still being written.");
     }
-    const body = assertContent(bodyInput, true);
+    const hasAttachments = !!db.prepare("SELECT 1 FROM channel_attachments WHERE message_id = ? AND deleted_at IS NULL").get(messageId);
+    const body = assertContent(bodyInput, hasAttachments);
     const mentions = validateMentions(channelId, body, normalizeMentions(body, mentionsInput));
     const growth = bytesOf(body) - bytesOf(message.body);
     if (growth > 0) assertStorage(channel.owner_id, growth);

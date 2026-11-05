@@ -124,6 +124,11 @@ export function addDmMembers(userId: string, channelId: string, userIds: string[
       );
       insertSyncFor(target);
     }
+    // The key names the member set: the old pair's key would hand a new 1:1 request this group instead.
+    const members = (db.prepare("SELECT user_id FROM channel_members WHERE channel_id = ?").all(channelId) as Array<{ user_id: string }>).map((row) => row.user_id);
+    const key = dmKey(members);
+    const taken = db.prepare("SELECT 1 FROM channels WHERE dm_key = ? AND id <> ?").get(key, channelId);
+    db.prepare("UPDATE channels SET dm_key = ? WHERE id = ?").run(taken ? null : key, channelId);
     const revision = bumpRevision(channelId);
     insertEvent({ channelId, kind: "members.changed", entityId: null, version: revision });
     return channelRow(channelId)!;

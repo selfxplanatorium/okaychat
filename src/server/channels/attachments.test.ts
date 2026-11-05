@@ -168,6 +168,26 @@ test("an attachment-only message is accepted, and it cannot request AI", async (
   );
 });
 
+test("only a message with live attachments may be edited to empty text", async () => {
+  const room = await createRoom(call, { name: "Edits", visibility: "public" }, "alice");
+  const text = await postMessage(call, room.id, { body: "hello" }, "alice");
+  const blank = await call(`/channels/${room.id}/messages/${text.message.id}`, { method: "PATCH", json: { revision: text.message.revision, body: "" }, user: "alice" });
+  assert.equal(blank.status, 422);
+  const attachment = await uploadFile(call, room.id, image(), "alice");
+  const withFile = await postMessage(call, room.id, { body: "caption", attachmentIds: [attachment.id] }, "alice");
+  const cleared = await call(`/channels/${room.id}/messages/${withFile.message.id}`, { method: "PATCH", json: { revision: withFile.message.revision, body: "" }, user: "alice" });
+  assert.equal(cleared.status, 200);
+});
+
+test("an upload re-checks membership after the body is read", async () => {
+  const room = await createRoom(call, { name: "Recheck", visibility: "public" }, "alice");
+  const { storeChannelAttachment } = await import("./attachments.js");
+  const { channelRow } = await import("./access.js");
+  const channel = channelRow(room.id)!;
+  assert.throws(() => storeChannelAttachment("bob", channel, { name: "dot.png", mime: "image/png", data: new Uint8Array(png) }), /not found/i);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM channel_attachments").get().n, 0);
+});
+
 function form(file: File): FormData {
   const body = new FormData();
   body.set("file", file);
