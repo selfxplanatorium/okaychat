@@ -9,7 +9,7 @@ type Result = DictationAdapter.Result;
 
 // Formats MediaRecorder offers, best first. Every server engine accepts these.
 const MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4", "audio/wav"];
-/** Level above which the input counts as speech. LibreChat's default. */
+/** Level above which the input counts as speech. A conservative recorder default. */
 const SPEECH_DB = -45;
 
 export interface RecorderOptions {

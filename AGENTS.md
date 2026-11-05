@@ -6,7 +6,7 @@ Guide for any agent (human or AI) working in this repo.
 
 ## What this is
 
-okaychat is a self-hosted AI chat app meant to replace LibreChat and Open WebUI. Goals: polished UI, every provider, OpenCode Go as the primary connection, MCP that just works, good prompt-cache behavior, usage and context tracking, and compaction.
+okaychat is a self-hosted AI chat app with a polished UI, every provider, OpenCode Go as the primary connection, MCP that just works, good prompt-cache behavior, usage and context tracking, and compaction.
 
 - Self-hosted, Docker, multi-user capable (each user has their own keys, MCP servers, and settings).
 - Lightweight stack. Avoid adding heavy dependencies without a reason written down here.
@@ -147,7 +147,7 @@ docs/                 Reusable documentation (see below)
 - `docs/implementation/step-limits.md`: independent agent/search limits and shared delegated-search budgets.
 - `docs/implementation/deep-research.md`: the deep research loop, its limits, delegates, cancellation, usage, and cache behavior.
 - `docs/implementation/code-sandbox.md`: the `run_code` sandbox container, its per-run jail, installed tools, and the runner API.
-- `docs/implementation/speech.md`: read-aloud and speech-to-text engines, the speech worker, recording retention, and the Open WebUI/LibreChat comparison.
+- `docs/implementation/speech.md`: read-aloud and speech-to-text engines, the speech worker, recording retention, and the engine coverage matrix.
 - `docs/implementation/voice-calls.md`: the `/api/voice/call` protocol, local Whisper/Piper pipeline, OpenAI Realtime WebRTC fallback, call view, limits, privacy (no recordings), failures, and the unmeasured latency target.
 - `docs/implementation/writing-drafts.md`: the simple reusable-text editor, `draft_text`, shared draft lifecycle, kind separation, and model guidance.
 - `docs/implementation/email.md`: IMAP/SMTP accounts, the discovery chain, TLS and host rules, the six mailbox tools, editable draft cards, attachments, limits, and the OAuth gap.

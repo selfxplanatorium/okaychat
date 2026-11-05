@@ -17,6 +17,7 @@ import { deleteConnection, getOwnConnection, listModels, listProviders, privateU
 import { OLLAMA, OLLAMA_DEFAULT_URL } from "./catalog/ollama.js";
 import { ollamaManagementRoutes } from "./catalog/ollama-routes.js";
 import { adminRoutes, audienceInput } from "./admin.js";
+import { createPermissionRouters } from "./permissions/routes.js";
 import { artifactRoutes } from "./artifacts.js";
 import { chatRoutes } from "./chat.js";
 import { emailRoutes } from "./email/routes.js";
@@ -104,8 +105,12 @@ function mergeSecrets(next?: Record<string, string>, prev?: Record<string, strin
   return Object.fromEntries(Object.entries(next).map(([k, v]) => [k, v === "••••••" ? (prev?.[k] ?? "") : v]));
 }
 
+const permissionRouters = createPermissionRouters();
+
 const api = new Hono<AppEnv>()
   .use(requireUser)
+  .route("/", permissionRouters.self)
+  .route("/", permissionRouters.admin)
   .route("/chatgpt", chatgptRoutes)
   .route("/agents/n8n", n8nRoutes())
   .route("/", agentSessionRoutes)
