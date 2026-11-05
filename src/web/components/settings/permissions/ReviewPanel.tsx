@@ -3,10 +3,14 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import type { AdminPrompt } from "@shared/types";
 import { t } from "@/i18n";
-import { usePermissions } from "@/state/permissions";
+import { usePermissions, type PermissionUser } from "@/state/permissions";
 import { describeImpact, impactValueText } from "@/state/permissions-impact";
 import { FEATURE_LABEL, LIMIT_LABEL } from "./labels";
+
+const NO_USERS: PermissionUser[] = [];
+const NO_PROMPTS: AdminPrompt[] = [];
 
 // Preview → review → commit. Impact labels are built from the canonical path, so nothing here interprets
 // prompt text; counts come from the whole draft even when the row list is long.
@@ -21,8 +25,8 @@ export function ReviewPanel({ open, onOpenChange }: { open: boolean; onOpenChang
   const [reason, setReason] = useState("");
   const [reloadBusy, setReloadBusy] = useState(false);
   const counts = preview?.counts;
-  const users = usePermissions((state) => state.bootstrap?.subjects.users ?? []);
-  const prompts = usePermissions((state) => state.subjects["everyone:"]?.serverPrompts ?? []);
+  const users = usePermissions((state) => state.bootstrap?.subjects.users ?? NO_USERS);
+  const prompts = usePermissions((state) => state.subjects["everyone:"]?.serverPrompts ?? NO_PROMPTS);
   const canCommit = !!preview && reason.trim().length > 0 && reason.trim().length <= 500 && commitStatus !== "loading" && !conflict;
 
   const commit = async () => {

@@ -1,13 +1,15 @@
 import { Select } from "@/components/ui/select";
 import { t } from "@/i18n";
-import { usePermissions } from "@/state/permissions";
+import { usePermissions, type CatalogModel } from "@/state/permissions";
 import type { PermissionsQuery, PolicyFilter } from "@/state/permissions-query";
 import { FILTER_LABELS } from "./labels";
 import { PromptWorkspace } from "./PromptWorkspace";
 import { SubjectPicker } from "./SubjectPicker";
 
+const NO_MODELS: CatalogModel[] = [];
+
 export function PromptsPage({ query, onQuery }: { query: PermissionsQuery; onQuery: (patch: Partial<PermissionsQuery>) => void }) {
-  const models = usePermissions((state) => state.bootstrap?.modelCatalog ?? []);
+  const models = usePermissions((state) => state.bootstrap?.modelCatalog ?? NO_MODELS);
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <div className="bg-card flex flex-wrap items-end gap-3 rounded-xl px-4 py-3 shadow-[var(--depth-highlight),var(--shadow-raised)]">
