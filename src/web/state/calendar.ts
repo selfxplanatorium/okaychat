@@ -240,8 +240,8 @@ export const useCalendar = create<CalendarState>((set, get) => {
     },
     refresh: async () => {
       await loadRange();
-      const id = get().selectedId;
-      if (id) await get().openEvent(id);
+      // Keep the editor snapshot stable; background refresh must not reset edits or advance its CAS base.
+      // Explicit Reload or reopening fetches the selected record.
     },
     loadMore: async () => {
       const state = get();

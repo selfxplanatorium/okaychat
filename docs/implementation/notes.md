@@ -65,6 +65,12 @@ compare dialog (local/server plain text, Reload, Save as a new note, Copy local)
 413 keeps the draft and points at storage; 403 stops writes and hides content behind the recovery
 controls. There is no merge or force overwrite.
 
+The editor persists each dirty snapshot synchronously before navigation can unmount it. Disposed
+controllers ignore late responses so an old acknowledgement cannot clear a newer draft. Recovery
+restores every local field before comparing the base revision; a mismatch opens the conflict path
+without writing. Background refresh updates the list and tags only; it does not unmount an open
+editor on a remote deletion or replace its CAS base.
+
 `lib/note-outbox.ts` keeps unsaved text as plaintext under
 `okaychat:note-outbox:<accountId>:<noteId>`, at most 20 entries and 2 MiB, evicting only acknowledged
 entries. If storage is unavailable the editor says the draft is only in this tab and warns on

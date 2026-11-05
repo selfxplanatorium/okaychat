@@ -192,8 +192,8 @@ export const useNotes = create<NotesState>((set, get) => {
     refresh: async () => {
       await loadList();
       void loadTags();
-      const id = get().selectedId;
-      if (id) await loadSelected(id);
+      // Keep the editor snapshot stable; background refresh must not reset edits or advance its CAS base.
+      // Explicit Reload or reopening fetches the selected record.
     },
     loadMore: async () => {
       const cursor = get().nextCursor;

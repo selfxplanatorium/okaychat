@@ -153,3 +153,29 @@ test("adopt replaces the base and clears dirty state", async () => {
   assert.equal(controller.isDirty(), false);
   await controller.flush();
 });
+
+
+test("recovering against a newer revision preserves every local field without writing", async () => {
+  let calls = 0;
+  const { controller, runTimers } = harness(async () => { calls++; return note(); });
+  const local = write({ title: "Recovered title", body: "Unsaved local text", tags: ["recovered"] });
+  controller.restore(local, 0);
+  runTimers();
+  await controller.flush();
+  assert.equal(calls, 0);
+  assert.equal(controller.state().status, "conflict");
+  assert.deepEqual(controller.state().value, local);
+  assert.equal(controller.state().server?.body, "Body");
+});
+
+test("a response after disposal cannot clear a newer editor's outbox", async () => {
+  let release!: (note: Note) => void;
+  const { controller, states } = harness(() => new Promise((resolve) => { release = resolve; }));
+  controller.edit(write({ body: "local" }));
+  const saving = controller.flush();
+  controller.dispose();
+  const count = states.length;
+  release({ ...note(2), body: "local" });
+  await saving;
+  assert.equal(states.length, count);
+});
