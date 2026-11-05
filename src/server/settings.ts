@@ -1,3 +1,4 @@
+import { isVideoSettings } from "../shared/video.js";
 import { canonicalLocaleTag } from "../shared/locale-tag.js";
 import { REASONING_EFFORTS } from "../shared/reasoning.js";
 import { imageServiceDef } from "../shared/image-services.js";
@@ -26,6 +27,7 @@ export function getSettings(userId: string): UserSettings {
       "INSERT INTO user_settings (user_id, json) VALUES (?, ?) ON CONFLICT (user_id) DO UPDATE SET json = excluded.json",
     ).run(userId, JSON.stringify(settings));
   }
+  if (settings.videoServices !== undefined && !isVideoSettings(settings.videoServices)) delete settings.videoServices;
   if (settings.imageServices !== undefined && !validImageServices(settings.imageServices)) delete settings.imageServices;
   if (settings.speech !== undefined && !validSpeechSettings(settings.speech)) delete settings.speech;
   if (settings.notifications !== undefined && !validNotificationSettings(settings.notifications)) delete settings.notifications;
@@ -53,6 +55,7 @@ export function updateSettings(userId: string, patch: Partial<UserSettings>): Us
   if (Object.hasOwn(patch, "sidebarItems") && !validSidebarItems(patch.sidebarItems)) {
     throw new HTTPException(400, { message: "sidebarItems must contain unique sidebar shortcut names" });
   }
+  if (Object.hasOwn(patch, "videoServices") && !isVideoSettings(patch.videoServices)) throw new HTTPException(400, { message: "Invalid video service settings" });
   if (Object.hasOwn(patch, "imageServices") && !validImageServices(patch.imageServices)) {
     throw new HTTPException(400, { message: "imageServices must map known image services to { enabled, model }" });
   }

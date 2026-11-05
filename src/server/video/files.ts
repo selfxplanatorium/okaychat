@@ -1,4 +1,4 @@
-import { mkdir, open, rename, rm, readFile, stat } from 'node:fs/promises';
+import { mkdir, open, link, rm, readFile, stat } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -47,10 +47,16 @@ export async function inspectVideoFile(row:VideoJobRow,file:string) {
   }finally{await fd.close();}
 }
 export async function persistVideo(row:VideoJobRow,source:string,now=Date.now()):Promise<boolean> {
+  const live=jobRow(row.id);
+  if(!live || live.lease_epoch!==row.lease_epoch || live.state!=='validating')return false;
   const info=await inspectVideoFile(row,source);
   const target=videoFile(row.user_id,row.id);
   await mkdir(path.dirname(target),{recursive:true,mode:0o700});
-  if(source!==target) await rename(source,target);
+  if(source!==target) {
+    // Publish without replacement: a stale epoch must never overwrite a newer immutable output.
+    await link(source,target);
+    await rm(source,{force:true});
+  }
   const parent=await open(path.dirname(target),'r');
   try{await parent.sync();}finally{await parent.close();}
   return tx(()=>{

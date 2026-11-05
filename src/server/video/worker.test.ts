@@ -145,3 +145,29 @@ test('owned serving authorizes before HEAD, validators and ranges; local output 
   const response=await videoFileResponse(c.user,row.id,new Request(url,{headers:{range:'bytes=0-7','if-range':'wrong'}}));assert.equal(response.status,200);await response.body?.cancel();
   assert.equal((await readFile(videoFile(c.user,row.id))).length,(await stat(videoFile(c.user,row.id))).size);
 });
+
+test('fork keeps only completed owned output alive; deleting the source cannot delete shared bytes or usage',async()=>{
+  const {branchThread,deleteThread}=await import('../threads.js');
+  const {maintainVideos}=await import('./maintenance.js');
+  const c=context(),h=harness(),row=admitVideo(admission(c),h.now);await h.worker.runOne();h.advance();await h.worker.runOne();
+  const user={id:'user',role:'user',parts:[{type:'text',text:'A boat'}]};
+  const assistant={id:'assistant',role:'assistant',parts:[{type:'tool-generate_video',state:'output-available',toolCallId:'call',input:{prompt:'A boat'},output:{version:1,accepted:true,state:'queued',jobId:row.id,service:'xai',model:row.model_id}}]};
+  db.prepare("INSERT INTO messages(id,thread_id,parent_id,format,content,created_at,bytes) VALUES('user',?,NULL,'ai-sdk/v6',?,1,1)").run(c.thread,JSON.stringify(user));
+  db.prepare("INSERT INTO messages(id,thread_id,parent_id,format,content,created_at,bytes) VALUES('assistant',?,'user','ai-sdk/v6',?,2,1)").run(c.thread,JSON.stringify(assistant));
+  const fork=branchThread(c.user,c.thread,'assistant',`${c.thread}_fork`);
+  assert.equal(db.prepare('SELECT count(*) AS n FROM video_threads WHERE video_id=?').get(row.id)!.n,2);
+  deleteThread(c.user,c.thread);await maintainVideos(h.now);
+  assert.ok(await stat(videoFile(c.user,row.id)));assert.equal(db.prepare('SELECT count(*) AS n FROM video_threads WHERE thread_id=?').get(fork.id)!.n,1);
+  assert.equal(db.prepare('SELECT cost FROM usage WHERE video_job_id=?').get(row.id)!.cost,.12);
+  deleteThread(c.user,fork.id);await maintainVideos(h.now);
+  assert.equal(db.prepare('SELECT count(*) AS n FROM videos WHERE id=?').get(row.id)!.n,0);
+  await assert.rejects(stat(videoFile(c.user,row.id)));
+});
+
+test('thread deletion during download cancels locally and cannot resurrect output',async()=>{
+  const {deleteThread}=await import('../threads.js');
+  const c=context(),h=harness({download:async()=>{deleteThread(c.user,c.thread);return{size:1,sha256:'unused'};}}),row=admitVideo(admission(c),h.now);
+  await h.worker.runOne();h.advance();await h.worker.runOne();
+  assert.equal(jobRow(row.id)!.state,'cancelled');assert.equal(jobRow(row.id)!.thread_id,null);assert.equal(jobRow(row.id)!.request_enc,null);
+  assert.equal(db.prepare('SELECT count(*) AS n FROM videos WHERE job_id=?').get(row.id)!.n,0);
+});

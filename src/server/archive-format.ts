@@ -146,6 +146,7 @@ const partValidator = (part: unknown, assets: Set<string>, artifactKeys: Set<str
           ...(typeof reference.version === "number" && Number.isSafeInteger(reference.version) && reference.version > 0 ? { version: reference.version } : {}),
         };
       });
+      if (part.name === "generate_video") return {type:"tool-record",name:"generate_video",input:null,output:{note:"Video not included"},state:"interrupted",references:[]};
       return {
         type: "tool-record",
         name: safeString(part.name, 200),
@@ -184,6 +185,7 @@ function validateManifest(raw: unknown, assets: Map<string, Uint8Array>, now: nu
     const digest = createHash("sha256").update(bytes).digest("hex");
     if (digest !== entry.key) fail("An asset's hash does not match its bytes.");
     const mime = safeString(entry.mime, ARCHIVE_LIMITS.mimeChars);
+    if (mime.toLowerCase().startsWith("video/")) fail("Video bytes are not supported in chat archives.");
     if (!/^[\x21-\x7e]+\/[\x21-\x7e]+$/.test(mime)) fail("An asset MIME type is invalid.");
     return {
       key: entry.key,

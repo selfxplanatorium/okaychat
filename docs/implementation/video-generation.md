@@ -1,9 +1,8 @@
 # Video generation foundation
 
-The durable worker and authenticated status/file routes are implemented. There is still **no video
-tool, settings toggle, player or Library integration**. Importing modules performs no provider work;
+The durable worker and authenticated status/file routes are implemented. There is still **no settings toggle, player or Library integration**. Importing modules performs no provider work;
 `index.ts` explicitly recovers leases, starts the worker/maintenance, and stops timers on shutdown.
-Paid admission is internal only until the separately guarded interactive tool is integrated.
+Paid admission is available only through the guarded interactive tool and direct owned retry.
 
 ## Contracts and credentials
 
@@ -77,7 +76,7 @@ No dependencies, binaries, container services or raster/image execution behavior
 and epoch/state/revision guards on writes. Tests inject the clock, provider, file and failure boundaries.
 Submitting is durable before POST, provider IDs encrypted before polling; there is no POST retry.
 On restart a submitting row without an ID becomes `submission_unknown` with unknown billing. Polling
-resumes the same ID; partial downloads are removed and fetched again. A final renamed file can be
+resumes the same ID; partial downloads are removed and fetched again. A final published file can be
 reinspected/adopted without a provider call. Successful provider billing evidence is saved before
 local download/inspection, including host rejection; local failure still settles that cost.
 
@@ -94,3 +93,26 @@ feature checks. Terminal snapshots close streams. Foreign/missing IDs match. No 
 The worker tests cover pre/post-submit crashes, unknown billing, ID/download/final-file recovery,
 lease replacement, local validation charges, five transient polls, deadlines and cancellation races.
 Retry authorization/UI and full fork/share/archive lifetime integration are still upcoming.
+
+## Interactive tool boundary
+
+`generate_video` is assembled only for stored ordinary interactive tool-calling turns, with the
+independent `videos` feature/family, service opt-in and no active voice call. Excluded modes include
+comparison, schedules, delegates, research workers, temporary/restricted chats, channels, evaluations
+and the external API. Execution repeats live checks, including receipt ownership/origin and the
+current model capability after asynchronous lookup. The receipt getter is assigned after tool
+assembly, before execution. The outbound risk annotation uses the existing taint approval gate.
+
+Acceptance is `{version:1,jobId,accepted:true,state:'queued',service,model}`; model output explicitly
+says started. Replaying a call returns the original receipt even after preferences change. Explicit
+Stop cancels only jobs attached to that LLM receipt; transport disconnects do not cancel video work.
+Direct retry checks expected revision and policy, keeps the original receipt/config, creates one
+child per parent, and never changes service/model/parameters. UI confirmation is still required before
+exposing this paid action. Settings API validates a strict opt-in map; no settings toggle is shipped yet.
+
+Completed same-account video references survive forks. Pending jobs are not copied. Public shares
+show only an inert tool record. Markdown/PDF exports describe an omitted video; native archives redact
+video tool IDs/requests, omit video bytes, and reject video MIME assets. Imported video records are inert.
+Output publication uses a same-filesystem exclusive hard link followed by staging unlink, instead of
+an overwriting rename, so an obsolete lease cannot replace a newer immutable final file. Parent fsync
+and the outcome/file/usage transaction retain the same recovery boundary.

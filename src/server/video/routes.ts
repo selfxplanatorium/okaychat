@@ -1,3 +1,7 @@
+import { z } from "zod";
+import { retryVideo, canRetryVideo } from "./retry.js";
+import { handleAppError } from "../errors.js";
+import { VideoError, videoAppError } from "./errors.js";
 import { Hono } from 'hono';
 import { db } from '../db.js';
 import { sessionAlive, type AppEnv } from '../auth.js';
@@ -9,7 +13,7 @@ import { videoFileResponse } from './files.js';
 
 const subscriptions=new Map<string,number>();
 export const videoRoutes=new Hono<AppEnv>()
-  .get('/video-jobs/:id',c=>{assertFeature(c.get('user').id,'videos');return c.json(videoJobView(ownJob(c.get('user').id,c.req.param('id'))));})
+  .get('/video-jobs/:id',c=>{assertFeature(c.get('user').id,'videos');const row=ownJob(c.get('user').id,c.req.param('id'));return c.json({...videoJobView(row),canRetry:canRetryVideo(row)});})
   .get('/threads/:threadId/video-jobs',c=>{
     const userId=c.get('user').id;assertFeature(userId,'videos');
     if(!db.prepare('SELECT 1 FROM threads WHERE id=? AND user_id=?').get(c.req.param('threadId'),userId)) throw new AppError({code:'not_found'});
@@ -18,6 +22,11 @@ export const videoRoutes=new Hono<AppEnv>()
     const rows=db.prepare(`SELECT id FROM video_jobs WHERE user_id=? AND thread_id=? ${assistant?'AND assistant_message_id=?':''} ${tool?'AND tool_call_id=?':''} ${cursor?'AND (created_at,id) < (SELECT created_at,id FROM video_jobs WHERE id=? AND user_id=?)':''} ORDER BY created_at DESC,id DESC LIMIT ?`).all(userId,c.req.param('threadId'),...(assistant?[assistant]:[]),...(tool?[tool]:[]),...(cursor?[cursor,userId]:[]),assistant&&tool?8:101) as Array<{id:string}>;
     const jobs=rows.slice(0,assistant&&tool?8:100).map(r=>videoJobView(ownJob(userId,r.id)));
     return c.json({jobs,cursor:rows.length>100?jobs.at(-1)!.id:null});
+  })
+  .post('/video-jobs/:id/retry',async c=>{
+    const input=z.object({expectedRevision:z.number().int().positive()}).strict().parse(await videoRouteJson(c.req.raw));
+    const row=await retryVideo(c.get('user').id,c.req.param('id'),input.expectedRevision);
+    return c.json({job:videoJobView(row)},202);
   })
   .post('/video-jobs/:id/cancel',async c=>{
     await videoRouteJson(c.req.raw);
@@ -43,7 +52,7 @@ export const videoRoutes=new Hono<AppEnv>()
           try{
             if(!sessionAlive(session)||!featureAllowed(userId,'videos'))return close();
             const row=ownJob(userId,id);
-            const snapshot=videoJobView(row);
+            const snapshot={...videoJobView(row),canRetry:canRetryVideo(row)};
             const frame=row.revision!==revision?`id: ${row.revision}\nevent: video-job\ndata: ${JSON.stringify(snapshot)}\n\n`:Date.now()-lastHeartbeat>=15000?': heartbeat\n\n':null;
             if(frame){const bytes=new TextEncoder().encode(frame);if(bytes.length>65536||(controller.desiredSize??0)<=0)return close();controller.enqueue(bytes);revision=row.revision;lastHeartbeat=Date.now();}
             if(!isVideoOpen(row.state))close();
@@ -55,7 +64,8 @@ export const videoRoutes=new Hono<AppEnv>()
     });
     return new Response(body,{headers:{'Content-Type':'text/event-stream','Cache-Control':'private,no-store','X-Accel-Buffering':'no','Vary':'Cookie'}});
   })
-  .on(['GET','HEAD'],'/videos/:id/file',c=>videoFileResponse(c.get('user').id,c.req.param('id'),c.req.raw));
+  .on(['GET','HEAD'],'/videos/:id/file',c=>videoFileResponse(c.get('user').id,c.req.param('id'),c.req.raw))
+  .onError((error,c)=>handleAppError(error instanceof VideoError?videoAppError(error):error,c));
 
 /** Count actual bytes before parsing; the app-wide body cap is deliberately much larger. */
 export async function videoRouteJson(request:Request,max=2048):Promise<unknown> {

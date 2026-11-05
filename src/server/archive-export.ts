@@ -150,6 +150,7 @@ function exportChat(
             }
           }
         }
+        if (stored?.mime.toLowerCase().startsWith("video/")) stored = undefined;
         if (!stored) {
           warning(warnings, "missingAsset", { name: typeof part.filename === "string" ? part.filename : undefined });
           parts.push({ type: "file", asset: null, name: String(part.filename ?? part.name ?? "attachment").slice(0, 200), mime: String(part.mediaType ?? part.mimeType ?? "application/octet-stream").slice(0, 100), missing: true });
@@ -171,8 +172,8 @@ function exportChat(
         parts.push({
           type: "tool-record",
           name: String(nested.name ?? "tool").slice(0, 200),
-          input: sanitize(nested.input),
-          output: sanitize(nested.output),
+          input: nested.name === "generate_video" ? null : sanitize(nested.input),
+          output: nested.name === "generate_video" ? { note: "Video not included" } : sanitize(nested.output),
           state: nested.state === "failed" ? "failed" : nested.state === "interrupted" ? "interrupted" : "completed",
           references: [],
         });
@@ -183,6 +184,11 @@ function exportChat(
         const state = part.state === "output-available" ? "completed" : part.state === "output-error" || part.state === "output-denied" ? "failed" : "interrupted";
         const output = (part.output ?? null) as Record<string, unknown> | null;
         const references: Array<{ kind: "asset" | "artifact"; key: string; version?: number }> = [];
+        if (name === "generate_video") {
+          parts.push({type:"tool-record",name,input:null,output:{note:"Video not included"},state:"interrupted",references:[]});
+          lossy++;
+          continue;
+        }
         if (name === "draft_email" || name === "draft_text") {
           // A draft is a live, mutable editor: export only that it existed, never its id or text.
           parts.push({ type: "tool-record", name, input: null, output: { note: "Draft not included" }, state: state === "completed" ? "interrupted" : state, references });

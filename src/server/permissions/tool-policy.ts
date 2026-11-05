@@ -5,7 +5,7 @@ import { assertFeature, featureAllowed, type Actor } from "./guard.js";
 
 const FEATURES: Readonly<Record<string, FeatureKey>> = {
   web_search: "webSearch", web_fetch: "webFetch", deep_research: "research",
-  run_code: "code", generate_image: "images", delegate_task: "delegation",
+  run_code: "code", generate_image: "images", generate_video: "videos", delegate_task: "delegation",
   search_knowledge: "knowledge", read_knowledge_chunk: "knowledge",
   memory_search: "memory", memory_save: "memory", memory_forget: "memory",
   conversation_search: "memory", conversation_read: "memory",

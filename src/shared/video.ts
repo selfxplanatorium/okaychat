@@ -88,3 +88,18 @@ export function videoEstimateMicrousd(price: VideoPrice, p: VideoParameters, bil
   if (!Number.isFinite(billedSeconds) || billedSeconds <= 0 || billedSeconds > 15) throw new Error('Invalid billed duration');
   return Math.round((billedSeconds * price.ratesByResolution[p.size] + (p.hasReference ? price.referenceImageUsd : 0)) * 1_000_000);
 }
+
+/** Validates a complete preference map; removed models and unknown keys fail closed. */
+export function isVideoSettings(value:unknown):value is VideoSettings {
+  if(!value || typeof value!=='object' || Array.isArray(value))return false;
+  for(const [id,raw] of Object.entries(value)){
+    const service=VIDEO_SERVICES.find(s=>s.id===id);
+    if(!service || !raw || typeof raw!=='object' || Array.isArray(raw))return false;
+    const entry=raw as Record<string,unknown>;
+    if(Object.keys(entry).some(k=>!['enabled','model','durationSeconds','aspectRatio','size'].includes(k)))return false;
+    if(entry.enabled!==undefined && typeof entry.enabled!=='boolean')return false;
+    const model=service.models.find(m=>m.id===(entry.model??service.models[0]!.id));
+    if(!model || !model.durations.includes((entry.durationSeconds??8) as VideoDuration) || !model.aspects.includes((entry.aspectRatio??'16:9') as VideoAspect) || !model.sizes.includes((entry.size??'720p') as VideoSize))return false;
+  }
+  return true;
+}
