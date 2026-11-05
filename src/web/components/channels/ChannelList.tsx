@@ -50,7 +50,7 @@ export function ChannelList({
           <PlusIcon aria-hidden /> {t("channels.create")}
         </Button>
       </div>
-      <div role="tablist" aria-label={t("channels.title")} className="flex gap-0.5 px-2 pt-2">
+      <div role="tablist" aria-label={t("channels.title")} className="flex flex-wrap gap-0.5 px-2 pt-2">
         {(["joined", "discover", "invitations"] as const).map((tab) => (
           <button
             key={tab}

@@ -68,7 +68,7 @@ export function cursorFor(userId: string, seq: bigint): string {
 }
 
 export function latestEventId(): bigint {
-  const statement = db.prepare("SELECT COALESCE(MAX(id), 0) AS id FROM channel_events");
+  const statement = db.prepare("SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'channel_events'), 0) AS id");
   statement.setReadBigInts(true);
   return (statement.get() as { id: bigint }).id;
 }
@@ -232,7 +232,7 @@ export function scanChanges(userId: string, cursorValue: string, limit = CHANNEL
   const cursor = decodeCursor(cursorValue);
   if (!cursor || cursor.userId !== userId) throw cursorInvalid();
   const state = eventState();
-  if (cursor.seq > latestEventId()) throw cursorInvalid();
+  if (cursor.epoch === state.epoch && cursor.seq > latestEventId()) throw cursorInvalid();
   if (cursor.epoch !== state.epoch || cursor.seq < state.floor) return { reset: true, reason: "history_expired" };
   const rows = readEvents(cursor.seq, CHANNEL_LIMITS.eventScan);
   if (!rows.length) return { events: [], cursor: cursorFor(userId, cursor.seq), hasMore: false, reset: false };

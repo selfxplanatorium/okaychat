@@ -10,6 +10,7 @@ import { assertStorage } from "../quota.js";
 import { resolveModel } from "../catalog/providers.js";
 import { CHANNEL_LIMITS, isChannelNotifyMode, isChannelReaction, type ChannelEventFrame } from "../../shared/channels.js";
 import {
+  accountRole,
   assertChannelMember,
   assertChannelRole,
   assertWritable,
@@ -232,7 +233,7 @@ export const channelRoutes = new Hono<AppEnv>()
   .use("*", bodyLimit({ maxSize: CHANNEL_LIMITS.aiRequestBytes, onError: (c) => c.json({ error: "That request is too large." }, 413) }))
   .use("*", async (c, next) => {
     await next();
-    c.header("Cache-Control", "private, no-store");
+    c.header("Cache-Control", c.res.headers.get("Content-Type")?.startsWith("text/event-stream") ? "private, no-store, no-transform" : "private, no-store");
   })
   // Static paths precede parameterized ones.
   .get("/groups", (c) => {
@@ -301,7 +302,7 @@ export const channelRoutes = new Hono<AppEnv>()
     // A malformed/tampered/wrong-user/future cursor is a 400 before any headers are sent.
     const supplied = suppliedRaw ? decodeCursor(suppliedRaw) : null;
     if (supplied && supplied.userId !== userId) throw new AppError({ code: "validation", status: 400, message: "That channel cursor is not valid.", details: { reason: "cursor_invalid" } });
-    if (supplied && supplied.seq > latestEventId()) throw new AppError({ code: "validation", status: 400, message: "That channel cursor is not valid.", details: { reason: "cursor_invalid" } });
+    if (supplied && supplied.epoch === eventState().epoch && supplied.seq > latestEventId()) throw new AppError({ code: "validation", status: 400, message: "That channel cursor is not valid.", details: { reason: "cursor_invalid" } });
     chargeRate(userId, "connect");
     const release = acquireStream(userId);
     const state = eventState();
@@ -330,7 +331,7 @@ export const channelRoutes = new Hono<AppEnv>()
         // backpressure wait here would deadlock the ready frame.
         void (async () => {
         let pendingBytes = 0;
-        const write = async (text: string) => {
+        const write = async (text: string, allowed = () => true) => {
           if (signal.aborted) throw new Error("closed");
           // Native streams have no awaited write: wait for the consumer to pull when the queue is full.
           if (controller.desiredSize !== null && controller.desiredSize <= 0) {
@@ -342,6 +343,8 @@ export const channelRoutes = new Hono<AppEnv>()
               }),
             ]);
           }
+          if (signal.aborted) throw new Error("closed");
+          if (!allowed()) return;
           const bytes = encoder.encode(text);
           pendingBytes += bytes.byteLength;
           if (pendingBytes > 256 * 1024) throw new Error("overflow");
@@ -376,6 +379,10 @@ export const channelRoutes = new Hono<AppEnv>()
               await write('event: revoked\ndata: {}\n\n').catch(() => {});
               break;
             }
+            if (cursor < eventState().floor) {
+              await write('event: reset\ndata: {"reason":"history_expired"}\n\n');
+              break;
+            }
             const generation = eventWakeGeneration();
             const rows = readEvents(cursor, 200);
             if (!rows.length) {
@@ -392,7 +399,7 @@ export const channelRoutes = new Hono<AppEnv>()
               if (signals >= 256) throw new Error("signal cap");
               signals++;
               const frame: ChannelEventFrame = { cursor: cursorFor(userId, row.id), event: projectEvent(row) };
-              await write(`id: ${frame.cursor}\nevent: ${row.kind}\ndata: ${JSON.stringify(frame.event)}\n\n`);
+              await write(`id: ${frame.cursor}\nevent: ${row.kind}\ndata: ${JSON.stringify(frame.event)}\n\n`, () => featureAllowed(userId, "channels") && sessionAlive(session) && eventVisible(userId, row));
             }
           }
           controller.close();
@@ -466,7 +473,7 @@ export const channelRoutes = new Hono<AppEnv>()
   .get("/:id", (c) => {
     const userId = c.get("user").id;
     const access = channelAccess(userId, c.req.param("id"));
-    if (!access) throw notFound();
+    if (!access || !access.eligible || db.prepare("SELECT 1 FROM channel_exclusions WHERE channel_id = ? AND user_id = ?").get(access.channel.id, userId)) throw notFound();
     if (access.member && access.eligible) return json(c, { channel: channelSummary(access.channel, access.member, true, userId) });
     const discoverable = access.channel.visibility !== "private" && access.eligible && !access.invited;
     if (!access.invited && !discoverable) throw notFound();
@@ -480,6 +487,7 @@ export const channelRoutes = new Hono<AppEnv>()
     const { channel, member } = assertChannelRole(userId, c.req.param("id"), ["owner"]);
     const body = parse(patchChannelSchema, await readBody(c, CHANNEL_LIMITS.aiRequestBytes));
     const aiJson = await nextAiJson(userId, body.ai, channel.ai_json);
+    assertChannelRole(userId, channel.id, ["owner"]);
     const updated = updateChannel(
       userId,
       channel.id,
@@ -579,6 +587,7 @@ export const channelRoutes = new Hono<AppEnv>()
     const { channel } = assertChannelRole(userId, c.req.param("id"), ["owner", "moderator"]);
     assertWritable(channel);
     const body = parse(inviteSchema, await readBody(c, CHANNEL_LIMITS.requestBytes));
+    assertChannelRole(userId, c.req.param("id"), ["owner", "moderator"]);
     for (const id of body.userIds) {
       if (!featureAllowed(id, "channels")) throw invalid("One of those accounts cannot use team channels.", "binding_unavailable");
     }
@@ -611,6 +620,7 @@ export const channelRoutes = new Hono<AppEnv>()
     const userId = c.get("user").id;
     assertChannelRole(userId, c.req.param("id"), ["owner"]);
     const body = parse(roleSchema, await readBody(c, CHANNEL_LIMITS.requestBytes));
+    assertChannelRole(userId, c.req.param("id"), ["owner"]);
     setMemberRole(userId, c.req.param("id"), body.revision, c.req.param("userId"), body.role);
     return json(c, { ok: true });
   })
@@ -618,6 +628,7 @@ export const channelRoutes = new Hono<AppEnv>()
     const userId = c.get("user").id;
     assertChannelRole(userId, c.req.param("id"), ["owner"]);
     const body = parse(transferSchema, await readBody(c, CHANNEL_LIMITS.requestBytes));
+    assertChannelRole(userId, c.req.param("id"), ["owner"]);
     const channel = transferOwner(userId, c.req.param("id"), body.revision, body.userId);
     return json(c, { channel: channelSummary(channel, memberRow(channel.id, userId)!, true, userId) });
   })
@@ -625,16 +636,21 @@ export const channelRoutes = new Hono<AppEnv>()
     const userId = c.get("user").id;
     assertChannelRole(userId, c.req.param("id"), ["owner", "moderator"]);
     const body = parse(archiveSchema, await readBody(c, CHANNEL_LIMITS.requestBytes));
-    if (body.archived) abortChannelRuns(c.req.param("id"));
+    assertChannelRole(userId, c.req.param("id"), ["owner", "moderator"]);
     const channel = archiveChannel(userId, c.req.param("id"), body.revision, body.archived);
+    if (body.archived) abortChannelRuns(channel.id);
     return json(c, { channel: channelSummary(channel, memberRow(channel.id, userId)!, true, userId) });
   })
   .delete("/:id", async (c) => {
     const userId = c.get("user").id;
     assertChannelRole(userId, c.req.param("id"), ["owner"]);
     const body = parse(deleteChannelSchema, await readBody(c, CHANNEL_LIMITS.requestBytes));
-    settleRunsForDeletion(c.req.param("id"));
-    deleteChannel(userId, c.req.param("id"), body.revision, body.reason ?? "");
+    assertChannelRole(userId, c.req.param("id"), ["owner"]);
+    tx(() => {
+      assertRoomRevision(c.req.param("id"), body.revision);
+      settleRunsForDeletion(c.req.param("id"));
+      deleteChannel(userId, c.req.param("id"), body.revision, body.reason ?? "");
+    });
     return json(c, { ok: true });
   })
   .get("/:id/messages", (c) => {
@@ -654,6 +670,7 @@ export const channelRoutes = new Hono<AppEnv>()
     const { channel } = assertChannelMember(userId, c.req.param("id"));
     assertWritable(channel);
     const body = parse(postMessageSchema, await readBody(c, CHANNEL_LIMITS.requestBytes));
+    assertChannelMember(userId, c.req.param("id"));
     const normalized = assertBody(body.body);
     const hash = postRequestHash({ ...body, body: normalized });
     if (body.requestAi) {
@@ -712,15 +729,17 @@ export const channelRoutes = new Hono<AppEnv>()
     const { channel } = assertChannelMember(userId, c.req.param("id"));
     assertWritable(channel);
     const body = parse(editMessageSchema, await readBody(c, CHANNEL_LIMITS.requestBytes));
+    assertWritable(assertChannelMember(userId, c.req.param("id")).channel);
     const normalized = assertBody(body.body);
     editHumanMessage(userId, channel.id, c.req.param("messageId"), body.revision, normalized, body.mentions);
     return json(c, { message: messageById(channel.id, c.req.param("messageId"), userId) });
   })
   .delete("/:id/messages/:messageId", async (c) => {
     const userId = c.get("user").id;
-    const { channel, member } = assertChannelMember(userId, c.req.param("id"));
+    assertChannelMember(userId, c.req.param("id"));
     // Archived rooms still allow destructive cleanup of their own messages.
     const body = parse(deleteMessageSchema, await readBody(c, CHANNEL_LIMITS.requestBytes));
+    const { channel, member } = assertChannelMember(userId, c.req.param("id"));
     const row = db.prepare("SELECT kind FROM channel_messages WHERE channel_id = ? AND id = ?").get(channel.id, c.req.param("messageId")) as { kind: "human" | "ai" } | undefined;
     if (!row) throw notFound();
     // Stopping a reply is the cancel route's decision (requester or moderator), never a side effect here.
@@ -753,6 +772,7 @@ export const channelRoutes = new Hono<AppEnv>()
     const userId = c.get("user").id;
     const { channel } = assertChannelMember(userId, c.req.param("id"));
     const body = parse(readSchema, await readBody(c, CHANNEL_LIMITS.requestBytes));
+    assertChannelMember(userId, c.req.param("id"));
     const result = setReadCursor(userId, channel.id, body.throughSeq);
     return json(c, { readSeq: result.readSeq, ...unreadFor(channel.id, userId, result.readSeq) });
   })
@@ -760,6 +780,7 @@ export const channelRoutes = new Hono<AppEnv>()
     const userId = c.get("user").id;
     const { channel } = assertChannelMember(userId, c.req.param("id"));
     const body = parse(preferencesSchema, await readBody(c, CHANNEL_LIMITS.requestBytes));
+    assertChannelMember(userId, c.req.param("id"));
     if (!isChannelNotifyMode(body.notifyMode)) throw invalid("Invalid notification mode.");
     setNotifyMode(userId, channel.id, body.notifyMode);
     return json(c, { ok: true });
@@ -769,6 +790,7 @@ export const channelRoutes = new Hono<AppEnv>()
     const { channel } = assertChannelMember(userId, c.req.param("id"));
     assertWritable(channel);
     const body = parse(aiRunSchema, await readBody(c, CHANNEL_LIMITS.requestBytes));
+    assertChannelMember(userId, c.req.param("id"));
     const hash = JSON.stringify({ clientId: body.clientId, sourceId: body.sourceId });
     const existing = runByClient(channel.id, userId, body.clientId);
     if (existing) {
@@ -913,9 +935,11 @@ export const channelAdminRoutes = new Hono<AppEnv>()
   })
   .patch("/:id", async (c) => {
     const body = parse(adminPatchSchema, await readBody(c, CHANNEL_LIMITS.aiRequestBytes));
+    const reason = requireReason(body.reason);
     const channel = channelRow(c.req.param("id"));
     if (!channel) throw notFound();
     const aiJson = await nextAiJson(c.get("user").id, body.ai, channel.ai_json);
+    assertLiveAdmin(c.get("user").id);
     const updated = updateChannel(
       c.get("user").id,
       channel.id,
@@ -929,18 +953,24 @@ export const channelAdminRoutes = new Hono<AppEnv>()
       },
       { admin: true },
     );
-    audit(c.get("user").id, channel.id, "update", null, requireReason(body.reason));
+    audit(c.get("user").id, channel.id, "update", null, reason);
     return json(c, { channel: updated });
   })
   .delete("/:id", async (c) => {
     const body = parse(adminDeleteSchema, await readBody(c, CHANNEL_LIMITS.requestBytes));
-    settleRunsForDeletion(c.req.param("id"));
-    deleteChannel(c.get("user").id, c.req.param("id"), body.revision, requireReason(body.reason));
+    assertLiveAdmin(c.get("user").id);
+    tx(() => {
+      const reason = requireReason(body.reason);
+      assertRoomRevision(c.req.param("id"), body.revision);
+      settleRunsForDeletion(c.req.param("id"));
+      deleteChannel(c.get("user").id, c.req.param("id"), body.revision, reason);
+    });
     return json(c, { ok: true });
   })
   .post("/:id/moderate", async (c) => {
     const userId = c.get("user").id;
     const body = parse(adminModerateSchema, await readBody(c, CHANNEL_LIMITS.requestBytes));
+    assertLiveAdmin(userId);
     const channel = channelRow(c.req.param("id"));
     if (!channel) throw notFound();
     const reason = requireReason(body.reason);
@@ -955,8 +985,8 @@ export const channelAdminRoutes = new Hono<AppEnv>()
         setMemberRole(userId, channel.id, body.revision, target, body.role);
         break;
       case "archive":
-        abortChannelRuns(channel.id);
         archiveChannel(userId, channel.id, body.revision, body.archived ?? true);
+        if (body.archived ?? true) abortChannelRuns(channel.id);
         break;
       case "transfer":
         if (!target) throw invalid("Choose a member.");
@@ -964,8 +994,8 @@ export const channelAdminRoutes = new Hono<AppEnv>()
         break;
       case "deleteMessage":
         if (!target) throw invalid("Choose a message.");
-        cancelRunsForSource(channel.id, target);
         deleteHumanMessage(userId, channel.id, target, body.revision, { moderator: true, reason });
+        cancelRunsForSource(channel.id, target);
         break;
       case "unblock":
         if (!target) throw invalid("Choose an account.");
@@ -975,6 +1005,16 @@ export const channelAdminRoutes = new Hono<AppEnv>()
     audit(userId, channel.id, body.action, target ?? null, reason);
     return json(c, { ok: true });
   });
+
+function assertLiveAdmin(userId: string): void {
+  if (accountRole(userId) !== "admin") throw new AppError({ code: "forbidden", message: "Administrator access is required." });
+}
+
+function assertRoomRevision(id: string, revision: number): void {
+  const channel = channelRow(id);
+  if (!channel) throw notFound();
+  if (channel.revision !== revision) throw conflict("revision", "This room changed. Reload and try again.");
+}
 
 function requireReason(raw: string | undefined): string {
   const reason = (raw ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").trim();

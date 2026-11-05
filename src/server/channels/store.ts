@@ -1,10 +1,11 @@
-import { db, tx } from "../db.js";
+import { db, tx, afterCommit } from "../db.js";
 import { newId } from "../crypto.js";
 import { AppError } from "../errors.js";
 import { assertStorage } from "../quota.js";
 import { CHANNEL_LIMITS } from "../../shared/channels.js";
 import type { ChannelAiBinding, ChannelMentionInput } from "../../shared/channels.js";
-import { channelRow, conflict, exclusionRow, groupEligible, inviteRow, memberRow, notFound, type ChannelRow, type MemberRow } from "./access.js";
+import { assertChannelMember, assertWritable, requireChannelsFeature, channelRow, conflict, exclusionRow, groupEligible, inviteRow, memberRow, notFound, type ChannelRow, type MemberRow } from "./access.js";
+import { requestChannelRevocation } from "./revocation.js";
 import { insertEvent, insertSync } from "./events.js";
 import { chargeRate } from "./rate.js";
 import { notifyAiFinished, notifyHumanMessage, notifyInvite, purgeMessageNotices } from "./notifications.js";
@@ -104,6 +105,8 @@ function pruneCreateKeys(userId: string, now: number): number {
 
 export function createChannel(userId: string, input: CreateChannelStoreInput): StoreResult<ChannelRow> {
   return tx(() => {
+    requireChannelsFeature(userId);
+    assertGroupsOwnedBy(userId, input.groupIds);
     const fields = validateRoomFields(input.name, input.description, input.icon, input.visibility, input.groupIds);
     const now = Date.now();
     const existing = db.prepare("SELECT * FROM channel_create_keys WHERE user_id = ? AND client_id = ?").get(userId, input.clientId) as
@@ -182,7 +185,10 @@ export function updateChannel(
     const revision = bumpRevision(channelId);
     audit(userId, channelId, "update", null, "");
     // A group audience change can grant or revoke access for people who are not in this room yet.
-    if (input.groupIds !== undefined) insertSync();
+    if (input.groupIds !== undefined) {
+      insertSync();
+      afterCommit(requestChannelRevocation);
+    }
     insertEvent({ channelId, kind: "channel.changed", entityId: channelId, version: revision });
     return channelRow(channelId)!;
   });
@@ -339,6 +345,7 @@ export function leaveChannel(userId: string, channelId: string): void {
     const revision = bumpRevision(channelId);
     insertEvent({ channelId, kind: "members.changed", entityId: userId, version: revision });
     insertEvent({ targetUserId: userId, kind: "sync" });
+    afterCommit(requestChannelRevocation);
   });
 }
 
@@ -411,6 +418,7 @@ export function removeMember(userId: string, channelId: string, targetId: string
     audit(userId, channelId, "remove", targetId, "");
     insertEvent({ channelId, kind: "members.changed", entityId: targetId, version: revision });
     insertEvent({ targetUserId: targetId, kind: "sync" });
+    afterCommit(requestChannelRevocation);
   });
 }
 
@@ -504,8 +512,8 @@ export function postHumanMessage(
   makeRun: (human: { messageId: string; seq: number }) => { runId: string } | null,
 ): StoreResult<PostedMessage> {
   return tx(() => {
-    const channel = channelRow(channelId);
-    if (!channel) throw notFound();
+    const { channel } = assertChannelMember(userId, channelId);
+    assertWritable(channel);
     const existing = db.prepare("SELECT * FROM channel_messages WHERE channel_id = ? AND author_id = ? AND client_id = ? AND kind = 'human'").get(
       channelId,
       userId,
@@ -698,11 +706,17 @@ export function createRunInTx(
   source: { messageId: string; seq: number },
   input: CreateRunInput,
 ): { runId: string; messageId: string } {
+  const current = assertChannelMember(userId, channel.id).channel;
+  assertWritable(current);
+  if (current.ai_json !== channel.ai_json) throw conflict("binding_unavailable", "This room's AI binding changed.");
+  const sourceRow = db.prepare("SELECT kind, deleted_at FROM channel_messages WHERE channel_id = ? AND id = ?").get(channel.id, source.messageId) as { kind: string; deleted_at: number | null } | undefined;
+  if (!sourceRow || sourceRow.deleted_at !== null || sourceRow.kind !== "human") throw notFound();
   const existing = runByClient(channel.id, userId, input.clientId);
   if (existing) {
     if (existing.request_hash !== input.requestHash) throw conflict("capacity", "That reply id was already used for a different request.");
     return { runId: existing.id, messageId: existing.message_id };
   }
+  assertStorage(current.owner_id, input.reservedBytes);
   if (openRun(channel.id)) throw conflict("ai_busy", "A reply is already running in this room.");
   if (db.prepare("SELECT 1 FROM channel_ai_runs WHERE requester_id = ? AND state IN ('queued', 'running')").get(userId)) {
     throw conflict("ai_busy", "You already have a room reply running.");

@@ -34,7 +34,7 @@ group eligibility, optional room) is inside the SQL before its limit.
 
 ## REST
 
-All routes return `Cache-Control: private, no-store`. Bodies are strict Zod objects; the channel router
+All ordinary responses return `Cache-Control: private, no-store`; SSE also preserves `no-transform`. Bodies are strict Zod objects; the channel router
 caps bodies at 128 KiB and individual ordinary reads use 48 KiB. Lists are keyset paged; history uses
 sequence cursors and never timestamps. Create and message client ids are durable idempotency keys with
 canonical request hashes; an exact replay returns the stored projection, while a reused id with
@@ -47,6 +47,9 @@ request ids are bounded in `src/shared/channels.ts`.
 subscribers; every frame is read from SQLite and re-authorized against live feature, room, group, and
 membership state.
 
+- Event high-water comes from SQLite’s durable AUTOINCREMENT sequence, so room cascades and pruning
+  cannot move it backwards. Open streams check the pruning floor again, and frames are re-authorized
+  after any backpressure wait. Epoch changes reset before same-epoch future-sequence validation.
 - Cursors are base64url `{v,epoch,seq,userId}` with an HMAC derived from `OKAYCHAT_SECRET`. Tampered,
   wrong-user, and future cursors are 400 before headers. A pruned floor or another epoch sends
   `event: reset` with `history_expired`.
@@ -84,11 +87,20 @@ the requester's existing turn slot and `llm.call` lease. It sends only:
 2. reduced assistant instructions and room metadata, both enveloped as untrusted data;
 3. a JSON transcript envelope plus the current request.
 
+Admission rechecks live membership, eligibility, archive state, binding, source and owner quota inside
+the write transaction after asynchronous model resolution. Room metadata and author names remain in
+the frozen, untrusted prompt envelopes. Admin update reasons are validated before any mutation.
+
 No tools, MCP, memory, knowledge, projects, skills, files, RAG, delegates, images, compaction, or title
 generation are available. Text checkpoints are durable at most every 500 ms or 1 KiB, capped at 64 KiB
 and a valid code point. Cancellation aborts the provider and keeps the partial body. Restart marks open
-runs `interrupted` and never retries. Final usage is written once with the unique `channel_run_id`; a
-provider that reports no usage stores `NULL` and the UI says so.
+runs `interrupted` and never retries. Membership removal, leaving a room, and audience changes abort
+idle providers after commit; revoked access settles as `failed`/`forbidden`, while an explicit stop is `cancelled`. Hard deletion retains the
+worker slot until the provider task releases its turn and operation lease. Revision checks precede
+archive/delete cancellation, including admin moderation.
+
+Final usage is written once with the unique `channel_run_id`; a provider that reports no usage stores
+`NULL` and the UI says so.
 
 ## Read state and notices
 
@@ -129,3 +141,10 @@ schedule targets, tools/MCP/knowledge/memory/delegation in room AI, autonomous A
 regeneration/continuation, owner credential lending, custom room prompts beyond the reduced snapshot,
 retention/legal hold, edit history/undo, delivery receipts, offline send, push digests, multiple app
 writers, cross-tab leader election, and a global search union.
+
+## Verification
+
+`channels.test.ts` exercises authenticated REST, SSE ready/reset/heartbeat/revoked frames and slot
+release, live notification ACL filtering, stale mutation cancellation, AI admission, streamed worker
+settlement and usage, idle-provider revocation, event pruning/high-water, and restart recovery. Worker
+provider calls use a deterministic mocked HTTP transport through the real AI SDK.

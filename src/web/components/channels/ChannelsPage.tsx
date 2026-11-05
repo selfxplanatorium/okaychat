@@ -84,8 +84,8 @@ export function ChannelsPage({ channelId }: { channelId?: string }) {
   }, [messageId, room?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (directory && !joinTarget) setJoinTarget(directory);
-  }, [directory, joinTarget]);
+    if (channelId && directory?.id === channelId && !joinTarget) setJoinTarget(directory);
+  }, [channelId, directory, joinTarget]);
 
   useEffect(() => {
     if (invitedId) setMode("invitations");
