@@ -14,6 +14,7 @@ memory, share, archive, or message search. Text is ordinary account text at rest
   Its derived UTC bounds are the first valid minute of each local date in the event zone. A 23- or
   25-hour civil day stays one day; a skipped midnight starts at the transition minute; a wholly
   skipped date is rejected rather than shifted.
+- Search (`?q=`) uses the same per-account 120/minute window as notes (`src/server/personal-search-rate.ts`).
 - `resolveLocalCandidates(zone, civil)` enumerates every whole-minute UTC offset in `[-1440, +1440]`,
   formats each candidate back in the zone, and keeps exact civil round trips. Zero candidates is a
   spring gap; two is an autumn fold. Results are cached (100 tuples). The resolver runs only on

@@ -92,6 +92,10 @@ Storage counts `length(CAST(title AS BLOB)) + length(CAST(body AS BLOB))` in the
 the write. Tags, FTS copies, source pointers, revisions, and hashes are bounded metadata and are not
 charged. Deletes and shrinks work over quota.
 
+Search requests (`?q=`) share the small per-account in-process window in `src/server/personal-search-rate.ts`:
+120 per minute across notes and calendar, so a looping client cannot pin a core. Plain list refreshes are
+not limited.
+
 Tests: `src/server/notes.test.ts`, `src/server/calendar-time.test.ts` for shared time helpers,
 `src/web/lib/note-autosave.test.ts`, `src/web/state/note-chat-handoff.test.ts`, and the migration suite.
 
