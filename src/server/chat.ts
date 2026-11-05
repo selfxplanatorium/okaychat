@@ -428,7 +428,8 @@ export async function turnStream(opts: TurnOptions) {
       }, { mcpIdentities: mcp.identities });
       const readOnlyTools = filteredReadOnly;
       const subagentModels = model.toolCall && settings.subagents && !temporary && allowed("delegation") && assistantAllowsDelegation(toolPolicy) ? await allowedSubagentModels(user.id, settings, model.ref) : [];
-      const useGenerativeUI = false;
+      const useGenerativeUI = model.toolCall && settings.generativeUI && !!opts.clientTools && !temporary && allowed("generativeUI");
+      const widgetTools = useGenerativeUI && allows("widgets") ? frontendTools(opts.clientTools!) : {};
       const subagents = subagentModels.length
         ? subagentTools({ userId: user.id, threadId, allowed: subagentModels, subTools: readOnlyTools, maxSteps: settings.maxSteps, searchBudget, signal: signal })
         : {};
@@ -449,13 +450,13 @@ export async function turnStream(opts: TurnOptions) {
         ...(useArtifacts ? artifactTools(threadId, user.id, { shots, canViewImages: model.inputModalities.includes("image"), savedThisTurn: artifactsInCurrentTurn(uiMessages), shotsThisTurn: screenshotsInCurrentTurn(uiMessages), browserDown }) : {}),
         ...(imageServices.length ? imageTools(user.id, threadId, imageServices, signal) : {}),
         ...(model.toolCall && !temporary && allowed("code") && settings.codeExecution && allows("code") && sandboxConfigured() && !sandboxDown ? sandboxTools(user.id, threadId, signal, sandboxTurn) : {}),
-        ...(useGenerativeUI && allows("widgets") ? frontendTools(opts.clientTools!) : {}),
+        ...widgetTools,
         ...mcp.tools,
         // Only trimmed chats point the model at removed attachments, so others keep their tool list (and cache).
         ...(compaction?.trim && allows("attachments") ? attachmentTools(user.id, canViewImages ? toolImages : undefined) : {}),
         // From a chat's first research on, so its tool block changes once, not with every toggle.
         ...(model.toolCall && assistantAllowsResearch(toolPolicy) && (research || hasResearch(uiMessages)) ? researchTool() : {}),
-      }, new Set(Object.keys(mcp.tools)));
+      }, new Set(Object.keys(mcp.tools)), new Set(Object.keys(widgetTools)));
       // Exact intersection at the last moment: a family that was not selected cannot leak through any
       // assembly branch, and an unknown tool key is denied. Delegates and research use this same set.
       const tools = filterAssistantTools(toolPolicy, offeredTools, { mcpIdentities: mcp.identities });
