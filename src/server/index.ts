@@ -55,7 +55,14 @@ const publicOrigin = process.env.OKAYCHAT_PUBLIC_URL ? new URL(process.env.OKAYC
 const globalBodyLimit = bodyLimit({ maxSize: 100 * 1024 * 1024, onError: (c) => c.json({ error: "Request is too large." }, 413) });
 // This family streams after authenticated admission. Hono otherwise buffers unknown-length bodies
 // before the route can reserve quota or refuse a busy account. Control bodies have their own 128 KiB cap.
-app.use("/api/*", (c,next) => c.req.path === "/api/conversation-imports" || c.req.path.startsWith("/api/conversation-imports/") ? next() : globalBodyLimit(c,next));
+app.use("/api/*", (c,next) => {
+  if(c.req.path === "/api/conversation-imports" || c.req.path.startsWith("/api/conversation-imports/")) {
+    // Auth and CSRF refusals happen before the feature router as well.
+    c.header("Cache-Control","private, no-store");
+    return next();
+  }
+  return globalBodyLimit(c,next);
+});
 app.use("/api/*", csrf({ origin: (origin, c) => origin === new URL(c.req.url).origin || origin === publicOrigin }));
 app.onError(handleAppError);
 // Applied to every response that did not set its own. A script CSP is not possible here: artifact frames

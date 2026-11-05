@@ -1,3 +1,4 @@
+import { assertStagingCapacity, conversationStagingReserved } from "../archive-staging-budget.js";
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { setImmediate as tick } from 'node:timers/promises';
@@ -6,8 +7,8 @@ import path from 'node:path';
 import { db } from '../db.js';
 import { storageUsed } from '../quota.js';
 import { IMPORT_LIMITS as L } from '../../shared/chat-import.js';
-import { receiveImport,confirmImport,cancelImport,recoverImports,kickImports,resumeImport,maintainImports } from './jobs.js';
-import { admitJob,allItems,hashBytes,getJob,jobDir,jobView,type JobRow } from './store.js';
+import { receiveImport,confirmImport,cancelImport,createExport,recoverImports,kickImports,resumeImport,maintainImports } from './jobs.js';
+import { admitJob,allItems,hashBytes,getJob,finishJob,readBounded,jobDir,jobView,type JobRow } from './store.js';
 import { commitConversation } from './commit.js';
 
 const now=Date.now();
@@ -69,4 +70,31 @@ test('tampered staged files fail closed at restart and expired previews release 
   assert.equal(getJob(row.user_id,row.id)!.error_code,'staging_unavailable');assert.equal(storageUsed(row.user_id),0);
   const next=await upload('tamper-checkpoint');maintainImports(next.row.expires_at+1);
   assert.equal(getJob(row.user_id,next.row.id)!.state,'expired');assert.equal(storageUsed(row.user_id),0);assert.ok(!existsSync(jobDir(next.row)));
+});
+
+test('admission caps work before receiving bytes and shares physical reservations with both archive families',()=> {
+  const rows:JobRow[]=[];
+  for(let i=0;i<6;i++) {const id=`capacity-${i}`;owner(id);rows.push(admitJob(id,'import'));}
+  assert.equal(conversationStagingReserved(),6*L.reservationBytes);
+  owner('capacity-overflow');
+  assert.throws(()=>admitJob('capacity-overflow','import'),{status:429});
+  assert.throws(()=>admitJob('capacity-0','import'),{status:409});
+  assert.throws(()=>assertStagingCapacity(256*1024*1024),{status:413});
+  for(const row of rows) finishJob(row,'cancelled');
+  assert.equal(conversationStagingReserved(),0);
+});
+
+test('native export dedupe hashes the worker-normalized transcript and never restores remote images',async()=> {
+  const id='normalized-export';owner(id);
+  db.prepare("INSERT INTO threads(id,user_id,title,status,created_at,updated_at) VALUES (?,?,?,'regular',1000,2000)").run('normalized-thread',id,'<b>Native title</b>');
+  db.prepare("INSERT INTO messages(id,thread_id,parent_id,format,content,created_at) VALUES ('native-m','normalized-thread',NULL,'ai-sdk/v6',?,1500)").run(JSON.stringify({role:'user',parts:[{type:'text',text:'<b>Historical text</b> ![pixel](https://example.test/never)'}]}));
+  const exported=createExport(id,[{id:'normalized-thread'}]);await until(id,exported.id,'ready');
+  const bytes=readBounded(getJob(id,exported.id)!,'output.json',L.inputBytes);
+  const file=JSON.parse(bytes.toString()) as {conversations:Array<ReturnType<typeof conversation>>};
+  assert.equal(file.conversations[0]!.title,'Native title');assert.ok(!bytes.toString().includes('!['));
+  cancelImport(id,exported.id);
+  const uploaded=await receiveImport(id,new Request('http://localhost/',{method:'POST',headers:{'content-type':'application/json'},body:bytes}));
+  await until(id,uploaded.id,'ready');const item=allItems(uploaded.id)[0]!;
+  assert.equal(item.state,'duplicate');assert.equal(item.error_code,null);assert.equal(item.thread_id,'normalized-thread');
+  cancelImport(id,uploaded.id);
 });

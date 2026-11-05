@@ -148,3 +148,13 @@ formatters. State tests cover late responses at each account boundary; static re
 malicious labels and quarantined markup remain inert. The lifecycle matrix exercises the actual private
 API on a temporary database, plus a second-account portable round trip and the unchanged native ZIP
 exporter. No real account exports are used in verification.
+
+## Release checks
+
+The user-facing increment passed `npm run typecheck`, the full `npm test` suite (1,900 passed,
+one existing skipped test), and `npm run build`. The emitted production worker was separately exercised
+for validation, serialization and canonical hashes. The restart suite launches a second fresh process
+against a temporary database after a durable first-conversation checkpoint and verifies exactly-once
+completion of the remaining conversation. No real account data or provider credentials are used.
+Keyboard/touch behavior uses the existing Base UI primitives and is checked structurally; a live
+browser/device walkthrough was not run in this change.
