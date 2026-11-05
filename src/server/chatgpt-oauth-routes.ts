@@ -131,14 +131,19 @@ chatgptHelperRoutes.use("*", async (c, next) => {
 });
 const helperInput = z.object({ attemptId: z.string().max(100), helperSecret: z.string().regex(/^[A-Za-z0-9_-]{43}$/), port: z.number().int().min(1024).max(65535).optional(), callbackUrl: z.string().max(8192).optional() }).strict();
 chatgptHelperRoutes.post("/:action", async c => {
-  const key = "global"; // A global bound also protects deployments without a trusted client-address proxy.
-  let limit = invalidAttempts.get(key);
-  if (!limit || limit.at < Date.now() - 60_000) { limit = { at: Date.now(), count: 0 }; invalidAttempts.set(key, limit); }
-  if (limit.count >= 10) return c.json({ error: "Try again later" }, 429);
   const input = helperInput.parse(await c.req.json());
   const row = db.prepare("SELECT * FROM chatgpt_login_attempts WHERE id=?").get(input.attemptId) as Attempt | undefined;
   const capability = c.req.header("Authorization")?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
-  if (!row || !capability || !equal(sha256(capability), row.helper_cap_hash)) { limit.count++; return c.json({ error: "Not found" }, 404); }
+  const valid = !!row && !!capability && equal(sha256(capability), row.helper_cap_hash);
+  // One attempt cannot be brute-forced, and one stranger cannot exhaust a server-wide bucket. Invalid
+  // requests get a much higher ceiling only to bound parsing and row lookups.
+  const key = valid ? `attempt:${row.id}` : "invalid";
+  const ceiling = valid ? 10 : 5000;
+  let limit = invalidAttempts.get(key);
+  if (!limit || limit.at < Date.now() - 60_000) { limit = { at: Date.now(), count: 0 }; invalidAttempts.set(key, limit); }
+  if (limit.count >= ceiling) return c.json({ error: "Try again later" }, 429);
+  limit.count++;
+  if (!valid) return c.json({ error: "Not found" }, 404);
   if (!live(row)) return c.json({ error: "Expired" }, 410);
   const action = c.req.param("action");
   if (action === "prepare") {
