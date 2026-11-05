@@ -1,5 +1,6 @@
 import { CUSTOM_LIMITS } from "../shared/custom-tools.js";
 import { EVAL_RESULT_RESERVATION } from "../shared/evaluations.js";
+import { ROOM_ARCHIVE_LIMITS } from "../shared/room-archive.js";
 import { db } from "./db.js";
 import { env } from "./env.js";
 import { AppError } from "./errors.js";
@@ -133,10 +134,14 @@ export function storageUsedSql(user: string): string {
     -- Channels are paid for by the current room owner, including other members' messages and AI output.
     -- A run's open output reservation is counted as a top-up to 64 KiB, so a growing body is charged once.
     UNION ALL SELECT COALESCE(SUM(
-        length(CAST(c.name AS BLOB)) + length(CAST(c.description AS BLOB)) + COALESCE(length(CAST(c.ai_json AS BLOB)), 0)), 0)
+        length(CAST(c.name AS BLOB)) + length(CAST(c.description AS BLOB)) + COALESCE(length(CAST(c.ai_json AS BLOB)), 0)
+        + COALESCE(length(CAST(c.imported_meta_json AS BLOB)), 0)), 0)
       FROM channels c WHERE c.owner_id = ${user}
-    UNION ALL SELECT COALESCE(SUM(length(CAST(m.body AS BLOB))), 0)
+    UNION ALL SELECT COALESCE(SUM(length(CAST(m.body AS BLOB)) + COALESCE(length(CAST(m.imported_json AS BLOB)), 0)), 0)
       FROM channel_messages m JOIN channels c ON c.id = m.channel_id WHERE c.owner_id = ${user}
+    -- Imported identities carry a fixed content reservation; they store no names, proofs, or email.
+    UNION ALL SELECT COALESCE(SUM(${ROOM_ARCHIVE_LIMITS.identityReservationBytes}), 0)
+      FROM channel_import_identities i JOIN channels c ON c.id = i.channel_id WHERE c.owner_id = ${user}
     -- Channel attachments are charged once, at upload, to the room owner recorded on the row. Pending and
     -- tombstoned-until-purged bytes are still stored and still count.
     UNION ALL SELECT COALESCE(SUM(size), 0) FROM channel_attachments WHERE owner_id = ${user}
@@ -164,6 +169,9 @@ export function storageUsedSql(user: string): string {
     -- API key metadata reserves a fixed 1 KiB per retained row. Requests, audit, rate, and usage rows are
     -- bounded operational metadata, excluded like the other operational counters.
     UNION ALL SELECT COUNT(*) * 1024 FROM api_keys WHERE user_id = ${user}
+    -- Room archive staging is reserved before the first byte and released only after its files are gone,
+    -- so a cleanup-pending receipt still blocks the same account's next reservation.
+    UNION ALL SELECT COALESCE(SUM(reservation_bytes), 0) FROM room_archive_jobs WHERE user_id = ${user}
   )), 0)`;
 }
 

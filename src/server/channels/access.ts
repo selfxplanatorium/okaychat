@@ -19,6 +19,7 @@ export interface ChannelRow {
   kind: string;
   dm_key: string | null;
   ai_json: string | null;
+  imported_meta_json: string | null;
   revision: number;
   next_seq: number;
   archived_at: number | null;

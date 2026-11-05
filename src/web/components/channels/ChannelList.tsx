@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArchiveIcon, CheckIcon, CompassIcon, MailIcon, PlusIcon, SearchIcon, UsersIcon, XIcon } from "lucide-react";
+import { ArchiveIcon, CheckIcon, CompassIcon, MailIcon, PlusIcon, SearchIcon, UploadIcon, UsersIcon, XIcon } from "lucide-react";
 import type { ChannelDirectoryEntry, ChannelInviteSummary, ChannelSummary } from "@shared/channels";
 import { t } from "@/i18n";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,7 @@ export function ChannelList({
   onDecline,
   onCreate,
   onNewDm,
+  onImport,
   onLoadMore,
   hasMore,
 }: {
@@ -42,6 +43,7 @@ export function ChannelList({
   onDecline: (id: string) => void;
   onCreate: () => void;
   onNewDm: () => void;
+  onImport: () => void;
   onLoadMore: () => void;
   hasMore: boolean;
 }) {
@@ -76,6 +78,11 @@ export function ChannelList({
         </Button>
         <Button type="button" size="sm" variant="outline" onClick={onNewDm} aria-label={t("channels.newDm")}>
           <UsersIcon aria-hidden /> {t("channels.newDm")}
+        </Button>
+      </div>
+      <div className="px-2 pt-1">
+        <Button type="button" size="sm" variant="ghost" className="w-full justify-start" onClick={onImport}>
+          <UploadIcon aria-hidden /> {t("roomArchives.importRoom")}
         </Button>
       </div>
       <div role="tablist" aria-label={t("channels.title")} className="grid grid-cols-2 gap-0.5 px-2 pt-2">

@@ -5,6 +5,11 @@ import { cn } from "@/lib/utils";
 
 export function ChannelQuote({ quote, onClick, className }: { quote: Quote; onClick?: () => void; className?: string }) {
   const content = quote.deleted || !quote.excerpt ? t("channels.quoteUnavailable") : quote.excerpt;
+  const author = quote.author
+    ? quote.author.kind === "known"
+      ? quote.author.name
+      : t("roomArchives.unknownAuthor")
+    : quote.authorName;
   return (
     <button
       type="button"
@@ -16,7 +21,7 @@ export function ChannelQuote({ quote, onClick, className }: { quote: Quote; onCl
     >
       <CornerUpLeftIcon aria-hidden className="mt-0.5 size-3 shrink-0" />
       <span className="min-w-0">
-        {quote.authorName && !quote.deleted && <span className="text-foreground font-medium">{quote.authorName}: </span>}
+        {author && !quote.deleted && <span className="text-foreground font-medium">{author}: </span>}
         <span className="line-clamp-2 break-words">{content}</span>
       </span>
     </button>

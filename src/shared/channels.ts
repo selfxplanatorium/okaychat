@@ -148,6 +148,8 @@ export interface ChannelSummary {
   dmMembers: ChannelMessageAuthor[] | null;
   /** Rooms with at least one unread thread reply (see docs/implementation/channels.md). */
   threadsUnread: number;
+  /** Null for a native room; imported rooms carry the source metadata for display only. */
+  imported?: ChannelImportedMeta | null;
 }
 
 /** What an eligible nonmember or invitee may see. No counts, owner id, members, history, or AI settings. */
@@ -187,10 +189,40 @@ export interface ChannelMessageAuthor {
   name: string;
 }
 
+/**
+ * A historical author is deliberately discriminated: a recognized local account is the only case that
+ * carries an id and a live name. Everything else is neutral and translated by the client, so an
+ * archive-controlled display name can never look like a live account label.
+ */
+export type ChannelHistoricalAuthor = { kind: "known"; id: string; name: string } | { kind: "unknown" };
+
+export interface ChannelHistoricalMention {
+  start: number;
+  end: number;
+  author: ChannelHistoricalAuthor;
+}
+
+/** Read-only counts from the archive. They never join live reactions or notify anyone. */
+export interface ChannelHistoricalReaction {
+  emoji: ChannelReaction;
+  count: number;
+}
+
+/** Source room metadata kept for display only; it never becomes live settings. */
+export interface ChannelImportedMeta {
+  sourceCreatedAt: number;
+  sourceUpdatedAt: number;
+  sourceArchivedAt: number | null;
+  sourceVisibility: ChannelVisibility;
+  importedAt: number;
+}
+
 export interface ChannelQuote {
   id: string;
   seq: number;
   authorName: string | null;
+  /** Present for an imported target author; the neutral/recognized rules match the timeline. */
+  author?: ChannelHistoricalAuthor | null;
   excerpt: string;
   deleted: boolean;
 }
@@ -284,6 +316,25 @@ export interface ChannelMessage {
   threadRootId: string | null;
   thread: ChannelThreadSummary | null;
   attachments: ChannelAttachment[];
+  /** Server-derived: this row came from an archive and has no native author or edit rights. */
+  imported?: boolean;
+  /** Imported author projection. Never grants "mine", edit rights, or presence. */
+  historicalAuthor?: ChannelHistoricalAuthor | null;
+  historicalMentions?: ChannelHistoricalMention[];
+  historicalReactions?: ChannelHistoricalReaction[];
+}
+
+/** One historical participant in the separate "Imported roster" view. */
+export interface ChannelImportedRosterEntry {
+  key: string;
+  author: ChannelHistoricalAuthor;
+  role: ChannelRole;
+  joinedAt: number;
+}
+
+export interface ChannelImportedRosterPage {
+  items: ChannelImportedRosterEntry[];
+  nextAfter: string | null;
 }
 
 export interface ChannelMessagePage {

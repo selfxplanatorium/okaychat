@@ -21,6 +21,8 @@ import type {
 import { CHANNEL_LIMITS, CHANNEL_REACTIONS, channelAttachmentUrl, isChannelRunState } from "../../shared/channels.js";
 import type { ChannelRow, MemberRow } from "./access.js";
 import { threadsUnreadCount, threadUnreadByRoot } from "./thread-counts.js";
+import { historicalMentionsOf, historicalReactionsOf, parseImportedMeta, parseImportedProvenance } from "./archive/history.js";
+import { importedAuthor, importedAuthorLookup } from "./archive/identity.js";
 
 /** Read-only projections shared by REST, sync, and events. No authorization decision lives here. */
 
@@ -39,6 +41,7 @@ export interface ChannelMessageRow {
   created_at: number;
   edited_at: number | null;
   deleted_at: number | null;
+  imported_json: string | null;
 }
 
 export interface ChannelRunRow {
@@ -140,6 +143,7 @@ export function channelSummary(channel: ChannelRow, member: MemberRow | null, el
     kind: dm ? "dm" : "room",
     dmMembers: dm ? dmMembersOf(channel.id) : null,
     threadsUnread: member ? threadsUnreadCount(channel.id, userId) : 0,
+    imported: parseImportedMeta(channel.imported_meta_json),
   };
 }
 
@@ -201,13 +205,16 @@ const excerpt = (body: string) => [...plain(body)].slice(0, 160).join("");
 function quoteOf(id: string | null, channelId: string): ChannelQuote | null {
   if (!id) return null;
   const row = db
-    .prepare("SELECT id, seq, author_id, body, deleted_at FROM channel_messages WHERE channel_id = ? AND id = ?")
-    .get(channelId, id) as { id: string; seq: number; author_id: string | null; body: string; deleted_at: number | null } | undefined;
+    .prepare("SELECT id, seq, author_id, body, deleted_at, imported_json FROM channel_messages WHERE channel_id = ? AND id = ?")
+    .get(channelId, id) as { id: string; seq: number; author_id: string | null; body: string; deleted_at: number | null; imported_json: string | null } | undefined;
   if (!row) return { id, seq: 0, authorName: null, excerpt: "", deleted: true };
+  const imported = row.imported_json !== null && row.deleted_at === null;
+  const provenance = imported ? parseImportedProvenance(row.imported_json) : null;
   return {
     id: row.id,
     seq: row.seq,
-    authorName: authorOf(row.author_id)?.name ?? null,
+    authorName: imported ? null : authorOf(row.author_id)?.name ?? null,
+    ...(imported ? { author: provenance?.authorIdentityId ? importedAuthor(channelId, provenance.authorIdentityId) : { kind: "unknown" } } : {}),
     excerpt: row.deleted_at === null ? excerpt(row.body) : "",
     deleted: row.deleted_at !== null,
   };
@@ -322,11 +329,23 @@ export function projectMessages(rows: ChannelMessageRow[], userId: string): Chan
     attachments.set(row.message_id, list);
   }
 
+  // One identity query for the whole page; a malformed stored payload never reaches a user join.
+  const provenance = new Map(rows.map((row) => [row.id, row.imported_json !== null ? parseImportedProvenance(row.imported_json) : null]));
+  const identityIds: string[] = [];
+  for (const value of provenance.values()) {
+    if (!value) continue;
+    if (value.authorIdentityId) identityIds.push(value.authorIdentityId);
+    for (const mention of value.mentions) identityIds.push(mention.identityId);
+  }
+  const lookup = importedAuthorLookup(rows[0]!.channel_id, identityIds);
+
   return rows.map((row) => {
     const run = runs.get(row.id);
     const deleted = row.deleted_at !== null;
     const aiConfig = run ? (JSON.parse(run.config_json) as { binding?: { label?: string }; injectionFlagged?: boolean }) : null;
     const state = row.thread_root === null && !deleted ? threads.get(row.id) : undefined;
+    const imported = provenance.get(row.id) ?? null;
+    const historical = imported && !deleted ? imported : null;
     return {
       id: row.id,
       channelId: row.channel_id,
@@ -343,6 +362,14 @@ export function projectMessages(rows: ChannelMessageRow[], userId: string): Chan
       deletedAt: row.deleted_at,
       aiRun: runProjection(run),
       ...(row.kind === "ai" ? { aiLabel: aiConfig?.binding?.label ?? null, aiRequester: run?.requester_id ? authorOf(run.requester_id) : null, injectionFlagged: aiConfig?.injectionFlagged === true } : {}),
+      ...(row.imported_json !== null
+        ? {
+            imported: true,
+            historicalAuthor: historical?.authorIdentityId ? lookup(historical.authorIdentityId) : null,
+            historicalMentions: historical ? historicalMentionsOf(row.channel_id, historical, lookup) : [],
+            historicalReactions: historical ? historicalReactionsOf(historical) : [],
+          }
+        : {}),
       threadRootId: row.thread_root,
       thread: state
         ? { replyCount: state.reply_count, lastReplySeq: state.last_seq, lastReplyAt: state.last_at, unread: unread.get(row.id) ?? 0 }

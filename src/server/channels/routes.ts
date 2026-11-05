@@ -9,6 +9,8 @@ import { featureAllowed, requireFeature } from "../permissions/guard.js";
 import { assertStorage } from "../quota.js";
 import { resolveModel } from "../catalog/providers.js";
 import { CHANNEL_LIMITS, isChannelNotifyMode, isChannelReaction, type ChannelEventFrame } from "../../shared/channels.js";
+import { ROOM_ARCHIVE_LIMITS } from "../../shared/room-archive.js";
+import { importedRosterPage } from "./archive/history.js";
 import {
   accountRole,
   assertChannelMember,
@@ -717,6 +719,15 @@ export const channelRoutes = new Hono<AppEnv>()
       items: page,
       nextCursor: rows.length > limit && page.length ? memberCursor(page.at(-1)!) : null,
     });
+  })
+  .get("/:id/imported-roster", (c) => {
+    const userId = c.get("user").id;
+    const { channel } = assertChannelMember(userId, c.req.param("id"));
+    assertRoom(channel);
+    const after = c.req.query("after") ?? null;
+    if (after !== null && (after.length === 0 || after.length > 200)) throw invalid("Invalid roster cursor.");
+    const limit = pageLimit(c.req.query("limit"), ROOM_ARCHIVE_LIMITS.rosterPage, ROOM_ARCHIVE_LIMITS.rosterPageMax);
+    return json(c, importedRosterPage(channel.id, after, limit));
   })
   .post("/:id/members", async (c) => {
     const userId = c.get("user").id;

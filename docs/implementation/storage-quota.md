@@ -124,8 +124,11 @@ reservation up to 64 KiB. Attachments are charged once at upload at their stored
 that `owner_id`; pending uploads and tombstoned-until-purged bytes still count. Transfer checks the target
 owner's full limit (including attachments) before changing `owner_id` and moves every attachment row to
 the new payer. Events, rate windows, members, read cursors, reactions, audit rows, notices, thread
-state/cursors, blocks, and FTS copies are bounded operational metadata and are not charged. See
-`docs/implementation/channels.md`.
+state/cursors, blocks, and FTS copies are bounded operational metadata and are not charged. Imported
+rooms add `channels.imported_meta_json`, `channel_messages.imported_json`, a fixed 1,024 bytes per
+`channel_import_identities` row, and their attachment references. A room archive job also counts its
+`reservation_bytes` against the job owner until its stage is deleted. See
+`docs/implementation/channels.md` and `docs/implementation/room-archives.md`.
 
 
 ## Custom tools

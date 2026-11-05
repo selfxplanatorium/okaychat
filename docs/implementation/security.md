@@ -120,7 +120,10 @@ provider key. Active runs recheck access before retries and checkpoints. Admin i
 audited route and does not fabricate membership. See `docs/implementation/channels.md`.
 
 Channel attachment reads call `assertChannelMember` before touching a file or BLOB and again verify the
-message is live; no public or share route resolves a channel attachment. The filename is display-only
+message is live; no public or share route resolves a channel attachment. Room archives are private
+authenticated downloads (never capabilities), use a strict bounded ZIP/manifest parser, keep imported
+authors non-authoritative (`author_id = NULL` plus an HMAC-recognized identity link), and refuse DM
+export. See `docs/implementation/room-archives.md`. The filename is display-only
 (never a path), `Content-Disposition` uses the RFC 5987 form, rasters are identified by magic bytes (SVG is
 refused), and anything not a raster downloads with `nosniff` and `default-src 'none'; sandbox`. The quota
 check runs before the first byte is written; a failed write leaves no row and no file. Preview responses

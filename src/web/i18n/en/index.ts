@@ -35,6 +35,7 @@ import messageDetails from "./messageDetails";
 import permissions from "./permissions";
 import projects from "./projects";
 import providers from "./providers";
+import roomArchives from "./roomArchives";
 import savedPrompts from "./savedPrompts";
 import schedules from "./schedules";
 import services from "./services";
@@ -90,6 +91,7 @@ export const en = {
   permissions,
   projects,
   providers,
+  roomArchives,
   savedPrompts,
   schedules,
   services,

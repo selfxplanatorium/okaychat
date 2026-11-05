@@ -51,6 +51,7 @@ import { compareRoutes } from "./compare.js";
 import { evaluationRoutes } from "./evaluations/routes.js";
 import { channelAdminRoutes, channelRoutes } from "./channels/routes.js";
 import { channelAttachmentRoutes } from "./channels/attachment-routes.js";
+import { roomArchiveAdminRoutes, roomArchiveChannelRoutes, roomArchiveRoutes } from "./channels/archive/routes.js";
 import { customToolRoutes } from "./custom-tools/routes.js";
 import { apiKeyRoutes } from "./api-access/routes.js";
 import { skillRoutes } from "./skills.js";
@@ -489,10 +490,15 @@ const api = new Hono<AppEnv>()
   .route("/", notificationRoutes)
   .route("/", compareRoutes)
   .route("/evaluations", evaluationRoutes)
+  // Room archive routes are registered before the channel routers: their paths share the prefix and
+  // Hono matches in registration order.
+  .route("/admin", roomArchiveAdminRoutes)
+  .route("/channels", roomArchiveChannelRoutes)
   // Attachment bytes must not inherit the JSON channel router's 128 KiB ceiling.
   .route("/channels", channelAttachmentRoutes)
   .route("/channels", channelRoutes)
   .route("/admin/channels", channelAdminRoutes)
+  .route("/", roomArchiveRoutes)
   .route("/custom-tools", customToolRoutes)
   .route("/", apiKeyRoutes)
   .route("/", shareRoutes)

@@ -1,5 +1,5 @@
 import { SmilePlusIcon } from "lucide-react";
-import { CHANNEL_REACTIONS, type ChannelMessage } from "@shared/channels";
+import { CHANNEL_REACTIONS, type ChannelHistoricalReaction, type ChannelMessage } from "@shared/channels";
 import { t } from "@/i18n";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
 import { cn } from "@/lib/utils";
@@ -8,14 +8,27 @@ export function ChannelReactionMenu({
   message,
   onToggle,
   disabled,
+  historical = [],
 }: {
   message: ChannelMessage;
   onToggle: (emoji: string, add: boolean) => void;
   disabled?: boolean;
+  historical?: ChannelHistoricalReaction[];
 }) {
   if (message.deletedAt) return null;
   return (
     <div className="mt-1 flex flex-wrap items-center gap-1">
+      {historical.map((reaction) => (
+        <span
+          key={`history-${reaction.emoji}`}
+          title={t("roomArchives.importedHistory")}
+          aria-label={`${t("channels.reactionCount", { emoji: reaction.emoji, count: reaction.count })} · ${t("roomArchives.importedHistory")}`}
+          className="border-border text-muted-foreground inline-flex items-center gap-1 rounded-full border border-dashed px-1.5 py-0.5 text-xs"
+        >
+          <span aria-hidden>{reaction.emoji}</span>
+          <span>{reaction.count}</span>
+        </span>
+      ))}
       {message.reactions.map((reaction) => (
         <button
           key={reaction.emoji}

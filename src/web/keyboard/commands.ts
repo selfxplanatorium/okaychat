@@ -84,6 +84,8 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "channels.react", labelKey: "keyboard.cmdChannelsReact", group: "Messages", keys: [] },
   { id: "channels.askAi", labelKey: "keyboard.cmdChannelsAskAi", group: "Messages", keys: [] },
   { id: "channels.stopAi", labelKey: "keyboard.cmdChannelsStopAi", group: "Messages", keys: [] },
+  { id: "channels.exportRoom", labelKey: "keyboard.cmdChannelsExportRoom", group: "Navigation", keys: [] },
+  { id: "channels.importRoom", labelKey: "keyboard.cmdChannelsImportRoom", group: "Navigation", keys: [] },
   { id: "nav.compare", labelKey: "keyboard.cmdNavCompare", group: "Navigation", keys: [] },
   { id: "nav.evaluations", labelKey: "keyboard.cmdNavEvaluations", group: "Navigation", keys: [] },
   { id: "nav.notes", labelKey: "keyboard.cmdNavNotes", group: "Navigation", keys: [] },

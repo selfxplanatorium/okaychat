@@ -5,6 +5,7 @@ import { rm } from "node:fs/promises";
 import path from "node:path";
 import { env } from "./env.js";
 import { removeArchiveStagingForUser } from "./archive-jobs.js";
+import { removeRoomArchiveFilesForUser } from "./channels/archive/maintenance.js";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { AdminUser, ModelAccessPolicy } from "../shared/types.js";
@@ -147,6 +148,7 @@ export const adminRoutes = new Hono<AppEnv>()
     // Media originals and their previews (the rows went with the user by cascade).
     removeUserMedia(id);
     removeArchiveStagingForUser(id);
+    removeRoomArchiveFilesForUser(id);
     requestKnowledgeRevocation();
     return c.json({ ok: true });
   })
