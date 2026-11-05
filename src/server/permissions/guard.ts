@@ -30,6 +30,7 @@ export const FEATURE_NAMES: Record<FeatureKey, string> = {
   customTools: "custom tools",
   notes: "notes",
   calendar: "calendar",
+  apiAccess: "external API access",
 };
 
 export interface Actor {

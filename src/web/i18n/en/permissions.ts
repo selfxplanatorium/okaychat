@@ -142,6 +142,8 @@ export default {
   featureChannelsHelp: "Allows shared rooms, membership, room search, and explicitly requested room AI replies. It is independent of sharing, schedules, and MCP.",
   featureCustomTools: "Custom tools",
   featureCustomToolsHelp: "Allows private Python functions and approved HTTPS request tools in interactive stored chats. Python also needs code execution. HTTP calls need explicit approval and do not rely on web page reading.",
+  featureApiAccess: "External API access",
+  featureApiAccessHelp: "Allows creating API keys and using the external OpenAI-compatible endpoint with this account's models and provider keys. Every API reply is billed to the account and stored in its usage ledger.",
   limitMaxStepsLabel: "Agent steps per reply",
   limitMaxStepsHelp: "Counts tool-capable invocations; the final no-tools answer still happens. Effective value is the minimum of the request, policy, and application maximum.",
   limitMaxSearchesLabel: "Searches per reply",

@@ -48,6 +48,7 @@ import { compareRoutes } from "./compare.js";
 import { evaluationRoutes } from "./evaluations/routes.js";
 import { channelAdminRoutes, channelRoutes } from "./channels/routes.js";
 import { customToolRoutes } from "./custom-tools/routes.js";
+import { apiKeyRoutes } from "./api-access/routes.js";
 import { skillRoutes } from "./skills.js";
 import { settingsPatch } from "./settings-schema.js";
 import { speechRoutes } from "./speech/routes.js";
@@ -442,6 +443,7 @@ const api = new Hono<AppEnv>()
   .route("/channels", channelRoutes)
   .route("/admin/channels", channelAdminRoutes)
   .route("/custom-tools", customToolRoutes)
+  .route("/", apiKeyRoutes)
   .route("/", shareRoutes)
   .route("/", adminRoutes)
   .route("/", permissionRoutes)

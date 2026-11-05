@@ -205,3 +205,13 @@ provider code, reference, and recovery actions for both early HTTP and streamed 
 ## n8n agents
 
 Agent errors agent_auth/agent_response/agent_failed use safe authored text, no automatic retries and Agents settings recovery. Agent upstream auth is HTTP 502, never application-session 401. agentReason is an allowlisted response reason and omitted from copied details. See [n8n agents](n8n-agents.md).
+
+## External API
+
+`/v1` never returns the application error envelope or the app's streamed `data-error` format. It maps the
+same taxonomy to `{error:{message,type,param,code},request_id}` and `x-request-id`, with protocol codes
+such as `invalid_api_key`, `insufficient_scope`, `permission_denied`, `rate_limit_exceeded`,
+`concurrent_limit`, `context_length_exceeded`, `model_not_found`, `request_too_large`, `timeout`,
+`upstream_*`, `unsupported_output`, `incomplete_response`, `response_limit`, `invalid_policy`, and
+`server_error`. Provider prose is never logged or returned; `describeBoundaryError` runs with `log:false`.
+After SSE headers an error is one JSON data record followed by a close with no finish chunk and no DONE.

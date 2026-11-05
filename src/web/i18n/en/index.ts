@@ -3,6 +3,7 @@ import account from "./account";
 import agents from "./agents";
 import admin from "./admin";
 import annotations from "./annotations";
+import apiAccess from "./apiAccess";
 import assistants from "./assistants";
 import appearance from "./appearance";
 import artifacts from "./artifacts";
@@ -56,6 +57,7 @@ export const en = {
   admin,
   agents,
   annotations,
+  apiAccess,
   assistants,
   appearance,
   artifacts,

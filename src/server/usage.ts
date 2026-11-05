@@ -42,22 +42,32 @@ export function costOf(cost: ModelCost | undefined, usage: TokenUsage): number {
   );
 }
 
+export type UsageKind = "chat" | "compaction" | "title" | "subagent" | "memory" | "research" | "evaluation" | "evaluation_judge" | "channel" | "api";
+
 export function recordUsage(entry: {
   userId: string;
   threadId?: string;
   providerId: string;
   modelId: string;
-  kind: "chat" | "compaction" | "title" | "subagent" | "memory" | "research" | "evaluation" | "evaluation_judge" | "channel";
+  kind: UsageKind;
   usage: TokenUsage;
   cost: number;
   /** A channel reply records the room and the run, so a settled ledger row is unique per run. */
   channelId?: string;
   channelRunId?: string;
+  /** External API requests carry both ids; the unique request id dedupes settlement retries. */
+  apiKeyId?: string;
+  apiRequestId?: string;
 }) {
+  // An API ledger row is never ambiguous: it names both its key and its request. Other kinds carry
+  // neither, so a bearer request cannot be disguised as a chat.
+  if (entry.kind === "api" ? !entry.apiKeyId || !entry.apiRequestId : !!entry.apiKeyId || !!entry.apiRequestId) {
+    throw new Error("API usage ids do not match the usage kind.");
+  }
   db.prepare(
     `INSERT INTO usage (user_id, thread_id, provider_id, model_id, kind, input_tokens, output_tokens, reasoning_tokens,
-       cache_read_tokens, cache_write_tokens, cost, created_at, channel_id, channel_run_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       cache_read_tokens, cache_write_tokens, cost, created_at, channel_id, channel_run_id, api_key_id, api_request_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     entry.userId,
     entry.threadId ?? null,
@@ -73,6 +83,8 @@ export function recordUsage(entry: {
     Date.now(),
     entry.channelId ?? null,
     entry.channelRunId ?? null,
+    entry.apiKeyId ?? null,
+    entry.apiRequestId ?? null,
   );
 }
 

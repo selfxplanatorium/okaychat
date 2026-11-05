@@ -9,6 +9,7 @@ export type SettingsSection =
   | "memory"
   | "email"
   | "providers"
+  | "apiAccess"
   | "mcp"
   | "agents"
   | "projects"
@@ -41,6 +42,11 @@ export const SETTINGS_DESTINATIONS = {
   webTools: { section: "general", anchor: "web-tools" },
   webSearchLimit: { section: "general", anchor: "web-search-limit" },
   providers: { section: "providers" },
+  usage: { section: "usage" },
+  apiAccess: { section: "apiAccess" },
+  apiKeys: { section: "apiAccess", anchor: "api-keys" },
+  apiUsage: { section: "apiAccess", anchor: "api-usage" },
+  apiDocs: { section: "apiAccess", anchor: "api-docs" },
   account: { section: "account" },
   email: { section: "email" },
   memory: { section: "memory" },

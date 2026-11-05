@@ -24,10 +24,11 @@ export interface CommandDef {
   palette?: boolean;
 }
 
-const SETTINGS_SECTIONS = ["general", "account", "memory", "email", "providers", "mcp", "agents", "projects", "schedules", "usage", "appearance", "keyboard", "admin"] as const;
+const SETTINGS_SECTIONS = ["general", "account", "memory", "email", "providers", "apiAccess", "mcp", "agents", "projects", "schedules", "usage", "appearance", "keyboard", "admin"] as const;
 
 const SETTINGS_LABELS = {
   general: "keyboard.settingsGeneral", account: "keyboard.settingsAccount", memory: "keyboard.settingsMemory", email: "keyboard.settingsEmail", providers: "keyboard.settingsProviders",
+  apiAccess: "keyboard.settingsApiAccess",
   mcp: "keyboard.settingsMcp", agents: "settings.sectionAgents", projects: "keyboard.settingsProjects", schedules: "keyboard.settingsSchedules", usage: "keyboard.settingsUsage",
   appearance: "keyboard.settingsAppearance", keyboard: "keyboard.settingsKeyboard", admin: "keyboard.settingsAdmin",
 } as const satisfies Record<(typeof SETTINGS_SECTIONS)[number], PlainMessageKey>;
@@ -192,7 +193,10 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "knowledge.search", labelKey: "keyboard.cmdKnowledgeSearch", group: "General", keys: [] },
   { id: "knowledge.reindex", labelKey: "keyboard.cmdKnowledgeReindex", group: "General", keys: [] },
   { id: "settings.ollamaTest", labelKey: "keyboard.cmdSettingsOllamaTest", group: "Settings", keys: [] },
-  { id: "settings.ollamaSave", labelKey: "keyboard.cmdSettingsOllamaSave", group: "Settings", keys: [] },
+  { id: "apiAccess.create", labelKey: "keyboard.cmdApiAccessCreate", group: "Settings", keys: [] },
+  { id: "apiAccess.copy", labelKey: "keyboard.cmdApiAccessCopy", group: "Settings", keys: [] },
+  { id: "apiAccess.copyExample", labelKey: "keyboard.cmdApiAccessCopyExample", group: "Settings", keys: [] },
+  { id: "apiAccess.revoke", labelKey: "keyboard.cmdApiAccessRevoke", group: "Settings", keys: [] },  { id: "settings.ollamaSave", labelKey: "keyboard.cmdSettingsOllamaSave", group: "Settings", keys: [] },
   { id: "settings.ollamaRefresh", labelKey: "keyboard.cmdSettingsOllamaRefresh", group: "Settings", keys: [] },
   { id: "settings.ollamaPull", labelKey: "keyboard.cmdSettingsOllamaPull", group: "Settings", keys: [] },
   { id: "settings.ollamaCancelPull", labelKey: "keyboard.cmdSettingsOllamaCancelPull", group: "Settings", keys: [] },

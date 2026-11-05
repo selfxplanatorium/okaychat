@@ -82,7 +82,8 @@ export default defineConfig({
     // Dev servers are reached over the tailnet (see AGENTS.md); allow MagicDNS names.
     allowedHosts: [".ts.net"],
     fs: { allow: [projectRoot, dependencyRoot] },
-    // `ws` carries `/api/voice/call`; without it the dev server answers the upgrade itself.
-    proxy: { "/api": { target: "http://localhost:8787", changeOrigin: false, ws: true } },
+    // `ws` carries `/api/voice/call`; without it the dev server answers the upgrade itself. `/v1` is the
+    // external API, mounted outside the session/CSRF chain on the server.
+    proxy: { "/api": { target: "http://localhost:8787", changeOrigin: false, ws: true }, "/v1": { target: "http://localhost:8787", changeOrigin: false } },
   },
 });

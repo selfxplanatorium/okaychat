@@ -155,6 +155,22 @@ Deferred: uploads/images, nested threads, DMs, presence, custom emoji, room shar
 scheduled room posting, autonomous AI, in-place regeneration, per-room retention, and multi-writer
 deployment.
 
+## Pass 10: external API access (built)
+
+- **A small OpenAI-compatible endpoint**: `GET /v1/models` and `POST /v1/chat/completions`, buffered or
+  SSE, authenticated only by an account-owned bearer credential. Stateless by design: no tools, memory,
+  retrieval, projects, files, images, history, or continuation.
+- **Credentials and accounting**: `okc_api_v1_…` tokens stored only as SHA-256, enumerated scopes, optional
+  expiry, bounded retention, atomic password-recovery revocation, per-key/per-account rates and
+  concurrency, shared turn slots, bounded provider transports, and an `api` usage ledger that never
+  estimates unknown provider usage.
+- **Settings → API access**: key cards, create/revoke dialogs, a once-only token dialog, usage/request/audit
+  panels, and copyable client examples. See `docs/implementation/api-access.md`.
+
+Deferred: the Responses API, tools/function calling, multimodal input, per-key budgets or model
+allowlists, key rotation/recovery, admin key inspection, CORS/browser clients, multi-process limiting,
+and provider-specific parameter bags.
+
 ## Known gaps
 
 - Stream replay is kept in server memory for 15 minutes after the last update. Reload recovery works; pending generations do not survive a server restart.

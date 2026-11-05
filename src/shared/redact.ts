@@ -4,6 +4,8 @@
  * so server logs and browser-side detail text cannot drift apart.
  */
 const SECRET_PATTERNS: Array<[RegExp, string]> = [
+  // okaychat external API credentials: the whole token or any prefix-bearing malformed form.
+  [/\bokc_api_v1_[A-Za-z0-9_-]{0,43}(?:\.[A-Za-z0-9_-]{0,43})?/g, "okc_api_v1_[redacted]"],
   [/\bsk-[A-Za-z0-9_-]{8,}/g, "sk-[redacted]"],
   // "Authorization": "Bearer abc..." and bare Bearer tokens in a header dump.
   [/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, "Bearer [redacted]"],

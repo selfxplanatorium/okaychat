@@ -17,7 +17,8 @@ const PURPOSE_LABELS = {
   evaluation: "usage.purposeEvaluation",
   evaluation_judge: "usage.purposeEvaluationJudge",
   channel: "usage.kindChannel",
-} as const satisfies Record<"chat" | "compaction" | "title" | "research" | "evaluation" | "evaluation_judge" | "channel", PlainMessageKey>;
+  api: "usage.purposeApi",
+} as const satisfies Record<"chat" | "compaction" | "title" | "research" | "evaluation" | "evaluation_judge" | "channel" | "api", PlainMessageKey>;
 
 type UsageResponse = { rows: UsageRow[]; go: GoWindow[]; agents?: AgentUsageCounters };
 
@@ -153,7 +154,7 @@ export function UsageSettings() {
 
       <SettingsSection title={t("usage.byPurpose")} description={t("usage.byPurposeDescription")}>
         <div key={`${days}-${byKind ? "data" : "loading"}`} className="animate-fade-in grid grid-cols-2 divide-x sm:grid-cols-4">
-          {(["chat", "compaction", "title", "research", "evaluation", "evaluation_judge"] as const).map((k) => {
+          {(Object.keys(PURPOSE_LABELS) as Array<keyof typeof PURPOSE_LABELS>).map((k) => {
             const r = byKind?.rows.find((x) => x.key === k);
             return <Stat key={k} label={t(PURPOSE_LABELS[k])} value={formatCost(r?.cost ?? 0)} hint={t("usage.requestCount", { count: r?.requests ?? 0 })} />;
           })}

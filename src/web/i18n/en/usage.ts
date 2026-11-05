@@ -32,5 +32,6 @@ export default {
   purposeEvaluation: "Evaluations",
   purposeEvaluationJudge: "Evaluation judging",
   kindChannel: "Channels",
+  purposeApi: "API requests",
   requestCount: { one: "{count} request", other: "{count} requests" },
 } as const;

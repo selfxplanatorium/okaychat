@@ -340,6 +340,8 @@ test("migration adds the edit columns and leaves existing rows unedited", () => 
       db.exec("DROP TABLE IF EXISTS channel_messages_fts; DROP TABLE IF EXISTS channel_search_keys; DROP TABLE IF EXISTS channel_events; DROP TABLE IF EXISTS channel_event_state; DROP TABLE IF EXISTS channel_rate_windows; DROP TABLE IF EXISTS channel_moderation_audit; DROP TABLE IF EXISTS channel_create_keys; DROP TABLE IF EXISTS channel_ai_runs; DROP TABLE IF EXISTS channel_reactions; DROP TABLE IF EXISTS channel_mentions; DROP TABLE IF EXISTS channel_messages; DROP TABLE IF EXISTS channel_exclusions; DROP TABLE IF EXISTS channel_invites; DROP TABLE IF EXISTS channel_members; DROP TABLE IF EXISTS channel_groups; DROP TABLE IF EXISTS channels");
       for (const table of ["notes_fts", "note_tags", "notes", "calendar_events_fts", "calendar_reminders", "calendar_events"]) db.exec("DROP TABLE IF EXISTS " + table);
       db.exec("DROP INDEX IF EXISTS usage_channel_run; ALTER TABLE usage DROP COLUMN channel_id; ALTER TABLE usage DROP COLUMN channel_run_id");
+      db.exec("DROP TABLE IF EXISTS api_requests; DROP TABLE IF EXISTS api_rate_windows; DROP TABLE IF EXISTS api_key_audit; DROP TABLE IF EXISTS api_telemetry_floors; DROP TABLE IF EXISTS api_keys");
+      db.exec("DROP INDEX IF EXISTS usage_api_request; DROP INDEX IF EXISTS usage_api_key_time; ALTER TABLE usage DROP COLUMN api_key_id; ALTER TABLE usage DROP COLUMN api_request_id");
       db.exec("PRAGMA user_version = 32");
       db.close();`);
     const result = JSON.parse(run(`const { db } = await import(${JSON.stringify(dbUrl)});

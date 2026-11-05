@@ -656,7 +656,8 @@ export type PromptKey =
   | "assistantInstructions"
   | "evaluationCase"
   | "evaluationJudge"
-  | "channelReply";
+  | "channelReply"
+  | "apiSystem";
 
 /** A server-wide system prompt as the admin page shows it. */
 export interface AdminPrompt {

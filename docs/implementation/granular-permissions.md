@@ -73,3 +73,10 @@ keep draft text); field-level conflict choice is not implemented.
   endpoint).
 - Prompt "preview" is computed from fetched layers plus the server inspection assembly; no test model call.
 - Rebase is destination-level, not field-level.
+
+## External API feature
+
+`apiAccess` gates the external API. Creation requires the all-model value; `GET /v1/models` requires it
+and filters every listed model by the exact-model value; `POST /v1/chat/completions` requires both.
+Listing, usage, audit, and revoke remain available to the session owner while the feature is disabled.
+There is no administrator exemption, and a broken stored policy fails closed with 503 `invalid_policy`.

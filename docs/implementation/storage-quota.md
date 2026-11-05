@@ -127,3 +127,9 @@ charged. See `docs/implementation/channels.md`.
 ## Custom tools
 
 Each custom definition charges its name, description, icon, schema, base key and encrypted config/secrets once. Every execution row reserves a fixed 128 KiB; deletion cascades runs and counters.
+## External API keys
+
+Each retained `api_keys` row reserves exactly 1,024 bytes. Requests, audit, rate windows, and the `api`
+usage ledger are bounded operational metadata and are not charged. Revoking or editing a key cannot grow
+the reservation, so it works when storage is full; pruning a tombstone frees 1 KiB. Generation writes no
+transcript or files, so an API call does not require spare content storage.

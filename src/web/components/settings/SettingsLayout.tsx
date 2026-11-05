@@ -14,6 +14,7 @@ import { McpSettings } from "./McpSettings";
 import { N8nAgentsSettings } from "./N8nAgentsSettings";
 import { ProjectSettings } from "./ProjectSettings";
 import { ProvidersSettings } from "./ProvidersSettings";
+import { ApiAccessSettings } from "./api-access/ApiAccessSettings";
 import { ScheduleSettings } from "./ScheduleSettings";
 import { UsageSettings } from "./UsageSettings";
 import { AccountSettings } from "./AccountSettings";
@@ -28,6 +29,7 @@ const PAGES: Record<string, ComponentType> = {
   memory: MemorySettings,
   email: EmailSettings,
   providers: ProvidersSettings,
+  apiAccess: ApiAccessSettings,
   mcp: McpSettings,
   agents: N8nAgentsSettings,
   projects: ProjectSettings,

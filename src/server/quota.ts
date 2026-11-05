@@ -155,6 +155,9 @@ export function storageUsedSql(user: string): string {
     UNION ALL SELECT COALESCE(SUM(length(CAST(title AS BLOB)) + length(CAST(description AS BLOB))
       + length(CAST(location AS BLOB)) + length(CAST(url AS BLOB))), 0)
       FROM calendar_events WHERE user_id = ${user}
+    -- API key metadata reserves a fixed 1 KiB per retained row. Requests, audit, rate, and usage rows are
+    -- bounded operational metadata, excluded like the other operational counters.
+    UNION ALL SELECT COUNT(*) * 1024 FROM api_keys WHERE user_id = ${user}
   )), 0)`;
 }
 

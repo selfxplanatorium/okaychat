@@ -14,7 +14,9 @@ import { ollamaManagementRoutes } from "./catalog/ollama-routes.js";
 import { hashPassword, newId } from "./crypto.js";
 import { disconnect as disconnectCodex } from "./codex.js";
 import { removeUserMedia } from "./media/store.js";
-import { db } from "./db.js";
+import { db, tx, afterCommit } from "./db.js";
+import { abortApiCalls } from "./api-access/limits.js";
+import { notifyAllRevoked, revokeAllApiKeys } from "./api-access/keys.js";
 import {
   clearModelAccessPoliciesForUser,
   listModelAccessPolicies,
@@ -109,9 +111,14 @@ export const adminRoutes = new Hono<AppEnv>()
     if (body.data.role) db.prepare("UPDATE users SET role = ? WHERE id = ?").run(body.data.role, id);
     if (body.data.storageLimit !== undefined) db.prepare("UPDATE users SET storage_limit = ? WHERE id = ?").run(body.data.storageLimit, id);
     if (body.data.password) {
-      db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(await hashPassword(body.data.password), id);
-      // A reset signs the user out everywhere.
-      db.prepare("DELETE FROM sessions WHERE user_id = ?").run(id);
+      const passwordHash = await hashPassword(body.data.password);
+      // A reset signs the user out everywhere and revokes their API keys in the same transaction.
+      tx(() => {
+        db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(passwordHash, id);
+        db.prepare("DELETE FROM sessions WHERE user_id = ?").run(id);
+        revokeAllApiKeys(id, "password_revoked");
+        afterCommit(() => notifyAllRevoked(id));
+      });
     }
     return c.json({ ok: true });
   })
@@ -126,6 +133,8 @@ export const adminRoutes = new Hono<AppEnv>()
     clearOwnedAgentAudiences(id);
     // Channel AI work by this account stops before the user row and their owned rooms disappear.
     abortChannelRunsForUser(id);
+    // Live external API calls of the account stop before the key rows cascade away.
+    abortApiCalls(id);
     db.prepare("DELETE FROM users WHERE id = ?").run(id);
     abortRevokedAgentRuns();
     requestChannelRevocation();

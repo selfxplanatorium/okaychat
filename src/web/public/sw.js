@@ -1,6 +1,6 @@
 // okaychat service worker. Makes the app installable and keeps the shell
-// available on a flaky connection. Never touches /api: chat streams, auth, and
-// user data always go to the network.
+// available on a flaky connection. Never touches /api or /v1: chat streams, the external API,
+// auth, and user data always go to the network.
 const SHELL_CACHE = "okaychat-shell-v4";
 const ASSET_CACHE = "okaychat-assets-v1";
 // Hashed assets are immutable, but a browser can open many builds' chunks over time. The cache is bounded
@@ -53,7 +53,7 @@ self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin || url.pathname.startsWith("/api/")) return;
+  if (url.origin !== self.location.origin || url.pathname.startsWith("/api/") || url.pathname === "/v1" || url.pathname.startsWith("/v1/")) return;
   // The desktop helper and its published checksum must match the running deployment, never a stale cache.
   if (url.pathname === "/chatgpt-connect.mjs" || url.pathname === "/chatgpt-connect.mjs.sha256") return;
 
