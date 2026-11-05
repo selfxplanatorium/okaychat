@@ -56,7 +56,7 @@ Only `translated` bytes count against the storage quota (`quota.ts`); a deleted 
 9. One `generateText` with `maxRetries: 0`, `maxOutputTokens: 6000`, the caller's `AbortSignal`, and no tools. `createModel(model, conn, { userId })` keeps the account cache affinity but never marks a chat breakpoint.
 10. Usage is recorded as `kind: "translation"` **before** the storage assertion, so a quota refusal still leaves an honest ledger row.
 11. An empty answer is `validation` and caches nothing. Over-long output is cut at the byte cap and stored with `truncated = 1`.
-12. `assertStorage(userId, netGrowth)` and the UPSERT share one transaction; `created_at` is kept on refresh.
+12. Re-read the current row and recheck the row limits inside the write transaction. `assertStorage(userId, netGrowth)` uses that current row, then the UPSERT runs in the same transaction; `created_at` is kept on refresh. A concurrent delete or replacement cannot grant stale quota credit.
 
 No single-flight: two identical concurrent requests may both call the provider; the second UPSERT writes the same text and only net growth is charged, and the DB cache covers every later repeat. One message owns one `AbortController` in the web store, so starting a second translation aborts the first and its provider call.
 

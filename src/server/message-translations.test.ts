@@ -61,13 +61,14 @@ type ChatBody = {
 };
 
 /** One fake provider: every call answers a fixed German sentence and is logged for shape assertions. */
-function transport(t: TestContext, answer = "Hallo Welt") {
+function transport(t: TestContext, answer = "Hallo Welt", onChat?: () => Promise<void>) {
   const log: ChatBody[] = [];
   t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url === "http://mock.test/v1/models") return Response.json({ data: [{ id: "mock" }] });
     assert.equal(url, "http://mock.test/v1/chat/completions", `unexpected request to ${url}`);
     log.push(JSON.parse(init?.body as string) as ChatBody);
+    await onChat?.();
     return Response.json({
       id: `r${log.length}`,
       object: "chat.completion",
@@ -330,4 +331,53 @@ test("shares, Markdown exports, and archives keep the original words only", asyn
   assert.ok(!payload.includes("Maschine uebersetzt"));
   assert.ok(!payload.includes("translation"));
   assert.equal(getSettings("alice").translateMessages, true);
+});
+
+/** Pause a provider response so another request can mutate storage before commit. */
+function pausedTransport(t: TestContext) {
+  let resume!: () => void;
+  let arrived!: () => void;
+  const started = new Promise<void>((resolve) => { arrived = resolve; });
+  const gate = new Promise<void>((resolve) => { resume = resolve; });
+  transport(t, "Hallo Welt", () => { arrived(); return gate; });
+  return { started, resume };
+}
+
+test("refresh charges current net growth when its old row was deleted during generation", async (t) => {
+  seedPair();
+  db.prepare(`INSERT INTO message_translations
+    (thread_id, message_id, lang, source_hash, source_chars, translated, truncated, model_ref, created_at, updated_at)
+    VALUES ('thr_1', 'a1', 'de', ?, 1, 'Hallo Welt', 0, 'custom-test/mock', 1, 1)`).run("a".repeat(64));
+  const provider = pausedTransport(t);
+  const request = put("thr_1", "a1", "de", { refresh: true });
+  await provider.started;
+  assert.equal((await call("alice", "DELETE", translationPath("thr_1", "a1", "de"))).status, 200);
+  db.prepare("UPDATE users SET storage_limit = ? WHERE id = 'alice'").run(storageUsed("alice") + 1);
+  try {
+    provider.resume();
+    const response = await request;
+    assert.equal(response.status, 413, await response.clone().text());
+    assert.equal(translationRows().length, 0);
+    assert.deepEqual(usageRows(), [["translation", 1]]);
+  } finally {
+    db.prepare("UPDATE users SET storage_limit = NULL WHERE id = 'alice'").run();
+  }
+});
+
+test("concurrent languages cannot exceed the per-message limit at commit", async (t) => {
+  seedPair();
+  const insert = db.prepare(`INSERT INTO message_translations
+    (thread_id, message_id, lang, source_hash, source_chars, translated, truncated, model_ref, created_at, updated_at)
+    VALUES ('thr_1', 'a1', ?, ?, 1, 'Text', 0, 'custom-test/mock', 1, 1)`);
+  for (let i = 0; i < MAX_TRANSLATIONS_PER_MESSAGE - 1; i++) insert.run(`x${i}`, "a".repeat(64));
+  const provider = pausedTransport(t);
+  const request = put("thr_1", "a1", "de");
+  await provider.started;
+  // Another language has committed while this provider response is still pending.
+  insert.run("fr", "a".repeat(64));
+  provider.resume();
+  const response = await request;
+  assert.equal(response.status, 409, await response.clone().text());
+  assert.equal(translationRows().length, MAX_TRANSLATIONS_PER_MESSAGE);
+  assert.deepEqual(usageRows(), [["translation", 1]]);
 });
