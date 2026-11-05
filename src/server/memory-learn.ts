@@ -178,7 +178,7 @@ export async function refreshSummary(userId: string, scope: string, { force = fa
 export async function memoryTick(now = Date.now()): Promise<void> {
   let summaries = 0;
   const threads = db.prepare(`SELECT t.user_id, t.id FROM threads t JOIN memory_preferences p ON p.user_id = t.user_id
-    WHERE p.enabled = 1 AND p.auto_save = 1 AND t.memory_disabled = 0 AND t.updated_at > t.memory_scanned_at
+    WHERE p.enabled = 1 AND p.auto_save = 1 AND t.memory_disabled = 0 AND t.compare_group_id IS NULL AND t.updated_at > t.memory_scanned_at
       AND t.updated_at < ? AND t.updated_at > ? ORDER BY t.updated_at LIMIT ?`).all(now - IDLE_MS, now - LOOKBACK_MS, JOBS_PER_TICK) as Array<{ user_id: string; id: string }>;
   for (const t of threads) {
     try { await reviewThread(t.user_id, t.id); } catch (error) {

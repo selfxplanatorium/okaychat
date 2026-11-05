@@ -353,7 +353,7 @@ const CLOSE = "\u0003";
 function recallTools(userId: string, threadId: string, scope: string | null, allowed: () => boolean): ToolSet {
   const scopeSql = scope ? "t.project_id = ?" : "t.project_id IS NULL";
   const scopeArgs = scope ? [scope] : [];
-  const readable = (id: string) => allowed() && !!db.prepare(`SELECT 1 FROM threads t WHERE t.user_id = ? AND t.id = ? AND t.id != ? AND t.memory_disabled = 0 AND ${scopeSql}`)
+  const readable = (id: string) => allowed() && !!db.prepare(`SELECT 1 FROM threads t WHERE t.user_id = ? AND t.id = ? AND t.id != ? AND t.memory_disabled = 0 AND t.compare_group_id IS NULL AND ${scopeSql}`)
     .get(userId, id, threadId, ...scopeArgs);
   return {
     conversation_search: tool({
@@ -366,7 +366,7 @@ function recallTools(userId: string, threadId: string, scope: string | null, all
         if (!allowed()) return { chats: [] };
         const until = before ? Date.parse(`${before}T00:00:00Z`) : Number.MAX_SAFE_INTEGER;
         const words = [...new Set(query.match(/[\p{L}\p{N}_]+/gu) ?? [])].slice(0, 12);
-        const base = `t.user_id = ? AND t.id != ? AND t.memory_disabled = 0 AND ${scopeSql} AND t.updated_at < ?`;
+        const base = `t.user_id = ? AND t.id != ? AND t.memory_disabled = 0 AND t.compare_group_id IS NULL AND ${scopeSql} AND t.updated_at < ?`;
         if (!words.length) {
           const rows = db.prepare(`SELECT t.id, t.title, t.updated_at FROM threads t WHERE ${base} AND EXISTS (SELECT 1 FROM messages m WHERE m.thread_id = t.id) ORDER BY t.updated_at DESC LIMIT 15`)
             .all(userId, threadId, ...scopeArgs, until) as Array<{ id: string; title: string | null; updated_at: number }>;

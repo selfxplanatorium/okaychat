@@ -313,7 +313,9 @@ function target(userId: string, body: Input, prev?: Row): Target | string {
   if (body.threadMode === "new") return { thread_mode: "new", thread_id: prev?.thread_mode === "new" ? prev.thread_id : null, thread_attached: 0, project_id };
   if (body.threadId) {
     if (body.threadId === prev?.thread_id) return { thread_mode: "same", thread_id: prev.thread_id, thread_attached: prev.thread_attached, project_id };
-    if (!getThread(userId, body.threadId)) return "Chat not found";
+    const chosen = getThread(userId, body.threadId);
+    if (!chosen) return "Chat not found";
+    if (chosen.compareGroupId) return "Choose a regular chat for this schedule.";
     return { thread_mode: "same", thread_id: body.threadId, thread_attached: 1, project_id };
   }
   // Keep the chat this schedule created; a picked chat or the latest per-run chat is let go.
