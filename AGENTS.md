@@ -44,6 +44,7 @@ src/server/
   index.ts            Hono app, static files in production
   routes.ts           REST API (threads, providers, MCP, usage, settings)
   chat.ts             /api/chat and turnStream() (one turn, shared with schedules), auto-compaction, titles
+  n8n/                Webhook chat targets: encrypted definitions, public-only single POST transport, bounded parser, remote sessions and honest request counters
   research.ts         Deep research: plan → collect (web-only workers) → review loop before the reply, its tool definition and findings
   appearance.ts       Validated per-user appearance API (preferences + custom themes inside user_settings)
   account.ts          Account display name and private profile pictures (re-encoded WebP in the media store)
@@ -292,3 +293,4 @@ Dev login: `dev-login.md` (gitignored) holds the account for signing in to the d
 - Cross-feature error boundaries: `createModel` raises `AppError` with code `forbidden` for a live model revoke so a streamed refusal cannot become `provider_auth`; email settings map blocked/unresolved hosts to authored taxonomy errors. Embedding failures must never persist an upstream response body in source status: map provider errors to safe text first. Voice call health success clears the speech registry's fail-fast outage before warming; `service_unavailable` is a worker failure, not a missing voice/model. Realtime signalling refreshes the credential and model grant when the SDP offer arrives.
 
 - ChatGPT chat now uses isolated SIWC OAuth registrations, not `codex_auth`; see `docs/implementation/codex-chat.md`. The desktop helper integration is default-off until live acceptance. The CLI remains image-only. SQLite WAL uses `synchronous=FULL` for rotating-token durability; one writer only.
+- n8n agents are chat targets, never LLMs or delegates. Dispatch before constructing prompts/tools; every destination including admin configuration uses publicFetch with HTTPS and rejected redirects, and never retries automatically. Whole configuration (URL too) and remote sessions are encrypted. Outside-agent replies stay raw for display and are enveloped as n8n_agent at model boundaries. Temporary turns send only latest text and write no sessions/runs/status. See docs/implementation/n8n-agents.md.

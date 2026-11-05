@@ -53,4 +53,10 @@ export default {
   renderTitle: "This page hit an unexpected error.",
   renderBody: "Reload to continue. Your saved chats are on the server.",
   reload: "Reload",
+  agentAuth: "The agent rejected the authentication header.",
+  agentAuthHint: "Check the header name and value in the agent settings. okaychat stays signed in.",
+  agentResponse: "The agent's answer could not be used.",
+  agentResponseHint: "Check the agent's workflow and response format in its settings.",
+  agentFailed: "The agent could not be reached.",
+  agentFailedHint: "Check the webhook URL and that the workflow is active, then retry.",
 } as const;

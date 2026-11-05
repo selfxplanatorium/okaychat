@@ -327,6 +327,7 @@ test("migration adds the edit columns and leaves existing rows unedited", () => 
       // Tables added by later migrations must be absent before the historical replay.
       db.exec("DROP TABLE IF EXISTS chatgpt_login_attempts; DROP TABLE IF EXISTS chatgpt_registrations; DROP TABLE IF EXISTS chatgpt_controls; DROP TABLE IF EXISTS chatgpt_hosts");
       for (const table of ["uploads", "sandbox_files", "user_avatars"]) db.exec("ALTER TABLE " + table + " DROP COLUMN media_id");
+      db.exec("DROP TABLE n8n_agent_sessions; DROP TABLE n8n_agent_runs; DROP TABLE n8n_agents");
       db.exec("PRAGMA user_version = 32");
       db.close();`);
     const result = JSON.parse(run(`const { db } = await import(${JSON.stringify(dbUrl)});

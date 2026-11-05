@@ -9,8 +9,27 @@ Object.defineProperty(globalThis, "localStorage", { value: {
   setItem: (key: string, value: string) => storage.set(key, value),
   removeItem: (key: string) => storage.delete(key),
 }, configurable: true });
-const { useData, getActiveModel } = await import("./data.js");
+const { useData, getActiveModel, getActiveTarget } = await import("./data.js");
 const models = ["deepseek", "luna", "project"].map((id) => ({ ref: `p/${id}` })) as ModelInfo[];
+const agentTarget = {
+  kind: "agent" as const,
+  ref: "n8n/agt_12345678",
+  providerId: "n8n" as const,
+  id: "agt_12345678",
+  name: "Support workflow",
+  description: "",
+  avatar: "workflow",
+  shared: false,
+  memoryMode: "history" as const,
+  reasoning: false as const,
+  toolCall: false as const,
+  attachments: false as const,
+  inputModalities: ["text"] as ["text"],
+  temperature: false as const,
+  free: false as const,
+  context: 0 as const,
+  maxOutput: 0 as const,
+};
 const initiallySelected = useData.getState().selectedModel;
 beforeEach(() => useData.setState({ settings: { ...DEFAULT_USER_SETTINGS, defaultModel: "p/luna" }, models, projects: [], activeProject: null, selectedModel: null, threadModels: {} }));
 
@@ -90,5 +109,37 @@ test("prompt discovery failures remove previously available prompts", async () =
   try {
     await useData.getState().refreshMcpPrompts();
     assert.deepEqual(useData.getState().mcpPrompts, []);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("an explicit n8n ref that is gone stays unavailable instead of falling back to an LLM", () => {
+  useData.getState().selectModel("n8n/agt_gone0000");
+  assert.equal(getActiveModel(), undefined);
+  assert.equal(getActiveTarget().unavailableRef, "n8n/agt_gone0000");
+  // A non-agent stale ref keeps the previous fallback behavior.
+  useData.getState().selectModel("p/gone");
+  assert.equal(getActiveModel()?.ref, "p/luna");
+  assert.equal(getActiveTarget().unavailableRef, undefined);
+});
+
+test("an agents-only account resolves the agent target and an explicit agent choice wins over defaults", () => {
+  useData.setState({ models: [agentTarget], settings: { ...DEFAULT_USER_SETTINGS, defaultModel: "p/luna" } });
+  assert.equal(getActiveModel()?.ref, agentTarget.ref);
+  useData.setState({ models: [...models, agentTarget] });
+  useData.getState().selectModel(agentTarget.ref);
+  assert.equal(getActiveModel()?.ref, agentTarget.ref);
+  assert.equal(getActiveTarget().unavailableRef, undefined);
+});
+
+test("an agent ref persists as a favorite without being treated as a language model", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_input, init) => Response.json({ ...useData.getState().settings, ...JSON.parse(init!.body as string) });
+  try {
+    useData.setState({ models: [...models, agentTarget] });
+    await useData.getState().updateSettings({ favoriteModels: [agentTarget.ref, "p/luna"] });
+    assert.deepEqual(useData.getState().settings?.favoriteModels, [agentTarget.ref, "p/luna"]);
+    // The account default may be an agent too; the chat target resolver accepts it.
+    await useData.getState().updateSettings({ defaultModel: agentTarget.ref });
+    assert.equal(getActiveModel()?.ref, agentTarget.ref);
   } finally { globalThis.fetch = originalFetch; }
 });

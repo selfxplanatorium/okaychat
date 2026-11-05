@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import type { GoWindow, UsageRow } from "@shared/types";
+import type { AgentUsageCounters, GoWindow, UsageRow } from "@shared/types";
 import { Select } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { t, type PlainMessageKey } from "@/i18n";
@@ -16,11 +16,13 @@ const PURPOSE_LABELS = {
   research: "usage.purposeResearch",
 } as const satisfies Record<"chat" | "compaction" | "title" | "research", PlainMessageKey>;
 
+type UsageResponse = { rows: UsageRow[]; go: GoWindow[]; agents?: AgentUsageCounters };
+
 function useUsage(days: Range, groupBy: "day" | "model" | "kind") {
-  const [data, setData] = useState<{ rows: UsageRow[]; go: GoWindow[] } | null>(null);
+  const [data, setData] = useState<UsageResponse | null>(null);
   useEffect(() => {
     let live = true;
-    void api<{ rows: UsageRow[]; go: GoWindow[] }>(`/usage?days=${days}&groupBy=${groupBy}`).then((next) => {
+    void api<UsageResponse>(`/usage?days=${days}&groupBy=${groupBy}`).then((next) => {
       if (live) setData(next);
     });
     return () => {
@@ -93,6 +95,13 @@ export function UsageSettings() {
           </div>
         </SettingsSection>
       )}
+
+      <SettingsSection title={t("agents.usageRequests")} description={t("agents.usageUnknown")}>
+        <div key={`${days}-${byDay ? "data" : "loading"}`} className="animate-fade-in grid grid-cols-2 divide-x">
+          <Stat label={t("agents.usageRequests")} value={formatNumber(byDay?.agents?.runs ?? 0)} />
+          <Stat label={t("agents.statusOk")} value={formatNumber(byDay?.agents?.ok ?? 0)} />
+        </div>
+      </SettingsSection>
 
       <SettingsSection title={t("usage.dailyCost")}>
         <div className="flex h-40 items-end gap-1 px-4 pt-4 pb-2">

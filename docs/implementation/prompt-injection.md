@@ -165,3 +165,7 @@ Grep audit used for coverage:
 rg -n "toModelOutput|execute:|read_attachment|read_document|read_artifact|load_skill|web_fetch|web_search|needsApproval" src/server
 rg -n "MarkdownImage|SimpleMarkdown|react-markdown|MarkdownText" src/web
 ```
+
+## n8n agents
+
+Outside-agent assistant replies are always model-bound n8n_agent envelopes, including legacy n8n modelRef metadata and edited replies. Assistant-role envelopes taint later tool actions. Display and public shares keep ordinary text. See [n8n agents](n8n-agents.md).

@@ -94,4 +94,5 @@ export default {
   sharedKey: "Shared {service} key",
   sharedKeyDescription: "Every user can use it unless they save their own.",
   defaultPiperVoice: "Default Piper voice",
+  sharedAgents: "Shared agents",
 } as const;

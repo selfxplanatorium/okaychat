@@ -1,7 +1,8 @@
 import { Loader2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { REASONING_EFFORTS } from "@shared/reasoning";
-import { DEFAULT_USER_SETTINGS, SIDEBAR_ITEMS, type ModelInfo } from "@shared/types";
+import { isAgentTarget } from "@shared/n8n-agents";
+import { DEFAULT_USER_SETTINGS, SIDEBAR_ITEMS, type ChatTargetInfo } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select } from "@/components/ui/select";
@@ -17,7 +18,9 @@ import { effortLabel, ModelSelect } from "../chat/ModelPicker";
 import { ImageServicesSettings } from "./ImageServicesSettings";
 import { SettingsPage, SettingsRow, SettingsSection, SettingsSlider } from "./SettingsUI";
 
-const toolModels = (m: ModelInfo) => m.toolCall;
+// Utility and sub-agent models stay language models: an n8n agent is a chat target, not a model call.
+const llmModels = (m: ChatTargetInfo) => !isAgentTarget(m);
+const toolModels = (m: ChatTargetInfo) => !isAgentTarget(m) && m.toolCall;
 
 const SIDEBAR_LABELS = {
   newChat: "general.sidebarNewChat",
@@ -110,6 +113,8 @@ export function GeneralSettings() {
               value={settings.utilityModel ?? ""}
               onValueChange={(v) => update({ utilityModel: v || null })}
               choices={[{ value: "", label: t("general.sameAsChatModel") }]}
+              filter={llmModels}
+              allowAgents={false}
             />
           }
         />
@@ -211,6 +216,7 @@ export function GeneralSettings() {
                   onValueChange={(v) => update({ subagentModel: v || null })}
                   choices={[{ value: "", label: t("general.sameAsUtilityModel") }, { value: "chat", label: t("general.sameAsChatModel") }]}
                   filter={toolModels}
+                  allowAgents={false}
                 />
               }
             />

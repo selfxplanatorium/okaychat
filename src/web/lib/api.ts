@@ -1,4 +1,5 @@
 import { parseErrorWire, unknownWire, type ErrorCode, type ErrorWire } from "@shared/errors";
+import type { AgentReason } from "@shared/n8n-agents";
 import { redactSecrets } from "@shared/redact";
 import { t } from "@/i18n";
 import { presentError } from "@/lib/error-presentation";
@@ -13,6 +14,8 @@ export class ApiError extends Error {
   readonly model?: string;
   readonly provider?: string;
   readonly requestId?: string;
+  /** An authored reason for an unusable agent answer; never remote text. */
+  readonly agentReason?: AgentReason;
 
   constructor(message: string, readonly status: number, wire?: Partial<ErrorWire>) {
     super(message);
@@ -25,6 +28,7 @@ export class ApiError extends Error {
     if (wire?.model) this.model = wire.model;
     if (wire?.provider) this.provider = wire.provider;
     if (wire?.requestId) this.requestId = wire.requestId;
+    if (wire?.agentReason) this.agentReason = wire.agentReason;
   }
 }
 

@@ -25,4 +25,5 @@ export default {
   navigation: "Navigation",
   nothingHere: "Nothing to see here",
   pageMissing: "This page does not exist.",
+  agents: "Agents",
 } as const;

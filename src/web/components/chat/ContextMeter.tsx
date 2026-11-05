@@ -1,19 +1,20 @@
 import { useAui, useAuiState } from "@assistant-ui/react";
-import { ChevronDownIcon, Loader2Icon, ScissorsIcon, ShrinkIcon } from "lucide-react";
+import { BotIcon, ChevronDownIcon, Loader2Icon, RotateCcwIcon, ScissorsIcon, ShrinkIcon } from "lucide-react";
 import { useId, useState } from "react";
 import { Link } from "wouter";
-import type { CompactionState } from "@shared/types";
+import { isAgentTarget } from "@shared/n8n-agents";
+import type { CompactionState, N8nAgentTarget, N8nMemoryMode } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { api } from "@/lib/api";
-import { t } from "@/i18n";
-import { formatCost, formatDateTime, formatNumber, formatPercent, formatTokens } from "@/i18n/format";
+import { t, type PlainMessageKey } from "@/i18n";
+import { formatCost, formatDateTime, formatDuration, formatNumber, formatPercent, formatTokens } from "@/i18n/format";
 import { settingsHref } from "@/lib/settings-link";
 import { cn } from "@/lib/utils";
-import { useCommand } from "@/keyboard/registry";
+import { useCommand, runCommand } from "@/keyboard/registry";
 import { useData } from "@/state/data";
 import { metadataOf, useContextUsage, useCurrentThreadId, useThreadMeta, useThreadMetaStore, useChatModel } from "@/state/thread-meta";
-import { useChatPrivacy } from "@/state/chat-privacy";
+import { isTemporaryChat, useChatPrivacy } from "@/state/chat-privacy";
 import { useThreadSync, useThreadSyncStore } from "@/state/thread-sync";
 
 function Ring({ fraction }: { fraction: number }) {
@@ -46,7 +47,18 @@ export function ContextMeter() {
   const privacy = useChatPrivacy();
   const meta = useThreadMeta();
   const usage = useContextUsage(meta?.compaction ?? null);
+  const unmanaged = !!usage && "unmanaged" in usage;
+  const managedUsage = usage && "tokens" in usage ? usage : null;
   const model = useChatModel();
+  const agentTarget = model && isAgentTarget(model) ? model : undefined;
+  const lastMetadata = useAuiState((s) => {
+    for (let i = s.thread.messages.length - 1; i >= 0; i--) {
+      const message = s.thread.messages[i]!;
+      if (message.role === "assistant") return message.metadata;
+    }
+    return undefined;
+  });
+  const agentMeta = metadataOf(lastMetadata).agent;
   const threadId = useCurrentThreadId();
   const configuredAutoCompactAt = useData((s) => s.settings?.autoCompactAt ?? 0.8);
   const autoCompactAt = privacy.temporary ? 0 : configuredAutoCompactAt;
@@ -59,7 +71,7 @@ export function ContextMeter() {
   const [compacting, setCompacting] = useState<"summary" | "trim" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const window = model?.context ?? usage?.window ?? 0;
+  const window = managedUsage?.window ?? model?.context ?? 0;
   const canCompact = !!window && !!threadId && !!model && hasMessages && !running && !compacting && !privacy.temporary && !sync;
   const canTrim = canCompact && hasMessages;
 
@@ -118,8 +130,12 @@ export function ContextMeter() {
     void trimNow();
   }, canTrim);
 
-  if (!window) return null;
-  const tokens = usage?.tokens ?? 0;
+  if (agentTarget) {
+    const canReset = agentTarget.memoryMode === "remote" && !!threadId && !isTemporaryChat(threadId) && !running && !sync;
+    return <AgentContextMeter agent={agentTarget} canReset={canReset} agentRequests={meta?.usage?.agentRequests ?? 0} historyTruncated={agentMeta?.historyTruncated} memoryReset={agentMeta?.memoryReset} />;
+  }
+  if (!window) return unmanaged ? <UnmanagedContextMeter /> : null;
+  const tokens = managedUsage?.tokens ?? 0;
   const fraction = tokens / window;
   const cacheRatio = meta?.usage?.input ? meta.usage.cacheRead / meta.usage.input : 0;
 
@@ -203,14 +219,101 @@ export function ContextMeter() {
   );
 }
 
-/** Model, tokens, and cost under each assistant message. */
+/** An agent has no managed context. The popover explains the memory mode and offers the local reset. */
+function AgentContextMeter({
+  agent,
+  canReset,
+  agentRequests,
+  historyTruncated,
+  memoryReset,
+}: {
+  agent: N8nAgentTarget;
+  canReset: boolean;
+  agentRequests: number;
+  historyTruncated?: boolean;
+  memoryReset?: boolean;
+}) {
+  const memory: Record<N8nMemoryMode, PlainMessageKey> = {
+    none: "agents.memoryNoneHint",
+    history: "agents.memoryHistoryHint",
+    remote: "agents.memoryRemoteHint",
+  };
+  return (
+    <Popover>
+      <PopoverTrigger
+        className="hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs transition-colors duration-(--motion-fast) ease-out-quart"
+        aria-label={t("composer.contextUsage")}
+      >
+        <BotIcon className="size-3.5" />
+        <span className="hidden sm:inline">{t("agents.badge")}</span>
+      </PopoverTrigger>
+      <PopoverContent side="top" align="end" className="w-72 p-3">
+        <div className="mb-1 flex items-center gap-2">
+          <span className="text-sm font-medium">{t("agents.badge")}</span>
+          <span className="bg-muted text-muted-foreground rounded px-1.5 text-[10px]">{t(memory[agent.memoryMode])}</span>
+        </div>
+        <p className="text-muted-foreground text-xs">{t("agents.capabilitiesNotice")}</p>
+        <p className="text-muted-foreground mt-2 text-xs">{t("agents.textOnlyHistory")}</p>
+        <p className="text-muted-foreground mt-1 text-xs tabular-nums">{t("agents.usageRequests")}: {formatNumber(agentRequests)}</p>
+        {historyTruncated && <p className="text-warning mt-1 text-xs">{t("agents.historyTruncated")}</p>}
+        {memoryReset && <p className="text-warning mt-1 text-xs">{t("agents.memoryResetNotice")}</p>}
+        {agent.memoryMode === "remote" && <p className="text-muted-foreground mt-2 text-xs">{t("agents.remoteRetention")}</p>}
+        {canReset && (
+          <Button type="button" size="sm" variant="outline" className="mt-3 min-h-9 pointer-coarse:min-h-11" onClick={() => runCommand("chat.resetAgentSession")}>
+            <RotateCcwIcon /> {t("agents.remoteReset")}
+          </Button>
+        )}
+        <Link
+          href={settingsHref("agents")}
+          data-command="settings.agents"
+          className="text-muted-foreground hover:text-foreground mt-2 inline-block text-xs underline underline-offset-4"
+        >
+          {t("settings.sectionAgents")}
+        </Link>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** Switching an agent chat back to a language model has no measurement until its next reply. */
+function UnmanagedContextMeter() {
+  return (
+    <Popover>
+      <PopoverTrigger
+        className="hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs transition-colors duration-(--motion-fast) ease-out-quart"
+        aria-label={t("composer.contextUsage")}
+      >
+        <span className="hidden sm:inline">{t("agents.contextPending")}</span>
+        <ChevronDownIcon className="size-3.5" />
+      </PopoverTrigger>
+      <PopoverContent side="top" align="end" className="w-72 p-3">
+        <p className="text-sm font-medium">{t("agents.contextPending")}</p>
+        <p className="text-muted-foreground mt-1 text-xs">{t("agents.contextPendingHint")}</p>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+
+/** Model, tokens, and cost under each assistant message; agents report only their name and elapsed time. */
 export function MessageMeta() {
   const raw = useAuiState((s) => s.message.metadata);
   const running = useAuiState((s) => s.message.status?.type === "running");
   const models = useData((s) => s.models);
   const meta = metadataOf(raw);
   if (running || !meta.modelRef) return null;
-  const name = models.find((m) => m.ref === meta.modelRef)?.name ?? meta.modelRef.split("/").pop();
+  const name = meta.agent?.name ?? meta.provenance?.name ?? models.find((m) => m.ref === meta.modelRef)?.name ?? meta.modelRef.split("/").pop();
+  if (meta.usageMode === "agent") {
+    const memory = meta.agent?.memoryMode;
+    return (
+      <div className="text-muted-foreground/80 ms-auto flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap pe-2 text-[11px] tabular-nums opacity-0 transition-opacity duration-(--motion-fast) delay-75 ease-out-quart [[data-role=assistant]:hover_&]:opacity-100">
+        <span>{t("agents.badge")}</span>
+        <span className="truncate">{name}</span>
+        {memory && <span>{t(memory === "none" ? "agents.memoryNone" : memory === "history" ? "agents.memoryHistory" : "agents.memoryRemote")}</span>}
+        {meta.durationMs !== undefined && <span>{t("agents.elapsed", { duration: formatDuration(Math.round(meta.durationMs / 1000)) })}</span>}
+      </div>
+    );
+  }
   const u = meta.usage;
   const cache = u?.input ? u.cacheRead / u.input : 0;
   return (

@@ -1,4 +1,6 @@
 import { deleteChatGPTUser } from "./chatgpt-oauth-store.js";
+import { n8nRoutes } from "./n8n/routes.js";
+import { clearOwnedAgentAudiences, abortRevokedAgentRuns } from "./n8n/store.js";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { env } from "./env.js";
@@ -58,6 +60,7 @@ const modelAccessInput = z.object({ policies: z.array(modelAccessPolicyInput).ma
 
 export const adminRoutes = new Hono<AppEnv>()
   .use("/admin/*", requireAdmin)
+  .route("/admin/agents/n8n", n8nRoutes(true))
   .get("/admin/users", (c) => {
     const rows = db
       .prepare(
@@ -116,7 +119,9 @@ export const adminRoutes = new Hono<AppEnv>()
     // A pending ChatGPT login would otherwise save credentials for the deleted user when it completes.
     disconnectCodex(id);
     deleteChatGPTUser(id);
+    clearOwnedAgentAudiences(id);
     db.prepare("DELETE FROM users WHERE id = ?").run(id);
+    abortRevokedAgentRuns();
     await rm(path.join(env.dataDir, "images", id), { recursive: true, force: true });
     // Media originals and their previews (the rows went with the user by cascade).
     removeUserMedia(id);

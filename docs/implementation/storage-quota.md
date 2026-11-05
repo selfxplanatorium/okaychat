@@ -71,3 +71,7 @@ shell's other startup requests. Admins see usage and can set/reset per-user limi
 Tests cover ownership, UTF-8 accounting, every principal write path, replacement deltas, failed-import
 rollback, temporary non-persistence, durable outputs, legacy migration/restart behavior, and Library
 deletion freeing capacity for another write.
+
+## n8n agents
+
+n8n definitions charge name/description/avatar/config ciphertext to the owner; encrypted sessions and transcript hashes charge the chatting account. Request rows are bounded operational counters, without prompts or response text. See [n8n agents](n8n-agents.md).

@@ -1,3 +1,5 @@
+import { resolveChatTarget } from "./catalog/chat-targets.js";
+import { agentTurnStream } from "./n8n/turn.js";
 import {
   convertToModelMessages,
   createUIMessageStream,
@@ -178,7 +180,12 @@ export async function turnStream(opts: TurnOptions) {
   const personalized = !temporary || opts.temporaryPersonalization === true;
   const user = { id: userId };
   const settings = getSettings(userId);
-  const { model, conn } = await resolveModel(userId, modelRef);
+  const target = await resolveChatTarget(userId, modelRef);
+  if (target.kind === "agent") {
+    if (!temporary) { ensureThread(userId, threadId); if (!opts.keepThreadModel) updateThread(userId, threadId, { modelRef }); }
+    return agentTurnStream({ ...opts, uiMessages }, target.agentId);
+  }
+  const { model, conn } = target;
   const effort = resolveReasoningEffort(model, settings, opts.effort);
   const describeError = (error: unknown) => {
     const wire = describeProviderError(error, { log: !temporary, model: model.ref, provider: model.providerId });
@@ -701,6 +708,7 @@ export const chatRoutes = new Hono<AppEnv>()
     const parsed = z.object({ messages: z.array(z.any()), modelRef: z.string().min(3).max(300) }).safeParse(await c.req.json());
     if (!parsed.success) return c.json({ error: "Invalid compaction request" }, 400);
     const body = parsed.data as { messages: UIMessage[]; modelRef: string };
+    if (body.modelRef.startsWith("n8n/") || getThread(user.id, threadId)?.modelRef?.startsWith("n8n/")) throw new AppError({ code: "validation", message: "Agent chats do not use compaction." });
     const thread = getThread(user.id, threadId);
     if (!thread) return c.json({ error: "Thread not found" }, 404);
     if (body.messages.length < 2) return c.json({ error: "Not enough conversation to compact" }, 400);
@@ -737,6 +745,7 @@ export const chatRoutes = new Hono<AppEnv>()
     if (!parsed.success) return c.json({ error: "Invalid trim request" }, 400);
     const thread = getThread(user.id, threadId);
     if (!thread) return c.json({ error: "Thread not found" }, 404);
+    if (thread.modelRef?.startsWith("n8n/")) throw new AppError({ code: "validation", message: "Agent chats do not use trimming." });
     // The stored messages, not the client's copy: trimming needs the full tool results to measure the savings.
     const state = trimCompaction(branchMessages(user.id, threadId, parsed.data.messageId), thread.compaction);
     if (!state) return c.json({ error: "Nothing to trim. The latest exchange always stays complete." }, 400);
@@ -761,7 +770,7 @@ export const chatRoutes = new Hono<AppEnv>()
     const fallback = text.trim().split("\n")[0]!.slice(0, 60) || "New chat";
     const ref = getSettings(user.id).utilityModel ?? body.modelRef;
     let title = fallback;
-    if (ref) {
+    if (ref && !body.modelRef?.startsWith("n8n/") && !getThread(user.id, threadId)?.modelRef?.startsWith("n8n/")) {
       try {
         const { model, conn } = await resolveModel(user.id, ref);
         const handle = createModel(model, conn, { userId: user.id });

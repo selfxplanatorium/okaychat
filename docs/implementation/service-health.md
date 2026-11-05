@@ -196,3 +196,7 @@ guidance when the browser worker is unconfigured.
 - The banner is session-scoped (dismissal is remembered in `sessionStorage` per account), not a
   server-side acknowledgement.
 - There is no metrics export, no Admin dashboard, and no automatic container orchestration.
+
+## n8n agents
+
+n8n agents use per-viewer/revision last-response evidence, not sidecar health or provider outage markers. No periodic requests run workflows. See [n8n agents](n8n-agents.md).

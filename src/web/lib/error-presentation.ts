@@ -47,6 +47,9 @@ const MESSAGES: Record<ErrorCode, PlainMessageKey> = {
   conflict: "errors.conflictMessage",
   rate_limited: "errors.rateLimitedMessage",
   unknown: "errors.unknownMessage",
+  agent_auth: "errors.agentAuth",
+  agent_response: "errors.agentResponse",
+  agent_failed: "errors.agentFailed",
 };
 
 const HINTS: Record<ErrorCode, PlainMessageKey> = {
@@ -68,6 +71,9 @@ const HINTS: Record<ErrorCode, PlainMessageKey> = {
   conflict: "errors.conflictHint",
   rate_limited: "errors.rateLimitedHint",
   unknown: "errors.unknownHint",
+  agent_auth: "errors.agentAuthHint",
+  agent_response: "errors.agentResponseHint",
+  agent_failed: "errors.agentFailedHint",
 };
 
 /** The one setting a user can change to fix this class of failure. */
@@ -77,6 +83,10 @@ export function settingsForError(code: ErrorCode): SettingsDestinationId | undef
     case "provider_quota":
     case "model_not_found":
       return "providers";
+    case "agent_auth":
+    case "agent_response":
+    case "agent_failed":
+      return "agents";
     case "context_length":
       return "compaction";
     case "storage_quota":

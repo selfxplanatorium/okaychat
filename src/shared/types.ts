@@ -17,6 +17,21 @@ export interface ModelCost {
   tiers?: Array<{ above: number; input: number; output: number; cacheRead?: number; cacheWrite?: number }>;
 }
 
+export type {
+  AgentUsageCounters,
+  ChatTargetInfo,
+  N8nAgentDetail,
+  N8nAgentInput,
+  N8nAgentStatus,
+  N8nAgentSummary,
+  N8nAgentTarget,
+  N8nMemoryMode,
+  N8nProtocol,
+  N8nResolvedMode,
+  N8nResponseMode,
+} from "./n8n-agents.js";
+import type { N8nMemoryMode, N8nResolvedMode } from "./n8n-agents.js";
+
 export interface ModelInfo {
   /** `${providerId}/${modelId}` */
   ref: string;
@@ -243,6 +258,21 @@ export interface AssistantMetadata {
    * the reply and replayed on a continuation, so the tool list never changes inside one turn.
    */
   unavailable?: TurnUnavailable[];
+  /** Replies from an n8n agent: no tokens, cost, or context are reported. */
+  usageMode?: "agent";
+  agent?: {
+    id: string;
+    /** Snapshot label; never the URL, a header, or a session id. */
+    name: string;
+    memoryMode: N8nMemoryMode;
+    responseMode?: N8nResolvedMode;
+    historyTruncated?: boolean;
+    memoryReset?: boolean;
+    outcome?: "ok" | "error" | "aborted";
+  };
+  /** Text written by an outside agent. Model-bound copies are enveloped as data. */
+  provenance?: { kind: "n8n_agent"; agentId: string; name: string };
+  injection?: InjectionReport;
 }
 
 export interface CompactionState {

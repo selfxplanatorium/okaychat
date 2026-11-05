@@ -1,23 +1,25 @@
 import { useAuiState } from "@assistant-ui/react";
 import { useEffect, useRef } from "react";
 import { create } from "zustand";
-import type { CompactionState, ThreadSummary, UsageRow } from "@shared/types";
-import type { ModelInfo } from "@shared/types";
+import type { ChatTargetInfo, CompactionState, ThreadSummary, UsageRow } from "@shared/types";
 import { api } from "@/lib/api";
-import { useActiveModel } from "./data";
+import { useActiveTarget } from "./data";
 import { isTemporaryChat } from "./chat-privacy";
-import { contextUsage } from "./context-usage";
+import { contextUsage, type ContextUsage } from "./context-usage";
 export { metadataOf } from "./context-usage";
+
+/** Token usage plus the honest count of agent requests in the chat (agents report no tokens). */
+export type ThreadUsage = UsageRow & { agentRequests?: number };
 
 interface ThreadMeta {
   memoryDisabled: boolean;
   compaction: CompactionState | null;
-  usage: UsageRow | null;
+  usage: ThreadUsage | null;
   branchedFrom: ThreadSummary["branchedFrom"];
 }
 
 /** `GET /threads/:id`: the thread list adapter's `fetch()` and the metadata refresh read the same response. */
-export type ThreadDetail = ThreadSummary & { compaction: CompactionState | null; usage: UsageRow | null };
+export type ThreadDetail = ThreadSummary & { compaction: CompactionState | null; usage: ThreadUsage | null };
 
 interface ThreadMetaState {
   byId: Record<string, ThreadMeta>;
@@ -69,8 +71,8 @@ export const useThreadMetaStore = create<ThreadMetaState>(() => ({
 
 export const useCurrentThreadId = () => useAuiState((s) => s.threadListItem.remoteId ?? null);
 
-/** The model of the open chat: its own choice once it has a thread, the new-chat choice before. */
-export const useChatModel = (): ModelInfo | undefined => useActiveModel(useCurrentThreadId());
+/** The model or agent of the open chat: its own choice once it has a thread, the new-chat choice before. */
+export const useChatModel = (): ChatTargetInfo | undefined => useActiveTarget(useCurrentThreadId());
 
 /**
  * The single owner of the open chat's metadata lifecycle, mounted once beside the runtime: refreshes when a chat
@@ -99,8 +101,19 @@ export function useThreadMeta(): ThreadMeta | null {
 }
 
 /** Context after the newest reply or trim. Selectors return primitives to keep renders stable. */
-export function useContextUsage(compaction: CompactionState | null): { tokens: number; window: number } | null {
-  const tokens = useAuiState((s) => contextUsage(s.thread.messages, compaction)?.tokens ?? null);
-  const window = useAuiState((s) => contextUsage(s.thread.messages, compaction)?.window ?? 0);
-  return tokens !== null ? { tokens, window } : null;
+export function useContextUsage(compaction: CompactionState | null): ContextUsage {
+  const kind = useAuiState((s) => {
+    const usage = contextUsage(s.thread.messages, compaction);
+    return usage === null ? "none" : "unmanaged" in usage ? "agent" : "tokens";
+  });
+  const tokens = useAuiState((s) => {
+    const usage = contextUsage(s.thread.messages, compaction);
+    return usage !== null && "tokens" in usage ? usage.tokens : 0;
+  });
+  const window = useAuiState((s) => {
+    const usage = contextUsage(s.thread.messages, compaction);
+    return usage !== null && "tokens" in usage ? usage.window : 0;
+  });
+  if (kind === "agent") return { unmanaged: "agent" };
+  return kind === "tokens" ? { tokens, window } : null;
 }

@@ -1,3 +1,5 @@
+import { abortRevokedAgentRuns } from "./n8n/store.js";
+import { afterCommit } from "./db.js";
 import { HTTPException } from "hono/http-exception";
 import type { ShareAudience, UserGroup } from "../shared/types.js";
 import { newId } from "./crypto.js";
@@ -10,9 +12,9 @@ import {
 } from "./entitlements.js";
 
 // Admin-defined user groups, and the audience of each shared resource: everyone, or only listed users and
-// members of listed groups. Shared provider connections and shared MCP servers both use it.
+// members of listed groups. Shared provider connections, shared MCP servers, and shared n8n agents use it.
 
-export type ShareKind = "provider" | "mcp";
+export type ShareKind = "provider" | "mcp" | "n8n";
 
 export function listGroups(): UserGroup[] {
   const groups = db.prepare("SELECT id, name FROM user_groups ORDER BY name").all() as Array<{ id: string; name: string }>;
@@ -30,6 +32,7 @@ export function createGroup(name: string, userIds: string[] = []): UserGroup {
     db.prepare("INSERT INTO user_groups (id, name, created_at) VALUES (?, ?, ?)").run(id, name, Date.now());
     setMembers(id, userIds);
   });
+  afterCommit(abortRevokedAgentRuns);
   return listGroups().find((g) => g.id === id)!;
 }
 
@@ -40,6 +43,7 @@ export function updateGroup(id: string, patch: { name?: string; userIds?: string
     if (patch.name !== undefined) db.prepare("UPDATE user_groups SET name = ? WHERE id = ?").run(patch.name, id);
     if (patch.userIds) setMembers(id, patch.userIds);
   });
+  afterCommit(abortRevokedAgentRuns);
   return listGroups().find((g) => g.id === id)!;
 }
 
@@ -47,6 +51,7 @@ export function deleteGroup(id: string) {
   tx(() => {
     clearModelAccessPoliciesForGroup(id);
     db.prepare("DELETE FROM user_groups WHERE id = ?").run(id);
+    afterCommit(abortRevokedAgentRuns);
   });
 }
 
@@ -77,6 +82,7 @@ export function setAudience(kind: ShareKind, resourceId: string, audience: Share
       for (const groupId of new Set(audience.groupIds)) addGroup.run(kind, resourceId, groupId);
     }
     if (isModelAccessKind(kind)) pruneModelAccessPolicies(resourceId);
+    if (kind === "n8n") afterCommit(abortRevokedAgentRuns);
   });
 }
 

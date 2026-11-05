@@ -1,3 +1,4 @@
+import { envelopeAgentHistory } from "./n8n/provenance.js";
 import { generateText } from "ai";
 import { z } from "zod";
 import type { MemoryEntry } from "../shared/memory.js";
@@ -85,6 +86,7 @@ export async function reviewThread(userId: string, threadId: string): Promise<Me
   const preferences = memoryPreferences(userId);
   const thread = getThread(userId, threadId);
   const state = db.prepare("SELECT user_id, id, updated_at, memory_cursor, model_ref FROM threads WHERE user_id = ? AND id = ?").get(userId, threadId) as ReviewState | undefined;
+  if (state?.model_ref?.startsWith("n8n/")) return null;
   if (!preferences.enabled || !preferences.autoSave || !thread || thread.memoryDisabled || !state) return null;
   const branch = currentBranch(userId, threadId);
   const done = () => db.prepare("UPDATE threads SET memory_cursor = ?, memory_scanned_at = ? WHERE id = ?").run(branch.at(-1)?.id ?? null, state.updated_at, threadId);
@@ -92,7 +94,7 @@ export async function reviewThread(userId: string, threadId: string): Promise<Me
   const from = branch.findIndex((m) => m.id === state.memory_cursor) + 1;
   const added = branch.slice(from);
   if (!added.some((m) => m.role === "user")) { done(); return []; }
-  const transcript = transcriptText(added);
+  const transcript = transcriptText(envelopeAgentHistory(added));
   const scope = thread.projectId;
   const visible = listMemories(userId, scope);
   const candidates = rankMemories(visible, transcript).slice(0, 60);

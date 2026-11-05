@@ -3,6 +3,7 @@ import { LibraryIcon } from "lucide-react";
 import { KnowledgePage } from "@/components/knowledge/KnowledgePage";
 import { LibraryPage } from "@/components/library/LibraryPage";
 import { McpSettings } from "@/components/settings/McpSettings";
+import { N8nAgentsSettings } from "@/components/settings/N8nAgentsSettings";
 import { ProjectSettings } from "@/components/settings/ProjectSettings";
 import { ScheduleSettings } from "@/components/settings/ScheduleSettings";
 import { SkillsSettings } from "@/components/settings/SkillsSettings";
@@ -12,17 +13,24 @@ import { t } from "@/i18n";
 
 function PluginsPage() {
   const [tab, setTab] = useState("mcp");
+  const tabs = [
+    { id: "mcp", label: "shell.mcpServers" },
+    { id: "skills", label: "shell.skills" },
+    { id: "agents", label: "shell.agents" },
+  ] as const;
   return (
     <div>
       <div className="mx-auto w-full max-w-3xl px-6 pt-8">
         <h1 className="text-xl font-semibold tracking-tight">{t("shell.pluginsTitle")}</h1>
         <p className="text-muted-foreground mt-1 text-sm">{t("shell.pluginsIntro")}</p>
         <div role="tablist" aria-label={t("shell.pluginType")} className="border-border mt-6 flex gap-5 border-b">
-          {([{ id: "mcp", label: "shell.mcpServers" }, { id: "skills", label: "shell.skills" }] as const).map(({ id, label }) => (
+          {tabs.map(({ id, label }) => (
             <button key={id} id={`plugin-tab-${id}`} role="tab" type="button" aria-selected={tab === id} aria-controls={`plugin-panel-${id}`} tabIndex={tab === id ? 0 : -1} onClick={() => setTab(id)} onKeyDown={(e) => {
               if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {
                 e.preventDefault();
-                const next = e.key === "Home" ? "mcp" : e.key === "End" ? "skills" : tab === "mcp" ? "skills" : "mcp";
+                const index = tabs.findIndex((item) => item.id === tab);
+                const nextIndex = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (index + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+                const next = tabs[nextIndex]!.id;
                 setTab(next);
                 document.getElementById(`plugin-tab-${next}`)?.focus();
               }
@@ -33,7 +41,7 @@ function PluginsPage() {
         </div>
       </div>
       <div role="tabpanel" id={`plugin-panel-${tab}`} aria-labelledby={`plugin-tab-${tab}`} tabIndex={0}>
-        {tab === "mcp" ? <McpSettings embedded /> : <SkillsSettings embedded />}
+        {tab === "mcp" ? <McpSettings embedded /> : tab === "skills" ? <SkillsSettings embedded /> : <N8nAgentsSettings embedded />}
       </div>
     </div>
   );

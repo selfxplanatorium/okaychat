@@ -11,13 +11,31 @@ const wire = (code: ErrorWire["code"], extra: Partial<ErrorWire> = {}): ErrorWir
 });
 
 test("every taxonomy code has a message and hint decision, including unknown", () => {
-  assert.equal(ERROR_CODES.length, 18);
+  assert.equal(ERROR_CODES.length, 21);
   for (const code of ERROR_CODES) {
     const chat = presentError(wire(code), "chat");
     assert.match(chat.messageKey, /^errors\./, code);
     assert.match(chat.hintKey, /^errors\./, code);
     assert.equal(chat.surface, "inline");
   }
+});
+
+test("agent errors route to Agents settings without logout or leaking authored reasons to Copy details", () => {
+  for (const code of ["agent_auth", "agent_response", "agent_failed"] as const) {
+    const result = presentError(wire(code, { retryable: false, agentReason: code === "agent_response" ? "inactive" : undefined }), "chat");
+    assert.equal(result.actions.settings, "agents");
+    assert.equal(result.actions.retry, true, "manual retry remains available");
+    assert.equal(result.actions.switchModel, false);
+    assert.equal(result.messageKey, code === "agent_auth" ? "errors.agentAuth" : code === "agent_response" ? "errors.agentResponse" : "errors.agentFailed");
+  }
+  const details = errorDetails(wire("agent_response", { agentReason: "inactive", hint: "SECRET_REASON" }));
+  assert.equal(details, "code: agent_response");
+});
+
+test("agent reason is allowlisted on the wire but never copied", () => {
+  const parsed = parseErrorWire({ code: "agent_response", message: "Safe", retryable: false, agentReason: "inactive", url: "SECRET_URL" });
+  assert.equal(parsed?.agentReason, "inactive");
+  assert.equal(parseErrorWire({ code: "agent_response", message: "Safe", retryable: false, agentReason: "SECRET_URL" })?.agentReason, undefined);
 });
 
 test("chat failures offer retry only when retrying can help", () => {

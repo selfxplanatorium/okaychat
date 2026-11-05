@@ -80,6 +80,10 @@ export function storageUsedSql(user: string): string {
       FROM knowledge_chunks WHERE user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(COALESCE(length(CAST(knowledge AS BLOB)), 0) + COALESCE(length(CAST(knowledge_ids AS BLOB)), 0)), 0)
       FROM turn_context WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(length(CAST(name AS BLOB)) + length(CAST(description AS BLOB)) + length(CAST(avatar AS BLOB)) + length(CAST(config_enc AS BLOB))), 0)
+      FROM n8n_agents WHERE owner_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(length(CAST(session_enc AS BLOB)) + length(CAST(history_hash AS BLOB))), 0)
+      FROM n8n_agent_sessions WHERE user_id = ${user}
   )), 0)`;
 }
 

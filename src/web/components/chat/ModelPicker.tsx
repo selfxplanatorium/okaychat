@@ -1,22 +1,25 @@
-import { BrainIcon, CheckIcon, ChevronDownIcon, ChevronsUpDownIcon, EyeIcon, SearchIcon, StarIcon, WrenchIcon } from "lucide-react";
+import { BrainIcon, CheckIcon, ChevronDownIcon, ChevronsUpDownIcon, EyeIcon, SearchIcon, StarIcon, TriangleAlertIcon, WrenchIcon } from "lucide-react";
 import { useMemo, useState } from "react";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { reasoningOptions, resolveReasoningEffort } from "@shared/reasoning";
-import type { ModelInfo, ReasoningEffort } from "@shared/types";
+import { isAgentRef, isAgentTarget } from "@shared/n8n-agents";
+import type { ChatTargetInfo, ModelInfo, ReasoningEffort } from "@shared/types";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuTrigger } from "@/components/ui/menu";
 import { TextSwap } from "@/components/assistant-ui/elements/surfaces";
+import { AgentAvatar } from "@/components/agents/AgentAvatar";
 import { t, type PlainMessageKey } from "@/i18n";
 import { compareText, formatNumber, formatTokens } from "@/i18n/format";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useData } from "@/state/data";
+import { useData, useUnavailableTargetRef } from "@/state/data";
 import { settingsHref } from "@/lib/settings-link";
 import { useChatModel, useCurrentThreadId } from "@/state/thread-meta";
 
 import { EffortIcon } from "./EffortIcon";
 
 const OPENCODE_GO = "opencode-go";
+const AGENT_GROUP = "agents";
 
 export function modelPrice(m: ModelInfo) {
   if (m.free) return t("composer.free");
@@ -35,28 +38,47 @@ export function Capabilities({ model }: { model: ModelInfo }) {
   );
 }
 
-/** Favorites first, then connected providers with OpenCode Go leading. Shared by every model picker. */
-export function useModelGroups(query = "", filter?: (m: ModelInfo) => boolean) {
+/** The small Agent/Shared labels an agent entry carries instead of capability, context, and price badges. */
+function AgentTags({ shared }: { shared: boolean }) {
+  return (
+    <span className="flex shrink-0 items-center gap-1">
+      <span className="bg-primary/10 text-primary rounded px-1.5 text-[10px] font-medium">{t("agents.badge")}</span>
+      {shared && <span className="bg-muted text-muted-foreground rounded px-1.5 text-[10px]">{t("agents.shared")}</span>}
+    </span>
+  );
+}
+
+/**
+ * Favorites first, then n8n agents as their own group, then connected providers with OpenCode Go leading.
+ * Agents are chat targets, not models: they never join a provider's group.
+ */
+export function useModelGroups(query = "", filter?: (m: ChatTargetInfo) => boolean, allowAgents = true) {
   const models = useData((s) => s.models);
   const providers = useData((s) => s.providers);
   const favorites = useData((s) => s.settings?.favoriteModels ?? []);
   return useMemo(() => {
     const q = query.trim().toLowerCase();
-    const match = (m: ModelInfo) => (!filter || filter(m)) && (!q || `${m.name} ${m.id} ${m.providerId}`.toLowerCase().includes(q));
+    const match = (m: ChatTargetInfo) =>
+      (allowAgents || !isAgentTarget(m)) &&
+      (!filter || filter(m)) &&
+      (!q || `${m.name} ${isAgentTarget(m) ? m.description : m.id} ${isAgentTarget(m) ? "" : m.providerId}`.toLowerCase().includes(q));
     const providerName = (id: string) => providers.find((p) => p.id === id)?.name ?? id;
+    const shown = models.filter(match);
     const byProvider = new Map<string, ModelInfo[]>();
-    for (const m of models.filter(match)) byProvider.set(m.providerId, [...(byProvider.get(m.providerId) ?? []), m]);
+    for (const m of shown) if (!isAgentTarget(m)) byProvider.set(m.providerId, [...(byProvider.get(m.providerId) ?? []), m]);
     const ordered = [...byProvider.entries()].sort(([a], [b]) => Number(b === OPENCODE_GO) - Number(a === OPENCODE_GO));
-    const favs = models.filter((m) => favorites.includes(m.ref) && match(m));
+    const agents = shown.filter(isAgentTarget).sort((a, b) => compareText(a.name, b.name));
+    const favs = shown.filter((m) => favorites.includes(m.ref));
     return [
       ...(favs.length ? [{ id: "favorites", label: t("composer.favorites"), models: favs }] : []),
+      ...(agents.length ? [{ id: AGENT_GROUP, label: t("agents.pickerGroup"), models: agents as ChatTargetInfo[] }] : []),
       ...ordered.map(([id, list]) => ({
         id,
         label: providerName(id),
-        models: list.sort((a, b) => Number(b.free) - Number(a.free) || compareText(b.releaseDate ?? "", a.releaseDate ?? "")),
+        models: list.sort((a, b) => Number(b.free) - Number(a.free) || compareText(b.releaseDate ?? "", a.releaseDate ?? "")) as ChatTargetInfo[],
       })),
     ];
-  }, [models, providers, favorites, query, filter]);
+  }, [models, providers, favorites, query, filter, allowAgents]);
 }
 
 /** A non-model choice listed above the models, e.g. "Same as chat model". */
@@ -65,8 +87,23 @@ export interface ModelChoice {
   label: string;
 }
 
+/** Opens the agent management page from any picker. */
+function AddAgentLink({ compact }: { compact: boolean }) {
+  return (
+    <div className={cn("border-t", compact ? "px-2 py-1.5" : "px-2.5 py-2")}>
+      <Link
+        href={settingsHref("agents")}
+        data-command="settings.agents"
+        className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex min-h-8 items-center rounded-lg text-xs outline-none transition-colors duration-(--motion-fast) focus-visible:ring-2 pointer-coarse:min-h-11"
+      >
+        {t("composer.addAgent")}
+      </Link>
+    </div>
+  );
+}
+
 /**
- * Search field and provider-grouped options. `compact` drops the context/price line for pickers outside the composer.
+ * Search field and target-grouped options. `compact` drops the context/price line for pickers outside the composer.
  * Arrows walk the options, Enter picks, F toggles a favorite.
  */
 export function ModelList({
@@ -75,17 +112,23 @@ export function ModelList({
   filter,
   choices = [],
   compact = false,
+  allowAgents = true,
+  showAddAgent = true,
 }: {
   value: string | null | undefined;
   onSelect: (value: string) => void;
-  filter?: (m: ModelInfo) => boolean;
+  filter?: (m: ChatTargetInfo) => boolean;
   choices?: ModelChoice[];
   compact?: boolean;
+  /** Utility and sub-agent pickers are language-model only: no agent group and no Add agent link. */
+  allowAgents?: boolean;
+  /** Settings forms keep the link out, so navigating away never discards a half-written form. */
+  showAddAgent?: boolean;
 }) {
   const favorites = useData((s) => s.settings?.favoriteModels ?? []);
   const updateSettings = useData((s) => s.updateSettings);
   const [query, setQuery] = useState("");
-  const groups = useModelGroups(query, filter);
+  const groups = useModelGroups(query, filter, allowAgents);
   const q = query.trim().toLowerCase();
   const shownChoices = choices.filter((c) => !q || c.label.toLowerCase().includes(q));
 
@@ -175,51 +218,68 @@ export function ModelList({
               {group.label}
               {group.id === OPENCODE_GO && <span className="bg-primary/10 text-primary rounded px-1.5 text-[10px]">{t("composer.primary")}</span>}
             </div>
-            {group.models.map((m) => (
-              <div
-                key={`${group.id}:${m.ref}`}
-                role="option"
-                aria-selected={m.ref === value}
-                aria-keyshortcuts="F"
-                tabIndex={0}
-                onClick={() => onSelect(m.ref)}
-                onKeyDown={(e) => optionKeys(e, () => onSelect(m.ref), m.ref)}
-                className={optionClass}
-              >
-                {check(m.ref === value)}
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5 text-sm">
-                    <span className="truncate">{m.name}</span>
-                    <Capabilities model={m} />
-                  </div>
-                  {!compact && (
-                    <div className="text-muted-foreground flex gap-2 text-[11px] tabular-nums">
-                      <span>{t("composer.contextWindow", { tokens: formatTokens(m.context) })}</span>
-                      {modelPrice(m) && <span>{modelPrice(m)}</span>}
+            {group.models.map((m) => {
+              const agent = isAgentTarget(m);
+              return (
+                <div
+                  key={`${group.id}:${m.ref}`}
+                  role="option"
+                  aria-selected={m.ref === value}
+                  aria-keyshortcuts="F"
+                  tabIndex={0}
+                  onClick={() => onSelect(m.ref)}
+                  onKeyDown={(e) => optionKeys(e, () => onSelect(m.ref), m.ref)}
+                  className={optionClass}
+                >
+                  {check(m.ref === value)}
+                  {agent ? (
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <AgentAvatar avatar={m.avatar} size="xs" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 text-sm">
+                          <span className="truncate">{m.name}</span>
+                          <AgentTags shared={m.shared} />
+                        </div>
+                        {!compact && m.description && <div className="text-muted-foreground line-clamp-1 text-[11px]">{m.description}</div>}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 text-sm">
+                        <span className="truncate">{m.name}</span>
+                        <Capabilities model={m} />
+                      </div>
+                      {!compact && (
+                        <div className="text-muted-foreground flex gap-2 text-[11px] tabular-nums">
+                          <span>{t("composer.contextWindow", { tokens: formatTokens(m.context) })}</span>
+                          {modelPrice(m) && <span>{modelPrice(m)}</span>}
+                        </div>
+                      )}
                     </div>
                   )}
+                  <button
+                    type="button"
+                    aria-label={favorites.includes(m.ref) ? t("composer.unfavorite") : t("composer.favorite")}
+                    tabIndex={-1}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void toggleFavorite(m.ref);
+                    }}
+                    className={cn(
+                      "text-muted-foreground hover:text-foreground rounded p-1 pointer-coarse:p-2.5 opacity-0 pointer-coarse:opacity-60 transition-[opacity,color] duration-(--motion-fast) ease-out-quart group-hover:opacity-100 group-focus-visible:opacity-100",
+                      favorites.includes(m.ref) && "text-warning opacity-100 pointer-coarse:opacity-100",
+                    )}
+                  >
+                    <StarIcon className={cn("size-3.5", favorites.includes(m.ref) && "fill-current")} />
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  aria-label={favorites.includes(m.ref) ? t("composer.unfavorite") : t("composer.favorite")}
-                  tabIndex={-1}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void toggleFavorite(m.ref);
-                  }}
-                  className={cn(
-                    "text-muted-foreground hover:text-foreground rounded p-1 pointer-coarse:p-2.5 opacity-0 pointer-coarse:opacity-60 transition-[opacity,color] duration-(--motion-fast) ease-out-quart group-hover:opacity-100 group-focus-visible:opacity-100",
-                    favorites.includes(m.ref) && "text-warning opacity-100 pointer-coarse:opacity-100",
-                  )}
-                >
-                  <StarIcon className={cn("size-3.5", favorites.includes(m.ref) && "fill-current")} />
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ))}
         {groups.length === 0 && shownChoices.length === 0 && <p className="text-muted-foreground px-3 py-6 text-center text-sm">{t("composer.noModels")}</p>}
       </ScrollArea>
+      {allowAgents && showAddAgent && <AddAgentLink compact={compact} />}
     </div>
   );
 }
@@ -228,15 +288,21 @@ export function ModelPicker() {
   const models = useData((s) => s.models);
   const selectModel = useData((s) => s.selectModel);
   const active = useChatModel();
+  const unavailable = useUnavailableTargetRef(useCurrentThreadId());
   const threadId = useCurrentThreadId();
   const [open, setOpen] = useState(false);
   const [, navigate] = useLocation();
 
   if (models.length === 0) {
     return (
-      <button type="button" data-command="settings.providers" onClick={() => navigate(settingsHref("providers"))} className="text-muted-foreground hover:text-foreground rounded-lg px-2 py-1 text-xs">
-        {t("composer.connectProvider")}
-      </button>
+      <div className="flex min-w-0 items-center gap-1">
+        <button type="button" data-command="settings.providers" onClick={() => navigate(settingsHref("providers"))} className="text-muted-foreground hover:text-foreground rounded-lg px-2 py-1 text-xs">
+          {t("composer.connectProvider")}
+        </button>
+        <Link href={settingsHref("agents")} data-command="settings.agents" className="text-muted-foreground hover:text-foreground rounded-lg px-2 py-1 text-xs">
+          {t("composer.addAgent")}
+        </Link>
+      </div>
     );
   }
 
@@ -248,7 +314,14 @@ export function ModelPicker() {
         aria-live="polite"
         data-command="composer.model"
       >
-        <TextSwap value={active?.name ?? t("composer.chooseModel")} className="truncate" />
+        {unavailable ? (
+          <>
+            <TriangleAlertIcon className="text-warning size-3.5 shrink-0" />
+            <span className="truncate">{t("composer.agentUnavailable")}</span>
+          </>
+        ) : (
+          <TextSwap value={active?.name ?? t("composer.chooseModel")} className="truncate" />
+        )}
         <ChevronDownIcon className="size-3 shrink-0 transition-transform duration-(--motion-base) ease-out-expo group-aria-expanded:rotate-180" />
       </PopoverTrigger>
       <PopoverContent side="top" className="flex max-h-[min(32rem,70dvh)] w-[min(26rem,calc(100vw-1rem))] flex-col p-0">
@@ -270,13 +343,15 @@ export function ModelSelect({
   onValueChange,
   choices,
   filter,
+  allowAgents = true,
   className,
   "aria-label": ariaLabel,
 }: {
   value: string | null | undefined;
   onValueChange: (value: string) => void;
   choices?: ModelChoice[];
-  filter?: (m: ModelInfo) => boolean;
+  filter?: (m: ChatTargetInfo) => boolean;
+  allowAgents?: boolean;
   className?: string;
   "aria-label"?: string;
 }) {
@@ -284,6 +359,7 @@ export function ModelSelect({
   const [open, setOpen] = useState(false);
   const model = models.find((m) => m.ref === value);
   const choice = choices?.find((c) => c.value === (value ?? ""));
+  const unavailable = !!value && isAgentRef(value) && !model;
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
@@ -294,13 +370,22 @@ export function ModelSelect({
         )}
       >
         {model ? (
-          // The provider is secondary, so it is the part that gives way when the trigger is narrow.
-          <span className="flex min-w-0 items-baseline">
-            <span className="min-w-0 truncate">{model.name}</span>
-            <span className="text-muted-foreground shrink-0 whitespace-pre">{` · ${model.providerId}`}</span>
-          </span>
+          isAgentTarget(model) ? (
+            <span className="flex min-w-0 items-center gap-1.5">
+              <AgentAvatar avatar={model.avatar} size="xs" />
+              <span className="truncate">{model.name}</span>
+            </span>
+          ) : (
+            // The provider is secondary, so it is the part that gives way when the trigger is narrow.
+            <span className="flex min-w-0 items-baseline">
+              <span className="min-w-0 truncate">{model.name}</span>
+              <span className="text-muted-foreground shrink-0 whitespace-pre">{` · ${model.providerId}`}</span>
+            </span>
+          )
         ) : (
-          <span className={cn("truncate", !choice && "text-muted-foreground")}>{choice?.label ?? (value || t("composer.chooseModel"))}</span>
+          <span className={cn("truncate", !choice && !unavailable && "text-muted-foreground", unavailable && "text-warning")}>
+            {unavailable ? t("agents.unavailable") : choice?.label ?? (value || t("composer.chooseModel"))}
+          </span>
         )}
         <ChevronsUpDownIcon className="text-muted-foreground size-3.5 shrink-0" />
       </PopoverTrigger>
@@ -310,6 +395,8 @@ export function ModelSelect({
           value={value}
           choices={choices}
           filter={filter}
+          allowAgents={allowAgents}
+          showAddAgent={false}
           onSelect={(v) => {
             onValueChange(v);
             setOpen(false);
@@ -338,10 +425,12 @@ export function useEffortChoices() {
   const settings = useData((s) => s.settings);
   const efforts = settings?.reasoningEffort ?? {};
   const updateSettings = useData((s) => s.updateSettings);
-  const current = resolveReasoningEffort(active ?? { ref: "" }, settings);
-  const options = reasoningOptions(active ?? {});
+  // Agents have no reasoning effort: the control is hidden and the bridge sends none.
+  const model = active && !isAgentTarget(active) ? active : undefined;
+  const current = resolveReasoningEffort(model ?? { ref: "" }, settings);
+  const options = reasoningOptions(model ?? {});
   const set = (effort: ReasoningEffort) => {
-    if (active) void updateSettings({ reasoningEffort: { ...efforts, [active.ref]: effort } });
+    if (model) void updateSettings({ reasoningEffort: { ...efforts, [model.ref]: effort } });
   };
   return { active, current, options, set };
 }
@@ -349,7 +438,7 @@ export function useEffortChoices() {
 /** "Instant" means reasoning is off, which only exists for models that offer it. */
 export function EffortPicker() {
   const { active, current, options, set } = useEffortChoices();
-  if (!active?.reasoning) return null;
+  if (!active?.reasoning || isAgentTarget(active)) return null;
   return (
     <Menu>
       <MenuTrigger data-command="composer.effort" aria-label={t("composer.reasoningEffortValue", { value: effortLabel(current) })} className="hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 shrink-0 pointer-coarse:h-9 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart">

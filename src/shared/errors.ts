@@ -1,4 +1,5 @@
 import { CHATGPT_FEATURE_CODES, type ChatGPTFeatureCode } from "./chatgpt.js";
+import { isAgentReason, type AgentReason } from "./n8n-agents.js";
 
 /**
  * The one error vocabulary shared by the server and the browser. The server maps every boundary
@@ -23,6 +24,9 @@ export const ERROR_CODES = [
   "forbidden",
   "conflict",
   "rate_limited",
+  "agent_auth",
+  "agent_response",
+  "agent_failed",
   "unknown",
 ] as const;
 
@@ -69,6 +73,8 @@ export interface ErrorWire {
   providerParam?: string;
   /** An authored next step, never selected from an upstream-provided URL. */
   recoveryAction?: RecoveryAction;
+  /** Authored reason for an unusable n8n agent answer (agent_response only); never remote text. */
+  agentReason?: AgentReason;
 }
 
 /** Data written into the chat stream while a provider call waits before another attempt. */
@@ -147,6 +153,7 @@ export function parseErrorWire(value: unknown): ErrorWire | undefined {
     ...(providerCode ? { providerCode } : {}),
     ...(providerParam ? { providerParam } : {}),
     ...(recoveryAction ? { recoveryAction } : {}),
+    ...(record.code === "agent_response" && isAgentReason(record.agentReason) ? { agentReason: record.agentReason } : {}),
   };
 }
 

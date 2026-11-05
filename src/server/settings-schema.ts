@@ -21,8 +21,8 @@ export const settingsPatch = z.object({
   imageServices: z.record(z.string(), z.unknown()).optional(),
   speech: speechSettingsSchema.optional(),
   defaultModel: modelRef.nullable().optional(),
-  utilityModel: modelRef.nullable().optional(),
-  subagentModel: modelRef.nullable().optional(),
+  utilityModel: modelRef.refine(ref => !ref.startsWith("n8n/"), "Choose a language model.").nullable().optional(),
+  subagentModel: modelRef.refine(ref => !ref.startsWith("n8n/"), "Choose a language model.").nullable().optional(),
   favoriteModels: z.array(modelRef).max(500).optional(),
   defaultReasoningEffort: z.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
   reasoningEffort: z.record(modelRef, z.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"]))

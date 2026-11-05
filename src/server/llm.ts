@@ -64,6 +64,7 @@ export interface CreateModelOptions {
 }
 
 export function createModel(info: ModelInfo, conn: Connection, opts: CreateModelOptions): ModelHandle {
+  if (info.ref.startsWith("n8n/")) throw new AppError({ code: "validation", message: "Agents cannot be used as language models." });
   // Recheck the live policy here, not only where the model was listed: a turn can run after an admin
   // revoked access, and a caller can hand over an earlier model/connection pair. Nothing reaches the
   // provider before this passes.

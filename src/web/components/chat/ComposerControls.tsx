@@ -11,9 +11,9 @@ import { api } from "@/lib/api";
 import { settingsHref } from "@/lib/settings-link";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
-import { useChatModel } from "@/state/thread-meta";
-import { useChatSearch } from "@/state/chat-search";
+import { useChatModel } from "@/state/thread-meta";import { useChatSearch } from "@/state/chat-search";
 import { useChatResearch } from "@/state/chat-research";
+import { isAgentTarget } from "@shared/n8n-agents";
 import { sharedTooltip, TooltipTrigger } from "@/components/ui/tooltip";
 import { Kbd } from "@/keyboard/Kbd";
 import { ariaCombo } from "@/keyboard/keys";
@@ -309,8 +309,9 @@ function PromptDialog({
 export function McpPromptsButton() {
   const hasPrompts = useData((s) => s.mcpPrompts.length > 0);
   const load = useData((s) => s.refreshMcpPrompts);
+  const active = useChatModel();
   const { pick, dialog } = usePromptPicker();
-  if (!hasPrompts) return null;
+  if (!hasPrompts || (active && isAgentTarget(active))) return null;
   return (
     <>
       <Menu onOpenChange={(open) => open && void load()}>
@@ -330,6 +331,7 @@ export function McpPromptsButton() {
 /** Touch and narrow layout: the plus button opens reasoning, search, and attachment choices in one menu. */
 export function MobileComposerMenu() {
   const { active, current, options, set } = useEffortChoices();
+  const agent = !!active && isAgentTarget(active);
   const { enabled, toggle } = useChatSearch();
   const webTools = useData((s) => s.settings?.webTools ?? true);
   const showSearch = !!active?.toolCall && webTools;
@@ -438,7 +440,7 @@ export function MobileComposerMenu() {
               {t("ux.openSearchLimitSettings")}
             </MenuItem>
           )}
-          {hasPrompts && (
+          {hasPrompts && !agent && (
             <MenuSubmenuRoot>
               <MenuSubmenuTrigger>
                 <SquareSlashIcon />
@@ -450,10 +452,12 @@ export function MobileComposerMenu() {
               </MenuContent>
             </MenuSubmenuRoot>
           )}
-          <ComposerPrimitive.AddAttachment render={<MenuItem />}>
-            <PaperclipIcon />
-            {t("composer.attach")}
-          </ComposerPrimitive.AddAttachment>
+          {!agent && (
+            <ComposerPrimitive.AddAttachment render={<MenuItem />}>
+              <PaperclipIcon />
+              {t("composer.attach")}
+            </ComposerPrimitive.AddAttachment>
+          )}
         </MenuContent>
       </Menu>
     </div>

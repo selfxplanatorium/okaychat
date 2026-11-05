@@ -14,6 +14,7 @@ import { useData } from "@/state/data";
 import { Checklist, invalidateDirectory, useDirectory } from "./Audience";
 import { ProviderLists, ProviderScopeProvider } from "./ProvidersSettings";
 import { AdminVoiceSettings } from "./AdminVoiceSettings";
+import { AgentManagement } from "@/components/agents/AgentManagement";
 import { SettingsPage, SettingsRow, SettingsSection } from "./SettingsUI";
 
 function NewUserForm({ onDone }: { onDone: () => void }) {
@@ -487,6 +488,7 @@ export function AdminSettings() {
       <Users defaultLimit={defaultLimit} />
       <Groups />
       <SystemPrompts />
+      <AgentManagement scope="shared" />
       <AdminVoiceSettings />
       <h2 className="mt-2 text-sm font-medium">{t("admin.serverProviders")}</h2>
       <p className="text-muted-foreground -mt-2 text-xs">

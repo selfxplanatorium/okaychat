@@ -149,4 +149,6 @@ export default {
   audioTooLarge: "Audio files are limited to {size}",
   transcribeFailed: "Could not transcribe {name}: {reason}",
   notSynced: "Chat is not synced with the server yet.",
+  addAgent: "Add agent",
+  agentUnavailable: "This agent is unavailable.",
 } as const;

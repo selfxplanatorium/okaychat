@@ -1,5 +1,6 @@
 /** The English source catalog. One namespace per area; each file is owned by that area. */
 import account from "./account";
+import agents from "./agents";
 import admin from "./admin";
 import appearance from "./appearance";
 import artifacts from "./artifacts";
@@ -38,6 +39,7 @@ import voice from "./voice";
 export const en = {
   account,
   admin,
+  agents,
   appearance,
   artifacts,
   audience,

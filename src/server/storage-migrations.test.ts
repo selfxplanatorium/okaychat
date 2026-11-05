@@ -23,7 +23,7 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       db.exec("DROP TRIGGER messages_fts_insert; DROP TRIGGER messages_fts_update; DROP TRIGGER messages_fts_delete");
       db.exec("DROP TABLE message_search_keys");
       db.exec("DROP INDEX messages_thread_time");
-      for (const table of ["chatgpt_login_attempts", "chatgpt_registrations", "chatgpt_hosts", "chatgpt_controls", "provider_model_grants", "provider_model_policies", "knowledge_chunks_fts", "knowledge_chunks", "knowledge_sources", "knowledge_collections", "share_groups", "share_users", "share_audiences", "user_group_members", "user_groups"]) db.exec("DROP TABLE " + table);
+      for (const table of ["chatgpt_login_attempts", "chatgpt_registrations", "chatgpt_hosts", "chatgpt_controls", "provider_model_grants", "provider_model_policies", "knowledge_chunks_fts", "knowledge_chunks", "knowledge_sources", "knowledge_collections", "share_groups", "share_users", "share_audiences", "user_group_members", "user_groups", "n8n_agent_sessions", "n8n_agent_runs", "n8n_agents"]) db.exec("DROP TABLE " + table);
       db.exec("ALTER TABLE threads DROP COLUMN knowledge_ids");
       db.exec("DROP TABLE image_threads");
       db.exec("DROP TABLE media");
@@ -69,6 +69,47 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       assert.ok(result.version >= 36, `user_version ${result.version}`);
       const { version: _version, ...state } = result as Record<string, unknown>;
       assert.deepEqual(state, { image: 42, skills: 0, sandbox: 0, users: 1, uploads: i === 0 ? 1 : 0, temporaryPrompt: "Keep this temporary chat out of history.", oldPromptCount: 0, original: "data:image/png;base64,bGVnYWN5LWZpbGU=", integratedTables: [...Array(10).fill(0), 1], edits: { edited_at: null, original_enc: null }, foreignKeys: [] });
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('n8n migration preserves selected audiences and rolls back schema and version together', () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'okaychat-n8n-migration-'));
+  const environment = { ...process.env, OKAYCHAT_DATA_DIR: directory, OKAYCHAT_SECRET: 'migration-tests-secret-not-for-production' };
+  const run = (code: string, extra: Record<string, string> = {}) => execFileSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', code], { env: { ...environment, ...extra }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const dbUrl = new URL('./db.ts', import.meta.url).href;
+  const setup = `const { db } = await import(${JSON.stringify(dbUrl)});
+    const version = db.prepare('PRAGMA user_version').get().user_version;
+    db.exec("INSERT INTO users (id,email,name,password_hash,role,created_at) VALUES ('u','u@example.test','U','unused','admin',1)");
+    db.exec("INSERT INTO user_groups (id,name,created_at) VALUES ('g','Group',1)");
+    db.exec("INSERT INTO user_group_members (group_id,user_id) VALUES ('g','u')");
+    db.exec("INSERT INTO share_audiences VALUES ('provider','p'),('mcp','m'),('mcp','empty')");
+    db.exec("INSERT INTO share_users VALUES ('provider','p','u')");
+    db.exec("INSERT INTO share_groups VALUES ('mcp','m','g')");
+    db.exec('DROP TABLE n8n_agent_sessions; DROP TABLE n8n_agent_runs; DROP TABLE n8n_agents');
+    db.exec('PRAGMA user_version = ' + (version - 1));
+    console.log(version); db.close();`;
+  try {
+    const tail = Number(run(setup).trim());
+    assert.throws(() => run(`await import(${JSON.stringify(dbUrl)})`, { OKAYCHAT_TEST_FAIL_MIGRATION: 'n8n-agents' }));
+    const dbFile = path.join(directory, 'okaychat.db');
+    // Read with SQLite directly so the verification itself cannot run the pending migration.
+    const result = JSON.parse(run(`import { DatabaseSync } from 'node:sqlite';
+      import fs from 'node:fs';
+      const file = fs.readdirSync(${JSON.stringify(directory)}).find(name => /\.(db|sqlite)$/.test(name));
+      const db = new DatabaseSync(${JSON.stringify(directory)} + '/' + file);
+      console.log(JSON.stringify({version:db.prepare('PRAGMA user_version').get().user_version,tables:db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'n8n_%' OR name LIKE '%_new'").all()})); db.close();`));
+    assert.equal(result.version, tail - 1);
+    assert.deepEqual(result.tables, []);
+    for (let i = 0; i < 2; i++) {
+      const state = JSON.parse(run(`const { db } = await import(${JSON.stringify(dbUrl)});
+        db.exec("INSERT OR IGNORE INTO share_audiences VALUES ('n8n','a')");
+        console.log(JSON.stringify({version:db.prepare('PRAGMA user_version').get().user_version, audiences:db.prepare('SELECT * FROM share_audiences ORDER BY kind,resource_id').all(), users:db.prepare('SELECT * FROM share_users').all(), groups:db.prepare('SELECT * FROM share_groups').all(), fks:db.prepare('PRAGMA foreign_key_check').all()})); db.close();`));
+      assert.equal(state.version, tail);
+      assert.deepEqual(state.audiences, [{ kind: 'mcp', resource_id: 'empty' }, { kind: 'mcp', resource_id: 'm' }, { kind: 'n8n', resource_id: 'a' }, { kind: 'provider', resource_id: 'p' }]);
+      assert.deepEqual(state.users, [{ kind: 'provider', resource_id: 'p', user_id: 'u' }]);
+      assert.deepEqual(state.groups, [{ kind: 'mcp', resource_id: 'm', group_id: 'g' }]);
+      assert.deepEqual(state.fks, []);
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

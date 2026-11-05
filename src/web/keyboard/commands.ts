@@ -24,11 +24,11 @@ export interface CommandDef {
   palette?: boolean;
 }
 
-const SETTINGS_SECTIONS = ["general", "account", "memory", "email", "providers", "mcp", "projects", "schedules", "usage", "appearance", "keyboard", "admin"] as const;
+const SETTINGS_SECTIONS = ["general", "account", "memory", "email", "providers", "mcp", "agents", "projects", "schedules", "usage", "appearance", "keyboard", "admin"] as const;
 
 const SETTINGS_LABELS = {
   general: "keyboard.settingsGeneral", account: "keyboard.settingsAccount", memory: "keyboard.settingsMemory", email: "keyboard.settingsEmail", providers: "keyboard.settingsProviders",
-  mcp: "keyboard.settingsMcp", projects: "keyboard.settingsProjects", schedules: "keyboard.settingsSchedules", usage: "keyboard.settingsUsage",
+  mcp: "keyboard.settingsMcp", agents: "settings.sectionAgents", projects: "keyboard.settingsProjects", schedules: "keyboard.settingsSchedules", usage: "keyboard.settingsUsage",
   appearance: "keyboard.settingsAppearance", keyboard: "keyboard.settingsKeyboard", admin: "keyboard.settingsAdmin",
 } as const satisfies Record<(typeof SETTINGS_SECTIONS)[number], PlainMessageKey>;
 
@@ -54,6 +54,7 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "nav.scheduled", labelKey: "keyboard.cmdNavScheduled", group: "Navigation", keys: [] },
   { id: "nav.plugins", labelKey: "keyboard.cmdNavPlugins", group: "Navigation", keys: [] },
   { id: "nav.settings", labelKey: "keyboard.cmdNavSettings", group: "Navigation", keys: ["Alt+Shift+O"] },
+  { id: "app.openAgents", labelKey: "keyboard.cmdAppOpenAgents", group: "Navigation", keys: [] },
   { id: "nav.projectFilter", labelKey: "keyboard.cmdNavProjectFilter", group: "Navigation", keys: [] },
   { id: "nav.createProject", labelKey: "keyboard.cmdNavCreateProject", group: "Navigation", keys: [] },
   { id: "nav.createSchedule", labelKey: "keyboard.cmdNavCreateSchedule", group: "Navigation", keys: [] },
@@ -81,6 +82,7 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "chat.loadImage", labelKey: "keyboard.cmdChatLoadImage", group: "Chat", keys: [] },
   { id: "chat.retryImage", labelKey: "keyboard.cmdChatRetryImage", group: "Chat", keys: [] },
   { id: "chat.voiceCall", labelKey: "keyboard.cmdChatVoiceCall", group: "Chat", keys: [] },
+  { id: "chat.resetAgentSession", labelKey: "keyboard.cmdChatResetAgentSession", group: "Chat", keys: [] },
 
   { id: "composer.model", labelKey: "keyboard.cmdComposerModel", group: "Composer", keys: ["Alt+Shift+M"] },
   { id: "composer.effort", labelKey: "keyboard.cmdComposerEffort", group: "Composer", keys: ["Alt+Shift+T"] },
@@ -139,6 +141,10 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "settings.chatgptDisconnectChat", labelKey: "keyboard.cmdSettingsChatgptDisconnectChat", group: "Settings", keys: [] },
   { id: "settings.chatgptEnablePlan", labelKey: "keyboard.cmdSettingsChatgptEnablePlan", group: "Settings", keys: [] },
   { id: "settings.chatgptForget", labelKey: "keyboard.cmdSettingsChatgptForget", group: "Settings", keys: [] },
+  { id: "agents.create", labelKey: "keyboard.cmdAgentsCreate", group: "Settings", keys: [] },
+  { id: "agents.save", labelKey: "keyboard.cmdAgentsSave", group: "Settings", keys: [] },
+  { id: "agents.test", labelKey: "keyboard.cmdAgentsTest", group: "Settings", keys: [] },
+  { id: "agents.stopTest", labelKey: "keyboard.cmdAgentsStopTest", group: "Settings", keys: [] },
   { id: "email.addAccount", labelKey: "keyboard.cmdEmailAdd", group: "Settings", keys: [] },
   { id: "email.discover", labelKey: "keyboard.cmdEmailDiscover", group: "Settings", keys: [] },
   { id: "email.test", labelKey: "keyboard.cmdEmailTest", group: "Settings", keys: [] },

@@ -769,6 +769,89 @@ const migrations: Array<string | (() => void)> = [
   DELETE FROM shared_connections WHERE provider_id = 'chatgpt';
   DELETE FROM share_audiences WHERE kind = 'provider' AND resource_id = 'chatgpt';
   `,
+  // n8n webhook agents (docs/implementation/n8n-agents.md): encrypted definitions, per-thread remote sessions,
+  // and run counters without bodies. Shared agents use the audience tables, whose kind CHECK only SQLite's
+  // table rebuild can widen: copy into new tables, drop the old children before their parent, then rename
+  // (SQLite rewrites the children's foreign keys to the renamed parent).
+  () => {
+    db.exec(`
+    CREATE TABLE n8n_agents (
+      id TEXT PRIMARY KEY,
+      owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      shared INTEGER NOT NULL DEFAULT 0 CHECK (shared IN (0, 1)),
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      avatar TEXT NOT NULL DEFAULT 'workflow',
+      enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+      config_enc TEXT NOT NULL,
+      revision INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX n8n_agents_owner ON n8n_agents(owner_id, shared);
+    CREATE INDEX n8n_agents_shared ON n8n_agents(shared, enabled);
+    CREATE TABLE n8n_agent_sessions (
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+      agent_id TEXT NOT NULL REFERENCES n8n_agents(id) ON DELETE CASCADE,
+      agent_revision INTEGER NOT NULL,
+      session_enc TEXT NOT NULL,
+      history_hash TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, thread_id, agent_id)
+    );
+    CREATE TABLE n8n_agent_runs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      thread_id TEXT REFERENCES threads(id) ON DELETE SET NULL,
+      agent_id TEXT, -- no foreign key: usage counters survive deleting the agent
+      status TEXT NOT NULL CHECK (status IN ('ok', 'error', 'aborted')),
+      duration_ms INTEGER NOT NULL,
+      input_bytes INTEGER NOT NULL,
+      output_bytes INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX n8n_agent_runs_user_time ON n8n_agent_runs(user_id, created_at);
+    CREATE TABLE share_audiences_new (
+      kind TEXT NOT NULL CHECK (kind IN ('provider', 'mcp', 'n8n')),
+      resource_id TEXT NOT NULL,
+      PRIMARY KEY (kind, resource_id)
+    );
+    CREATE TABLE share_users_new (
+      kind TEXT NOT NULL,
+      resource_id TEXT NOT NULL,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      PRIMARY KEY (kind, resource_id, user_id),
+      FOREIGN KEY (kind, resource_id) REFERENCES share_audiences_new(kind, resource_id) ON DELETE CASCADE
+    );
+    CREATE TABLE share_groups_new (
+      kind TEXT NOT NULL,
+      resource_id TEXT NOT NULL,
+      group_id TEXT NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+      PRIMARY KEY (kind, resource_id, group_id),
+      FOREIGN KEY (kind, resource_id) REFERENCES share_audiences_new(kind, resource_id) ON DELETE CASCADE
+    );
+    INSERT INTO share_audiences_new (kind, resource_id) SELECT kind, resource_id FROM share_audiences;
+    INSERT INTO share_users_new (kind, resource_id, user_id) SELECT kind, resource_id, user_id FROM share_users;
+    INSERT INTO share_groups_new (kind, resource_id, group_id) SELECT kind, resource_id, group_id FROM share_groups;
+    `);
+    // Test seam: proves a failure midway rolls back every table above together with the version.
+    if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "n8n-agents") throw new Error("Injected migration failure");
+    db.exec(`
+    DROP TABLE share_users;
+    DROP TABLE share_groups;
+    DROP TABLE share_audiences;
+    ALTER TABLE share_audiences_new RENAME TO share_audiences;
+    ALTER TABLE share_users_new RENAME TO share_users;
+    ALTER TABLE share_groups_new RENAME TO share_groups;
+    `);
+    db.exec(`CREATE TRIGGER n8n_agent_audience_cleanup AFTER DELETE ON n8n_agents BEGIN
+      DELETE FROM share_audiences WHERE kind = 'n8n' AND resource_id = OLD.id;
+    END`);
+    // Refuse to commit any broken references after the audience rebuild.
+    const broken = db.prepare("PRAGMA foreign_key_check").all();
+    if (broken.length) throw new Error(`Audience rebuild left ${broken.length} broken foreign keys`);
+  },
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
