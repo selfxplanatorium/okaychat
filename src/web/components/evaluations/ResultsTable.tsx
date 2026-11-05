@@ -83,7 +83,7 @@ export function ResultsTable({ run, onOpen }: { run: EvalRunDetail; onOpen: (cas
         <p className="text-muted-foreground p-6 text-sm">{t("evaluations.resultsEmpty")}</p>
       ) : (
         <div className="min-h-0 flex-1 overflow-x-auto">
-          <table className="w-full min-w-[52rem] text-left text-xs">
+          <table className="w-full min-w-[46rem] text-left text-xs">
             <thead className="bg-muted/60 sticky top-0 z-10">
               <tr>
                 {[t("evaluations.columnCase"), t("evaluations.columnInput"), t("evaluations.columnState"), t("evaluations.columnLatency"), t("evaluations.columnTokens"), t("evaluations.columnCost"), t("evaluations.columnManual"), t("evaluations.columnJudge")].map((label) => (
