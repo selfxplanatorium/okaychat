@@ -440,3 +440,50 @@ test("admin visibility is metadata only and can disable an endpoint with an audi
   assert.equal((db.prepare("SELECT COUNT(*) AS n FROM permission_audit WHERE summary_json LIKE ?").get(`%${created.endpoint.id}%`) as { n: number }).n, 1);
   assert.equal((await call(`/webhooks/${created.endpoint.id}`, { method: "PATCH", user: "alice", json: { revision: 2, enabled: true } })).status, 200);
 });
+
+test("a chat that used shared knowledge never exports, even while its collections stay readable", async () => {
+  const config = JSON.stringify({ version: 1, requestKind: "send", turnOrigin: "interactive", modelRef: "m", sampling: {}, instructions: "", toolPolicy: { mode: "inherit", builtins: [], mcpTools: [] }, knowledgeIds: [], assistantName: null, assistantIcon: null, assistantRevision: null, webSearch: true, deepResearch: false });
+  for (const thread of ["thr_restricted", "thr_later"]) {
+    db.prepare("INSERT INTO threads (id, user_id, title, created_at, updated_at) VALUES (?, 'alice', 't', 1, 1)").run(thread);
+  }
+  db.prepare("INSERT INTO generation_runs (id, thread_id, user_message_id, assistant_message_id, config_json, state, created_at, updated_at) VALUES ('run_r', 'thr_restricted', 'm1', 'a1', ?, 'running', 1, 1)").run(config);
+  db.prepare("INSERT INTO generation_runs (id, thread_id, user_message_id, assistant_message_id, config_json, state, created_at, updated_at) VALUES ('run_l', 'thr_later', 'm2', 'a2', ?, 'running', 1, 1)").run(config);
+  const created = await createEndpoint({ subscriptions: ["chat.turn.completed"], includeMessageText: true });
+  await enable(created.endpoint.id, 1);
+
+  // Bob publishes the collection to everyone, so Alice's dependency stays readable throughout.
+  db.prepare("INSERT OR IGNORE INTO knowledge_collections (id, user_id, name, visibility, created_at, updated_at) VALUES ('kc_shared', 'bob', 'Team', 'shared', 1, 1)").run();
+  db.prepare("INSERT INTO knowledge_thread_dependencies (thread_id, collection_id, created_at) VALUES ('thr_restricted', 'kc_shared', 1)").run();
+  endRun("run_r", { state: "finished", finishReason: "stop", durationMs: 1 }, { answerText: "team secret" });
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM outgoing_webhook_deliveries WHERE endpoint_id = ?").get(created.endpoint.id) as { n: number }).n, 0);
+
+  // Admitted before the chat attached shared knowledge: the claim-time recheck cancels it unsent.
+  endRun("run_l", { state: "finished", finishReason: "stop", durationMs: 1 }, { answerText: "later" });
+  const row = db.prepare("SELECT id FROM outgoing_webhook_deliveries WHERE endpoint_id = ?").get(created.endpoint.id) as { id: string };
+  db.prepare("INSERT INTO knowledge_thread_dependencies (thread_id, collection_id, created_at) VALUES ('thr_later', 'kc_shared', 1)").run();
+  assert.equal(store.claimDelivery(row.id, Date.now()), null);
+  assert.deepEqual({ ...db.prepare("SELECT status, last_error_code FROM outgoing_webhook_deliveries WHERE id = ?").get(row.id) }, { status: "cancelled", last_error_code: "source_revoked" });
+});
+
+test("a group room stops exporting once its owner leaves the room's groups", async () => {
+  const room = createChannel("alice", {
+    clientId: "room-g",
+    name: "Group room",
+    description: "",
+    icon: "hash",
+    visibility: "private",
+    groupIds: [],
+    aiJson: null,
+    requestHash: "hash-room-g",
+  }).value;
+  const created = await createEndpoint({ subscriptions: ["channel.message.created"], channelIds: [room.id], includeMessageText: true });
+  await enable(created.endpoint.id, 1);
+  postHumanMessage("alice", room.id, { clientId: "g1", body: "before", mentions: [], requestHash: postRequestHash({ body: "before" }) }, () => null);
+  const row = db.prepare("SELECT id FROM outgoing_webhook_deliveries WHERE endpoint_id = ?").get(created.endpoint.id) as { id: string };
+  // The room becomes group-scoped with no group the owner belongs to: reads close, so does the export.
+  db.prepare("UPDATE channels SET visibility = 'group' WHERE id = ?").run(room.id);
+  assert.equal(store.claimDelivery(row.id, Date.now()), null);
+  assert.deepEqual({ ...db.prepare("SELECT status, last_error_code FROM outgoing_webhook_deliveries WHERE id = ?").get(row.id) }, { status: "cancelled", last_error_code: "source_revoked" });
+  const saved = await call(`/webhooks/${created.endpoint.id}`, { method: "PATCH", json: { revision: 2, channelIds: [room.id] } });
+  assert.equal(saved.status, 400, "an ineligible room cannot be selected");
+});

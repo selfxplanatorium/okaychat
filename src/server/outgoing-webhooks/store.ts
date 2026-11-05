@@ -1,10 +1,11 @@
 import { assertFeature, featureAllowed } from "../permissions/guard.js";
-import { threadKnowledgeAccess } from "../knowledge/thread-policy.js";
+import { isRestrictedKnowledgeThread, ownsThreadRow } from "../knowledge/thread-policy.js";
 import { afterCommit, db, tx } from "../db.js";
 import { decrypt, encrypt, newId, sha256 } from "../crypto.js";
 import { AppError } from "../errors.js";
 import { assertStorage, QuotaError } from "../quota.js";
-import { channelRow } from "../channels/access.js";
+import { channelEligibility, channelRow } from "../channels/access.js";
+import type { ChannelVisibility } from "../../shared/channels.js";
 import { encodeCursor } from "./schemas.js";
 import {
   TEXT_EVENT_TYPES,
@@ -153,6 +154,14 @@ function hostnameOf(row: EndpointRow): string {
   }
 }
 
+/**
+ * A chat that ever used another account's shared knowledge is never redistributable (shares, exports,
+ * archives, schedules), even while its dependencies resolve, so it never leaves through a webhook either.
+ */
+function threadExportable(userId: string, threadId: string): boolean {
+  return ownsThreadRow(userId, threadId) && !isRestrictedKnowledgeThread(threadId);
+}
+
 const endpointReservation = (name: string, configEnc: string, secretEnc: string) =>
   Buffer.byteLength(name) + Buffer.byteLength(configEnc) + Buffer.byteLength(secretEnc) + 2048;
 
@@ -244,10 +253,10 @@ export function getEndpoint(userId: string, id: string): EndpointDetail | undefi
 /** Save-time room scope: only currently owned rooms, never DMs, never archived rooms. */
 function assertOwnedRooms(userId: string, channelIds: string[]): void {
   for (const id of channelIds) {
-    const row = db.prepare("SELECT owner_id, kind, archived_at FROM channels WHERE id = ?").get(id) as
-      | { owner_id: string; kind: string; archived_at: number | null }
+    const row = db.prepare("SELECT owner_id, kind, archived_at, visibility FROM channels WHERE id = ?").get(id) as
+      | { owner_id: string; kind: string; archived_at: number | null; visibility: ChannelVisibility }
       | undefined;
-    if (!row || row.owner_id !== userId || row.kind !== "room" || row.archived_at !== null) {
+    if (!row || row.owner_id !== userId || row.kind !== "room" || row.archived_at !== null || !channelEligibility(userId, { id, visibility: row.visibility })) {
       throw new AppError({ code: "validation", message: "A selected room is not one you currently own." });
     }
   }
@@ -258,6 +267,8 @@ function assertChannelEventEligible(userId: string, row: EndpointRow, channelId:
   if (!featureAllowed({ userId, modelRef: null }, "channels")) return false;
   const channel = channelRow(channelId);
   if (!channel || channel.owner_id !== userId || channel.kind !== "room" || channel.archived_at !== null) return false;
+  // Group-scoped rooms close even for their owner after a group removal; the export closes with them.
+  if (!channelEligibility(userId, channel)) return false;
   if (deletion || !messageId) return true;
   return !!db.prepare("SELECT 1 FROM channel_messages WHERE channel_id = ? AND id = ? AND deleted_at IS NULL").get(channelId, messageId);
 }
@@ -268,11 +279,11 @@ export function sourceAccessible(row: DeliveryRow, endpoint?: EndpointRow): bool
   switch (row.event_type) {
     case "chat.turn.completed":
     case "chat.turn.failed":
-      return !!row.source_thread_id && threadKnowledgeAccess(row.user_id, row.source_thread_id) === "available";
+      return !!row.source_thread_id && threadExportable(row.user_id, row.source_thread_id);
     case "schedule.run.completed":
     case "schedule.run.failed":
       if (!featureAllowed({ userId: row.user_id, modelRef: null }, "schedules")) return false;
-      return !row.source_thread_id || threadKnowledgeAccess(row.user_id, row.source_thread_id) === "available";
+      return !row.source_thread_id || threadExportable(row.user_id, row.source_thread_id);
     case "channel.message.created":
     case "channel.message.edited":
     case "channel.mention":
@@ -558,10 +569,10 @@ export function admitEvent<K extends ProductionEventType>(input: AdmissionInput<
       if (!assertChannelEventEligible(input.userId, endpoint, input.channelId, input.messageId ?? null, deletion)) continue;
     }
     if ((input.type === "chat.turn.completed" || input.type === "chat.turn.failed") && input.threadId) {
-      if (threadKnowledgeAccess(input.userId, input.threadId) !== "available") continue;
+      if (!threadExportable(input.userId, input.threadId)) continue;
     }
     if ((input.type === "schedule.run.completed" || input.type === "schedule.run.failed") && input.threadId) {
-      if (threadKnowledgeAccess(input.userId, input.threadId) !== "available") continue;
+      if (!threadExportable(input.userId, input.threadId)) continue;
     }
     const admission = (() => {
       try {
