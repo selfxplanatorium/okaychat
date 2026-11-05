@@ -65,7 +65,9 @@ root, and a top-level post quoting a reply joins that reply's thread.
 per-viewer cursor. A root tombstone removes the state row, tombstones its live replies, and emits one
 `message.changed` per reply with `rootId`; a reply tombstone recomputes the counters. A thread holds at
 most 500 live replies. `GET /api/channels/:id/messages/:messageId/thread` pages replies (50 max, 30
-default) and returns `focusId` when the requested id was a reply. The room dot uses the newest reply only,
+default) and returns `focusId` when the requested id was a reply. Reply edits carry `rootId` on their
+invalidation. The web invalidation pump refreshes both thread projections and room messages, filtering
+replies out of the room cache so they cannot affect room reads. The room dot uses the newest reply only,
 so your own newest reply hides it; the thread's own unread count is exact.
 
 Replies never enter the room AI transcript, and neither entry point can start a run on a reply or with
@@ -85,7 +87,9 @@ channel-disabled account with the same 422.
 DMs have no AI binding, invites, roles, archive, audience, or metadata edits; every room-only route answers
 403. They never appear in discover, global search, or `/api/admin/channels`, and admin inspect, patch,
 delete, and moderate answer 404 before a reason check. No audit row names a DM. Leaving transfers ownership
-to the oldest remaining member; the last member deletes the row, its attachments, and its media directory.
+to the oldest remaining member after checking that member’s storage quota; a failed transfer rolls back
+the leave or block, including membership, payer changes, and the block row. The last member deletes the
+row, its attachments, and its media directory.
 Blocking leaves every two-member DM between the pair but keeps group DMs.
 
 ## REST

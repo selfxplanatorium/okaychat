@@ -10,7 +10,7 @@ import { chargeRate } from "./rate.js";
 import { purgeChannelNotices } from "../notifications.js";
 import { requestChannelRevocation } from "./revocation.js";
 import { removeChannelMedia } from "./attachments.js";
-import { dmCounts, type StoreResult } from "./store.js";
+import { channelStorageBytes, dmCounts, type StoreResult } from "./store.js";
 
 /**
  * Direct messages are `channels` rows with `kind='dm'`, `visibility='private'`, an empty name, and a
@@ -154,6 +154,8 @@ function leaveInTx(userId: string, channel: ChannelRow): void {
   }
   if (member.role === "owner") {
     const next = remaining[0]!;
+    // Leaving and blocking must obey the same payer limit as an explicit room transfer.
+    assertStorage(next.user_id, channelStorageBytes(channel.id));
     db.prepare("UPDATE channel_members SET role = 'owner' WHERE channel_id = ? AND user_id = ?").run(channel.id, next.user_id);
     db.prepare("UPDATE channels SET owner_id = ? WHERE id = ?").run(next.user_id, channel.id);
     db.prepare("UPDATE channel_attachments SET owner_id = ? WHERE channel_id = ?").run(next.user_id, channel.id);

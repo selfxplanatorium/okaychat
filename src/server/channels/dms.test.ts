@@ -30,6 +30,7 @@ before(() => {
 });
 
 beforeEach(() => {
+  db.exec("UPDATE users SET storage_limit = NULL");
   db.exec("DELETE FROM channel_rate_windows; DELETE FROM notifications; DELETE FROM channel_dm_blocks; DELETE FROM channel_attachments; DELETE FROM channel_messages; DELETE FROM channel_members; DELETE FROM channels");
 });
 
@@ -169,4 +170,29 @@ test("deleting a DM owner removes it without an audit row and frees its attachme
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM channels WHERE id = ?").get(dm.body.channel.id).n, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM channel_moderation_audit WHERE channel_id = ?").get(dm.body.channel.id).n, 0);
   assert.ok(storageUsed("alice") < used);
+});
+
+test("owner leave and block cannot transfer DM bytes beyond the next owner's quota", async () => {
+  const dm = await createDm("alice", ["bob"]);
+  const id = dm.body.channel.id;
+  await postMessage(call, id, { body: "Stored conversation" }, "alice");
+  const attachment = await uploadFile(call, id, new File(["pending bytes"], "pending.txt"), "alice");
+  const aliceUsed = storageUsed("alice");
+  const bobUsed = storageUsed("bob");
+  db.prepare("UPDATE users SET storage_limit = ? WHERE id = 'bob'").run(bobUsed + 1);
+  for (const endpoint of [`/channels/${id}/leave`, "/channels/dm-blocks/bob"]) {
+    const response = await call(endpoint, { method: "POST", json: {}, user: "alice" });
+    assert.equal(response.status, 413);
+    assert.equal(db.prepare("SELECT owner_id FROM channels WHERE id = ?").get(id).owner_id, "alice");
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM channel_members WHERE channel_id = ?").get(id).n, 2);
+    assert.equal(db.prepare("SELECT owner_id FROM channel_attachments WHERE id = ?").get(attachment.id).owner_id, "alice");
+    assert.equal(storageUsed("alice"), aliceUsed);
+    assert.equal(storageUsed("bob"), bobUsed);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM channel_dm_blocks").get().n, 0);
+  }
+  db.prepare("UPDATE users SET storage_limit = ? WHERE id = 'bob'").run(bobUsed + aliceUsed);
+  assert.equal((await call(`/channels/${id}/leave`, { method: "POST", json: {}, user: "alice" })).status, 200);
+  assert.equal(storageUsed("alice"), 0);
+  assert.equal(storageUsed("bob"), bobUsed + aliceUsed);
+  assert.equal(db.prepare("SELECT owner_id FROM channel_attachments WHERE id = ?").get(attachment.id).owner_id, "bob");
 });

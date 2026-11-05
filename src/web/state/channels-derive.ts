@@ -120,3 +120,8 @@ export function excerpt(text: string, max = 160): string {
 export function isArchived(room: Pick<ChannelSummary, "archivedAt">): boolean {
   return room.archivedAt !== null;
 }
+
+/** Room invalidations can name replies; those belong only in the thread cache. */
+export function mergeRoomMessages(current: ChannelMessage[], incoming: ChannelMessage[]): ChannelMessage[] {
+  return mergeMessages(current.filter((message) => message.threadRootId === null), incoming.filter((message) => message.threadRootId === null));
+}

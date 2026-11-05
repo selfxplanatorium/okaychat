@@ -21,7 +21,7 @@ import { t } from "@/i18n";
 import { channelError } from "@/lib/channel-error";
 import { channelsApi, type ChannelBindingRequest } from "./channels-api";
 import { startChannelTransport, type TransportState } from "./channels-events";
-import { capMessages, mergeMessages, mergeMessage, mergeThread, newestSeq, reconcileRooms, sortMessages, totalUnread, MAX_THREADS_IN_MEMORY, type ChannelThreadState } from "./channels-derive";
+import { capMessages, mergeMessages, mergeRoomMessages, mergeMessage, mergeThread, newestSeq, reconcileRooms, sortMessages, totalUnread, MAX_THREADS_IN_MEMORY, type ChannelThreadState } from "./channels-derive";
 
 /** In-memory channel workspace state. No room text, drafts, or history may touch browser storage. */
 
@@ -283,8 +283,11 @@ export const useChannels = create<ChannelsState>((set, get) => {
             if (get().activeRoomId !== roomId) return;
             try {
               const { message } = await channelsApi.message(roomId, id);
-              const current = get().messages[roomId] ?? [];
-              set({ messages: { ...get().messages, [roomId]: mergeMessages(current, [message]) } });
+              if (get().activeRoomId !== roomId) return;
+              set((state) => ({
+                messages: { ...state.messages, [roomId]: mergeRoomMessages(state.messages[roomId] ?? [], [message]) },
+                threads: mergeIntoThreads(state.threads, message),
+              }));
             } catch {
               // A deleted/inaccessible message is refreshed from the latest page below.
               void get().loadHistory();
@@ -607,7 +610,7 @@ export const useChannels = create<ChannelsState>((set, get) => {
         if (generation !== get().generation || get().activeRoomId !== id) return;
         set((state) => {
           const current = state.messages[id] ?? [];
-          const merged = mergeMessages(current, page.items);
+          const merged = mergeRoomMessages(current, page.items);
           return {
             messages: { ...state.messages, [id]: merged },
             pages: {
@@ -638,7 +641,7 @@ export const useChannels = create<ChannelsState>((set, get) => {
       try {
         const { message } = await channelsApi.message(id, messageId);
         set((state) => ({
-          messages: { ...state.messages, [id]: mergeMessages(state.messages[id] ?? [], [message]) },
+          messages: { ...state.messages, [id]: mergeRoomMessages(state.messages[id] ?? [], [message]) },
           threads: mergeIntoThreads(state.threads, message),
         }));
       } catch {
@@ -659,7 +662,7 @@ export const useChannels = create<ChannelsState>((set, get) => {
         }
         const page = await channelsApi.messages(id, { aroundId: messageId });
         set((state) => ({
-          messages: { ...state.messages, [id]: mergeMessages(state.messages[id] ?? [], page.items) },
+          messages: { ...state.messages, [id]: mergeRoomMessages(state.messages[id] ?? [], page.items) },
           pages: { ...state.pages, [id]: { nextBeforeSeq: page.nextBeforeSeq, nextAfterSeq: page.nextAfterSeq, hasMore: page.hasMore } },
         }));
       } catch {
@@ -722,7 +725,7 @@ export const useChannels = create<ChannelsState>((set, get) => {
           return;
         }
         set((state) => {
-          const messages = result.message ? mergeMessages(state.messages[id] ?? [], [result.message]) : state.messages[id] ?? [];
+          const messages = result.message ? mergeRoomMessages(state.messages[id] ?? [], [result.message]) : state.messages[id] ?? [];
           const pendingAttachments = { ...state.pendingAttachments };
           delete pendingAttachments[composerKey];
           return {
@@ -829,7 +832,7 @@ export const useChannels = create<ChannelsState>((set, get) => {
             const oldest = keys.filter((key) => key !== rootId).sort((a, b) => threads[a]!.openedAt - threads[b]!.openedAt)[0];
             if (oldest) delete threads[oldest];
           }
-          const messages = mergeMessages(state.messages[id] ?? [], [page.root]);
+          const messages = mergeRoomMessages(state.messages[id] ?? [], [page.root]);
           return {
             threads,
             threadStatus: state.activeThreadId === rootId ? "ready" : state.threadStatus,
@@ -995,7 +998,7 @@ export const useChannels = create<ChannelsState>((set, get) => {
       try {
         const { message } = await channelsApi.editMessage(id, messageId, { revision: current.revision, body: body.replace(/\r\n/g, "\n"), mentions });
         set((state) => ({
-          messages: { ...state.messages, [id]: mergeMessages(state.messages[id] ?? [], [message]) },
+          messages: { ...state.messages, [id]: mergeRoomMessages(state.messages[id] ?? [], [message]) },
           threads: mergeIntoThreads(state.threads, message),
           error: null,
         }));
@@ -1025,7 +1028,7 @@ export const useChannels = create<ChannelsState>((set, get) => {
       try {
         const { message } = await channelsApi.react(id, messageId, emoji, add);
         set((state) => ({
-          messages: { ...state.messages, [id]: mergeMessages(state.messages[id] ?? [], [message]) },
+          messages: { ...state.messages, [id]: mergeRoomMessages(state.messages[id] ?? [], [message]) },
           threads: mergeIntoThreads(state.threads, message),
         }));
       } catch (error) {

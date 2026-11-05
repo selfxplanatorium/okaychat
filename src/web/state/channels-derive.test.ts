@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ChannelMessage, ChannelSummary } from "@shared/channels";
-import { capMessages, mergeMessage, mergeMessages, nextUnreadAfter, totalUnread } from "./channels-derive";
+import { capMessages, mergeRoomMessages, mergeMessage, mergeMessages, nextUnreadAfter, totalUnread } from "./channels-derive";
 import { dmTitle, dmsOf, mergeThread, roomsOf, threadLabel } from "./channels-derive";
 
 const message = (id: string, seq: number, revision = 1, deleted = false): ChannelMessage => ({
@@ -101,4 +101,11 @@ test("thread labels and merges never move a cursor backwards or drop loaded repl
   assert.deepEqual(merged.items.map((item) => item.seq), [2, 3]);
   assert.equal(merged.readSeq, 3, "a page with an older cursor never lowers the read position");
   assert.equal(merged.root?.id, "root");
+});
+
+test("reply invalidations never enter the room timeline or advance its newest sequence", () => {
+  const root = message("root", 1);
+  const reply = { ...message("reply", 5), threadRootId: root.id };
+  assert.deepEqual(mergeRoomMessages([root], [reply]), [root]);
+  assert.deepEqual(mergeRoomMessages([root, reply], [{ ...reply, revision: 2, body: "edited" }]), [root]);
 });
