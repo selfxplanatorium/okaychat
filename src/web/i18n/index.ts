@@ -1,3 +1,4 @@
+import { SOURCE_LOCALE } from "@shared/ui-locales";
 import { en } from "./en";
 import { currentLocale, setActiveLocale } from "./locale";
 
@@ -43,7 +44,7 @@ export type Translation = {
   [N in Namespace]?: { [K in keyof Catalog[N]]?: Catalog[N][K] extends string ? string : PluralForms };
 };
 
-export const SOURCE_LOCALE = "en";
+export { SOURCE_LOCALE };
 export const LOCALE_STORAGE_KEY = "okaychat:locale";
 
 let overrides: Translation = {};

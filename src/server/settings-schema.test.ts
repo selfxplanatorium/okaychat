@@ -35,3 +35,15 @@ test("activity indicator preferences are a complete strict pair", () => {
     assert.equal(settingsPatch.safeParse({ channelActivity: value }).success, false, JSON.stringify(value));
   }
 });
+
+test("language fields accept any structurally valid tag, null, or omission and reject malformed tags", () => {
+  for (const tag of ["fr", "FR-fr", "it-IT", "pt-PT", "pt-pt", "pt-BR", "pt", "nl-BE", "zz"]) {
+    assert.deepEqual(settingsPatch.parse({ locale: tag, translationTarget: tag }), { locale: tag, translationTarget: tag });
+  }
+  assert.deepEqual(settingsPatch.parse({ locale: null }), { locale: null });
+  assert.deepEqual(settingsPatch.parse({}), {});
+  for (const tag of ["pt_PT", "f", "fr-", `en-${"a".repeat(40)}`, "", 3]) {
+    assert.equal(settingsPatch.safeParse({ locale: tag }).success, false, String(tag));
+    assert.equal(settingsPatch.safeParse({ translationTarget: tag }).success, false, String(tag));
+  }
+});

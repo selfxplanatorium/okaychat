@@ -31,10 +31,15 @@ export function getSettings(userId: string): UserSettings {
   if (settings.notifications !== undefined && !validNotificationSettings(settings.notifications)) delete settings.notifications;
   // A hand-edited or legacy value falls back to the documented default instead of hiding the switch.
   if (!isChannelActivitySettings(settings.channelActivity)) settings.channelActivity = { ...DEFAULT_CHANNEL_ACTIVITY_SETTINGS };
-  // A tag stored by an older client (or a hand-edited row) follows the browser instead of blocking settings.
+  // A tag stored by an older client (or a hand-edited row) follows the browser instead of blocking settings;
+  // a valid one is returned in canonical form (`pt-pt` → `pt-PT`) so clients compare tags exactly. The row
+  // itself is not rewritten.
   for (const key of ["locale", "translationTarget"] as const) {
     const value = settings[key];
-    if (value != null && (typeof value !== "string" || canonicalLocaleTag(value) === null)) delete settings[key];
+    if (value == null) continue;
+    const canonical = typeof value === "string" ? canonicalLocaleTag(value) : null;
+    if (canonical === null) delete settings[key];
+    else settings[key] = canonical;
   }
   return settings;
 }

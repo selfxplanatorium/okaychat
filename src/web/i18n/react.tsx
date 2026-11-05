@@ -3,10 +3,10 @@ import { template, type MessageKey, type MessageNodeParams } from "./index";
 import { formatNumber } from "./format";
 
 /**
- * `t()` for text with elements inside, such as a link or bold name: `{name}` placeholders take any
+ * `t()` for text with elements inside, such as a link or bold name: placeholders take any
  * ReactNode, so translators keep control of word order. Plain-string results should use `t()`.
  *
- *   <Trans k="share.byline" params={{ name: <strong>{user}</strong> }} />
+ *   <Trans k="schedules.lastRunError" params={{ date, error: <span className="text-error">{message}</span> }} />
  */
 export function Trans<K extends MessageKey>({ k, params }: { k: K; params?: MessageNodeParams<K, ReactNode> }) {
   const values = params as Record<string, ReactNode> | undefined;
