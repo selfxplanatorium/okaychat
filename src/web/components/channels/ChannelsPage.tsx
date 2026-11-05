@@ -23,6 +23,8 @@ import { CreateChannelDialog } from "./CreateChannelDialog";
 import { ChannelJoinDialog } from "./ChannelJoinDialog";
 import type { MessageActions } from "./ChannelMessageRow";
 
+const NO_MESSAGES: ChannelMessage[] = [];
+
 export function ChannelsPage({ channelId }: { channelId?: string }) {
   const me = useData((state) => state.me);
   const [, navigate] = useLocation();
@@ -41,7 +43,7 @@ export function ChannelsPage({ channelId }: { channelId?: string }) {
   const roomStatus = useChannels((state) => state.roomStatus);
   const roomView = useChannels((state) => state.room);
   const activeRoomId = useChannels((state) => state.activeRoomId);
-  const messages = useChannels((state) => (state.activeRoomId ? state.messages[state.activeRoomId] ?? [] : []));
+  const messages = useChannels((state) => (state.activeRoomId ? state.messages[state.activeRoomId] ?? NO_MESSAGES : NO_MESSAGES));
   const pages = useChannels((state) => (state.activeRoomId ? state.pages[state.activeRoomId] : undefined));
   const members = useChannels((state) => state.members);
   const drafts = useChannels((state) => state.drafts);
