@@ -61,7 +61,7 @@ export function ChannelList({
   };
   const tabs = [
     ["joined", "channels.joined", CompassIcon],
-    ["dm", "channels.directMessages", UsersIcon],
+    ["dm", "channels.dmTab", UsersIcon],
     ["discover", "channels.discover", SearchIcon],
     ["invitations", "channels.invites", MailIcon],
     ["archived", "channels.archived", ArchiveIcon],

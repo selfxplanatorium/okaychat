@@ -67,8 +67,9 @@ The ChatGPT plan uses the official **Sign in with ChatGPT** flow for chat. Set `
 - Streaming Markdown, math, Mermaid, syntax highlighting, and reasoning logs
 - Branches, editable replies, retries, model switching, and full-text search
 - Named assistants, a saved prompt library with variables and `/shortcuts`, bookmarks, feedback, and explicit continuation of truncated replies
-- Shared team channels with rooms, mentions, reactions, realtime updates, and explicit AI replies
+- Shared team channels with rooms, attachments, thread replies, direct messages, mentions, reactions, realtime updates, and explicit AI replies
 - Private notes with tags and search, and a calendar with reminders
+- German and Spanish UI, plus per-message translation into any language
 - Tags, saved filters, notifications, and portable chat archives
 - Attachments: images, PDFs, DOCX, and text/code files
 - Prompt-injection envelopes, approval gates, and honest errors

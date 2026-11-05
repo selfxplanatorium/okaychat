@@ -191,6 +191,7 @@ export default {
   threadAiUnavailable: "Assistant replies are not available in threads.",
 
   directMessages: "Direct messages",
+  dmTab: "DMs",
   newDm: "New message",
   dmTo: "To",
   dmSearchPlaceholder: "Search by account email",
