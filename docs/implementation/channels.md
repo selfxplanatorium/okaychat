@@ -311,5 +311,5 @@ that reply, so an old reply opens on its own page instead of the newest page whe
 Outgoing webhooks hook authoritative room transactions, not SSE invalidations. Human create/edit/delete
 and a structured mention of the room owner, plus a successful assistant settlement, can emit a curated
 event (see `docs/implementation/outgoing-webhooks.md`). The endpoint owner must currently own the selected
-room; DMs, joined-only rooms, presence, typing, reactions, reads, and records invalidations never export.
+room and pass its live group eligibility (a group removal stops the export as it closes the room); DMs, joined-only rooms, presence, typing, reactions, reads, and records invalidations never export.
 Edit and delete cancel and scrub older unsent text copies for that message.
