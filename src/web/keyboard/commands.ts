@@ -128,6 +128,7 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "settings.ollamaCancelPull", labelKey: "keyboard.cmdSettingsOllamaCancelPull", group: "Settings", keys: [] },
   { id: "settings.ollamaDelete", labelKey: "keyboard.cmdSettingsOllamaDelete", group: "Settings", keys: [] },
   { id: "settings.providerModels", labelKey: "keyboard.cmdSettingsProviderModels", group: "Settings", keys: [] },
+  { id: "settings.permissions", labelKey: "keyboard.cmdSettingsPermissions", group: "Settings", keys: [] },
   { id: "email.addAccount", labelKey: "keyboard.cmdEmailAdd", group: "Settings", keys: [] },
   { id: "email.discover", labelKey: "keyboard.cmdEmailDiscover", group: "Settings", keys: [] },
   { id: "email.test", labelKey: "keyboard.cmdEmailTest", group: "Settings", keys: [] },

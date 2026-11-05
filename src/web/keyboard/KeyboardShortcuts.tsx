@@ -3,7 +3,7 @@ import { CommandIcon, SearchIcon } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { settingsHref } from "@/lib/settings-link";
+import { settingsHref, permissionsHref } from "@/lib/settings-link";
 import { signOut } from "@/lib/sign-out";
 import { cn } from "@/lib/utils";
 import { useAppearance } from "@/state/appearance";
@@ -96,6 +96,11 @@ export function KeyboardShortcuts() {
     const section = command.id.slice("settings.".length);
     useCommand(command.id, () => {
       if (section === "admin" && useData.getState().me?.role !== "admin") return false;
+      if (section === "permissions") {
+        if (useData.getState().me?.role !== "admin") return false;
+        navigate(permissionsHref({ view: "people" }));
+        return;
+      }
       const anchored = section === "compaction" || section === "webTools" || section === "webSearchLimit";
       navigate(anchored ? settingsHref(section) : `/settings/${section}`);
     });

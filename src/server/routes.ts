@@ -13,6 +13,7 @@ import { deleteConnection, getOwnConnection, listModels, listProviders, privateU
 import { OLLAMA, OLLAMA_DEFAULT_URL } from "./catalog/ollama.js";
 import { ollamaManagementRoutes } from "./catalog/ollama-routes.js";
 import { adminRoutes, audienceInput } from "./admin.js";
+import { permissionRoutes } from "./permissions/routes.js";
 import { artifactRoutes } from "./artifacts.js";
 import { chatRoutes } from "./chat.js";
 import { emailRoutes } from "./email/routes.js";
@@ -395,6 +396,7 @@ const api = new Hono<AppEnv>()
   .route("/", searchRoutes)
   .route("/", shareRoutes)
   .route("/", adminRoutes)
+  .route("/", permissionRoutes)
   // One API boundary: every sub-router's AppError becomes the same safe wire shape, also when a
   // router is mounted on its own in tests.
   .onError(handleAppError);

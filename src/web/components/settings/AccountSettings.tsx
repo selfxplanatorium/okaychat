@@ -9,6 +9,7 @@ import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { errorText } from "@/lib/error-text";
 import { useData } from "@/state/data";
+import { SelfPermissionsSettings } from "./SelfPermissions";
 import { SettingsPage, SettingsRow, SettingsSection } from "./SettingsUI";
 
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
@@ -226,6 +227,7 @@ export function AccountSettings() {
         <SettingsRow label={t("account.emailAddress")} control={<span className="text-muted-foreground max-w-full break-all text-sm">{me.email}</span>} />
       </SettingsSection>
       <SecuritySection />
+      <SelfPermissionsSettings />
       <StorageSection />
       <div aria-live="polite" aria-atomic="true" className="min-h-5 text-sm">
         {error ? <p role="alert" className="text-destructive">{error}</p> : <p className="text-muted-foreground">{status}</p>}

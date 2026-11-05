@@ -18,6 +18,7 @@ import knowledge from "./knowledge";
 import library from "./library";
 import mcp from "./mcp";
 import memory from "./memory";
+import permissions from "./permissions";
 import projects from "./projects";
 import providers from "./providers";
 import schedules from "./schedules";
@@ -55,6 +56,7 @@ export const en = {
   library,
   mcp,
   memory,
+  permissions,
   projects,
   providers,
   schedules,

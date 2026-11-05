@@ -22,7 +22,12 @@ export interface SettingsDestination {
   section: SettingsSection;
   /** A row in the settings page, addressed by `id="setting-<anchor>"` and focused after the lazy page mounts. */
   anchor?: string;
+  /** Fixed query state (e.g. which admin workspace tab a link opens). */
+  query?: Readonly<Record<string, string>>;
 }
+
+/** Query values are omitted when null/empty so a clean destination stays a clean URL. */
+export type SettingsQuery = Readonly<Record<string, string | null | undefined>>;
 
 /** `focus` is the query key `SettingsLayout` reads once the section has rendered. */
 export const SETTINGS_FOCUS_PARAM = "focus";
@@ -40,15 +45,27 @@ export const SETTINGS_DESTINATIONS = {
   keyboard: { section: "keyboard" },
   voice: { section: "voice" },
   mcp: { section: "mcp" },
+  admin: { section: "admin" },
+  /** The granular permissions workspace; `view` selects a section inside it. */
+  permissions: { section: "admin", query: { view: "people" } },
 } as const satisfies Record<string, SettingsDestination>;
 
 export type SettingsDestinationId = keyof typeof SETTINGS_DESTINATIONS;
 
-export const settingsHref = (id: SettingsDestinationId): string => {
+export const settingsHref = (id: SettingsDestinationId, query?: SettingsQuery): string => {
   const destination: SettingsDestination = SETTINGS_DESTINATIONS[id];
-  const query = destination.anchor ? `?${SETTINGS_FOCUS_PARAM}=${encodeURIComponent(destination.anchor)}` : "";
-  return `/settings/${destination.section}${query}`;
+  const params = new URLSearchParams();
+  if (destination.anchor) params.set(SETTINGS_FOCUS_PARAM, destination.anchor);
+  for (const [key, value] of Object.entries({ ...destination.query, ...query })) {
+    if (value !== null && value !== undefined && value !== "") params.set(key, value);
+  }
+  const entries = [...params];
+  const suffix = entries.length ? `?${params.toString()}` : "";
+  return `/settings/${destination.section}${suffix}`;
 };
+
+/** Every admin permissions link goes through here, so renamed query keys update in one place. */
+export const permissionsHref = (query: SettingsQuery): string => settingsHref("permissions", query);
 
 /** Scrolls a settings row into view and focuses it, after the section's lazy content has mounted. */
 export function focusSettingAnchor(anchor: string): boolean {

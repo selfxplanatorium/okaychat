@@ -1,5 +1,6 @@
-import { HardDriveIcon, KeyRoundIcon, Loader2Icon, PencilIcon, PlusIcon, TrashIcon } from "lucide-react";
+import { HardDriveIcon, KeyRoundIcon, Loader2Icon, PencilIcon, PlusIcon, ShieldCheckIcon, TrashIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { Link, useSearch } from "wouter";
 import type { AdminPrompt, AdminUser, ProviderInfo, StorageInfo, UserGroup } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -10,8 +11,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { t } from "@/i18n";
 import { formatBytes, formatCost } from "@/i18n/format";
+import { permissionsHref } from "@/lib/settings-link";
+import { isPermissionsSearch } from "@/state/permissions-query";
 import { useData } from "@/state/data";
 import { Checklist, invalidateDirectory, useDirectory } from "./Audience";
+import { PermissionsWorkspace } from "./permissions/PermissionsWorkspace";
 import { ProviderLists, ProviderScopeProvider } from "./ProvidersSettings";
 import { AdminVoiceSettings } from "./AdminVoiceSettings";
 import { SettingsPage, SettingsRow, SettingsSection } from "./SettingsUI";
@@ -449,7 +453,27 @@ function SystemPrompts() {
   );
 }
 
+function PermissionsEntry() {
+  const linkClass = "bg-muted/70 hover:bg-muted focus-visible:outline-ring inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-transparent px-3 text-sm transition-colors duration-(--motion-fast)";
+  return (
+    <SettingsSection title={t("permissions.title")} description={t("permissions.entryDescription")}>
+      <div className="flex flex-wrap gap-2 px-4 py-3">
+        <Link href={permissionsHref({ view: "people" })} className={linkClass}>
+          <ShieldCheckIcon className="size-4" aria-hidden /> {t("permissions.openWorkspace")}
+        </Link>
+        <Link href={permissionsHref({ view: "inspect" })} className={linkClass}>
+          {t("permissions.navInspect")}
+        </Link>
+        <Link href={permissionsHref({ view: "audit" })} className={linkClass}>
+          {t("permissions.navAudit")}
+        </Link>
+      </div>
+    </SettingsSection>
+  );
+}
+
 export function AdminSettings() {
+  const search = useSearch();
   const [allowSignup, setAllowSignup] = useState<boolean | null>(null);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [defaultLimit, setDefaultLimit] = useState<number | null>(null);
@@ -467,8 +491,11 @@ export function AdminSettings() {
     void api<StorageInfo>("/storage").then((s) => setDefaultLimit(s.defaultLimit));
   }, []);
 
+  if (isPermissionsSearch(search)) return <PermissionsWorkspace />;
+
   return (
     <SettingsPage title={t("settings.sectionAdmin")} description={t("admin.pageDescription")}>
+      <PermissionsEntry />
       <SettingsSection title={t("admin.access")}>
         <SettingsRow
           label={t("admin.openSignup")}
