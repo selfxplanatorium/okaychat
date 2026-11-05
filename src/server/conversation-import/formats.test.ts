@@ -853,6 +853,35 @@ test("normalizes text and multimodal parts, including omitted attachments", () =
   assert.equal(JSON.stringify(item.conversation).includes("secret"), false);
 });
 
+test("metadata-only attachments become inert placeholders, counted once", () => {
+  const text = textMessage("m1", "user", "see the attached report", {
+    metadata: {
+      attachments: [
+        { id: "file-123", name: "report.pdf", mime_type: "application/pdf" },
+        { id: "file-456", name: "photo.png", mime_type: "image/png" },
+      ],
+    },
+  });
+  const item = oneItem([mappingConversation([{ key: "root", parent: null, children: [], message: text }])]);
+  assert.deepEqual(item.conversation!.messages[0]!.parts, [
+    portableText("see the attached report"),
+    { type: "missing-attachment", kind: "file", name: "report.pdf" },
+    { type: "missing-attachment", kind: "image", name: "photo.png" },
+  ]);
+  assert.equal(item.counts.omittedAttachments, 2);
+  assert.equal(warningCount(item, "attachments_missing"), 2);
+
+  // The same upload named by a content part and by metadata is one missing attachment, not two.
+  const multimodal = textMessage("m2", "user", "", {
+    content: { content_type: "multimodal_text", parts: [{ content_type: "image_asset_pointer", asset_pointer: "file-service://file-789" }] },
+    metadata: { attachments: [{ id: "file-789", name: "chart.png", mime_type: "image/png" }] },
+  });
+  const single = oneItem([mappingConversation([{ key: "root", parent: null, children: [], message: multimodal }])]);
+  assert.deepEqual(single.conversation!.messages[0]!.parts, [{ type: "missing-attachment", kind: "image", name: null }]);
+  assert.equal(single.counts.omittedAttachments, 1);
+  assert.equal(JSON.stringify(single.conversation).includes("file-789"), false);
+});
+
 test("keeps multiline, fenced and inline code text literal while stripping markup", () => {
   const source = [
     "before <b>bold</b>",
