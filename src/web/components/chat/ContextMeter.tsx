@@ -1,18 +1,20 @@
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { ChevronDownIcon, Loader2Icon, ScissorsIcon, ShrinkIcon } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "wouter";
 import type { CompactionState } from "@shared/types";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { api } from "@/lib/api";
 import { t } from "@/i18n";
-import { formatCost, formatDateTime, formatNumber, formatPercent, formatTokens } from "@/i18n/format";
+import { formatCost, formatDateTime, formatDuration, formatNumber, formatPercent, formatTokens } from "@/i18n/format";
 import { settingsHref } from "@/lib/settings-link";
 import { cn } from "@/lib/utils";
 import { useCommand } from "@/keyboard/registry";
 import { useData } from "@/state/data";
 import { metadataOf, useContextUsage, useCurrentThreadId, useThreadMeta, useThreadMetaStore, useChatModel } from "@/state/thread-meta";
+import { editKey, useMessageEdits } from "@/state/message-edits";
+import { replyDetailRows, compactUsage, type DetailRow } from "./message-details";
 import { useChatPrivacy } from "@/state/chat-privacy";
 import { useThreadSync, useThreadSyncStore } from "@/state/thread-sync";
 
@@ -203,28 +205,123 @@ export function ContextMeter() {
   );
 }
 
-/** Model, tokens, and cost under each assistant message. */
+/** The quiet footer line plus the accessible Details popover for a settled reply. */
 export function MessageMeta() {
   const raw = useAuiState((s) => s.message.metadata);
   const running = useAuiState((s) => s.message.status?.type === "running");
   const models = useData((s) => s.models);
+  const threadId = useCurrentThreadId();
+  const messageId = useAuiState((s) => s.message.id);
+  const edited = useMessageEdits((s) => (threadId ? s.editedAt[editKey(threadId, messageId)] !== undefined : false));
   const meta = metadataOf(raw);
-  if (running || !meta.modelRef) return null;
-  const name = models.find((m) => m.ref === meta.modelRef)?.name ?? meta.modelRef.split("/").pop();
-  const u = meta.usage;
+  const name = models.find((m) => m.ref === meta.modelRef)?.name ?? meta.modelRef?.split("/").pop();
+  const rows = replyDetailRows(meta, name);
+  const compact = compactUsage(meta);
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+
+  // The command belongs to the focused message, never the newest visible reply.
+  useCommand(
+    "message.details",
+    () => {
+      const root = document.activeElement?.closest("[data-message-root]");
+      if (!root || root.getAttribute("data-message-id") !== messageId) return false;
+      setOpen(true);
+      return true;
+    },
+    !!rows,
+  );
+  useEffect(() => {
+    if (!open) return;
+    // From the palette the popover opens while focus is on the closed dialog; put it in the panel.
+    requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-slot=message-details-popover]")?.focus());
+  }, [open]);
+
+  if (running || !rows) return null;
+  const u = compact.usage;
   const cache = u?.input ? u.cacheRead / u.input : 0;
   return (
-    <div className="text-muted-foreground/80 ms-auto flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap pe-2 text-[11px] tabular-nums opacity-0 transition-opacity duration-(--motion-fast) delay-75 ease-out-quart [[data-role=assistant]:hover_&]:opacity-100">
-      <span>{name}</span>
-      {u && (
-        <span title={t("composer.usageDetail", { input: formatNumber(u.input), cached: formatNumber(u.cacheRead), written: formatNumber(u.cacheWrite), output: formatNumber(u.output), reasoning: formatNumber(u.reasoning) })}>
-          {cache ? t("composer.usageCached", { input: formatTokens(u.input), percent: formatPercent(cache), output: formatTokens(u.output) }) : t("composer.usage", { input: formatTokens(u.input), output: formatTokens(u.output) })}
-        </span>
-      )}
-      {meta.cost !== undefined && meta.cost > 0 && <span>{formatCost(meta.cost)}</span>}
-      {meta.durationMs !== undefined && <span>{t("composer.seconds", { n: formatNumber(meta.durationMs / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) })}</span>}
+    <div className="text-muted-foreground/80 ms-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-x-2 gap-y-0.5 pe-2 text-[11px] tabular-nums">
+      {name && <span className="max-w-40 truncate">{name}</span>}
+      <span className="pointer-fine:opacity-0 pointer-fine:transition-opacity pointer-fine:duration-(--motion-fast) pointer-fine:delay-75 pointer-fine:ease-out-quart [[data-role=assistant]:hover_&]:opacity-100 [[data-role=assistant]:focus-within_&]:opacity-100 hidden items-center gap-2 whitespace-nowrap sm:inline-flex">
+        {u && (
+          <span title={t("composer.usageDetail", { input: formatNumber(u.input), cached: formatNumber(u.cacheRead), written: formatNumber(u.cacheWrite), output: formatNumber(u.output), reasoning: formatNumber(u.reasoning) })}>
+            {cache ? t("composer.usageCached", { input: formatTokens(u.input), percent: formatPercent(cache), output: formatTokens(u.output) }) : t("composer.usage", { input: formatTokens(u.input), output: formatTokens(u.output) })}
+          </span>
+        )}
+        {compact.cost !== undefined && <span>{formatCost(compact.cost)}</span>}
+        {compact.durationMs !== undefined && <span>{t("composer.seconds", { n: formatNumber(compact.durationMs / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) })}</span>}
+      </span>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger
+          ref={trigger}
+          // The handler, not a data-command fallback: details always belong to the focused reply.
+          className="text-muted-foreground hover:text-foreground shrink-0 underline underline-offset-2 transition-colors duration-(--motion-fast) ease-out-quart"
+        >
+          {t("messageDetails.open")}
+        </PopoverTrigger>
+        <PopoverContent
+          data-slot="message-details-popover"
+          tabIndex={-1}
+          side="top"
+          align="end"
+          finalFocus={trigger}
+          className="w-[min(22rem,calc(100vw-1rem))] max-h-[min(70vh,32rem)] overflow-y-auto p-3 outline-none"
+        >
+          <h3 className="mb-2 text-sm font-medium">{t("messageDetails.title")}</h3>
+          <dl className="text-muted-foreground grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+            {rows.map((row) => (
+              <div key={row.key} className="contents">
+                <dt>{detailLabel(row)}</dt>
+                <dd className="text-foreground text-right tabular-nums">
+                  <DetailValueText row={row} />
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <p className="text-muted-foreground mt-2 text-xs">{t("messageDetails.totalsHelp")}</p>
+          <p className="text-muted-foreground mt-1 text-xs">{t("messageDetails.cacheHelp")}</p>
+          {edited && <p className="text-muted-foreground mt-2 text-xs">{t("messageDetails.originalGeneration")}</p>}
+        </PopoverContent>
+      </Popover>
     </div>
   );
+}
+
+function detailLabel(row: DetailRow) {
+  switch (row.key) {
+    case "model":
+      return t("messageDetails.model");
+    case "input":
+      return t("messageDetails.input");
+    case "cacheRead":
+      return t("messageDetails.cacheRead");
+    case "cacheWrite":
+      return t("messageDetails.cacheWrite");
+    case "output":
+      return t("messageDetails.output");
+    case "reasoning":
+      return t("messageDetails.reasoning");
+    case "cost":
+      return t("messageDetails.cost");
+    case "duration":
+      return t("messageDetails.duration");
+  }
+}
+
+function DetailValueText({ row }: { row: DetailRow }) {
+  const value = row.value;
+  if (!value) return <span className="text-muted-foreground">{t("messageDetails.notReported")}</span>;
+  switch (value.kind) {
+    case "text":
+      return <>{value.text}</>;
+    case "tokens":
+      return <>{formatTokens(value.value)}</>;
+    case "cost":
+      return <>{formatCost(value.value)}</>;
+    case "seconds":
+      return <>{formatDuration(value.value)}</>;
+  }
 }
 
 /** Divider after the message where the conversation was compacted or trimmed. */

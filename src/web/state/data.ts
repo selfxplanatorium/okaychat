@@ -3,6 +3,12 @@ import type { McpPromptInfo, McpServerInfo, Me, ModelInfo, Project, ProviderInfo
 import { api, prefetch } from "@/lib/api";
 import { setLibraryAccount } from "./library-cache";
 import { clearMessageEdits } from "./message-edits";
+import { setAnnotationsAccount } from "./message-annotations";
+import { setSavedPromptsAccount } from "./saved-prompts";
+import { closePromptPicker } from "./prompt-picker";
+import { closeFeedback } from "./feedback-dialog";
+import { closeBookmarks } from "./bookmark-dialog";
+import { useMessageJump } from "./message-jump";
 import { clearStoredMessages } from "@/runtime/message-persistence";
 import { useServices } from "./services";
 import { warmThreadCache } from "@/runtime/threadCache";
@@ -185,6 +191,13 @@ export function preloadData(userId: string) {
   if (preloaded?.userId !== userId) {
     clearMessageEdits();
     clearStoredMessages();
+    // Private prompts and annotations belong to the account that fetched them, never the next session.
+    setSavedPromptsAccount(userId);
+    setAnnotationsAccount(userId);
+    closePromptPicker();
+    closeFeedback();
+    closeBookmarks();
+    useMessageJump.getState().clear();
   }
   // The service registry is optional data: it starts alongside the rest and never holds up the chat.
   useServices.getState().start(userId);

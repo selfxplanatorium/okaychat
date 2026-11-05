@@ -1,13 +1,8 @@
 import { ComposerPrimitive, useAui } from "@assistant-ui/react";
-import { CheckIcon, ChevronRightIcon, GlobeIcon, GlobeOffIcon, Loader2Icon, PaperclipIcon, PlusIcon, SettingsIcon, SquareSlashIcon, TelescopeIcon, TriangleAlertIcon } from "lucide-react";
-import { Fragment, useMemo, useRef, useState, type CSSProperties } from "react";
+import { CheckIcon, ChevronRightIcon, GlobeIcon, GlobeOffIcon, PaperclipIcon, PlusIcon, SettingsIcon, SquareSlashIcon, TelescopeIcon, TriangleAlertIcon } from "lucide-react";
+import { useMemo, useRef, useState, type CSSProperties } from "react";
 import { Link, useLocation } from "wouter";
-import type { McpPromptInfo } from "@shared/types";
-import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { t } from "@/i18n";
-import { api } from "@/lib/api";
 import { settingsHref } from "@/lib/settings-link";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
@@ -22,6 +17,7 @@ import { Menu, MenuContent, MenuItem, MenuLabel, MenuSubmenuRoot, MenuSubmenuTri
 import { EffortIcon } from "./EffortIcon";
 import { effortLabel, useEffortChoices } from "./ModelPicker";
 import { Popover, PopoverContent } from "@/components/ui/popover";
+import { openPromptPicker } from "@/state/prompt-picker";
 
 const triggerClass =
   "hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 shrink-0 pointer-coarse:h-9 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart";
@@ -196,134 +192,23 @@ export function ResearchToggle() {
   );
 }
 
-/** Puts a filled-in prompt into the composer, after anything already typed. */
-function usePromptPicker() {
-  const aui = useAui();
-  const [open, setOpen] = useState<McpPromptInfo | null>(null);
-  const insert = async (prompt: McpPromptInfo, args: Record<string, string>) => {
-    const { text } = await api<{ text: string }>(`/mcp/${prompt.serverId}/prompts`, { method: "POST", json: { name: prompt.name, arguments: args } });
-    const current = aui.composer().getState().text.trim();
-    aui.composer().setText(current ? `${current}\n\n${text}` : text);
-  };
-  const pick = (prompt: McpPromptInfo) => {
-    if (prompt.arguments.length) setOpen(prompt);
-    else void insert(prompt, {}).catch(() => setOpen(prompt));
-  };
-  const dialog = <PromptDialog prompt={open} onClose={() => setOpen(null)} onSubmit={insert} />;
-  return { pick, dialog };
-}
-
-function PromptItems({ onPick }: { onPick: (prompt: McpPromptInfo) => void }) {
-  const prompts = useData((s) => s.mcpPrompts);
-  const servers = [...new Set(prompts.map((p) => p.server))];
-  return servers.map((server) => (
-    <Fragment key={server}>
-      <MenuLabel>{server}</MenuLabel>
-      {prompts
-        .filter((p) => p.server === server)
-        .map((p) => (
-          <MenuItem key={`${p.serverId}:${p.name}`} onClick={() => onPick(p)} className="flex-col items-start gap-0">
-            <span>{p.title ?? p.name}</span>
-            {p.description && <span className="line-clamp-2 text-xs opacity-70">{p.description}</span>}
-          </MenuItem>
-        ))}
-    </Fragment>
-  ));
-}
-
-function PromptDialog({
-  prompt,
-  onClose,
-  onSubmit,
-}: {
-  prompt: McpPromptInfo | null;
-  onClose: () => void;
-  onSubmit: (prompt: McpPromptInfo, args: Record<string, string>) => Promise<void>;
-}) {
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // The closing animation still shows the last prompt, so the dialog does not collapse while it fades.
-  const [shown, setShown] = useState(prompt);
-  if (prompt && prompt !== shown) {
-    setShown(prompt);
-    setValues({});
-    setError(null);
-  }
+/** Desktop: the combined prompt picker, always available even while the personal library is empty. */
+export function PromptsButton() {
+  const loadMcp = useData((s) => s.refreshMcpPrompts);
   return (
-    <Dialog open={!!prompt} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="gap-3 sm:max-w-md">
-        {shown && (
-          <form
-            className="flex flex-col gap-3"
-            onSubmit={async (e) => {
-              e.preventDefault();
-              setBusy(true);
-              setError(null);
-              try {
-                // Optional arguments left empty are not sent, so the server applies its own default.
-                await onSubmit(shown, Object.fromEntries(Object.entries(values).filter(([, v]) => v.trim())));
-                onClose();
-              } catch (err) {
-                setError((err as Error).message);
-              } finally {
-                setBusy(false);
-              }
-            }}
-          >
-            <DialogTitle className="pe-6 text-base">{shown.title ?? shown.name}</DialogTitle>
-            <DialogDescription>{shown.description ?? t("composer.promptFrom", { server: shown.server })}</DialogDescription>
-            {shown.arguments.map((arg, index) => (
-              <label key={arg.name} className="flex flex-col gap-1 text-xs">
-                <span className="font-medium">
-                  {arg.name}
-                  {arg.required && <span className="text-muted-foreground"> {t("composer.required")}</span>}
-                </span>
-                <Input
-                  autoFocus={index === 0}
-                  required={arg.required}
-                  value={values[arg.name] ?? ""}
-                  onChange={(e) => setValues({ ...values, [arg.name]: e.target.value })}
-                />
-                {arg.description && <span className="text-muted-foreground">{arg.description}</span>}
-              </label>
-            ))}
-            {error && <p className="text-error text-xs">{error}</p>}
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" onClick={onClose}>
-                {t("common.cancel")}
-              </Button>
-              <Button type="submit" disabled={busy}>
-                {busy && <Loader2Icon className="animate-spin" />}
-                {t("composer.insert")}
-              </Button>
-            </div>
-          </form>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/** Desktop: shown only when the user's MCP servers offer prompt templates. */
-export function McpPromptsButton() {
-  const hasPrompts = useData((s) => s.mcpPrompts.length > 0);
-  const load = useData((s) => s.refreshMcpPrompts);
-  const { pick, dialog } = usePromptPicker();
-  if (!hasPrompts) return null;
-  return (
-    <>
-      <Menu onOpenChange={(open) => open && void load()}>
-        <MenuTrigger aria-label={t("composer.mcpPrompts")} data-command="composer.prompts" className={cn(triggerClass, "max-sm:hidden pointer-coarse:hidden")}>
-          <SquareSlashIcon className="size-3.5" />
-          {t("composer.prompts")}
-        </MenuTrigger>
-        <MenuContent side="top" align="start" className="max-h-80 w-72">
-          <PromptItems onPick={pick} />
-        </MenuContent>
-      </Menu>
-      {dialog}
-    </>
+    <button
+      type="button"
+      data-command="composer.prompts"
+      aria-label={t("composer.prompts")}
+      onClick={() => {
+        void loadMcp();
+        openPromptPicker();
+      }}
+      className={cn(triggerClass, "max-sm:hidden pointer-coarse:hidden")}
+    >
+      <SquareSlashIcon className="size-3.5" />
+      {t("composer.prompts")}
+    </button>
   );
 }
 
@@ -335,9 +220,7 @@ export function MobileComposerMenu() {
   const showSearch = !!active?.toolCall && webTools;
   const research = useChatResearch();
   const researchBlocked = !!research.unavailable && research.enabled;
-  const hasPrompts = useData((s) => s.mcpPrompts.length > 0);
   const loadPrompts = useData((s) => s.refreshMcpPrompts);
-  const { pick, dialog } = usePromptPicker();
   const [, navigate] = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const mobileTrigger = useRef<HTMLButtonElement>(null);
@@ -351,13 +234,11 @@ export function MobileComposerMenu() {
   }, showSearch);
   return (
     <div className="hidden shrink-0 max-sm:block pointer-coarse:block">
-      {dialog}
       <Menu
         open={menuOpen}
         onOpenChange={(open) => {
           setMenuOpen(open);
           if (!open) setSearchLimitOpen(false);
-          else if (hasPrompts) void loadPrompts();
         }}
       >
         <MenuTrigger
@@ -438,18 +319,17 @@ export function MobileComposerMenu() {
               {t("ux.openSearchLimitSettings")}
             </MenuItem>
           )}
-          {hasPrompts && (
-            <MenuSubmenuRoot>
-              <MenuSubmenuTrigger>
-                <SquareSlashIcon />
-                <span className="flex-1">{t("composer.prompts")}</span>
-                <ChevronRightIcon className="text-muted-foreground ml-auto" />
-              </MenuSubmenuTrigger>
-              <MenuContent side="right" align="start" alignOffset={-5} className="max-h-80 w-64">
-                <PromptItems onPick={pick} />
-              </MenuContent>
-            </MenuSubmenuRoot>
-          )}
+          <MenuItem
+            onClick={() => {
+              setMenuOpen(false);
+              void loadPrompts();
+              // The dialog lives beside the thread, so opening it after the menu lets go of focus is enough.
+              requestAnimationFrame(() => openPromptPicker());
+            }}
+          >
+            <SquareSlashIcon />
+            <span className="flex-1">{t("composer.prompts")}</span>
+          </MenuItem>
           <ComposerPrimitive.AddAttachment render={<MenuItem />}>
             <PaperclipIcon />
             {t("composer.attach")}

@@ -14,6 +14,8 @@ Each account has one limit: `OKAYCHAT_STORAGE_LIMIT` bytes (default 1 GiB), over
 - Uploaded fonts, account avatar, encrypted memory bytes (facts and summaries), and extracted project-file text.
 - Skill names, descriptions, instructions, reference paths and reference contents, counted as UTF-8 bytes across `skills` and `skill_files`.
 - Raster image originals in the file-backed media store (`media.size`), once per account however many uploads, run outputs, forks, or the avatar point at them. Their previews in `media-cache/` are a regenerable cache and do not count (see `media.md`).
+- Saved prompt text: UTF-8 bytes of `saved_prompts.name`, `shortcut`, and `body`. Prompt edits charge net growth; bookmarks and annotation metadata are not charged.
+- The encrypted comment of private answer feedback (`message_feedback.comment_enc`). A removed rating clears the ciphertext and frees its bytes; the tombstone row itself is bounded fixed metadata and is excluded.
 - Message JSON (`messages.bytes`), without inline `data:` URLs, which are charged once as uploads, plus the encrypted first original of an edited assistant reply (`messages.original_enc`). The original is retained after Undo. Branching charges the copied message and original. Existing rows are backfilled by a migration.
 
 Settings, provider/MCP credentials, skill-source credentials, editable email drafts (`email_drafts`,

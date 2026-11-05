@@ -66,8 +66,6 @@ import {
   MoreHorizontalIcon,
   SquarePenIcon,
   SquareIcon,
-  ThumbsDownIcon,
-  ThumbsUpIcon,
   Volume2Icon,
   VolumeXIcon,
 } from "lucide-react";
@@ -96,6 +94,11 @@ import { ChatErrorMessage } from "@/components/chat/message-error";
 import { EditableReplyTexts, EditedReplyBadge, ReplyEditAction, ReplyEditorFooter, ReplyEditorShell } from "@/components/chat/AssistantMessageEditor";
 import { editKey, useMessageEdits } from "@/state/message-edits";
 import { RetryMenu } from "@/components/chat/retry-model";
+import { BookmarkCommand, BookmarkMarker, BookmarkMenuItem } from "@/components/chat/MessageBookmark";
+import { FeedbackCommand, FeedbackMarker, FeedbackMenuItem } from "@/components/chat/MessageFeedback";
+import { PromptSlashInput } from "@/components/chat/PromptSlashInput";
+import { isMounted, jumpIndex, widenForJump } from "@/components/chat/message-jump";
+import { messageRoot, registerMessageRoot, useMessageJump } from "@/state/message-jump";
 import { RetryStatus } from "@/components/chat/retry-status";
 import { DictationSend, ReadAloudAutoPlay, SpeechServiceHint, useDictateLabel, useSendDictation, VoiceNotice } from "@/speech/ChatVoice";
 import { useLocalSpeechUnavailable } from "@/speech/adapters";
@@ -318,14 +321,22 @@ const MessageEnteringContext = createContext(false);
 const useMessageFocus = () => {
   const aui = useAui();
   const hovering = useAuiState((s) => s.message.isHovering);
+  const remoteId = useAuiState((s) => s.threadListItem.remoteId);
+  const messageId = useAuiState((s) => s.message.id);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!hovering && ref.current?.contains(document.activeElement)) aui.message().setIsHovering(true);
   }, [hovering, aui]);
+  // A bookmark jump focuses the registered root, never a selector built from an id.
+  useLayoutEffect(() => {
+    registerMessageRoot(remoteId, messageId, ref.current);
+    return () => registerMessageRoot(remoteId, messageId, null);
+  }, [remoteId, messageId]);
   return {
     ref,
     tabIndex: -1,
     "data-message-root": "",
+    "data-message-id": messageId,
     onFocus: () => aui.message().setIsHovering(true),
     // Menus opened from the bar are portaled, but hold the bar open themselves (its interaction lock).
     onBlur: (event: FocusEvent<HTMLDivElement>) => {
@@ -627,6 +638,11 @@ const openWindow = (ids: readonly string[]): MessageWindow => ({
 
 const WindowedMessages: FC<{ viewportRef: RefObject<HTMLDivElement | null> }> = ({ viewportRef }) => {
   const { ids, keys } = useMessageIds();
+  const remoteId = useAuiState((s) => s.threadListItem.remoteId);
+  const request = useMessageJump((s) => s.request);
+  const historyLoading = useAuiState((s) => s.thread.isLoading);
+  const sync = useThreadSync();
+  const [jumpNotice, setJumpNotice] = useState<string | null>(null);
   const [stored, setWindow] = useState(() => openWindow(ids));
   // Another thread or branch: start over from its newest messages. New messages at the end keep the window.
   // A shorter list with the same first id is another branch too (a fork keeps its source's message ids),
@@ -644,6 +660,10 @@ const WindowedMessages: FC<{ viewportRef: RefObject<HTMLDivElement | null> }> = 
   // Distance from the bottom, taken just before older messages mount and restored after, so the
   // messages being read do not move. Browsers without scroll anchoring would otherwise jump.
   const fromBottom = useRef<number | null>(null);
+  // An explicit jump centers its target itself, so the bottom-distance restoration must not fight it.
+  const suppressRestore = useRef(false);
+  const highlightTimer = useRef(0);
+  useEffect(() => () => window.clearTimeout(highlightTimer.current), []);
   // User scrolling only: the restore below and the viewport's own autoscroll also fire scroll events.
   // Scroll events count while a finger or mouse button is down (scrollbar drags) or shortly after a
   // finger lifts (a fling keeps scrolling).
@@ -724,7 +744,9 @@ const WindowedMessages: FC<{ viewportRef: RefObject<HTMLDivElement | null> }> = 
   const focusedRef = useRef<Element | null>(null);
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
-    const distance = fromBottom.current;
+    const suppressed = suppressRestore.current;
+    suppressRestore.current = false;
+    const distance = suppressed ? null : fromBottom.current;
     fromBottom.current = null;
     if (viewport && distance !== null) viewport.scrollTo({ top: viewport.scrollHeight - distance, behavior: "instant" });
     const slot = slotRef.current;
@@ -735,10 +757,54 @@ const WindowedMessages: FC<{ viewportRef: RefObject<HTMLDivElement | null> }> = 
     if (!active || active === document.body) nextFocusable(slot)?.focus();
   }, [start, viewportRef]);
 
+  // A jump request is resolved only against the runtime's current list. Lowering the window is enough; the
+  // next effect run finds the mounted root, focuses it, and clears the request.
+  useLayoutEffect(() => {
+    if (!request || !remoteId || request.threadId !== remoteId || historyLoading || sync === "pending") return;
+    setJumpNotice(null);
+    if (sync === "stale") {
+      // A cached history that never reached the server cannot be navigated safely.
+      setJumpNotice(t("annotations.syncRequired"));
+      useMessageJump.getState().clear(request.requestId);
+      return;
+    }
+    const index = jumpIndex(ids, request.messageId);
+    if (index < 0) {
+      setJumpNotice(t("annotations.targetUnavailable"));
+      useMessageJump.getState().clear(request.requestId);
+      return;
+    }
+    if (!isMounted(win, index)) {
+      suppressRestore.current = true;
+      fromBottom.current = null;
+      setWindow((w) => {
+        const next = widenForJump(w, index);
+        // The target is now the oldest mounted row. Stop automatic reveal there, or its bottom-preserving
+        // slices would pull the view away from the message the jump just centered.
+        return { ...w, floor: Math.max(next.floor, next.start), start: next.start };
+      });
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      const root = messageRoot(remoteId, request.messageId);
+      if (!root) {
+        setJumpNotice(t("annotations.targetUnavailable"));
+      } else {
+        root.focus({ preventScroll: true });
+        root.scrollIntoView({ block: "center", behavior: "instant" });
+        root.classList.add("message-jump-highlight");
+        highlightTimer.current = window.setTimeout(() => root.classList.remove("message-jump-highlight"), 1500);
+      }
+      useMessageJump.getState().clear(request.requestId);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [request, remoteId, historyLoading, sync, ids, win.start, win.floor]);
+
   // Nothing at all for a new chat, so the group's `empty:hidden` drops its margin under the welcome line.
   if (!ids.length) return null;
   return (
     <>
+      {jumpNotice && <p role="status" className="text-muted-foreground mb-2 px-2 text-xs">{jumpNotice}</p>}
       <span
         ref={slotRef}
         className="contents"
@@ -964,7 +1030,7 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
         >
           <ComposerAttachments />
           {longPaste.notice}
-          <ComposerPrimitive.Input
+          <PromptSlashInput
             {...longPaste.inputProps}
             placeholder={researching ? t("thread.researchPlaceholder") : t("thread.messagePlaceholder")}
             className="aui-composer-input caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base leading-6 outline-none"
@@ -1439,11 +1505,15 @@ const AssistantMessage: FC = () => {
 
       <div
         data-slot="aui_assistant-message-footer"
-        className={cn("ms-2 flex items-center", ACTION_BAR_HEIGHT)}
+        className={cn("ms-2 flex flex-wrap items-center gap-y-1", ACTION_BAR_HEIGHT)}
       >
         {!editing && <BranchPicker />}
         {!editing && <AssistantActionBar />}
+        {!editing && <BookmarkMarker threadId={remoteId} messageId={messageId} />}
+        {!editing && <FeedbackMarker threadId={remoteId} messageId={messageId} />}
         {MessageMeta && <MessageMeta />}
+        <BookmarkCommand threadId={remoteId} messageId={messageId} />
+        <FeedbackCommand threadId={remoteId} messageId={messageId} />
       </div>
     </MessagePrimitive.Root>
   );
@@ -1451,6 +1521,8 @@ const AssistantMessage: FC = () => {
 
 const AssistantActionBar: FC = () => {
   const { BranchAction } = useContext(ThreadComponentsContext);
+  const remoteId = useAuiState((s) => s.threadListItem.remoteId);
+  const messageId = useAuiState((s) => s.message.id);
   // A local server voice is disabled while the worker is down; StopSpeaking is never disabled, so an
   // active playback can always be stopped.
   const readAloudUnavailable = useLocalSpeechUnavailable("tts");
@@ -1465,24 +1537,6 @@ const AssistantActionBar: FC = () => {
       <ReplyEditAction />
       {BranchAction && <BranchAction />}
       <RetryMenu />
-      <AuiIf condition={(s) => s.thread.capabilities.feedback}>
-        <ActionBarPrimitive.FeedbackPositive asChild>
-          <TooltipIconButton
-            tooltip={t("thread.helpful")}
-            className="data-[submitted=true]:bg-accent data-[submitted=true]:text-accent-foreground"
-          >
-            <ThumbsUpIcon />
-          </TooltipIconButton>
-        </ActionBarPrimitive.FeedbackPositive>
-        <ActionBarPrimitive.FeedbackNegative asChild>
-          <TooltipIconButton
-            tooltip={t("thread.notHelpful")}
-            className="data-[submitted=true]:bg-accent data-[submitted=true]:text-accent-foreground"
-          >
-            <ThumbsDownIcon />
-          </TooltipIconButton>
-        </ActionBarPrimitive.FeedbackNegative>
-      </AuiIf>
       <AuiIf condition={(s) => s.thread.capabilities.speech}>
         <AuiIf condition={(s) => s.message.speech == null}>
           <ActionBarPrimitive.Speak asChild disabled={readAloudUnavailable}>
@@ -1519,6 +1573,8 @@ const AssistantActionBar: FC = () => {
           sideOffset={6}
           className="aui-action-bar-more-content bg-popover text-popover-foreground data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:animate-out data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 min-w-[8rem] overflow-hidden rounded-xl border p-1.5"
         >
+          <BookmarkMenuItem threadId={remoteId} messageId={messageId} />
+          <FeedbackMenuItem threadId={remoteId} messageId={messageId} />
           <ActionBarPrimitive.ExportMarkdown asChild>
             <ActionBarMorePrimitive.Item className="aui-action-bar-more-item hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none transition-colors duration-(--motion-fast) ease-out-quart select-none">
               <DownloadIcon className="size-4" />
@@ -1578,6 +1634,8 @@ const UserText: TextMessagePartComponent = ({ text }) =>
 const UserMessage: FC = () => {
   const entering = useContext(MessageEnteringContext);
   const focus = useMessageFocus();
+  const remoteId = useAuiState((s) => s.threadListItem.remoteId);
+  const messageId = useAuiState((s) => s.message.id);
   return (
     <MessagePrimitive.Root
       {...focus}
@@ -1609,8 +1667,10 @@ const UserMessage: FC = () => {
       <div
         data-slot="aui_user-message-footer"
         // Fixed height: the bar mounts on hover and must not push the next message.
-        className="col-span-full col-start-1 -mt-1 -me-1 flex min-h-7 items-center justify-end"
+        className="col-span-full col-start-1 -mt-1 -me-1 flex min-h-7 flex-wrap items-center justify-end gap-y-1"
       >
+        <BookmarkMarker threadId={remoteId} messageId={messageId} />
+        <BookmarkCommand threadId={remoteId} messageId={messageId} />
         <BranchPicker data-slot="aui_user-branch-picker" />
         <UserActionBar />
       </div>
@@ -1635,7 +1695,31 @@ const UserActionBar: FC = () => {
         </TooltipIconButton>
       </ActionBarPrimitive.Edit>
       <UserCopyButton />
+      <UserMoreMenu />
     </ActionBarPrimitive.Root>
+  );
+};
+
+/** The user message's More menu only needs bookmarking; the direct Copy/Edit/Retry/Branch actions stay. */
+const UserMoreMenu: FC = () => {
+  const remoteId = useAuiState((s) => s.threadListItem.remoteId);
+  const messageId = useAuiState((s) => s.message.id);
+  return (
+    <ActionBarMorePrimitive.Root>
+      <ActionBarMorePrimitive.Trigger asChild>
+        <TooltipIconButton tooltip={t("common.more")} command="message.more" className="data-[state=open]:bg-accent">
+          <MoreHorizontalIcon />
+        </TooltipIconButton>
+      </ActionBarMorePrimitive.Trigger>
+      <ActionBarMorePrimitive.Content
+        side="bottom"
+        align="start"
+        sideOffset={6}
+        className="aui-action-bar-more-content bg-popover text-popover-foreground data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:animate-out data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 min-w-[8rem] overflow-hidden rounded-xl border p-1.5"
+      >
+        <BookmarkMenuItem threadId={remoteId} messageId={messageId} />
+      </ActionBarMorePrimitive.Content>
+    </ActionBarMorePrimitive.Root>
   );
 };
 

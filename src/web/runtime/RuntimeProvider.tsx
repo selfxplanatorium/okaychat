@@ -30,6 +30,7 @@ import { useChatWebStore } from "@/state/chat-web-mode";
 import { persistKnowledgeAttachments, useChatKnowledgeStore } from "@/state/chat-knowledge";
 import { dropThread, readThread, sameRows, ServerRows, writeThread } from "./threadCache";
 import { editedAtOf, rememberEdits } from "@/state/message-edits";
+import { dropThreadAnnotations } from "@/state/message-annotations";
 import { forgetStoredThread, reportStoredMessage, reportStoredRows } from "./message-persistence";
 import { setThreadSync, useThreadSyncStore } from "@/state/thread-sync";
 import { applyRetryNotice, clearRetryNotice, retryChunkData, retryOwnerId } from "@/state/retry-status";
@@ -217,6 +218,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
     if (isTemporaryChat(remoteId)) return;
     await api(`/threads/${remoteId}`, { method: "DELETE" });
     forgetStoredThread(remoteId);
+    dropThreadAnnotations(remoteId);
   },
   async fetch(remoteId) {
     if (isTemporaryChat(remoteId)) return { remoteId, status: "regular", title: t("composer.temporaryChat") };

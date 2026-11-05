@@ -51,8 +51,6 @@ export default {
   researchTurnOff: "Turn deep research off",
   promptFrom: "A prompt from {server}.",
   required: "(required)",
-  insert: "Insert",
-  mcpPrompts: "MCP prompts",
   prompts: "Prompts",
   composerOptions: "Composer options",
   reasoningValue: "Reasoning: {value}",

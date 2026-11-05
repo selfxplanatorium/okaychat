@@ -1,6 +1,6 @@
 # Roadmap
 
-Status as of 2026-10-31. Update this file when a feature ships or a plan changes.
+Status as of 2026-11-05. Update this file when a feature ships or a plan changes.
 
 ## Pass 1: core (built)
 
@@ -70,11 +70,20 @@ An audit of the main interaction flows and six improvements that keep frequent a
 - **Sidebar quick create**: Projects and Scheduled get a one-click `+` and real empty-state actions; both forms open immediately from `?new=1`.
 - **First-run shortcut hints**: a quiet, account-dismissed row in an empty chat teaches the configured search, model, and command bindings, with a retryable save failure.
 
-Deferred: a per-chat tools sheet (needs consolidated per-chat capability state), and hover-only message metadata (kept by design).
+Deferred: a per-chat tools sheet (needs consolidated per-chat capability state).
 
 ## Pass 4: resilience (built)
 
 - **Graceful degradation**: one service registry with cached, single-flight probes (browser worker and its Scrapling fallback, speech worker, sandbox, SearXNG, and per-account Codex, providers, and email statuses that never contact a vendor), an authenticated `GET /api/services`, tools withheld per turn with the reason stored on the reply, fail-fast `service_unavailable` with a fix hint, a dismissible notice only after the service was actually used, explanatory panel states (Voice, Library, PDF export), and recovery on focus or a failed action. See `docs/implementation/service-health.md`.
+
+## Pass 5: reuse and revisit (built)
+
+- **Personal saved prompts**: account-wide templates with `{{variable}}` filling, a combined Prompts dialog that keeps external MCP prompts, and `/shortcut` insertion in the main composer. See `docs/implementation/saved-prompts.md`.
+- **Private message bookmarks**: per-message marks with a current-branch jump list, focus and a short semantic highlight, and no copy into forks. See `docs/implementation/message-annotations.md`.
+- **Private answer feedback**: Helpful / Not helpful plus an optional encrypted comment, explicit edit/remove, conflict handling, and a changed-reply notice.
+- **Accessible reply details**: a real Details button and popover for the stored model, token, cache, cost, and time values; the compact footer is no longer hover-only.
+
+All four are private account data beside messages or the prompt library. None enters message content, prompts, search, exports, public shares, memory, or provider requests by itself.
 
 ## Known gaps
 

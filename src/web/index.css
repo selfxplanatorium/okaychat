@@ -83,6 +83,26 @@
   }
 }
 
+/* The bookmark jump reveals the real message root; the outline is semantic, and reduced motion drops the fade. */
+.message-jump-highlight {
+  outline: 2px solid var(--ring);
+  outline-offset: 4px;
+  animation: message-jump-highlight 1.5s var(--ease-out-quart) both;
+}
+@keyframes message-jump-highlight {
+  from {
+    outline-color: transparent;
+  }
+  to {
+    outline-color: var(--ring);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .message-jump-highlight {
+    animation: none;
+  }
+}
+
 /* Appearance > Square corners. Overrides every radius, including pills, avatars, and scrollbars. */
 html[data-corners="square"] *,
 html[data-corners="square"] *::before,

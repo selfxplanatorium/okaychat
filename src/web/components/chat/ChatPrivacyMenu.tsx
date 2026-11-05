@@ -1,7 +1,7 @@
 import { getExternalStoreMessages, useAui, useAuiState } from "@assistant-ui/react";
 import type { UIMessage } from "ai";
 import type { ThreadSummary } from "@shared/types";
-import { CalendarClockIcon, MonitorIcon, MoonIcon, MoreHorizontalIcon, PuzzleIcon, SunIcon } from "lucide-react";
+import { BookmarkIcon, CalendarClockIcon, MonitorIcon, MoonIcon, MoreHorizontalIcon, PuzzleIcon, SunIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "wouter";
 import { CallButton } from "@/speech/call/CallButton";
@@ -21,6 +21,8 @@ import { chatPrivacyFor, useChatPrivacy, useChatPrivacyStore } from "@/state/cha
 import { useCurrentThreadId, useThreadMeta, useThreadMetaStore } from "@/state/thread-meta";
 import { useThreadSync } from "@/state/thread-sync";
 import { runCommand, useCommand } from "@/keyboard/registry";
+import { openBookmarks } from "@/state/bookmark-dialog";
+import { useThreadAnnotations } from "@/state/message-annotations";
 
 const MODES = [
   { mode: "light", label: "composer.schemeLight", Icon: SunIcon },
@@ -74,10 +76,13 @@ export function ChatPrivacyMenu() {
   const aui = useAui();
   const privacy = useChatPrivacy();
   const meta = useThreadMeta();
+
   const running = useAuiState((s) => s.thread.isRunning);
   const syncing = !!useThreadSync();
   const started = useAuiState((s) => s.thread.messages.length > 0);
   const remoteId = useCurrentThreadId();
+  const annotations = useThreadAnnotations(remoteId ?? undefined);
+  const bookmarkCount = Object.keys(annotations.bookmarks).length;
   const refresh = useThreadMetaStore((s) => s.refresh);
   const [open, setOpen] = useState(false);
   const [ghostOpen, setGhostOpen] = useState(false);
@@ -195,6 +200,7 @@ export function ChatPrivacyMenu() {
           {started && <CallButton placement="options" onOpen={() => setOpen(false)} />}
           {privacy.temporary ? <>
             <p className="text-muted-foreground mt-1 text-xs">{t("composer.temporaryOptionsBody")}</p>
+            <p className="text-muted-foreground mt-3 text-xs">{t("annotations.saveChatFirst")}</p>
             <div className="my-4 flex items-center justify-between gap-4">
               <div>
                 <label htmlFor="temporary-personalization" className="text-sm font-medium">{t("composer.personalizeChat")}</label>
@@ -223,6 +229,19 @@ export function ChatPrivacyMenu() {
               }} />
             </div>
             <Link href={settingsHref("memory")} onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground mb-4 block text-xs underline underline-offset-4">{t("composer.memorySettings")}</Link>
+            {started && remoteId && (
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  openBookmarks();
+                }}
+                className="hover:bg-accent mb-4 -mx-2 flex w-[calc(100%+1rem)] items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors duration-(--motion-fast)"
+              >
+                <BookmarkIcon className="size-4 shrink-0" />
+                {t("annotations.bookmarksCount", { count: bookmarkCount })}
+              </button>
+            )}
             {skillsEnabled && (
               <button
                 type="button"

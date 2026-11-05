@@ -3,6 +3,12 @@ import { resetServices } from "@/state/services";
 import { clearThreadCache } from "@/runtime/threadCache";
 import { clearMessageEdits } from "@/state/message-edits";
 import { clearStoredMessages } from "@/runtime/message-persistence";
+import { setAnnotationsAccount } from "@/state/message-annotations";
+import { setSavedPromptsAccount } from "@/state/saved-prompts";
+import { closePromptPicker } from "@/state/prompt-picker";
+import { closeFeedback } from "@/state/feedback-dialog";
+import { closeBookmarks } from "@/state/bookmark-dialog";
+import { useMessageJump } from "@/state/message-jump";
 
 /** Every logout goes through here, so the message cache never outlives the session it belongs to. */
 export async function signOut() {
@@ -10,6 +16,12 @@ export async function signOut() {
   await clearThreadCache();
   clearMessageEdits();
   clearStoredMessages();
+  setSavedPromptsAccount(null);
+  setAnnotationsAccount(null);
+  closePromptPicker();
+  closeFeedback();
+  closeBookmarks();
+  useMessageJump.getState().clear();
   resetServices();
   window.location.href = "/";
 }

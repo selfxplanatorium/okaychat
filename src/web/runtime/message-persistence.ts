@@ -46,7 +46,9 @@ export function clearStoredMessages() {
 /** For `useSyncExternalStore`: the epoch changes whenever any chat's stored set does. */
 export function subscribeStoredMessages(listener: () => void): () => void {
   listeners.add(listener);
-  return () => listeners.delete(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 export const storedMessagesEpoch = () => epoch;
