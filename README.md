@@ -20,7 +20,7 @@
 
 - **Every model, one place.** OpenCode Go, your own ChatGPT plan, OpenCode Zen, a local Ollama, and any OpenAI-compatible, Anthropic, or Google endpoint. Per-chat model and reasoning controls, live context and cost metering, prompt caching, and automatic compaction.
 - **Tools that actually work.** MCP servers, web search, a real offline code sandbox, document editing, image generation, knowledge bases, memory, deep research, scheduled prompts, and voice — not a chat box with a prompt.
-- **Built for several people.** Accounts, groups, per-audience shared keys, model policies, storage quotas, public read-only shares, and admin controls that do not require editing a config file.
+- **Built for several people.** Accounts, groups, per-audience shared keys, per-model and per-user system prompts, granular feature and limit policies, storage quotas, and admin controls that do not require editing a config file.
 - **Private by default.** SQLite plus files on your disk. Credentials and memory are encrypted at rest. Outbound requests to user-chosen URLs are DNS-checked, every hop. Chromium runs in its own container, away from app data.
 - **Fast where it counts.** Streaming, reload recovery, a virtualized sidebar, a windowed message list, lazy routes, cached thread history, and a production bundle split so sign-in does not download the app.
 
@@ -66,20 +66,24 @@ The ChatGPT plan uses the official **Sign in with ChatGPT** flow for chat. Set `
 **Chat**
 - Streaming Markdown, math, Mermaid, syntax highlighting, and reasoning logs
 - Branches, editable replies, retries, model switching, and full-text search
+- Named assistants, a saved prompt library with variables and `/shortcuts`, bookmarks, feedback, and explicit continuation of truncated replies
+- Tags, saved filters, notifications, and portable chat archives
 - Attachments: images, PDFs, DOCX, and text/code files
 - Prompt-injection envelopes, approval gates, and honest errors
-- Markdown/PDF export and public read-only links
+- Markdown/PDF export and share links with expiry, passwords, and frozen snapshots
 
 **Models**
 - OpenCode Go, ChatGPT plan, OpenCode Zen, Ollama, and 100+ providers
-- Custom OpenAI-compatible endpoints
+- Custom OpenAI-compatible endpoints and side-by-side model comparison
+- Assistant presets with sampling, tool, and knowledge policies
 - Per-model reasoning effort and context/cost metering
-- Shared keys with per-audience model policies
+- Shared keys with per-audience model policies and granular feature limits
 
 </td><td width="50%" valign="top">
 
 **Tools**
 - MCP tools, resources, prompts, OAuth, forms, and embedded apps
+- n8n webhook agents for your own workflows
 - Keyless web search and readable page fetching
 - Code execution in an offline sandbox
 - PDF, Word, and Excel creation and in-place editing
@@ -94,7 +98,7 @@ The ChatGPT plan uses the official **Sign in with ChatGPT** flow for chat. Set `
 </td></tr>
 </table>
 
-**More:** scheduled prompts, voice calls, read-aloud and dictation, image generation, email drafting and sending, a persistent file library, keyboard-first controls, an installable PWA, and a theme engine with light/dark/system modes.
+**More:** scheduled prompts, voice calls, read-aloud and dictation, image generation, email drafting and sending, a persistent file library, keyboard-first controls, an installable PWA, and a theme engine with light/dark/system modes plus liquid-glass surfaces.
 
 ## Development
 
