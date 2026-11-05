@@ -13,6 +13,7 @@ import channels from "./channels";
 import chatArchives from "./chatArchives";
 import composer from "./composer";
 import compare from "./compare";
+import customTools from "./customTools";
 import entitlements from "./entitlements";
 import errors from "./errors";
 import email from "./email";
@@ -61,6 +62,7 @@ export const en = {
   common,
   channels,
   chatArchives,
+  customTools,
   composer,
   compare,
   entitlements,

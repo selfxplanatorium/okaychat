@@ -36,6 +36,10 @@ model allowlists, `operationsPerMinute`, and `concurrentOperations` apply unchan
 stops further dispatch. Generation and judge dispatch each resolve the `evaluations` feature for
 their own exact model, in addition to the account-level management guard.
 
+`customTools` gates the `/api/custom-tools` management routes and the execution operation. Python
+functions additionally need `code`, while HTTP request tools do not need `webFetch`. Deletion and the
+`GET /cleanup` owner list stay available when the feature is denied so an account can remove stored data.
+
 n8n webhook turns also enforce `modelAllowed` for the canonical `n8n/<agent-id>` target before
 constructing the stream and again immediately before POST, so hand-crafted requests and a
 revocation during request preparation cannot bypass a target denial.

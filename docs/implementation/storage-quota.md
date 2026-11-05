@@ -117,3 +117,8 @@ the current room owner. Body bytes are counted once; an open run only tops the r
 Transfer checks the target owner's full limit before changing `owner_id`. Events, rate windows, members,
 read cursors, reactions, audit rows, notices, and FTS copies are bounded operational metadata and are not
 charged. See `docs/implementation/channels.md`.
+
+
+## Custom tools
+
+Each custom definition charges its name, description, icon, schema, base key and encrypted config/secrets once. Every execution row reserves a fixed 128 KiB; deletion cascades runs and counters.

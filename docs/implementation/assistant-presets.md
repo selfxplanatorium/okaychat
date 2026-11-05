@@ -79,3 +79,8 @@ same server API. A temporary chat holds the validated snapshot in memory and sen
 - An imported archive's assistant is inactive review data in `threads.imported_assistant_json`; it is not
   activated automatically and has no dedicated review screen yet.
 - There is no preset version history, marketplace, group audience, uploaded icon, or schedule picker.
+
+
+Custom tools follow the same intersection: `inherit` chats use the account's enabled tools, while any
+`selected` preset omits them entirely (dynamic per-tool selectors are deferred). The workspace explains
+this to the user; the final tool-key intersection is the enforcement, not the editor note.

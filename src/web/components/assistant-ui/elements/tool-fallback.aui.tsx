@@ -49,6 +49,8 @@ import { McpAppCard, mcpAppOf } from "@/components/chat/McpApp";
 import { InjectionBadge } from "@/components/chat/tool-ui";
 import { Textarea } from "@/components/ui/textarea";
 import { toolInjection } from "@/lib/tool-injection";
+import { isCustomToolKey } from "@shared/custom-tools";
+import { CustomToolCallCard } from "@/components/chat/CustomToolCallCard";
 
 const ANIMATION_DURATION = 200;
 
@@ -1286,6 +1288,8 @@ function ToolFallbackApprovalImpl({
 }
 
 const ToolFallbackImpl: ToolCallMessagePartComponent = ({
+  type,
+  toolCallId,
   toolName,
   args,
   argsText,
@@ -1340,6 +1344,10 @@ const ToolFallbackImpl: ToolCallMessagePartComponent = ({
     }
   }, [approval, isRequiresAction, status?.type]);
 
+  // A custom tool call uses the same shell but a structured result card. It is still read-only.
+  if (isCustomToolKey(toolName)) {
+    return <CustomToolCallCard {...{ type, toolCallId, toolName, args, argsText, result, status, responseDeliveryStatus, addResult, resume, interrupt, approval, respondToApproval }} />;
+  }
   // MCP App results render the server's own UI instead of the collapsed call.
   const injection = toolInjection(result);
   const mcpApp = status?.type === "complete" ? mcpAppOf(result) : null;

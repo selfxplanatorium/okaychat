@@ -22,10 +22,17 @@ const LOCAL_TOOLS = new Set(["read_attachment", "draft_text"]);
  * Browser-executed widget tools come from the request body and run in the client, so they are gated
  * as a whole by `generativeUI`; a name that collides with a server tool keeps the server's feature.
  */
-export function guardTools(actor: Actor, tools: ToolSet, mcpNames = new Set<string>(), widgetNames = new Set<string>()): ToolSet {
+export function guardTools(
+  actor: Actor,
+  tools: ToolSet,
+  mcpNames = new Set<string>(),
+  widgetNames = new Set<string>(),
+  customNames = new Set<string>(),
+): ToolSet {
   const result: ToolSet = {};
   for (const [name, definition] of Object.entries(tools)) {
-    const feature = mcpNames.has(name) ? "mcp" : FEATURES[name] ?? (widgetNames.has(name) ? "generativeUI" : undefined);
+    const feature = mcpNames.has(name) ? "mcp"
+      : FEATURES[name] ?? (widgetNames.has(name) ? "generativeUI" : customNames.has(name) ? "customTools" : undefined);
     if (!feature && !LOCAL_TOOLS.has(name)) throw new AppError({ code: "forbidden", message: "An unregistered tool was withheld." });
     if (feature && !featureAllowed(actor, feature)) continue;
     const execute = definition.execute;

@@ -1,3 +1,4 @@
+import { CUSTOM_LIMITS } from "../shared/custom-tools.js";
 import { EVAL_RESULT_RESERVATION } from "../shared/evaluations.js";
 import { db } from "./db.js";
 import { env } from "./env.js";
@@ -139,6 +140,15 @@ export function storageUsedSql(user: string): string {
             THEN MAX(0, 65536 - length(CAST(m.body AS BLOB))) ELSE 0 END), 0)
       FROM channel_ai_runs r JOIN channels c ON c.id = r.channel_id JOIN channel_messages m ON m.id = r.message_id
       WHERE c.owner_id = ${user}
+    -- Custom definitions charge their visible text and full encrypted config/secrets once. Every run
+    -- reserves a fixed 128 KiB, so a terminal result write can never exceed the quota after side effects.
+    UNION ALL SELECT COALESCE(SUM(
+        length(CAST(name AS BLOB)) + length(CAST(description AS BLOB)) + length(CAST(icon AS BLOB))
+        + length(CAST(input_schema_json AS BLOB)) + length(CAST(base_key AS BLOB))
+        + length(CAST(config_enc AS BLOB)) + length(CAST(secrets_enc AS BLOB))), 0)
+      FROM custom_tools WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(${CUSTOM_LIMITS.resultReservation}), 0)
+      FROM custom_tool_runs WHERE user_id = ${user}
   )), 0)`;
 }
 

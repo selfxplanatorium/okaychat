@@ -1471,6 +1471,79 @@ const migrations: Array<string | (() => void)> = [
     db.prepare("INSERT INTO channel_event_state (singleton, epoch, floor_id) VALUES (1, ?, 0)").run(newId("chev"));
     if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "channels") throw new Error("Injected migration failure");
   },
+  `
+  CREATE TABLE IF NOT EXISTS custom_tools (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    base_key TEXT NOT NULL UNIQUE,
+    kind TEXT NOT NULL CHECK(kind IN ('python','http')),
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    icon TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0,1)),
+    input_schema_json TEXT NOT NULL,
+    config_enc TEXT NOT NULL,
+    secrets_enc TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision BETWEEN 1 AND 2147483647),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(user_id,id)
+  );
+  CREATE INDEX IF NOT EXISTS custom_tools_owner ON custom_tools(user_id,created_at,id);
+
+  CREATE TABLE IF NOT EXISTS custom_tool_runs (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    tool_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    source TEXT NOT NULL CHECK(source IN ('chat','test')),
+    thread_id TEXT REFERENCES threads(id) ON DELETE CASCADE,
+    execution_key TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('prepared','running','succeeded','failed','cancelled','unknown','denied','expired')),
+    input_enc TEXT,
+    input_hash TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    review_enc TEXT,
+    approval_id TEXT,
+    token_hash TEXT,
+    session_hash TEXT NOT NULL,
+    payload_pruned INTEGER NOT NULL DEFAULT 0 CHECK(payload_pruned IN (0,1)),
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    started_at INTEGER,
+    finished_at INTEGER,
+    duration_ms INTEGER,
+    dispatched INTEGER NOT NULL DEFAULT 0 CHECK(dispatched IN (0,1)),
+    input_bytes INTEGER NOT NULL,
+    output_bytes INTEGER NOT NULL DEFAULT 0,
+    http_status INTEGER,
+    result_enc TEXT,
+    error_code TEXT,
+    FOREIGN KEY(user_id,tool_id) REFERENCES custom_tools(user_id,id) ON DELETE CASCADE,
+    UNIQUE(user_id,execution_key)
+  );
+  CREATE INDEX IF NOT EXISTS custom_runs_recent ON custom_tool_runs(user_id,tool_id,created_at DESC,id DESC);
+  CREATE INDEX IF NOT EXISTS custom_runs_state ON custom_tool_runs(state,created_at);
+
+  CREATE TABLE IF NOT EXISTS custom_tool_rate_windows (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    window_start INTEGER NOT NULL,
+    attempts INTEGER NOT NULL CHECK(attempts BETWEEN 0 AND 30),
+    PRIMARY KEY(user_id,window_start)
+  );
+
+  CREATE TABLE IF NOT EXISTS custom_tool_counters (
+    user_id TEXT NOT NULL,
+    tool_id TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    succeeded INTEGER NOT NULL DEFAULT 0,
+    failed INTEGER NOT NULL DEFAULT 0,
+    cancelled INTEGER NOT NULL DEFAULT 0,
+    unknown INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(user_id,tool_id),
+    FOREIGN KEY(user_id,tool_id) REFERENCES custom_tools(user_id,id) ON DELETE CASCADE
+  );
+  `,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

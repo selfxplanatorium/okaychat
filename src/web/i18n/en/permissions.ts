@@ -136,6 +136,8 @@ export default {
   featureEvaluationsHelp: "Allows private datasets and runs in the evaluation workspace. Every case and every judge verdict is a model request billed to the account.",
   featureChannels: "Team channels",
   featureChannelsHelp: "Allows shared rooms, membership, room search, and explicitly requested room AI replies. It is independent of sharing, schedules, and MCP.",
+  featureCustomTools: "Custom tools",
+  featureCustomToolsHelp: "Allows private Python functions and approved HTTPS request tools in interactive stored chats. Python also needs code execution. HTTP calls need explicit approval and do not rely on web page reading.",
   limitMaxStepsLabel: "Agent steps per reply",
   limitMaxStepsHelp: "Counts tool-capable invocations; the final no-tools answer still happens. Effective value is the minimum of the request, policy, and application maximum.",
   limitMaxSearchesLabel: "Searches per reply",

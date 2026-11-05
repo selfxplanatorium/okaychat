@@ -1,4 +1,5 @@
 import type { ModelMessage } from "ai";
+import { isCustomToolKey } from "../shared/custom-tools.js";
 import type { InjectionFinding, InjectionReport } from "../shared/types.js";
 
 // Third-party text reaching a model is spotlighted as data, and a small heuristic scans it for the
@@ -29,7 +30,8 @@ export type UntrustedKind =
   | "evaluation_output"
   | "evaluation_expected"
   | "channel_history"
-  | "channel_metadata";
+  | "channel_metadata"
+  | "custom_tool";
 
 export interface UntrustedSource {
   kind: UntrustedKind;
@@ -308,7 +310,7 @@ export function messagesHaveUntrustedContent(messages: ModelMessage[]): boolean 
     if (message.role === "tool") {
       return message.content.some((part) => {
         if (part.type !== "tool-result") return false;
-        if (UNTRUSTED_TOOL_NAMES.has(part.toolName)) return true;
+        if (UNTRUSTED_TOOL_NAMES.has(part.toolName) || isCustomToolKey(part.toolName)) return true;
         return outputText(part.output).includes(UNTRUSTED_OPEN);
       });
     }

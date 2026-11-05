@@ -320,3 +320,15 @@ docker run --rm -v "$PWD/sandbox":/s -w /tmp python:3.12-slim-bookworm sh -c 'pi
 ```
 
 and put the header line back on top of `requirements.txt`.
+
+
+## Custom tool function mode
+
+`POST /workspaces/:ws/function` is the one-use Python function mode used by private custom tools. The app
+derives the workspace id from the run id, so it never accepts a workspace or job id from the public API.
+The route takes `{job,code,input,timeoutMs}` (capped), writes a fixed wrapper plus the user module to
+private run files, and starts `python3 -I` with canonical JSON on stdin. It uses the same admitted slot,
+workspace uid, bubblewrap jail, isolation probe, limits and cancellation as `run_code`, but captures exact
+stdout (32 KiB) and stderr (8 KiB) and kills the whole uid on overflow instead of head/tail splicing. A
+fresh workspace is deleted in `finally`; a worker slot wait of at most 2 s answers 429 `{error:"busy"}`.
+Function workspaces refuse a second function call and every ordinary run/convert route.

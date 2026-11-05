@@ -50,6 +50,7 @@ export const FEATURE_LABEL: Record<FeatureKey, PlainMessageKey> = {
   skills: "permissions.featureSkillsLabel",
   evaluations: "permissions.featureEvaluationsLabel",
   channels: "permissions.featureChannels",
+  customTools: "permissions.featureCustomTools",
 };
 
 export const FEATURE_HELP: Record<FeatureKey, PlainMessageKey> = {
@@ -72,6 +73,7 @@ export const FEATURE_HELP: Record<FeatureKey, PlainMessageKey> = {
   skills: "permissions.featureSkillsHelp",
   evaluations: "permissions.featureEvaluationsHelp",
   channels: "permissions.featureChannelsHelp",
+  customTools: "permissions.featureCustomToolsHelp",
 };
 
 export const LIMIT_LABEL: Record<LimitKey, PlainMessageKey> = {

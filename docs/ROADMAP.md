@@ -48,6 +48,14 @@ Status as of 2026-11-05. Update this file when a feature ships or a plan changes
 | Mobile app | Installable PWA (manifest, maskable icons, offline shell), safe areas, touch-sized controls, swipe drawer, native-style settings rows | Install needs HTTPS. See `docs/implementation/mobile-pwa.md` |
 | Deploy | Dockerfile with two targets (`app`; `browser`: Chromium + Scrapling worker), separate sandbox and speech Dockerfiles, Compose with all workers and SearXNG | Optional `docker-compose.gpu.yml` enables CUDA Whisper. `SCRAPLING_BROWSER=false` skips Scrapling's stealth-browser fallback |
 
+## Pass 10: custom tools (built)
+
+- Plugins → Custom tools: private per-account Python functions and fixed-destination HTTPS request tools,
+  strict schema builder, write-only encrypted secrets, exact approval review, workspace tests, retained
+  run ledger, counters and a new `customTools` permission. Python uses a one-use sandbox function mode;
+  HTTP uses `publicFetch` only, with redirects and private destinations refused. See
+  `docs/implementation/custom-tools.md`.
+
 ## Pass 2: completed
 
 - Resumable streams and selected-chat restoration after reload.

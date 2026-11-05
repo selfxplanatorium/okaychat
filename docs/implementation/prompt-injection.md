@@ -179,3 +179,10 @@ third-party data. The transcript is a JSON array inside `kind="channel_history"`
 source body is removed from the transcript and sent as the explicit request. Nothing from account
 memory, projects, skills, tools, or files is present. The scanner result rides on the AI message as an
 advisory badge; it does not make model compliance a guarantee. See `docs/implementation/channels.md`.
+
+
+Custom tool descriptions and schema prose are enveloped as `custom_tool` and marked as external metadata,
+so offering one conservatively taints the turn. Their results are redacted, enveloped again as
+`custom_tool` data, and any historical/imported tool key matching the reserved `custom_<24 hex>_r<n>`
+syntax is treated as untrusted even after the definition is deleted. Imported records remain inert and
+public shares keep hiding tool results.

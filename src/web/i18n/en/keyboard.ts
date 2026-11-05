@@ -22,6 +22,7 @@ export default {
   cmdNavProjects: "Open Projects",
   cmdNavScheduled: "Open Scheduled",
   cmdNavPlugins: "Open Plugins",
+  cmdNavCustomTools: "Open custom tools",
   cmdNavSettings: "Open settings",
   cmdNavProjectFilter: "Filter chats by project",
   cmdNavCreateProject: "Create a project",
@@ -272,4 +273,10 @@ export default {
   cmdAgentsStopTest: "Stop the agent test",
   cmdChatResetAgentSession: "Reset this chat's remote agent memory",
   cmdChatExportArchive: "Export this chat as a portable archive",
+  cmdCustomToolsCreatePython: "Create a Python custom tool",
+  cmdCustomToolsCreateHttp: "Create an HTTP custom tool",
+  cmdCustomToolsSave: "Save the custom tool",
+  cmdCustomToolsTest: "Test the custom tool",
+  cmdCustomToolsCancelTest: "Cancel the custom tool test",
+  cmdCustomToolsDelete: "Delete the custom tool",
 } as const;
