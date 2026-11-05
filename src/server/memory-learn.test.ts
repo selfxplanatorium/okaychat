@@ -162,6 +162,9 @@ test("past-chat search stays inside the chat's scope and skips excluded chats", 
   updateThread("alice", "secret", { memoryDisabled: true });
   ensureThread("alice", "garden-chat", "project-a");
   say("garden-chat", "p1", "user", "Kubernetes ingress inside a project", null);
+  ensureThread("alice", "compare-pane");
+  say("compare-pane", "cp1", "user", "Kubernetes ingress inside a comparison pane", null);
+  db.prepare("UPDATE threads SET compare_group_id = 'grp' WHERE id = 'compare-pane'").run();
 
   const tools = conversationMemory("alice", "current", "").tools;
   const found = await execute(tools, "conversation_search", { query: "kubernetes traefik" });
@@ -172,6 +175,7 @@ test("past-chat search stays inside the chat's scope and skips excluded chats", 
   assert.match(read.text, /User: We set up the Kubernetes ingress with Traefik/);
   await assert.rejects(execute(tools, "conversation_read", { id: "garden-chat" }), /not available/);
   await assert.rejects(execute(tools, "conversation_read", { id: "secret" }), /not available/);
+  await assert.rejects(execute(tools, "conversation_read", { id: "compare-pane" }), /not available/);
 
   const projectTools = conversationMemory("alice", "garden-chat", "").tools;
   assert.deepEqual((await execute(projectTools, "conversation_search", { query: "kubernetes" })).chats, [], "a project chat sees only its project's other chats");
