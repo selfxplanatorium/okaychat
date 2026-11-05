@@ -167,3 +167,15 @@ test("a thread has a bounded reply count", async () => {
     409,
   );
 });
+
+test("editing a reply emits its root id for thread invalidation", async () => {
+  const id = await roomWithMembers();
+  const root = await postMessage(call, id, { body: "Root" }, "alice");
+  const reply = await postMessage(call, id, { body: "Reply", threadRootId: root.message.id }, "bob");
+  const response = await call(`/channels/${id}/messages/${reply.message.id}`, {
+    method: "PATCH", user: "bob", json: { revision: 1, body: "Edited reply" },
+  });
+  assert.equal(response.status, 200);
+  const event = db.prepare("SELECT root_id FROM channel_events WHERE entity_id = ? AND kind = 'message.changed' ORDER BY id DESC LIMIT 1").get(reply.message.id);
+  assert.equal(event.root_id, root.message.id);
+});

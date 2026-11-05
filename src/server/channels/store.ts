@@ -634,7 +634,7 @@ export function editHumanMessage(userId: string, channelId: string, messageId: s
   tx(() => {
     const channel = channelRow(channelId);
     const message = db.prepare("SELECT * FROM channel_messages WHERE channel_id = ? AND id = ?").get(channelId, messageId) as
-      | { id: string; author_id: string | null; kind: string; revision: number; deleted_at: number | null; body: string }
+      | { id: string; author_id: string | null; kind: string; revision: number; deleted_at: number | null; body: string; thread_root: string | null }
       | undefined;
     if (!channel || !message) throw notFound();
     if (message.kind !== "human" || message.author_id !== userId) throw new AppError({ code: "forbidden", message: "You can only edit your own messages." });
@@ -660,7 +660,7 @@ export function editHumanMessage(userId: string, channelId: string, messageId: s
       );
     }
     const next = (db.prepare("SELECT revision FROM channel_messages WHERE id = ?").get(messageId) as { revision: number }).revision;
-    insertEvent({ channelId, kind: "message.changed", entityId: messageId, version: next });
+    insertEvent({ channelId, kind: "message.changed", entityId: messageId, version: next, rootId: message.thread_root });
   });
 }
 
