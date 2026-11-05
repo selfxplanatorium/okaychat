@@ -14,4 +14,5 @@ export default {
   sectionAppearance: "Appearance",
   sectionKeyboard: "Keyboard",
   sectionAdmin: "Admin",
+  sectionAgents: "Agents",
 } as const;

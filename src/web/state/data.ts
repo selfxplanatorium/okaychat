@@ -1,16 +1,19 @@
 import { create } from "zustand";
-import type { McpPromptInfo, McpServerInfo, Me, ModelInfo, Project, ProviderInfo, StorageInfo, UserSettings } from "@shared/types";
+import type { ChatTargetInfo, McpPromptInfo, McpServerInfo, Me, Project, ProviderInfo, StorageInfo, UserSettings } from "@shared/types";
+import { isAgentRef } from "@shared/n8n-agents";
 import { api, prefetch } from "@/lib/api";
 import { setLibraryAccount } from "./library-cache";
 import { clearMessageEdits } from "./message-edits";
 import { useServices } from "./services";
+import { startAgentAccount } from "./n8n-agents";
 import { warmThreadCache } from "@/runtime/threadCache";
 
 interface DataState {
   me: Me | null;
   settings: UserSettings | null;
   providers: ProviderInfo[];
-  models: ModelInfo[];
+  /** Everything a chat can target: language models plus enabled n8n agents. */
+  models: ChatTargetInfo[];
   mcp: Array<McpServerInfo & { authorizationUrl?: string }>;
   mcpPrompts: McpPromptInfo[];
   loaded: boolean;
@@ -76,7 +79,7 @@ export const useData = create<DataState>((set, get) => ({
       api<Me>("/me"),
       api<UserSettings>("/settings"),
       api<ProviderInfo[]>("/providers"),
-      api<ModelInfo[]>("/models"),
+      api<ChatTargetInfo[]>("/models"),
       api<McpServerInfo[]>("/mcp"),
       api<Project[]>("/projects"),
       api<StorageInfo>("/storage"),
@@ -85,7 +88,7 @@ export const useData = create<DataState>((set, get) => ({
     set({ me, settings, providers, models, mcp, projects, storage, loaded: true, ...(active && !projects.some((p) => p.id === active) ? { activeProject: null } : {}) });
   },
   refreshProviders: async () => {
-    const [providers, models] = await Promise.all([api<ProviderInfo[]>("/providers"), api<ModelInfo[]>("/models")]);
+    const [providers, models] = await Promise.all([api<ProviderInfo[]>("/providers"), api<ChatTargetInfo[]>("/models")]);
     set({ providers, models });
   },
   refreshMcp: async () => {
@@ -137,19 +140,45 @@ export const useData = create<DataState>((set, get) => ({
 // Same test as isTemporaryChat, which lives with assistant-ui code this module must not import.
 const isTemporaryThread = (id: string) => id.startsWith("tmp_");
 
-/** The model the next message of a chat will use. Without a thread id: the new chat being written. */
-export function useActiveModel(threadId?: string | null): ModelInfo | undefined {
-  return useData((s) => resolveActiveModel(s, threadId));
+/** The target a chat's next message goes to, plus an explicit agent ref that is no longer offered. */
+export interface ActiveTarget {
+  target?: ChatTargetInfo;
+  /** An explicit n8n ref the list no longer contains: never silently replaced by an LLM. */
+  unavailableRef?: string;
 }
 
-function resolveActiveModel({ models, selectedModel, threadModels, settings, projects, activeProject }: DataState, threadId?: string | null): ModelInfo | undefined {
-  const selected = threadId ? threadModels[threadId] : selectedModel;
-  const fallback = settings?.defaultModel;
-  const projectModel = projects.find((p) => p.id === activeProject)?.defaultModel;
-  return models.find((m) => m.ref === selected) ?? models.find((m) => m.ref === projectModel) ?? models.find((m) => m.ref === fallback) ?? models[0];
+/**
+ * Resolution order: this chat's choice, the active project's default, the account default, then the first
+ * target. Only an explicit agent ref stops the chain: a removed or disabled agent must stay visible as
+ * unavailable instead of quietly sending the message to a language model.
+ */
+export function resolveActiveTarget(state: DataState, threadId?: string | null): ActiveTarget {
+  const selected = threadId ? state.threadModels[threadId] : state.selectedModel;
+  const projectModel = state.projects.find((p) => p.id === state.activeProject)?.defaultModel;
+  const fallback = state.settings?.defaultModel;
+  for (const ref of [selected, projectModel, fallback]) {
+    const target = ref ? state.models.find((m) => m.ref === ref) : undefined;
+    if (target) return { target };
+    if (ref && isAgentRef(ref)) return { unavailableRef: ref };
+  }
+  return state.models[0] ? { target: state.models[0] } : {};
 }
 
-export const getActiveModel = (threadId?: string | null) => resolveActiveModel(useData.getState(), threadId);
+/** The target the next message of a chat will use. Without a thread id: the new chat being written. */
+export function useActiveTarget(threadId?: string | null): ChatTargetInfo | undefined {
+  return useData((s) => resolveActiveTarget(s, threadId).target);
+}
+
+/** The explicit agent ref the chat still remembers but the server no longer offers, if any. */
+export function useUnavailableTargetRef(threadId?: string | null): string | null {
+  return useData((s) => resolveActiveTarget(s, threadId).unavailableRef ?? null);
+}
+
+export const useActiveModel = useActiveTarget;
+
+export const getActiveTarget = (threadId?: string | null) => resolveActiveTarget(useData.getState(), threadId);
+
+export const getActiveModel = (threadId?: string | null) => getActiveTarget(threadId).target;
 
 export const selectedThreadKey = (userId: string | undefined) => `okaychat:thread:${userId}`;
 
@@ -180,6 +209,9 @@ let preloaded: { userId: string; promise?: Promise<void> } | undefined;
 /** Starts the shell's data requests as soon as the session is known, alongside the shell chunk and appearance. */
 export function preloadData(userId: string) {
   setLibraryAccount(userId);
+  // Agent summaries and last-response evidence are account-scoped; a late answer for the previous
+  // account must never paint the new one.
+  startAgentAccount(userId);
   // A new account must not inherit the previous one's edited-reply badges or open editor.
   if (preloaded?.userId !== userId) clearMessageEdits();
   // The service registry is optional data: it starts alongside the rest and never holds up the chat.

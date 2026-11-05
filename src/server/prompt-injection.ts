@@ -7,6 +7,7 @@ import type { InjectionFinding, InjectionReport } from "../shared/types.js";
 // approval gate. See docs/implementation/prompt-injection.md.
 
 export type UntrustedKind =
+  | "n8n_agent"
   | "web_page"
   | "web_search"
   | "mcp_tool"
@@ -305,6 +306,9 @@ export function messagesHaveUntrustedContent(messages: ModelMessage[]): boolean 
         if (UNTRUSTED_TOOL_NAMES.has(part.toolName)) return true;
         return outputText(part.output).includes(UNTRUSTED_OPEN);
       });
+    }
+    if (message.role === "assistant") {
+      return typeof message.content === "string" ? message.content.includes(UNTRUSTED_OPEN) : message.content.some(part => part.type === "text" && part.text.includes(UNTRUSTED_OPEN));
     }
     if (message.role !== "user") return false;
     if (typeof message.content === "string") return message.content.includes(UNTRUSTED_OPEN) || containsAttachment(message.content);

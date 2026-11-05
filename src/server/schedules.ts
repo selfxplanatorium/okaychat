@@ -1,3 +1,5 @@
+import { agentMetadata } from "./n8n/provenance.js";
+import { deleteSession } from "./n8n/store.js";
 import { generateId, readUIMessageStream, type UIMessage } from "ai";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -144,7 +146,7 @@ export async function runSchedule(row: Row, reserved?: () => void): Promise<void
     let assistant: UIMessage | undefined;
     for await (const message of readUIMessageStream({ stream })) assistant = message;
     if (!assistant) throw new AppError({ code: "tool_failed", message: "The model returned nothing." });
-    const failed = assistant.parts.length === 0;
+    const failed = assistant.parts.length === 0 || (agentMetadata(assistant)?.usageMode === "agent" && agentMetadata(assistant)?.agent?.outcome !== "ok");
     // appendMessage creates a missing thread; a chat deleted during the run must stay deleted.
     if (!getThread(row.user_id, threadId)) throw new AppError({ code: "not_found", message: "Its chat was deleted while the run was replying." });
     appendMessage(row.user_id, threadId, { id: assistant.id || generateId(), parent_id: userMessage.id, format: "ai-sdk/v6", content: withoutId(assistant) });

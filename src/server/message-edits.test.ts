@@ -322,6 +322,7 @@ test("migration adds the edit columns and leaves existing rows unedited", () => 
       db.exec("ALTER TABLE email_drafts DROP COLUMN kind");
       db.exec("DROP TABLE image_threads; DROP TABLE media; DROP INDEX uploads_media; DROP INDEX sandbox_files_media");
       for (const table of ["uploads", "sandbox_files", "user_avatars"]) db.exec("ALTER TABLE " + table + " DROP COLUMN media_id");
+      db.exec("DROP TABLE n8n_agent_sessions; DROP TABLE n8n_agent_runs; DROP TABLE n8n_agents");
       db.exec("PRAGMA user_version = 32");
       db.close();`);
     const result = JSON.parse(run(`const { db } = await import(${JSON.stringify(dbUrl)});

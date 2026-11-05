@@ -68,3 +68,7 @@ Not defended against: an admin (who controls the server), anyone who can run cod
 3. Back up `OKAYCHAT_SECRET` separately from the data volume.
 4. Rebuild images when Dependabot updates base images, Chromium, or Scrapling. Debian security updates (FFmpeg, LibreOffice, Ghostscript, poppler in the sandbox) arrive only with a rebuild.
 5. Give admin rights only to people who may run code on the server (stdio MCP servers run as the app).
+
+## n8n agents
+
+n8n webhook configurations (entire URL and auth header) are encrypted; shared recipients cannot read details or test hidden credentials. All destinations, including admins, use pinned public HTTPS, no redirects and no automatic retries. See [n8n agents](n8n-agents.md).

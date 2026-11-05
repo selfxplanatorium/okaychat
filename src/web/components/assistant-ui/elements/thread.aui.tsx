@@ -102,6 +102,10 @@ import { useLocalSpeechUnavailable } from "@/speech/adapters";
 import { useSpeech } from "@/speech/store";
 import { useThreadSync, type ThreadSync } from "@/state/thread-sync";
 import { useChatResearch } from "@/state/chat-research";
+import { useChatModel, useCurrentThreadId } from "@/state/thread-meta";
+import { useUnavailableTargetRef } from "@/state/data";
+import { isAgentTarget } from "@shared/n8n-agents";
+import { AgentNotice } from "@/components/chat/AgentNotice";
 import { DictationWaveform } from "@/speech/Waveform";
 import { CallButton, useCallEntry } from "@/speech/call/CallButton";
 import { useCall } from "@/speech/call/store";
@@ -949,44 +953,55 @@ const SyncNotice: FC<{ sync: ThreadSync | undefined }> = ({ sync }) =>
 const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
   // Until the server's rows replace a cached paint, a send would attach the reply to whatever the cache showed.
   const sync = useThreadSync();
+  const aui = useAui();
   const submitMode = useSubmitMode();
   const researching = useChatResearch().enabled;
+  const target = useChatModel();
+  const agent = !!target && isAgentTarget(target);
+  const unavailable = useUnavailableTargetRef(useCurrentThreadId());
   // The composer sits on the bottom edge, so it grows upward with the typed line held in place.
   const smoothHeight = useSmoothHeight({ pin: "bottom" });
-  const longPaste = useLongPaste();
+  const longPaste = useLongPaste(!agent);
+  // Switching to a text-only agent must not leave an earlier attachment in the submission.
+  useEffect(() => {
+    if (agent && aui.composer.getState().attachments.length > 0) void aui.composer.clearAttachments();
+  }, [agent, aui]);
+  const shell = (
+    <div
+      ref={smoothHeight}
+      data-slot="aui_composer-shell"
+      className="depth-composer data-[dragging=true]:border-ring flex w-full cursor-text flex-col gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) [backdrop-filter:blur(var(--glass-blur))_saturate(var(--glass-saturation))] transition-[border-color,box-shadow] duration-(--motion-base) ease-out-quart data-[dragging=true]:border-dashed data-[dragging=true]:bg-[color-mix(in_oklab,var(--color-accent)_50%,var(--color-background))]"
+    >
+      {!agent && <ComposerAttachments />}
+      {longPaste.notice}
+      <ComposerPrimitive.Input
+        {...longPaste.inputProps}
+        placeholder={researching ? t("thread.researchPlaceholder") : t("thread.messagePlaceholder")}
+        className="aui-composer-input caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base leading-6 outline-none"
+        rows={1}
+        submitMode={sync || unavailable ? "none" : submitMode}
+        autoFocus={autoFocus && finePointer}
+        enterKeyHint="send"
+        aria-label={t("thread.messageInput")}
+      />
+      <SyncNotice sync={sync} />
+      <VoiceNotice />
+      <SpeechServiceHint />
+      <AgentNotice />
+      <ComposerAction blocked={!!sync || !!unavailable} agent={agent} unavailable={!!unavailable} />
+    </div>
+  );
   return (
     <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
-      <ComposerPrimitive.AttachmentDropzone asChild>
-        <div
-          ref={smoothHeight}
-          data-slot="aui_composer-shell"
-          className="depth-composer data-[dragging=true]:border-ring flex w-full cursor-text flex-col gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) [backdrop-filter:blur(var(--glass-blur))_saturate(var(--glass-saturation))] transition-[border-color,box-shadow] duration-(--motion-base) ease-out-quart data-[dragging=true]:border-dashed data-[dragging=true]:bg-[color-mix(in_oklab,var(--color-accent)_50%,var(--color-background))]"
-        >
-          <ComposerAttachments />
-          {longPaste.notice}
-          <ComposerPrimitive.Input
-            {...longPaste.inputProps}
-            placeholder={researching ? t("thread.researchPlaceholder") : t("thread.messagePlaceholder")}
-            className="aui-composer-input caret-primary placeholder:text-muted-foreground/60 max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-1 text-base leading-6 outline-none"
-            rows={1}
-            submitMode={sync ? "none" : submitMode}
-            autoFocus={autoFocus && finePointer}
-            enterKeyHint="send"
-            aria-label={t("thread.messageInput")}
-          />
-          <SyncNotice sync={sync} />
-          <VoiceNotice />
-          <SpeechServiceHint />
-          <ComposerAction blocked={!!sync} />
-        </div>
-      </ComposerPrimitive.AttachmentDropzone>
+      {/* Agents accept text only: no dropzone, no attachment button, and no adapter to turn a drop into an upload. */}
+      {agent ? shell : <ComposerPrimitive.AttachmentDropzone asChild>{shell}</ComposerPrimitive.AttachmentDropzone>}
       <DictationSend />
       <ReadAloudAutoPlay />
     </ComposerPrimitive.Root>
   );
 };
 
-const ComposerAction: FC<{ blocked: boolean }> = ({ blocked }) => {
+const ComposerAction: FC<{ blocked: boolean; agent: boolean; unavailable: boolean }> = ({ blocked, agent, unavailable }) => {
   // The stop control only cancels the send while no run it could stop is going.
   const isSending = useAuiState(
     (s) =>
@@ -1019,7 +1034,7 @@ const ComposerAction: FC<{ blocked: boolean }> = ({ blocked }) => {
   return (
     <div className="aui-composer-action-wrapper relative flex items-center justify-between gap-2">
       <div className="flex min-w-0 items-center gap-1">
-        <ComposerAddAttachment className="max-sm:hidden pointer-coarse:hidden" />
+        {!agent && <ComposerAddAttachment className="max-sm:hidden pointer-coarse:hidden" />}
         {ComposerToolbar && <ComposerToolbar />}
       </div>
       <div className="flex items-center gap-1.5">
@@ -1091,7 +1106,7 @@ const ComposerAction: FC<{ blocked: boolean }> = ({ blocked }) => {
               </TooltipIconButton>
             ) : blocked ? (
               <TooltipIconButton
-                tooltip={t("thread.loadingLatest")}
+                tooltip={unavailable ? t("composer.agentUnavailable") : t("thread.loadingLatest")}
                 side="bottom"
                 type="button"
                 variant="default"
@@ -1134,7 +1149,8 @@ const ComposerAction: FC<{ blocked: boolean }> = ({ blocked }) => {
                 variant="default"
                 size="icon"
                 className="aui-composer-cancel size-7 pointer-coarse:size-9 rounded-[0.6rem] pointer-coarse:rounded-xl"
-                aria-label={isSending ? t("thread.cancelSending") : t("thread.stopGenerating")}
+                aria-label={isSending ? t("thread.cancelSending") : agent ? t("agents.stopHint") : t("thread.stopGenerating")}
+                title={agent ? t("agents.stopHint") : undefined}
               >
                 <SquareIcon className="aui-composer-cancel-icon size-3.5 fill-current" />
               </Button>

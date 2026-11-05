@@ -201,3 +201,7 @@ provider code, reference, and recovery actions for both early HTTP and streamed 
    without duplicating output.
 6. Add a fixture test for the shape, a presentation test for the code, and a leak check if the source
    can carry third-party text. Update this table.
+
+## n8n agents
+
+Agent errors agent_auth/agent_response/agent_failed use safe authored text, no automatic retries and Agents settings recovery. Agent upstream auth is HTTP 502, never application-session 401. agentReason is an allowlisted response reason and omitted from copied details. See [n8n agents](n8n-agents.md).

@@ -3,6 +3,7 @@ import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { ErrorCode, ErrorWire } from "../shared/errors.js";
+import { isAgentReason, type AgentReason } from "../shared/n8n-agents.js";
 import { redactSecrets } from "../shared/redact.js";
 
 export { redactSecrets } from "../shared/redact.js";
@@ -154,6 +155,30 @@ export const ERROR_CATALOG: Record<ErrorCode, CatalogEntry> = {
     message: "Too many requests are running at once.",
     hint: "Wait a moment and try again.",
   },
+  agent_auth: {
+    status: 502,
+    retryable: false,
+    messageKey: "errors.agentAuth",
+    hintKey: "errors.agentAuthHint",
+    message: "The agent's workflow rejected the request.",
+    hint: "Check the agent's header in Settings → Agents and that this server may reach the workflow. Your okaychat session is fine.",
+  },
+  agent_response: {
+    status: 502,
+    retryable: false,
+    messageKey: "errors.agentResponse",
+    hintKey: "errors.agentResponseHint",
+    message: "The agent's answer could not be read.",
+    hint: "Check the workflow's response settings in n8n and the agent's response mode in Settings → Agents.",
+  },
+  agent_failed: {
+    status: 502,
+    retryable: false,
+    messageKey: "errors.agentFailed",
+    hintKey: "errors.agentFailedHint",
+    message: "The agent's workflow failed.",
+    hint: "Open the workflow's executions in n8n to see what went wrong. Sending again may repeat its actions.",
+  },
   unknown: {
     status: 500,
     retryable: false,
@@ -178,6 +203,7 @@ export interface AppErrorInit {
   model?: string;
   provider?: string;
   requestId?: string;
+  agentReason?: AgentReason;
   cause?: unknown;
 }
 
@@ -195,6 +221,7 @@ export class AppError extends Error {
   readonly model?: string;
   readonly provider?: string;
   readonly requestId?: string;
+  readonly agentReason?: AgentReason;
 
   constructor(init: AppErrorInit) {
     const entry = ERROR_CATALOG[init.code];
@@ -212,6 +239,7 @@ export class AppError extends Error {
     if (init.model) this.model = init.model;
     if (init.provider) this.provider = init.provider;
     if (init.requestId) this.requestId = init.requestId;
+    if (isAgentReason(init.agentReason) && init.code === "agent_response") this.agentReason = init.agentReason;
   }
 
   static isInstance(error: unknown): error is AppError {
@@ -238,6 +266,7 @@ export function toWireError(error: AppError): ErrorWire {
     ...(error.model ? { model: safeText(error.model, 200) } : {}),
     ...(error.provider ? { provider: safeText(error.provider, 100) } : {}),
     ...(error.requestId ? { requestId: safeText(error.requestId, 200) } : {}),
+    ...(error.agentReason ? { agentReason: error.agentReason } : {}),
   };
 }
 

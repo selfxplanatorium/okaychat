@@ -10,6 +10,7 @@ export type SettingsSection =
   | "email"
   | "providers"
   | "mcp"
+  | "agents"
   | "projects"
   | "schedules"
   | "usage"
@@ -40,6 +41,7 @@ export const SETTINGS_DESTINATIONS = {
   keyboard: { section: "keyboard" },
   voice: { section: "voice" },
   mcp: { section: "mcp" },
+  agents: { section: "agents" },
 } as const satisfies Record<string, SettingsDestination>;
 
 export type SettingsDestinationId = keyof typeof SETTINGS_DESTINATIONS;

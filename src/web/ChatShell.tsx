@@ -16,6 +16,7 @@ import { StorageNotice } from "@/components/StorageNotice";
 import { ThemeEditorHost } from "@/components/settings/theme/ThemeEditorHost";
 import { RuntimeProvider } from "@/runtime/RuntimeProvider";
 import { preloadable } from "@/lib/preloadable";
+import { isAgentTarget } from "@shared/n8n-agents";
 import { chatIdFromPath, chatPath, showChat, takePreloadedData, useData } from "@/state/data";
 import { loadInstalledFonts } from "@/state/fonts";
 import { isTemporaryChat, useChatPrivacyStore } from "@/state/chat-privacy";
@@ -140,6 +141,8 @@ export function Shell({ userId }: { userId: string }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const load = useData((s) => s.load);
   const connected = useData((s) => s.providers.some((p) => p.connected));
+  // An agents-only account can chat without a provider key.
+  const hasAgent = useData((s) => s.models.some(isAgentTarget));
   const onboardingSkipped = useData((s) => s.settings?.onboardingSkipped === true);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
   const [location] = useLocation();
@@ -210,7 +213,7 @@ export function Shell({ userId }: { userId: string }) {
       </div>
     );
   if (!loaded) return <AppLoading />;
-  if (!connected && !onboardingSkipped && !inSettings) return <Onboarding />;
+  if (!connected && !hasAgent && !onboardingSkipped && !inSettings) return <Onboarding />;
 
   return (
     <RuntimeProvider>

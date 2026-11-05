@@ -90,6 +90,7 @@ export function KeyboardShortcuts() {
     useCommand(`nav.${page}`, () => navigate(`/${page}`));
   }
   useCommand("nav.settings", () => navigate("/settings"));
+  useCommand("app.openAgents", () => navigate(settingsHref("agents")));
   useCommand("nav.createProject", () => navigate("/projects?new=1"));
   useCommand("nav.createSchedule", () => navigate("/scheduled?new=1"));
   for (const command of COMMANDS.filter((c) => c.group === "Settings")) {

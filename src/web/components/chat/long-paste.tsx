@@ -14,7 +14,7 @@ const isLong = (text: string) => text.length >= LONG_PASTE_CHARS || text.split("
  * Long pastes attach as "Pasted text.txt", with an offer to paste inline instead. Ctrl/⌘+Shift+V (paste as plain
  * text) always pastes inline. Spread `inputProps` on the composer input and render `notice` inside the composer.
  */
-export function useLongPaste(): {
+export function useLongPaste(enabled = true): {
   inputProps: {
     onPaste: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
     onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
@@ -33,7 +33,8 @@ export function useLongPaste(): {
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const inline = plainPaste.current;
     plainPaste.current = false;
-    if (inline || event.clipboardData.files.length > 0) return;
+    // Agent targets accept text only, so a long paste stays inline instead of becoming an attachment.
+    if (!enabled || inline || event.clipboardData.files.length > 0) return;
     const text = event.clipboardData.getData("text/plain");
     if (!isLong(text)) return;
     event.preventDefault();

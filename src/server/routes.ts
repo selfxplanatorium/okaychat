@@ -1,3 +1,6 @@
+import { n8nRoutes, agentSessionRoutes } from "./n8n/routes.js";
+import { listChatTargets } from "./catalog/chat-targets.js";
+import { agentUsage, threadAgentRequests } from "./n8n/store.js";
 import { appearanceRoutes } from "./appearance.js";
 import { accountRoutes } from "./account.js";
 import { memoryRoutes } from "./memory.js";
@@ -100,6 +103,8 @@ function mergeSecrets(next?: Record<string, string>, prev?: Record<string, strin
 
 const api = new Hono<AppEnv>()
   .use(requireUser)
+  .route("/agents/n8n", n8nRoutes())
+  .route("/", agentSessionRoutes)
   .use(async (c, next) => {
     // Learn the OAuth redirect origin only from signed-in requests. Any anonymous request could otherwise
     // set a forged Host first and receive every user's authorization codes.
@@ -143,7 +148,7 @@ const api = new Hono<AppEnv>()
     return c.json({ ok: true });
   })
   .route("/providers/ollama", ollamaManagementRoutes("user"))
-  .get("/models", async (c) => c.json(await listModels(c.get("user").id)))
+  .get("/models", async (c) => c.json(await listChatTargets(c.get("user").id)))
 
   // Threads and history (assistant-ui ThreadHistoryAdapter rows)
   .get("/threads", (c) => {
@@ -163,7 +168,7 @@ const api = new Hono<AppEnv>()
   })
   .get("/threads/:id", (c) => {
     const thread = getThread(c.get("user").id, c.req.param("id"));
-    return thread ? c.json({ ...thread, usage: threadUsage(c.get("user").id, thread.id) }) : c.json({ error: "Not found" }, 404);
+    return thread ? c.json({ ...thread, usage: { ...threadUsage(c.get("user").id, thread.id), agentRequests: threadAgentRequests(c.get("user").id, thread.id) } }) : c.json({ error: "Not found" }, 404);
   })
   .patch("/threads/:id", async (c) => {
     const parsed = z.object({
@@ -226,7 +231,7 @@ const api = new Hono<AppEnv>()
     const days = Number(c.req.query("days") ?? 30);
     const groupBy = (c.req.query("groupBy") ?? "day") as "day" | "model" | "provider" | "kind";
     const since = Date.now() - days * 86_400_000;
-    return c.json({ rows: usageSummary(c.get("user").id, groupBy, since), go: goWindows(c.get("user").id) });
+    return c.json({ agents: agentUsage(c.get("user").id, since), rows: usageSummary(c.get("user").id, groupBy, since), go: goWindows(c.get("user").id) });
   })
 
   // Storage

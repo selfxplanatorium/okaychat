@@ -9,8 +9,19 @@ interface ContextMessage {
 export const metadataOf = (metadata: unknown): AssistantMetadata =>
   ((metadata as { custom?: AssistantMetadata } | undefined)?.custom ?? {}) as AssistantMetadata;
 
+/** An agent reply reports no tokens, so the meter must not fall back to an older LLM measurement. */
+export type ContextUsage = { tokens: number; window: number } | { unmanaged: "agent" } | null;
+
 /** A trim supersedes earlier provider counts until a later assistant reply reports usage. */
-export function contextUsage(messages: readonly ContextMessage[], compaction: CompactionState | null) {
+export function contextUsage(messages: readonly ContextMessage[], compaction: CompactionState | null): ContextUsage {
+  // The newest reply decides the mode: after an agent answer the chat has no managed context at all.
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]!;
+    if (message.role !== "assistant") continue;
+    if (metadataOf(message.metadata).usageMode === "agent") return { unmanaged: "agent" };
+    break;
+  }
+
   let latest: AssistantMetadata | null = null;
   let latestIndex = -1;
   for (let i = messages.length - 1; i >= 0; i--) {

@@ -1,3 +1,4 @@
+import { envelopeAgentHistory } from "./n8n/provenance.js";
 import { generateText, stepCountIs, streamText, tool, type ToolSet, type UIMessage } from "ai";
 import { z } from "zod";
 import type { InjectionReport, ModelInfo, PromptKey, ReasoningEffort, TokenUsage } from "../shared/types.js";
@@ -123,7 +124,7 @@ export function researchInput(messages: UIMessage[]): { request: string; context
   const request = last >= 0 ? textOf(messages[last]!).slice(0, REQUEST_CHARS) : "";
   const lines: string[] = [];
   let size = 0;
-  for (const message of messages.slice(0, Math.max(0, last)).reverse()) {
+  for (const message of envelopeAgentHistory(messages.slice(0, Math.max(0, last))).reverse()) {
     if (message.role !== "user" && message.role !== "assistant") continue;
     const text = textOf(message);
     if (!text) continue;

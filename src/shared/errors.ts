@@ -1,3 +1,5 @@
+import { isAgentReason, type AgentReason } from "./n8n-agents.js";
+
 /**
  * The one error vocabulary shared by the server and the browser. The server maps every boundary
  * (HTTP, streamed chat, tools, schedules) into this shape and sends only these fields: raw provider
@@ -21,6 +23,9 @@ export const ERROR_CODES = [
   "forbidden",
   "conflict",
   "rate_limited",
+  "agent_auth",
+  "agent_response",
+  "agent_failed",
   "unknown",
 ] as const;
 
@@ -37,6 +42,8 @@ export interface ErrorWire {
   model?: string;
   provider?: string;
   requestId?: string;
+  /** Authored reason for an unusable n8n agent answer (agent_response only); never remote text. */
+  agentReason?: AgentReason;
 }
 
 /** Data written into the chat stream while a provider call waits before another attempt. */
@@ -85,6 +92,7 @@ export function parseErrorWire(value: unknown): ErrorWire | undefined {
     ...(text(record.model) ? { model: text(record.model) } : {}),
     ...(text(record.provider) ? { provider: text(record.provider) } : {}),
     ...(text(record.requestId) ? { requestId: text(record.requestId) } : {}),
+    ...(record.code === "agent_response" && isAgentReason(record.agentReason) ? { agentReason: record.agentReason } : {}),
   };
 }
 

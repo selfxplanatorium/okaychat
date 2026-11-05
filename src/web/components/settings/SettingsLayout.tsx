@@ -9,6 +9,7 @@ import { AppearanceSettings } from "./AppearanceSettings";
 import { EmailSettings } from "./EmailSettings";
 import { GeneralSettings } from "./GeneralSettings";
 import { McpSettings } from "./McpSettings";
+import { N8nAgentsSettings } from "./N8nAgentsSettings";
 import { ProjectSettings } from "./ProjectSettings";
 import { ProvidersSettings } from "./ProvidersSettings";
 import { ScheduleSettings } from "./ScheduleSettings";
@@ -26,6 +27,7 @@ const PAGES: Record<string, ComponentType> = {
   email: EmailSettings,
   providers: ProvidersSettings,
   mcp: McpSettings,
+  agents: N8nAgentsSettings,
   projects: ProjectSettings,
   schedules: ScheduleSettings,
   usage: UsageSettings,

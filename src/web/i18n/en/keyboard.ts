@@ -222,4 +222,10 @@ export default {
   cmdCallEnd: "End the voice call",
   cmdCallRetry: "Retry the voice call",
   cmdCallRefresh: "Refresh voice availability",
+  cmdAppOpenAgents: "Open agents settings",
+  cmdAgentsCreate: "Add an n8n agent",
+  cmdAgentsSave: "Save the agent",
+  cmdAgentsTest: "Send a test message to the agent",
+  cmdAgentsStopTest: "Stop the agent test",
+  cmdChatResetAgentSession: "Reset this chat's remote agent memory",
 } as const;

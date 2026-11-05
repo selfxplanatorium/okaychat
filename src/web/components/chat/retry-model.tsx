@@ -6,8 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
 import { Popover, PopoverContent } from "@/components/ui/popover";
 import { t } from "@/i18n";
+import { isAgentTarget } from "@shared/n8n-agents";
 import { metadataOf } from "@/state/context-usage";
 import { useData } from "@/state/data";
+import { useChatModel } from "@/state/thread-meta";
 import { useThreadSync, useThreadSyncStore } from "@/state/thread-sync";
 import { ModelList } from "./ModelPicker";
 import { retryParentId, retryRun } from "./retry-run";
@@ -28,6 +30,8 @@ export function RetryWithModel({ inline = false }: { inline?: boolean }) {
   const remoteId = useAuiState((s) => s.threadListItem.remoteId);
   const models = useData((s) => s.models);
   const selectModel = useData((s) => s.selectModel);
+  const activeTarget = useChatModel();
+  const agentTarget = !!activeTarget && isAgentTarget(activeTarget);
   const sync = useThreadSync();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -115,6 +119,7 @@ export function RetryWithModel({ inline = false }: { inline?: boolean }) {
               <RefreshCwIcon />
             </MenuTrigger>
             <MenuContent align={role === "user" ? "end" : "start"} className="max-h-[min(32rem,var(--available-height))] w-56">
+              {agentTarget && <p className="text-muted-foreground border-b px-2.5 py-2 text-xs text-pretty">{t("agents.retryWarning")}</p>}
               <MenuItem disabled={blocked} onClick={() => retry()}>
                 <RefreshCwIcon />
                 {t("common.retry")}

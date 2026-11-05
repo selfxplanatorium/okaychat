@@ -1,3 +1,4 @@
+import { AppError } from "../errors.js";
 import { createHash } from "node:crypto";
 import { HTTPException } from "hono/http-exception";
 import type { ModelInfo, ProviderConnectionInput, ProviderInfo } from "../../shared/types.js";
@@ -441,7 +442,9 @@ export function usableConnectionCount(userId: string): number {
   }).length;
 }
 
-export async function resolveModel(userId: string, ref: string): Promise<{ model: ModelInfo; conn: Connection }> {
+export async function resolveModel(userId: string, ref: string): Promise<{
+ model: ModelInfo; conn: Connection }> {
+  if (ref.startsWith("n8n/")) throw new AppError({ code: "validation", message: "Agents cannot be used as language models." });
   const slash = ref.indexOf("/");
   const providerId = ref.slice(0, slash);
   const modelId = ref.slice(slash + 1);

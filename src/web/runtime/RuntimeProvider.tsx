@@ -13,6 +13,7 @@ import { generateId, lastAssistantMessageIsCompleteWithApprovalResponses, lastAs
 import { createAssistantStream } from "assistant-stream";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { resolveReasoningEffort } from "@shared/reasoning";
+import { isAgentTarget } from "@shared/n8n-agents";
 import { applyImagePartUpdates, type ImagePartUpdate } from "@shared/media";
 import type { MessageEditResult, ThreadSummary } from "@shared/types";
 import { t } from "@/i18n";
@@ -20,6 +21,7 @@ import { api, structuredResponseError, takePrefetched } from "@/lib/api";
 import { toolkit, widgetHelperRenders } from "@/components/chat/tool-ui";
 import { WidgetInstructions, widgets } from "@/components/genui/toolkit";
 import { chatIdFromPath, getActiveModel, selectedThreadKey, threadsPath, useData } from "@/state/data";
+import { invalidateAgentSession } from "@/state/n8n-agents";
 import { loadThreadDetail, useChatModel } from "@/state/thread-meta";
 import { StoredImageAttachmentAdapter, AudioAttachmentAdapter, DocumentAttachmentAdapter, CodeAttachmentAdapter, BinaryAttachmentAdapter } from "./attachments";
 import { chatPrivacyFor, isTemporaryChat, useChatPrivacy, useChatPrivacyStore } from "@/state/chat-privacy";
@@ -109,6 +111,9 @@ async function saveRow(remoteId: string, row: MessageRow): Promise<void> {
     stored.content = applyImagePartUpdates(stored.content, result.images ?? []);
   } catch (error) {
     cacheRows(remoteId, serverRows.failed(remoteId), undefined);
+    // The write never reached the server, so a retained remote session would claim a history this chat
+    // does not have. Resetting is best effort; the server's digest check still guards the next send.
+    void invalidateAgentSession(remoteId);
     throw error;
   }
   // The body of a re-sent message never carries `edited_at`; the server keeps the row's edit, so the cache must too.
@@ -136,6 +141,9 @@ async function saveEdit(remoteId: string, path: string, method: "PATCH" | "DELET
     return result;
   } catch (error) {
     cacheRows(remoteId, serverRows.failed(remoteId), undefined);
+    // The write never reached the server, so a retained remote session would claim a history this chat
+    // does not have. Resetting is best effort; the server's digest check still guards the next send.
+    void invalidateAgentSession(remoteId);
     throw error;
   }
 }
@@ -238,6 +246,9 @@ const threadListAdapter: RemoteThreadListAdapter = {
   },
   unstable_useAdapters: function useThreadAdapters() {
     const aui = useAui();
+    const target = useChatModel();
+    // Agent targets are text-only: leaving the adapter out also blocks drops and pasted files, not just the button.
+    const textOnly = !!target && isAgentTarget(target);
     const history = useMemo<ThreadHistoryAdapter>(
       () => ({
         async load() {
@@ -336,7 +347,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
       new AudioAttachmentAdapter(() => chatPrivacyFor(aui.threadListItem.getState()).temporary),
       new BinaryAttachmentAdapter(() => chatPrivacyFor(aui.threadListItem.getState()).temporary),
     ]), [aui]);
-    return useMemo(() => ({ history, attachments: threadAttachments }), [history, threadAttachments]);
+    return useMemo(() => ({ history, ...(textOnly ? {} : { attachments: threadAttachments }) }), [history, threadAttachments, textOnly]);
   },
 };
 
@@ -345,7 +356,7 @@ function ModelContextBridge() {
   const aui = useAui();
   const model = useChatModel();
   const privacy = useChatPrivacy();
-  const effort = useData((s) => (model ? resolveReasoningEffort(model, s.settings) : undefined));
+  const effort = useData((s) => (model && !isAgentTarget(model) ? resolveReasoningEffort(model, s.settings) : undefined));
   const webSearch = useChatSearch().enabled;
   useEffect(
     () =>
@@ -355,7 +366,8 @@ function ModelContextBridge() {
           const item = aui.threadListItem.getState();
           const active = getActiveModel(item.remoteId);
           const ref = active?.ref;
-          return { config: { modelName: ref, reasoningEffort: active ? resolveReasoningEffort(active, useData.getState().settings) : undefined, webSearch: chatSearchFor(item), deepResearch: chatResearchFor(item), temporaryPersonalization: chatPrivacyFor(item).personalized } };
+          const agent = !!active && isAgentTarget(active);
+          return { config: { modelName: ref, reasoningEffort: active && !agent ? resolveReasoningEffort(active, useData.getState().settings) : undefined, webSearch: agent ? false : chatSearchFor(item), deepResearch: agent ? false : chatResearchFor(item), temporaryPersonalization: chatPrivacyFor(item).personalized } };
         },
       }),
     [aui, model?.ref, effort, webSearch, privacy.personalized, privacy.temporary],

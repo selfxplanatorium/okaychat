@@ -5,16 +5,20 @@ import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { t } from "@/i18n";
+import { isAgentTarget } from "@shared/n8n-agents";
 import { parseChatError } from "@/lib/api";
 import { errorDetails, presentError } from "@/lib/error-presentation";
 import { settingsHref, type SettingsDestinationId } from "@/lib/settings-link";
+import { useChatModel } from "@/state/thread-meta";
 import { useThreadSync, useThreadSyncStore } from "@/state/thread-sync";
+import { agentReasonKey } from "@/components/agents/agent-error";
 import { RetryWithModel } from "./retry-model";
 
 const SETTINGS_COMMAND: Partial<Record<SettingsDestinationId, string>> = {
   providers: "settings.providers",
   account: "settings.account",
   compaction: "settings.compaction",
+  agents: "settings.agents",
 };
 
 /**
@@ -32,6 +36,8 @@ export function ChatErrorMessage() {
   const loading = useAuiState((s) => s.thread.isLoading);
   const remoteId = useAuiState((s) => s.threadListItem.remoteId);
   const sync = useThreadSync();
+  const activeTarget = useChatModel();
+  const agentTarget = !!activeTarget && isAgentTarget(activeTarget);
   const { isCopied, copyToClipboard } = useCopyToClipboard();
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -63,6 +69,9 @@ export function ChatErrorMessage() {
         <div className="min-w-0">
           <p role="alert" className="text-foreground font-medium wrap-break-word">{t(presentation.messageKey)}</p>
           <p className="text-muted-foreground text-xs wrap-break-word">{t(presentation.hintKey)}</p>
+          {wire.code === "agent_response" && agentReasonKey(wire.agentReason) && (
+            <p className="text-muted-foreground text-xs wrap-break-word">{t(agentReasonKey(wire.agentReason)!)}</p>
+          )}
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
@@ -105,6 +114,7 @@ export function ChatErrorMessage() {
         )}
       </div>
       {wire.ref && <p className="text-muted-foreground font-mono text-xs break-all">{t("errors.reference", { ref: wire.ref })}</p>}
+      {agentTarget && presentation.actions.retry && <p className="text-muted-foreground text-xs text-pretty">{t("agents.retryWarning")}</p>}
       {actionError && <p role="alert" className="text-destructive text-xs">{actionError}</p>}
     </div>
   );
