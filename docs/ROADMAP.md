@@ -51,7 +51,6 @@ Status as of 2026-11-05. Update this file when a feature ships or a plan changes
 ## Pass 2: completed
 
 - Resumable streams and selected-chat restoration after reload.
-- Named assistant presets with copied snapshots, server-validated sampling, and restrictive tool/knowledge policies; explicit continuation of length-limited replies with generation receipts; portable native chat archives with bounded import/export. See `docs/implementation/assistant-presets.md`, `continuation.md`, and `chat-archives.md`.
 - Per-user appearance sync, including custom theme libraries, with first-device migration and offline edit recovery.
 - Code-split authenticated chat, public shares, and settings, with separate cacheable library chunks. Sign-in does not load the authenticated chat runtime. See `docs/implementation/web-bundle.md` for the boundaries and measurement method.
 
@@ -86,6 +85,15 @@ Deferred: a per-chat tools sheet (needs consolidated per-chat capability state).
 
 All four are private account data beside messages or the prompt library. None enters message content, prompts, search, exports, public shares, memory, or provider requests by itself.
 
+## Pass 6: connected workspace (built)
+
+- **n8n webhook agents**: per-account agents with encrypted definitions and auth headers, NDJSON/SSE/JSON response parsing, optional history memory, streaming chat, stop, usage counters, and shared audiences. See `docs/implementation/n8n-agents.md`.
+- **Liquid glass appearance**: a vendored, attributed Glisse 0.5.0 adaptation with explicit backdrop sources, bounded material leases, performance tiers, appearance settings, and Glisse switches across the app. The sliding sidebar selection card was removed in favour of a static selection. See `docs/implementation/appearance.md`.
+- **Granular permissions**: an admin workspace for people, groups, models, features, limits, prompt overrides, effective inspection, and audit; per-model and per-user instructions; server-side enforcement across tools, routes, jobs, and runtimes. See `docs/implementation/granular-permissions.md`.
+- **Assistant presets, continuation, and archives**: named reusable assistants with copied snapshots and restrictive tool/knowledge policies; explicit continuation of length-limited replies with generation receipts; portable native chat archives with bounded import/export. See `docs/implementation/assistant-presets.md`, `continuation.md`, and `chat-archives.md`.
+- **Performance pass**: FTS row addressing and trigger repair, a history time index, scoped model resolution, bounded live-model caches, and a repeatable benchmark. See `docs/implementation/performance.md`.
+- **Official ChatGPT sign-in**: the SIWC desktop-helper flow for chat, independent of the Codex CLI image connection, behind a default-off deployment flag until the live release checks pass. See `docs/implementation/codex-chat.md`.
+
 ## Known gaps
 
 - Stream replay is kept in server memory for 15 minutes after the last update. Reload recovery works; pending generations do not survive a server restart.
@@ -94,4 +102,4 @@ All four are private account data beside messages or the prompt library. None en
 
 ## ChatGPT plan OAuth release gate
 
-SIWC desktop helper/store/transport implementation is in progress behind a default-off deployment flag. Live server-exchange admission, namespaced tool round trips, rotation, deployment eligibility, mobile resume and image independence must pass before enabling it. The CLI remains image-only; see `implementation/codex-chat.md`.
+The SIWC desktop helper, encrypted store, and transport are implemented behind a default-off deployment flag. Live server-exchange admission, namespaced tool round trips, rotation, deployment eligibility, mobile resume, and image independence must pass before enabling it in a release. The CLI remains image-only; see `docs/implementation/codex-chat.md`.
