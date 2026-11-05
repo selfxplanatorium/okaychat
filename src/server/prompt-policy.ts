@@ -151,4 +151,3 @@ export function listModelInstructionRefs(userId: string): string[] {
   return (db.prepare("SELECT model_ref FROM user_model_instructions WHERE user_id = ? ORDER BY model_ref").all(userId) as Array<{ model_ref: string }>)
     .map((row) => row.model_ref);
 }
-
