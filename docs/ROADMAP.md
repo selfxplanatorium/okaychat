@@ -227,8 +227,8 @@ server-side source-language detection, and per-message language memory.
   outside the coverage contract still falls back to English per key.
 
 Deferred: a fluent native-speaker review for the three new locales, visual checks of long labels at narrow
-widths, full coverage of the remaining optional namespaces (`keyboard`, `admin`, `providers`, `mcp`, …),
-switching language without a reload, further locales, and RTL.
+widths, switching language without a reload, further locales, and RTL. Every English namespace is now
+translated, so a new English key is required in each wave locale from the moment it lands.
 
 ## Known gaps
 

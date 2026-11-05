@@ -23,6 +23,7 @@ import {
 } from "./format.js";
 import { applyLocale, loadLocale, matchLocale, t, textDirection, type LocaleLoaders, type Translation } from "./index.js";
 import { catalogProblems, loadChunk, LEGACY_SUPPLEMENT, requiredKeys, rowProblems, SOURCE } from "./testing/catalog-rules.js";
+import { englishProseLeft } from "./testing/translation-quality.js";
 import { missingKeys, readSources, requestedKeys, runtimeSources, unusedKeys } from "./testing/key-scan.js";
 
 afterEach(() => applyLocale("en", {}));
@@ -175,6 +176,34 @@ test("every chunk on disk is valid for its registry row, including optional entr
     const keys = requiredKeys(row.coverage);
     for (const key of LEGACY_SUPPLEMENT) assert.ok(keys.includes(key), `${row.tag}: ${key}`);
   }
+});
+
+test("wave locales leave no English prose and every English key is required", async () => {
+  const wave = nonSource.filter((row) => row.coverage === "wave");
+  const keys = requiredKeys("wave");
+  const english = Object.values(SOURCE).reduce((n, entries) => n + Object.keys(entries).length, 0);
+  assert.equal(keys.length, english, "wave coverage is the complete English source");
+  for (const row of wave) {
+    const catalog = await loadChunk(row.tag);
+    assert.deepEqual(englishProseLeft(row.tag, catalog), [], row.tag);
+    const translated = Object.values(catalog as Record<string, Record<string, unknown>>)
+      .reduce((n, entries) => n + Object.keys(entries).length, 0);
+    assert.equal(translated, english, `${row.tag} supplies every English key`);
+  }
+});
+
+test("the English-left gate checks plural forms and binds exemptions to the reviewed text", () => {
+  const pluralSource = { demo: { items: { one: "one item selected", other: "{count} items selected" } } };
+  assert.deepEqual(
+    englishProseLeft("fr", { demo: { items: { one: "un élément sélectionné", other: "{count} items selected" } } }, pluralSource),
+    ["fr: demo.items.other is still English"],
+  );
+  // A reviewed key is exempt only for the exact reviewed English text, not for whatever replaces it.
+  const changedSource = { apiAccess: { paramModel: "a changed English sentence" } };
+  assert.deepEqual(
+    englishProseLeft("fr", { apiAccess: { paramModel: "a changed English sentence" } }, changedSource),
+    ["fr: apiAccess.paramModel is still English"],
+  );
 });
 
 test("translated plural entries pick the active language's category for representative counts", async () => {
