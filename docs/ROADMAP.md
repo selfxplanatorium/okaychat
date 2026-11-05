@@ -127,13 +127,32 @@ Deferred: dataset import/templates, rubric libraries, multiple judges, pairwise 
 one-click reruns of failed cases, regression gates, scheduled or webhook runs, sharing/admin
 visibility, charts, and tool-using or multi-turn cases.
 
+## Pass 9: team channels (built)
+
+- **Rooms and authority**: public/private/group shared rooms with explicit membership, one owner,
+  moderators, invitations, exclusions, transfer, archive, and audited admin moderation. Group rooms
+  follow live group membership. See `docs/implementation/channels.md`.
+- **Text messaging**: Markdown text only, quoted replies by message id, structured mentions, six
+  reactions, monotonic read cursors, `all`/`mentions`/`none` notices, room search, and a mobile-first
+  `/channels` workspace with lazy route, sidebar unread badge, keyboard commands, and a focused member
+  and settings experience.
+- **Resumable invalidations**: a durable event log, HMAC cursors with epoch/floor reset, bounded SSE
+  with heartbeat and per-account/process caps, a polling fallback, and sync refresh on revocation.
+- **Explicit room AI**: model or reduced-preset binding, transactional admission with a frozen source
+  boundary and encrypted transcript, an in-process two-slot worker with checkpoints/cancellation and
+  exactly-once usage kind `channel`, and no tools, memory, projects, files, RAG, or personal context.
+
+Deferred: uploads/images, nested threads, DMs, presence, custom emoji, room sharing/export/import,
+scheduled room posting, autonomous AI, in-place regeneration, per-room retention, and multi-writer
+deployment.
+
 ## Known gaps
 
 - Stream replay is kept in server memory for 15 minutes after the last update. Reload recovery works; pending generations do not survive a server restart.
 
 - No public usage/limits API for OpenCode Go was found. Go windows show our own recorded spend, not the remaining quota.
 
-- Deliberate deferrals: team channels/rooms, MFA/SSO, and a Postgres backend. Chats stay private to an account unless shared read-only; authentication is password-based with session revocation, and storage is SQLite plus files.
+- Deliberate deferrals: MFA/SSO and a Postgres backend. Chats stay private to an account unless shared read-only; team rooms are a separate aggregate with explicit membership. Authentication is password-based with session revocation, and storage is SQLite plus files.
 
 ## ChatGPT plan OAuth release gate
 

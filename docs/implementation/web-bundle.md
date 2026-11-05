@@ -119,3 +119,11 @@ export the engine from a statically imported barrel or preload it with settings.
 Importing the npm bundle would inject another stylesheet and is forbidden.
 Verify engine isolation and compressed sizes after material/control changes;
 production sizes alone do not establish frame-time or raster-memory budgets.
+
+## Team channels
+
+`/channels` and `/channels/:channelId` are one `preloadable()` route chunk before the chat fallback. The
+shell imports only the small channel store for the sidebar badge and one sync/stream after startup; the
+workspace, Markdown renderer, dialogs, and admin table load with the route. Room navigation keeps the same
+Channels chunk and does not mount or re-create the private assistant-ui runtime. The transport is one
+fetch-stream per visible tab, capped by the server, with polling when hidden or after repeated failures.

@@ -64,6 +64,12 @@ export interface CreateModelOptions {
   onRetry?: (notice: RetryNotice) => void;
   /** Test seam for the retry clock and fake provider; never set in production code. */
   retry?: Omit<RetryingFetchOptions, "onRetry" | "fetchImpl">;
+  /**
+   * Optional caller guard, checked before the first attempt and before every retry. Channel AI uses it
+   * to re-check room membership, the feature, the binding, and the run's live state without changing
+   * private chat prompt assembly.
+   */
+  guard?: () => void;
 }
 
 export function createModel(info: ModelInfo, conn: Connection, opts: CreateModelOptions): ModelHandle {
@@ -74,6 +80,7 @@ export function createModel(info: ModelInfo, conn: Connection, opts: CreateModel
       const access = sharedModelAccess(opts.userId, info.providerId);
       if (!access.visible || (!access.all && !access.ids.has(info.id))) throw new AppError({ code: "forbidden", message: modelAccessMessage(info.ref) });
     }
+    opts.guard?.();
   };
   check();
   const handle = createRawModel(info, conn, opts);
@@ -97,6 +104,7 @@ function createRawModel(info: ModelInfo, conn: Connection, opts: CreateModelOpti
       const access = sharedModelAccess(opts.userId, info.providerId);
       if (!access.visible || (!access.all && !access.ids.has(info.id))) throw new AppError({ code: "forbidden", message: modelAccessMessage(info.ref) });
     }
+    opts.guard?.();
     // The dispatch middleware reserved attempt one and holds its lease throughout the call.
     if (attempt > 1) reserveOperation({ userId: opts.userId, modelRef: info.ref }, "llm.call", { hold: false });
   };

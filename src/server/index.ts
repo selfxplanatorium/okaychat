@@ -24,6 +24,8 @@ import { resetArchiveJobsAtStartup, startArchiveMaintenance } from "./archive-jo
 import { publicShareRoutes } from "./shares.js";
 import { startRecordingPurge } from "./speech/config.js";
 import { startCompareMaintenance } from "./compare.js";
+import { initChannelWorker } from "./channels/worker.js";
+import { startChannelMaintenance } from "./channels/maintenance.js";
 import { speechToken, speechWorkerConfigured } from "./speech/worker.js";
 import { voiceWebSocketServer } from "./voice/routes.js";
 
@@ -98,6 +100,9 @@ serve({ fetch: app.fetch, port: env.port, hostname: env.host, websocket: { serve
   startMemoryWorker();
   startRecordingPurge();
   startCompareMaintenance();
+  // Channel AI work never resumes: open rows become interrupted, keeping their last checkpoint.
+  initChannelWorker();
+  startChannelMaintenance();
   // Moves legacy image BLOBs/inline chat images to files in small steps, then collects orphaned media.
   startMediaMaintenance();
   // Rows keep queued/extracting/embedding state across a restart; resuming spends no idle timer.

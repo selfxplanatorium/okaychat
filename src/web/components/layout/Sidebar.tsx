@@ -1,13 +1,13 @@
 import { useGlassSurface } from "@/components/glass/GlassSurface";
 import { useAui, useAuiState } from "@assistant-ui/react";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { t } from "@/i18n";
 import { useCommand, useKeyboardDialog, useShortcutProps } from "@/keyboard/registry";
 import { SIDEBAR_ITEMS } from "@shared/types";
 import { useChatPrivacyStore } from "@/state/chat-privacy";
 import { KnowledgeControl } from "@/components/knowledge/KnowledgeSelector";
 import { ChatSearch } from "./ChatSearch";
-import { CalendarClockIcon, BookOpenIcon, FlaskConicalIcon, FolderIcon, GitCompareArrowsIcon, LibraryIcon, LogOutIcon, PanelLeftIcon, PlusIcon, PuzzleIcon, SearchIcon, SettingsIcon, SquarePenIcon, UserRoundIcon } from "lucide-react";
+import { CalendarClockIcon, BookOpenIcon, FlaskConicalIcon, FolderIcon, GitCompareArrowsIcon, LibraryIcon, LogOutIcon, MessagesSquareIcon, PanelLeftIcon, PlusIcon, PuzzleIcon, SearchIcon, SettingsIcon, SquarePenIcon, UserRoundIcon } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { ThreadList, ThreadSelectionBar } from "@/components/assistant-ui/elements/thread-list.aui";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
@@ -21,6 +21,8 @@ import { signOut } from "@/lib/sign-out";
 import { cn } from "@/lib/utils";
 import { showChat, useData } from "@/state/data";
 import { prefetchLibrary } from "@/state/library-cache";
+import { useChannels } from "@/state/channels";
+import { formatUnreadBadge, totalMentions } from "@/state/channels-derive";
 
 import { SettingsNav } from "@/components/settings/SettingsNav";
 import { Brand } from "./Brand";
@@ -37,11 +39,17 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
   const toggleDialog = useKeyboardDialog((s) => s.toggle);
   const setSearchOpen = (open: boolean) => open !== searchOpen && toggleDialog("search");
   const visibleItems = useData((s) => s.settings?.sidebarItems) ?? SIDEBAR_ITEMS;
+  const channelRooms = useChannels((s) => s.joined);
+  const channelUnread = channelRooms.reduce((sum, room) => sum + (room.membership ? room.unread : 0), 0);
+  const channelMentions = totalMentions(channelRooms);
+  const me = useData((s) => s.me);
+  useEffect(() => {
+    if (me && visibleItems.includes("channels")) void useChannels.getState().start(me.id);
+  }, [me, visibleItems]);
   const empty = useAuiState((s) => s.thread.isEmpty);
   useCommand("app.search", () => toggleDialog("search"), !settings);
   const searchHint = useShortcutProps("app.search", t("sidebar.searchChats"));
   const closeHint = useShortcutProps("app.toggleSidebar", t("sidebar.closeSidebar"));
-  const me = useData((s) => s.me);
   const panelRef = useRef<HTMLDivElement>(null);
   // Settings keeps the panel open on desktop; leaving returns it to the chat's own open state.
   const shown = open || settings;
@@ -99,18 +107,27 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
                 { id: "knowledge", label: "sidebar.knowledge", href: "/knowledge", icon: BookOpenIcon },
                 { id: "plugins", label: "sidebar.plugins", href: "/plugins", icon: PuzzleIcon },
                 { id: "projects", label: "sidebar.projects", href: "/projects", icon: FolderIcon, create: { command: "nav.createProject", label: "ux.newProjectQuick", href: "/projects?new=1" } },
+                { id: "channels", label: "sidebar.channels", href: "/channels", icon: MessagesSquareIcon },
                 { id: "compare", label: "sidebar.compare", href: "/compare", icon: GitCompareArrowsIcon },
                 { id: "evaluations", label: "sidebar.evaluations", href: "/evaluations", icon: FlaskConicalIcon },
               ] as const).filter((item) => visibleItems.includes(item.id)).map((item) => (
                 <div key={item.id} className="flex items-center gap-0.5">
                   <Link
                     href={item.href}
-                    aria-current={location === item.href ? "page" : undefined}
+                    aria-current={(item.id === "channels" ? location === "/channels" || location.startsWith("/channels/") : location === item.href) ? "page" : undefined}
                     className={cn(rowClass, "min-w-0 flex-1")}
                     // Start the Library's first page while the pointer heads for the click, so it opens with data.
                     {...(item.id === "library" ? { onPointerEnter: prefetchLibrary, onFocus: prefetchLibrary, onPointerDown: prefetchLibrary } : {})}
                   >
-                    <item.icon className="size-4 shrink-0" /> {t(item.label)}
+                    <item.icon className="size-4 shrink-0" /> <span className="min-w-0 flex-1 truncate">{t(item.label)}</span>
+                    {item.id === "channels" && channelUnread > 0 && (
+                      <span
+                        className="depth-primary text-primary-foreground rounded-full px-1.5 py-0.5 text-[0.65rem] font-medium"
+                        aria-label={t("channels.unread", { count: channelMentions > 0 ? channelMentions : channelUnread })}
+                      >
+                        {formatUnreadBadge(channelMentions > 0 ? channelMentions : channelUnread)}
+                      </span>
+                    )}
                   </Link>
                   {item.id === "knowledge" && <KnowledgeControl reveal={() => { if (!open) onToggle(); }} />}
                   {"create" in item && (

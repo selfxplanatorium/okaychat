@@ -96,3 +96,16 @@ n8n webhook configurations (entire URL and auth header) are encrypted; shared re
 - A generated assistant reply's finish state is a server receipt, not client metadata. `appendMessage`
   strips client generation objects, and Continue requires the stored `finished`/`length` receipt plus the
   stored message graph.
+
+## Team channels
+
+Room access is checked again on every REST route, every replayed SSE frame, and every AI checkpoint:
+account feature, live group eligibility, explicit membership, and role. Private/group rooms never enter
+the global chat spotlight, notification list, or discover list; unknown and inaccessible ids share one
+404. Channel cursors are HMAC-signed and user-bound, replay is read from SQLite (never a body cache), and
+subscribers are capped per account and process. Room text is treated as untrusted: the server rejects
+image syntax and app asset references, the renderer drops image nodes and unsafe links, and AI input is
+enveloped with `channel_history`/`channel_metadata`. Room AI has no tools, MCP, memory, knowledge,
+projects, files, RAG, or account instructions, and uses a reduced binding that never lends the owner's
+provider key. Active runs recheck access before retries and checkpoints. Admin inspection is a separate
+audited route and does not fabricate membership. See `docs/implementation/channels.md`.

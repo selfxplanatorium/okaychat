@@ -47,13 +47,17 @@ export function recordUsage(entry: {
   threadId?: string;
   providerId: string;
   modelId: string;
-  kind: "chat" | "compaction" | "title" | "subagent" | "memory" | "research" | "evaluation" | "evaluation_judge";
+  kind: "chat" | "compaction" | "title" | "subagent" | "memory" | "research" | "evaluation" | "evaluation_judge" | "channel";
   usage: TokenUsage;
   cost: number;
+  /** A channel reply records the room and the run, so a settled ledger row is unique per run. */
+  channelId?: string;
+  channelRunId?: string;
 }) {
   db.prepare(
     `INSERT INTO usage (user_id, thread_id, provider_id, model_id, kind, input_tokens, output_tokens, reasoning_tokens,
-       cache_read_tokens, cache_write_tokens, cost, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       cache_read_tokens, cache_write_tokens, cost, created_at, channel_id, channel_run_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     entry.userId,
     entry.threadId ?? null,
@@ -67,6 +71,8 @@ export function recordUsage(entry: {
     entry.usage.cacheWrite,
     entry.cost,
     Date.now(),
+    entry.channelId ?? null,
+    entry.channelRunId ?? null,
   );
 }
 

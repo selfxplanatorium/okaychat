@@ -24,6 +24,10 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       db.exec("DROP TABLE message_search_keys");
       db.exec("DROP INDEX messages_thread_time");
       for (const table of ["evaluation_scores", "evaluation_results", "evaluation_runs", "evaluation_cases", "evaluation_datasets", "chatgpt_login_attempts", "chatgpt_registrations", "chatgpt_hosts", "chatgpt_controls", "saved_prompts", "message_bookmarks", "message_feedback", "assistant_presets", "generation_segments", "generation_runs", "archive_jobs", "provider_model_grants", "provider_model_policies", "knowledge_chunks_fts", "knowledge_chunks", "knowledge_sources", "knowledge_collections", "share_groups", "share_users", "share_audiences", "user_group_members", "user_groups", "n8n_agent_sessions", "n8n_agent_runs", "n8n_agents", "permission_leases", "permission_rate_windows", "permission_audit", "user_model_instructions", "prompt_rules", "permission_policies", "permission_state", "notifications", "tag_filter_presets", "thread_tags", "comparison_panes", "comparison_groups"]) db.exec("DROP TABLE " + table);
+      db.exec("DROP TABLE channel_messages_fts; DROP TABLE channel_search_keys; DROP TABLE channel_events; DROP TABLE channel_event_state; DROP TABLE channel_rate_windows; DROP TABLE channel_moderation_audit; DROP TABLE channel_create_keys; DROP TABLE channel_ai_runs; DROP TABLE channel_reactions; DROP TABLE channel_mentions; DROP TABLE channel_messages; DROP TABLE channel_exclusions; DROP TABLE channel_invites; DROP TABLE channel_members; DROP TABLE channel_groups; DROP TABLE channels");
+      db.exec("DROP INDEX IF EXISTS usage_channel_run");
+      db.exec("ALTER TABLE usage DROP COLUMN channel_id");
+      db.exec("ALTER TABLE usage DROP COLUMN channel_run_id");
       for (const index of ["shares_user_time", "shares_thread", "shares_expiry", "threads_compare"]) db.exec("DROP INDEX " + index);
       db.exec("ALTER TABLE threads DROP COLUMN compare_group_id");
       for (const column of ["custom_instructions", "instructions_revision", "assistant_json", "assistant_revision", "imported_assistant_json", "preferred_head"]) db.exec("ALTER TABLE threads DROP COLUMN " + column);
@@ -133,7 +137,8 @@ test('n8n migration preserves selected audiences and rolls back schema and versi
     db.exec('DROP TABLE permission_leases; DROP TABLE permission_rate_windows; DROP TABLE permission_audit; DROP TABLE user_model_instructions; DROP TABLE prompt_rules; DROP TABLE permission_policies; DROP TABLE permission_state');
     db.exec('DROP TABLE saved_prompts; DROP TABLE message_bookmarks; DROP TABLE message_feedback');
     db.exec('DROP TABLE evaluation_scores; DROP TABLE evaluation_results; DROP TABLE evaluation_runs; DROP TABLE evaluation_cases; DROP TABLE evaluation_datasets');
-    for (const table of ['notifications', 'tag_filter_presets', 'thread_tags', 'comparison_panes', 'comparison_groups']) db.exec('DROP TABLE ' + table);
+    for (const table of ['channel_messages_fts', 'channel_search_keys', 'channel_events', 'channel_event_state', 'channel_rate_windows', 'channel_moderation_audit', 'channel_create_keys', 'channel_ai_runs', 'channel_reactions', 'channel_mentions', 'channel_messages', 'channel_exclusions', 'channel_invites', 'channel_members', 'channel_groups', 'channels', 'notifications', 'tag_filter_presets', 'thread_tags', 'comparison_panes', 'comparison_groups']) db.exec('DROP TABLE ' + table);
+    db.exec('DROP INDEX IF EXISTS usage_channel_run; ALTER TABLE usage DROP COLUMN channel_id; ALTER TABLE usage DROP COLUMN channel_run_id');
     for (const index of ['shares_user_time', 'shares_thread', 'shares_expiry', 'threads_compare']) db.exec('DROP INDEX ' + index);
     db.exec('ALTER TABLE threads DROP COLUMN compare_group_id');
     db.exec('DROP TABLE assistant_presets; DROP TABLE generation_segments; DROP TABLE generation_runs; DROP TABLE archive_jobs');
@@ -170,4 +175,47 @@ test('n8n migration preserves selected audiences and rolls back schema and versi
       assert.deepEqual(state.fks, []);
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("channels migration rolls back cleanly, keeps notifications intact, and maintains its own FTS", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "okaychat-channels-migration-"));
+  const base = { ...process.env, OKAYCHAT_DATA_DIR: directory, OKAYCHAT_SECRET: "migration-tests-secret-not-for-production" };
+  const dbUrl = new URL("./db.ts", import.meta.url).href;
+  const run = (code: string, env: Record<string, string | undefined> = {}) =>
+    execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", code], { env: { ...base, ...env }, encoding: "utf8" });
+  try {
+    // A failure after the channels DDL rolls the whole migration back with its version.
+    assert.throws(() => run(`await import(${JSON.stringify(dbUrl)});`, { OKAYCHAT_TEST_FAIL_MIGRATION: "channels" }));
+    const result = JSON.parse(run(`const { db } = await import(${JSON.stringify(dbUrl)});
+      db.prepare("INSERT INTO users (id,email,name,password_hash,role,created_at) VALUES ('u','u@example.test','U','unused','user',1)").run();
+      db.prepare("INSERT INTO channels (id,owner_id,name,visibility,created_at,updated_at) VALUES ('c','u','Room','public',1,1)").run();
+      db.prepare("INSERT INTO channel_messages (id,channel_id,seq,author_id,kind,body,created_at) VALUES ('m','c',1,'u','human','alpha beta',1)").run();
+      const inserted = db.prepare("SELECT rowid FROM channel_messages_fts WHERE channel_messages_fts MATCH 'alpha'").all();
+      db.prepare("UPDATE channel_messages SET body = 'gamma' WHERE id = 'm'").run();
+      const updated = db.prepare("SELECT rowid FROM channel_messages_fts WHERE channel_messages_fts MATCH 'alpha'").all();
+      const found = db.prepare("SELECT rowid FROM channel_messages_fts WHERE channel_messages_fts MATCH 'gamma'").all();
+      db.prepare("DELETE FROM channel_messages WHERE id = 'm'").run();
+      const gone = db.prepare("SELECT rowid FROM channel_messages_fts WHERE channel_messages_fts MATCH 'gamma'").all();
+      // The rebuilt notifications table accepts the new kind but still rejects an unknown one.
+      db.prepare("INSERT INTO notifications (id,user_id,kind,level,title_key,params_json,created_at) VALUES ('n','u','channel','info','channel.message','{}',1)").run();
+      let rejected = false;
+      try { db.prepare("INSERT INTO notifications (id,user_id,kind,level,title_key,params_json,created_at) VALUES ('bad','u','other','info','channel.message','{}',1)").run(); } catch { rejected = true; }
+      console.log(JSON.stringify({
+        version: db.prepare("PRAGMA user_version").get().user_version,
+        tables: ["channels","channel_members","channel_messages","channel_events","channel_search_keys","channel_event_state"].map((table) => db.prepare("SELECT count(*) AS n FROM " + table).get().n),
+        epoch: db.prepare("SELECT epoch FROM channel_event_state WHERE singleton=1").get().epoch,
+        inserted: inserted.length, updated: updated.length, found: found.length, gone: gone.length,
+        rejected, fks: db.prepare("PRAGMA foreign_key_check").all(),
+        usageColumns: db.prepare("PRAGMA table_info(usage)").all().filter((column) => String(column.name).startsWith("channel")).map((column) => column.name),
+      })); db.close();`));
+    assert.ok(result.version >= 44, `user_version ${result.version}`);
+    assert.deepEqual(result.tables.slice(0, 4), [1, 0, 0, 0]);
+    assert.match(String(result.epoch), /^chev_/);
+    assert.deepEqual([result.inserted, result.updated, result.found, result.gone], [1, 0, 1, 0]);
+    assert.equal(result.rejected, true);
+    assert.deepEqual(result.fks, []);
+    assert.deepEqual(result.usageColumns.sort(), ["channel_id", "channel_run_id"]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

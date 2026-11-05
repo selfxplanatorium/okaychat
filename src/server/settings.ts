@@ -14,6 +14,14 @@ export function getSettings(userId: string): UserSettings {
   }
   if (!REASONING_EFFORTS.includes(settings.defaultReasoningEffort)) settings.defaultReasoningEffort = DEFAULT_USER_SETTINGS.defaultReasoningEffort;
   if (settings.sidebarItems !== undefined && !validSidebarItems(settings.sidebarItems)) delete settings.sidebarItems;
+  // A saved list from before team channels gets the new item once; removing it later is not undone.
+  if (settings.sidebarItems !== undefined && settings.sidebarChannelsSeen !== true) {
+    settings.sidebarItems = [...settings.sidebarItems, ...(settings.sidebarItems.includes("channels") ? [] : (["channels"] as const))];
+    settings.sidebarChannelsSeen = true;
+    db.prepare(
+      "INSERT INTO user_settings (user_id, json) VALUES (?, ?) ON CONFLICT (user_id) DO UPDATE SET json = excluded.json",
+    ).run(userId, JSON.stringify(settings));
+  }
   if (settings.imageServices !== undefined && !validImageServices(settings.imageServices)) delete settings.imageServices;
   if (settings.speech !== undefined && !validSpeechSettings(settings.speech)) delete settings.speech;
   if (settings.notifications !== undefined && !validNotificationSettings(settings.notifications)) delete settings.notifications;

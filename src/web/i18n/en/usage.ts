@@ -31,5 +31,6 @@ export default {
   purposeResearch: "Deep research",
   purposeEvaluation: "Evaluations",
   purposeEvaluationJudge: "Evaluation judging",
+  kindChannel: "Channels",
   requestCount: { one: "{count} request", other: "{count} requests" },
 } as const;

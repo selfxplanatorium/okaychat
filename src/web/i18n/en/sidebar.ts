@@ -21,6 +21,7 @@ export default {
   knowledge: "Knowledge",
   plugins: "Plugins",
   projects: "Projects",
+  channels: "Channels",
   compare: "Compare models",
   evaluations: "Evaluations",
   account: "Account",

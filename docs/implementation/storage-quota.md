@@ -108,3 +108,12 @@ n8n definitions charge name/description/avatar/config ciphertext to the owner; e
 - Tags, tag filter presets, notification rows, and comparison group/pane metadata are not charged.
   Comparison pane threads and their messages count exactly like normal chats; deleting the group frees
   them.
+
+## Team channels
+
+Room metadata (name, description, reduced AI binding), every member's message bodies, run config and
+encrypted frozen input, a 1 KiB run receipt, and an open run's 64 KiB output reservation count against
+the current room owner. Body bytes are counted once; an open run only tops the reservation up to 64 KiB.
+Transfer checks the target owner's full limit before changing `owner_id`. Events, rate windows, members,
+read cursors, reactions, audit rows, notices, and FTS copies are bounded operational metadata and are not
+charged. See `docs/implementation/channels.md`.

@@ -1,5 +1,6 @@
 import { abortRevokedAgentRuns } from "./n8n/store.js";
 import { afterCommit } from "./db.js";
+import { requestChannelRevocation } from "./channels/revocation.js";
 import { HTTPException } from "hono/http-exception";
 import type { ShareAudience, UserGroup } from "../shared/types.js";
 import { newId } from "./crypto.js";
@@ -44,14 +45,17 @@ export function updateGroup(id: string, patch: { name?: string; userIds?: string
     if (patch.userIds) setMembers(id, patch.userIds);
   });
   afterCommit(abortRevokedAgentRuns);
+  afterCommit(requestChannelRevocation);
   return listGroups().find((g) => g.id === id)!;
 }
 
+// updateGroup's membership commit and deleteGroup's audience removal both revoke room eligibility.
 export function deleteGroup(id: string) {
   tx(() => {
     clearModelAccessPoliciesForGroup(id);
     db.prepare("DELETE FROM user_groups WHERE id = ?").run(id);
     afterCommit(abortRevokedAgentRuns);
+    afterCommit(requestChannelRevocation);
   });
 }
 
