@@ -32,7 +32,7 @@ export function CustomToolCallCard(props: ToolCallMessagePartProps) {
             <div className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
               <span>{result.name}</span>
               <span>{t("customTools.runRevision", { revision: result.revision })}</span>
-              <span>run {result.runId}</span>
+              <span>{t("customTools.runId", { runId: result.runId })}</span>
               <span>{t("customTools.duration")}: {result.durationMs} ms</span>
               {result.httpStatus !== null && <span>HTTP {result.httpStatus}</span>}
             </div>

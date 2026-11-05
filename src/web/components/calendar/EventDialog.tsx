@@ -102,6 +102,14 @@ export function EventDialog({
   const [selectedEnd, setSelectedEnd] = useState<number | null>(event && !event.allDay ? event.endAt : null);
   const [resolveFailed, setResolveFailed] = useState(false);
   const [saving, setSaving] = useState(false);
+  // The same create must reuse its request id after a lost response, or a retry duplicates the event.
+  // A changed payload is a different create and gets a fresh id.
+  const createAttempt = useRef<{ key: string; id: string } | null>(null);
+  const copyAttempt = useRef<{ key: string; id: string } | null>(null);
+  const idFor = (slot: typeof createAttempt, key: string) => {
+    if (slot.current?.key !== key) slot.current = { key, id: uuidV4() };
+    return slot.current.id;
+  };
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -281,7 +289,7 @@ export function EventDialog({
       } else {
         const result = await api<{ event: CalendarEvent }>("/calendar/events", {
           method: "POST",
-          json: { ...write, requestId: uuidV4() },
+          json: { ...write, requestId: idFor(createAttempt, JSON.stringify(write)) },
         });
         useCalendar.getState().applyEvent(result.event);
         setNotice(t("calendar.saved"));
@@ -325,7 +333,7 @@ export function EventDialog({
     const write = payload();
     if (!write) return;
     try {
-      const result = await api<{ event: CalendarEvent }>("/calendar/events", { method: "POST", json: { ...write, requestId: uuidV4() } });
+      const result = await api<{ event: CalendarEvent }>("/calendar/events", { method: "POST", json: { ...write, requestId: idFor(copyAttempt, JSON.stringify(write)) } });
       useCalendar.getState().applyEvent(result.event);
       setConflictOpen(false);
       onClose();

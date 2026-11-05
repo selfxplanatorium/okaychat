@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, beforeEach, test } from "node:test";
 import { Hono } from "hono";
-import type { CalendarEvent, CalendarPage } from "../shared/calendar.js";
+import { RESOLVE_RATE_PER_MINUTE, type CalendarEvent, type CalendarPage } from "../shared/calendar.js";
 
 const dataDir = mkdtempSync(path.join(os.tmpdir(), "okaychat-calendar-test-"));
 process.env.OKAYCHAT_DATA_DIR = dataDir;
@@ -212,7 +212,8 @@ test("resolve-time is authoritative for gaps and folds and is rate capped", asyn
   const fold = await json<{ startCandidates: Array<{ offsetMinutes: number }> }>(await call("/calendar/resolve-time", { method: "POST", json: { timeZone: "Europe/Rome", startLocal: "2026-10-25T02:30", endLocal: "2026-10-25T03:30" } }));
   assert.deepEqual(fold.startCandidates.map((candidate) => candidate.offsetMinutes), [120, 60]);
   let limited = 0;
-  for (let index = 0; index < 30; index++) {
+  // The window admits RESOLVE_RATE_PER_MINUTE calls before it rejects; go past it.
+  for (let index = 0; index < RESOLVE_RATE_PER_MINUTE + 10; index++) {
     const response = await call("/calendar/resolve-time", { method: "POST", json: { timeZone: "UTC", startLocal: "2026-01-01T10:00", endLocal: "2026-01-01T11:00" } });
     if (response.status === 429) limited++;
   }

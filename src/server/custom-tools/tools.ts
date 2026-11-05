@@ -18,6 +18,7 @@ import { hasActiveVoiceCall } from "../voice/routes.js";
 import { CustomToolTurn, type CustomToolIdentity } from "./approvals.js";
 import { executePrepared, prepareExecution, validateToolInput } from "./execute.js";
 import { chatExecutionKey, configBundle, preparedInput, runByExecutionKey, summaryOf, toolRow, type ToolRow } from "./store.js";
+import { inputHashOf } from "./execute.js";
 import { listTools } from "./store.js";
 
 // Tool assembly for an interactive stored chat. Only enabled, valid, owner-scoped definitions are offered,
@@ -130,7 +131,7 @@ export function customToolsForTurn(opts: CustomToolsForTurnOptions): CustomTools
           if (live.enabled !== 1) return fail("disabled");
           if (live.kind === "python") assertFeature(opts.actor, "code");
           const validated = validateToolInput(live, input);
-          const executionKey = chatExecutionKey(opts.logicalReplyId, callId);
+          const executionKey = chatExecutionKey(opts.logicalReplyId, callId, inputHashOf(validated));
           const assertReady = () => {
             assertFeature(opts.actor, "customTools");
             const nowRow = toolRow(opts.actor.userId, row.id);

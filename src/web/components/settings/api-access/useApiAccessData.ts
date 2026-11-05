@@ -77,6 +77,7 @@ export function useApiAccessData(): ApiAccessData {
   // even while both answers belong to the same account.
   const requestsToken = useRef(0);
   const auditToken = useRef(0);
+  const usageToken = useRef(0);
   const controllers = useRef(new Set<AbortController>());
 
   const request = useCallback(<T,>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
@@ -89,16 +90,17 @@ export function useApiAccessData(): ApiAccessData {
     const query = new URLSearchParams({ days: String(days), groupBy });
     if (keyFilter) query.set("keyId", keyFilter);
     setUsageLoading(true);
+    const token = ++usageToken.current;
     try {
       const next = await request<ApiUsageResponse>(`/api-keys/usage?${query}`);
-      if (generation.current !== gen) return;
+      if (generation.current !== gen || usageToken.current !== token) return;
       setUsage(next);
       setUsageError(false);
     } catch {
-      if (generation.current !== gen) return;
+      if (generation.current !== gen || usageToken.current !== token) return;
       setUsageError(true);
     } finally {
-      if (generation.current === gen) setUsageLoading(false);
+      if (generation.current === gen && usageToken.current === token) setUsageLoading(false);
     }
   }, [days, groupBy, keyFilter, request]);
 

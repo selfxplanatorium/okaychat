@@ -340,7 +340,15 @@ export async function executePrepared(opts: ExecutePreparedOptions): Promise<Too
   }
   const bundle = configBundle(tool);
   if (!bundle) return errorResult(tool, "disabled", run.id);
-  if (bundle.config.kind === "python") assertFeature(opts.actor, "code");
+  if (bundle.config.kind === "python") {
+    try {
+      assertFeature(opts.actor, "code");
+    } catch {
+      // Denying here still releases the prepared row and its quota reservation immediately.
+      if (run.state === "prepared") denyRun(opts.actor.userId, run.id);
+      return errorResult(tool, "permission_denied", run.id);
+    }
+  }
   if (bundle.config.kind === "http" && run.source === "chat") {
     if (!isApprovedInvocation(opts.approvedInvocation) || opts.approvedInvocation.runId !== run.id ||
       opts.approvedInvocation.requestHash !== opts.requestHash || opts.approvedInvocation.revision !== run.revision) {

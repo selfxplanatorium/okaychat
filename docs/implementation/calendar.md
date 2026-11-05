@@ -25,7 +25,7 @@ memory, share, archive, or message search. Text is ordinary account text at rest
   date costs a handful of formats instead of a minute-by-minute scan.
 
 The server's `/api/calendar/resolve-time` is authoritative for editing. It returns candidate instants
-and numeric offset labels, rate-limited to 20 requests per account per minute with a bounded
+and numeric offset labels, rate-limited to 60 requests per account per minute with a bounded
 in-process window (429 + `Retry-After`; no LLM bucket).
 
 ## API and storage

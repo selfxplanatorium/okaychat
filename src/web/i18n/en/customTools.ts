@@ -82,6 +82,7 @@ export default {
   runRevision: "Revision {revision}",
   runSource: "Source: {source}",
   duration: "Duration",
+  runId: "Run {runId}",
   bytes: "Bytes",
   executions: "Tool executions",
   statePrepared: "Prepared",

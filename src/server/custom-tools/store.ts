@@ -439,10 +439,12 @@ function assertAttemptsLeft(userId: string, executionKey: string): void {
   if (executionKey.startsWith("chat:")) {
     const logical = executionKey.split(":")[1] ?? "";
     // Prepared runs count too: they are already admitted attempts and can still execute, so a burst of
-    // preparations followed by claims must not admit more than the reply budget.
+    // preparations followed by claims must not admit more than the reply budget. A client-chosen reply id
+    // may contain LIKE wildcards, so escape them before building the prefix.
+    const prefix = `chat:${logical.replace(/[\\%_]/g, (char) => `\\${char}`)}:%`;
     const { n } = db.prepare(
-      "SELECT COUNT(*) AS n FROM custom_tool_runs WHERE user_id = ? AND execution_key LIKE ? AND state IN ('prepared','running','succeeded','failed','cancelled','unknown')",
-    ).get(userId, `chat:${logical}:%`) as { n: number };
+      "SELECT COUNT(*) AS n FROM custom_tool_runs WHERE user_id = ? AND execution_key LIKE ? ESCAPE '\\' AND state IN ('prepared','running','succeeded','failed','cancelled','unknown')",
+    ).get(userId, prefix) as { n: number };
     if (n >= CUSTOM_LIMITS.attemptsPerReply) throw rateLimited("This reply reached its custom tool limit.");
   }
 }
@@ -683,8 +685,12 @@ export function prune(userId: string, now = Date.now()): void {
 export function testExecutionKey(sessionHash: string, requestId: string): string {
   return `test:${sessionHash}:${requestId}`;
 }
-export function chatExecutionKey(logicalReplyId: string, toolCallId: string): string {
-  return `chat:${logicalReplyId}:${toolCallId}`;
+/**
+ * A reply-scoped execution key. The input fingerprint is part of it because some providers restart
+ * tool-call ids in every step (`functions.name:0`); without it a later step would address an earlier run.
+ */
+export function chatExecutionKey(logicalReplyId: string, toolCallId: string, inputFingerprint: string): string {
+  return `chat:${logicalReplyId}:${toolCallId}:${inputFingerprint.slice(0, 16)}`;
 }
 
 export function makeRunToken(): { token: string; hash: string } {

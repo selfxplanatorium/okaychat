@@ -33,7 +33,7 @@ export const CALENDAR_PAGE_DEFAULT = 50;
 export const CALENDAR_PAGE_MAX = 100;
 export const CALENDAR_WRITE_LIMIT = 128 * 1024;
 export const CALENDAR_SMALL_LIMIT = 4 * 1024;
-export const RESOLVE_RATE_PER_MINUTE = 20;
+export const RESOLVE_RATE_PER_MINUTE = 60;
 
 export type EventTime =
   | { allDay: false; timeZone: string; startAt: number; endAt: number; startDate: null; endDate: null }

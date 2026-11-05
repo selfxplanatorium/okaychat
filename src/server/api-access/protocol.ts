@@ -152,6 +152,11 @@ export function mapFinishReason(reason: string | undefined): "stop" | "length" |
     case "content-filter": return "content_filter";
     case "tool-calls": throw unsupportedOutput();
     case "error": throw serverError();
+    // A provider that reports an unspecified or vendor-specific reason still finished its message
+    // (the local Ollama adapter sends "other" when the daemon omits done_reason).
+    case "other":
+    case "unknown":
+      return "stop";
     default: throw incompleteResponse();
   }
 }

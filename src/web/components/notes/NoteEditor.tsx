@@ -176,11 +176,17 @@ export function NoteEditor({
     removeOutbox(accountId, note.id);
   };
 
+  const copyAttempt = useRef<{ key: string; id: string } | null>(null);
+
   const saveCopy = async () => {
     try {
       const result = await api<{ note: Note }>("/notes", {
         method: "POST",
-        json: { ...value, requestId: uuidV4() },
+        json: { ...value, requestId: (() => {
+          const key = JSON.stringify(value);
+          if (copyAttempt.current?.key !== key) copyAttempt.current = { key, id: uuidV4() };
+          return copyAttempt.current.id;
+        })() },
       });
       useNotes.getState().applyNote(result.note);
       controller.current?.adopt(server);

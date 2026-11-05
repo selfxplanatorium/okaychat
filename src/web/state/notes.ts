@@ -1,3 +1,4 @@
+import { clearOutbox } from "@/lib/note-outbox";
 import { create } from "zustand";
 import type { Note, NoteFromSource, NotePage, NoteSummary, NoteTagCount, NoteTagMatch, NoteWrite } from "@shared/notes";
 import { noteExcerpt } from "@shared/notes";
@@ -73,6 +74,10 @@ let generation = 0;
 let listRequest = 0;
 
 const errorText = (error: unknown) => (error instanceof ApiError ? error.message : String(error));
+
+// A retried create must not duplicate a note whose first response was lost, so one request id is reused
+// until that create succeeds. Source copies key on the exact source so a retry copies it once.
+const pendingCreates = new Map<string, string>();
 
 export const useNotes = create<NotesState>((set, get) => {
   const loadList = async (cursor?: string) => {
@@ -165,6 +170,8 @@ export const useNotes = create<NotesState>((set, get) => {
       void loadTags();
     },
     reset() {
+      const accountId = get().accountId;
+      if (accountId) clearOutbox(accountId);
       generation++;
       listRequest++;
       set({
@@ -228,17 +235,21 @@ export const useNotes = create<NotesState>((set, get) => {
       const token = generation;
       try {
         const filterProject = get().filters.projectId;
+        const projectId = filterProject === undefined ? null : filterProject;
+        const createKey = `note:${accountId}:${projectId ?? "none"}`;
         const body: NoteWrite & { requestId: string } = {
           title: "",
           body: "",
           favorite: false,
           pinned: false,
           tags: [],
-          projectId: filterProject === undefined ? null : filterProject,
-          requestId: uuidV4(),
+          projectId,
+          requestId: pendingCreates.get(createKey) ?? uuidV4(),
         };
+        pendingCreates.set(createKey, body.requestId);
         const result = await api<{ note: Note }>("/notes", { method: "POST", json: body });
         if (token !== generation) return null;
+        pendingCreates.delete(createKey);
         get().applyNote(result.note);
         set((state) => ({ items: [summaryOf(result.note), ...state.items.filter((item) => item.id !== result.note.id)] }));
         set({ creating: false });
@@ -252,7 +263,16 @@ export const useNotes = create<NotesState>((set, get) => {
     },
     async createFromSource(input) {
       const token = generation;
-      const result = await api<{ note: Note }>("/notes/from-source", { method: "POST", json: { ...input, requestId: uuidV4() } });
+      const accountId = get().accountId;
+      const source = input.source;
+      const sourceKey = source.kind === "message"
+        ? `m:${source.threadId}:${source.messageId}`
+        : `a:${source.threadId}:${source.artifactId}:${source.version}`;
+      const key = `source:${accountId}:${sourceKey}:${input.title ?? ""}`;
+      const requestId = pendingCreates.get(key) ?? uuidV4();
+      pendingCreates.set(key, requestId);
+      const result = await api<{ note: Note }>("/notes/from-source", { method: "POST", json: { ...input, requestId } });
+      pendingCreates.delete(key);
       if (token !== generation) return null;
       get().applyNote(result.note);
       set((state) => ({ items: [summaryOf(result.note), ...state.items.filter((item) => item.id !== result.note.id)] }));

@@ -7,6 +7,7 @@ import { getThread } from "../threads.js";
 import { hasActiveVoiceCall } from "../voice/routes.js";
 import {
   approvedInvocation,
+  inputHashOf,
   prepareExecution,
   prepareHttpReview,
   validateToolInput,
@@ -127,7 +128,7 @@ export class CustomToolTurn {
     if (!identity) return undefined;
     // Python has no external effect and no baseline approval; its output still taints later actions.
     if (identity.kind === "python") return undefined;
-    const executionKey = chatExecutionKey(this.opts.logicalReplyId, toolCall.toolCallId);
+    const executionKey = chatExecutionKey(this.opts.logicalReplyId, toolCall.toolCallId, inputHashOf(toolCall.input as Json));
     const current = toolRow(this.opts.actor.userId, identity.id);
     if (!current || current.revision !== identity.revision) return { type: "denied", reason: fixedReason("definition_changed") };
     if (!featureAllowed(this.opts.actor, "customTools")) return { type: "denied", reason: fixedReason("permission_denied") };
@@ -196,18 +197,4 @@ export class CustomToolTurn {
     }
   }
 
-  /** The review a chat card may show. Only the owner and session that prepared it can read it. */
-  reviewFor(toolCallId: string): ReturnType<typeof reviewOf> {
-    const executionKey = chatExecutionKey(this.opts.logicalReplyId, toolCallId);
-    const run = runByExecutionKey(this.opts.actor.userId, executionKey);
-    if (!run || run.session_hash !== this.opts.sessionHash || run.thread_id !== this.opts.threadId) return null;
-    return reviewOf(this.opts.actor.userId, run.id);
-  }
-
-  executionContext(toolCallId: string): { runId: string; requestHash: string; input: Json } | null {
-    const executionKey = chatExecutionKey(this.opts.logicalReplyId, toolCallId);
-    const run = runByExecutionKey(this.opts.actor.userId, executionKey);
-    if (!run) return null;
-    return { runId: run.id, requestHash: run.request_hash, input: preparedInput(this.opts.actor.userId, run.id) ?? ({} as Json) };
-  }
 }
