@@ -90,7 +90,7 @@ export interface ApiCallAdmission {
  * Reserves the API slots, the hard account turn slot, and the policy's kind:'turn' lease without an await
  * between check and register. A partial failure rolls back everything already taken.
  */
-export function admitApiCall(userId: string, keyId: string): ApiCallAdmission {
+export function admitApiCall(userId: string, keyId: string, modelRef: string | null = null): ApiCallAdmission {
   if (processCalls >= API_LIMITS.concurrentProcess) throw new ApiConcurrentLimit("The server is handling too many API requests. Try again shortly.");
   if (!take(perKey, keyId, API_LIMITS.concurrentPerKey)) throw new ApiConcurrentLimit("This API key has too many requests running at once.");
   if (!take(perAccount, userId, API_LIMITS.concurrentPerAccount)) {
@@ -108,7 +108,7 @@ export function admitApiCall(userId: string, keyId: string): ApiCallAdmission {
   let lease: Lease;
   try {
     // kind:'turn' charges no operation; it only holds the administrator's concurrent-turn bucket.
-    lease = reserveOperation({ userId, modelRef: null }, "llm.call", { kind: "turn" });
+    lease = reserveOperation({ userId, modelRef }, "llm.call", { kind: "turn" });
   } catch (error) {
     releaseTurn();
     processCalls--;

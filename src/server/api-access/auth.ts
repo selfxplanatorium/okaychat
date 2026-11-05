@@ -65,7 +65,12 @@ function allowAttempt(c: Context, now: number): boolean {
     processBucket.count++;
     return true;
   }
-  if (addresses.size >= MAX_ADDRESSES) return false;
+  if (addresses.size >= MAX_ADDRESSES) {
+    for (const [key, bucket] of addresses) {
+      if (bucket.resetAt <= now) addresses.delete(key);
+    }
+    if (addresses.size >= MAX_ADDRESSES) return false;
+  }
   addresses.set(address, { count: 1, resetAt: now + WINDOW_MS });
   processBucket.count++;
   return true;

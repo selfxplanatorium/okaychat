@@ -69,6 +69,7 @@ export function splitUtf8(text: string, maxBytes = API_LIMITS.ssePieceBytes): st
 const sse = (value: unknown): Uint8Array => encoder.encode(`data: ${JSON.stringify(value)}\n\n`);
 
 const isClientAbort = (signal: AbortSignal): boolean => {
+  if (!signal.aborted) return false;
   const reason = signal.reason as { name?: string } | undefined;
   return reason?.name === "AbortError" || signal.reason === undefined;
 };
@@ -124,9 +125,15 @@ class ProviderReader {
       timer = setTimeout(() => reject(new Error("provider_timeout")), limit);
       timer.unref?.();
     });
+    let onAbort: () => void = () => {};
+    const aborted = new Promise<never>((_, reject) => {
+      onAbort = () => reject(this.signal.reason);
+      this.signal.addEventListener("abort", onAbort, { once: true });
+    });
     try {
-      return await Promise.race([this.iterator.next(), timeout]);
+      return await Promise.race([this.iterator.next(), timeout, aborted]);
     } finally {
+      this.signal.removeEventListener("abort", onAbort);
       if (timer) clearTimeout(timer);
     }
   }
@@ -223,7 +230,10 @@ export async function generateCompletion(plan: GenerationPlan): Promise<Response
   };
 
   const unregister = registerApiCall(plan.userId, plan.keyId, controller);
+  let cleaned = false;
   const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
     clearInterval(poll);
     if (lease) clearInterval(lease);
     plan.signal.removeEventListener("abort", onAbort);
@@ -231,7 +241,7 @@ export async function generateCompletion(plan: GenerationPlan): Promise<Response
     plan.onDone?.();
   };
 
-  let result: ReturnType<typeof streamText>;
+  let result: { fullStream: AsyncIterable<Part> };
   try {
     result = streamText({
       model: plan.handle.model,
@@ -240,6 +250,8 @@ export async function generateCompletion(plan: GenerationPlan): Promise<Response
       maxOutputTokens: plan.maxOutputTokens,
       providerOptions: plan.handle.providerOptions,
       maxRetries: 0,
+      experimental_lowMemory: true,
+      telemetry: { isEnabled: false },
       abortSignal: controller.signal,
       ...(plan.temperature !== undefined ? { temperature: plan.temperature } : {}),
     });
@@ -304,6 +316,7 @@ export async function generateCompletion(plan: GenerationPlan): Promise<Response
         headers: { ...apiHeaders(requestId), "Content-Type": "application/json; charset=utf-8" },
       });
     } catch (error) {
+      abort(error);
       await reader.close();
       cleanup();
       const clientGone = plan.signal.aborted && isClientAbort(plan.signal);
@@ -331,6 +344,7 @@ export async function generateCompletion(plan: GenerationPlan): Promise<Response
       if (isUnsupportedPart(part.type)) throw unsupportedOutput();
     }
   } catch (error) {
+    abort(error);
     await reader.close();
     cleanup();
     const clientGone = plan.signal.aborted && isClientAbort(plan.signal);
@@ -339,7 +353,7 @@ export async function generateCompletion(plan: GenerationPlan): Promise<Response
     return errorResponse(failure, requestId);
   }
 
-  const body = streamBody(plan, reader, first, { id, created, settle, cleanup, complete, signal: abortSignal });
+  const body = streamBody(plan, reader, first, { id, created, settle, cleanup, complete, abort, signal: abortSignal });
   return new Response(body, {
     status: 200,
     headers: {
@@ -351,6 +365,7 @@ export async function generateCompletion(plan: GenerationPlan): Promise<Response
 }
 
 interface StreamHelpers {
+  abort: (reason: unknown) => void;
   id: string;
   created: number;
   settle: (
@@ -376,7 +391,6 @@ function streamBody(plan: GenerationPlan, reader: ProviderReader, first: Part, h
   let bytes = 0;
   let lastActivity = Date.now();
   let awaitingPull = false;
-  let pullStarted = 0;
   let initial: Part | null = first;
   let queue: Uint8Array[] = [];
   let controllerRef: ReadableStreamDefaultController<Uint8Array> | null = null;
@@ -436,8 +450,10 @@ function streamBody(plan: GenerationPlan, reader: ProviderReader, first: Part, h
 
   const fail = async (controller: ReadableStreamDefaultController<Uint8Array>, error: unknown) => {
     if (terminal) return;
+    terminal = true;
     const clientGone = isClientAbort(plan.signal);
     const failure = failureOf(error, clientGone, helpers.signal);
+    helpers.abort(error);
     helpers.settle(plan.signal.aborted ? "cancelled" : "failed", 200, plan.signal.aborted ? (clientGone ? "client_disconnected" : "cancelled") : failure.code, null, state.usage);
     if (!clientGone) {
       try {
@@ -446,7 +462,10 @@ function streamBody(plan: GenerationPlan, reader: ProviderReader, first: Part, h
         // The output cap or a closed consumer leaves no room for the error record.
       }
     }
-    terminal = true;
+    clearInterval(heartbeat);
+    helpers.signal.removeEventListener("abort", onStreamAbort);
+    helpers.cleanup();
+    void reader.close();
     try {
       controller.close();
     } catch {
@@ -454,26 +473,15 @@ function streamBody(plan: GenerationPlan, reader: ProviderReader, first: Part, h
     }
   };
 
+  const onStreamAbort = () => {
+    if (!terminal && !cancelled && controllerRef) void fail(controllerRef, helpers.signal.reason);
+  };
   const heartbeat = setInterval(() => {
     if (terminal || cancelled) return;
-    if (awaitingPull && Date.now() - pullStarted >= API_LIMITS.drainTimeoutMs) {
-      helpers.settle("cancelled", 200, "client_disconnected", null, state.usage);
-      terminal = true;
-      void reader.close();
-      try {
-        controllerRef?.close();
-      } catch {
-        // Already closed.
-      }
-      return;
-    }
-    if (Date.now() - lastActivity >= 15_000) {
-      lastActivity = Date.now();
-      try {
-        controllerRef?.enqueue(encoder.encode(": keepalive\n\n"));
-      } catch {
-        // A closed stream simply has no heartbeat.
-      }
+    // Time spent waiting for a provider event is governed by the provider deadline. Drain time
+    // measures a full outgoing queue, including when the consumer never asks for another pull.
+    if (!awaitingPull && Date.now() - lastActivity >= API_LIMITS.drainTimeoutMs) {
+      helpers.abort(new DOMException("The consumer stopped reading.", "AbortError"));
     }
   }, 1_000);
   heartbeat.unref?.();
@@ -481,6 +489,8 @@ function streamBody(plan: GenerationPlan, reader: ProviderReader, first: Part, h
   return new ReadableStream<Uint8Array>({
     start(controller) {
       controllerRef = controller;
+      helpers.signal.addEventListener("abort", onStreamAbort, { once: true });
+      if (helpers.signal.aborted) { onStreamAbort(); return; }
       try {
         write(controller, chunk([{ index: 0, delta: { role: "assistant", content: "" }, finish_reason: null, logprobs: null }]));
       } catch (error) {
@@ -490,7 +500,6 @@ function streamBody(plan: GenerationPlan, reader: ProviderReader, first: Part, h
     async pull(controller) {
       if (terminal) return;
       awaitingPull = true;
-      pullStarted = Date.now();
       try {
         plan.recheck();
         if (initial) {
@@ -504,12 +513,14 @@ function streamBody(plan: GenerationPlan, reader: ProviderReader, first: Part, h
             if (state.finishReason === undefined) throw new Error("provider_eof");
             break;
           }
+          if (terminal || cancelled) return;
           acceptPart(step.value);
         }
         awaitingPull = false;
         if (state.finishReason !== undefined) {
           await finishFrame(controller);
           clearInterval(heartbeat);
+          helpers.signal.removeEventListener("abort", onStreamAbort);
           helpers.cleanup();
           controller.close();
           return;
@@ -519,13 +530,13 @@ function streamBody(plan: GenerationPlan, reader: ProviderReader, first: Part, h
       } catch (error) {
         awaitingPull = false;
         clearInterval(heartbeat);
-        helpers.cleanup();
-        void reader.close();
         await fail(controller, error);
       }
     },
     async cancel() {
       cancelled = true;
+      helpers.signal.removeEventListener("abort", onStreamAbort);
+      helpers.abort(new DOMException("The consumer cancelled.", "AbortError"));
       clearInterval(heartbeat);
       helpers.cleanup();
       if (!terminal) helpers.settle("cancelled", 200, "client_disconnected", null, state.usage);

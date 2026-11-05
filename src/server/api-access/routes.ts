@@ -311,11 +311,13 @@ export const inferenceRoutes = new Hono<ApiEnv>()
     }
     if (!apiAccessEnabled(principal.userId)) return sendApiError(c, permissionDenied("Your administrator has disabled external API access."), requestId);
     const release = admitCatalogCall();
-    const timer = new AbortController();
-    const deadline = setTimeout(() => timer.abort(), API_LIMITS.catalogDurationMs);
-    deadline.unref?.();
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      deadline = setTimeout(() => reject(apiFailure(504, "server_error", "timeout", "The model catalog took too long to respond.")), API_LIMITS.catalogDurationMs);
+      deadline.unref?.();
+    });
     try {
-      const models = await listModels(principal.userId);
+      const models = await Promise.race([listModels(principal.userId), timeout]);
       const eligible = [...new Set(models.filter(apiEligible).filter((model) => apiModelAllowed(principal.userId, model.ref)).map((model) => model.ref))].sort();
       if (eligible.length > 10_000) return sendApiError(c, apiFailure(503, "server_error", "catalog_limit", "The model catalog is too large to list."), requestId);
       if (!principalAlive(principal) || !apiAccessEnabled(principal.userId)) return sendApiError(c, liveDenialFailure(), requestId);
@@ -379,7 +381,7 @@ export const inferenceRoutes = new Hono<ApiEnv>()
       }
       const { systemBlocks, conversation } = buildMessages(principal.userId, model, body, ceiling, resolved.policy);
       pruneApiTelemetry(principal.userId, admittedAt);
-      const admission = admitApiCall(principal.userId, principal.keyId);
+      const admission = admitApiCall(principal.userId, principal.keyId, model.ref);
       let released = false;
       const release = () => {
         if (released) return;

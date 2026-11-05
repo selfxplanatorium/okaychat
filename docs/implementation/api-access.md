@@ -95,8 +95,11 @@ Only `GET /v1/models` and `POST /v1/chat/completions` exist. The completion path
 
 SSE sends a role chunk, text chunks (≤8 KiB UTF-8 pieces), a terminal choice, an optional usage chunk,
 then exactly one `data: [DONE]`. After headers an error is one JSON data record and a close with no
-finish chunk and no DONE. The body is pull-driven, so a slow consumer throttles the provider; a consumer
-that stops pulling for 30 s aborts upstream. The role and terminal frames are serialized with
+finish chunk and no DONE. The SDK uses `experimental_lowMemory: true` with telemetry disabled so the single `fullStream` consumer
+has no unread replay tee or SDK content collection. The body is pull-driven, so a slow consumer throttles the provider; a consumer
+that stops pulling for 30 s aborts upstream. Cancellation, errors, and live revocation explicitly abort the
+provider and settle/release even when the consumer never pulls again; keepalive records are not queued
+independently of pulls. The role and terminal frames are serialized with
 `JSON.stringify`.
 
 ## Permissions and recovery

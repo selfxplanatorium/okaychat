@@ -481,3 +481,36 @@ test("protocol mapping, finish reasons, usage shape, and UTF-8 splitting", async
   assert.equal(schema.acceptsJson("application/json; charset=utf-8"), true);
   assert.equal(schema.acceptsJson("application/json; charset=latin1"), false);
 });
+
+test("API admission enforces the exact-model concurrent-turn bucket", () => {
+  db.prepare("INSERT INTO permission_policies (subject_kind,subject_id,model_ref,document,updated_at,updated_by) VALUES ('user','alice','fake/model',?,1,NULL)")
+    .run(JSON.stringify({ version: 1, limits: { concurrentTurns: 1 } }));
+  const first = limits.admitApiCall("alice", "key-a", "fake/model");
+  try {
+    assert.throws(() => limits.admitApiCall("alice", "key-b", "fake/model"), (error: unknown) => error instanceof limits.ApiConcurrentLimit);
+    const other = limits.admitApiCall("alice", "key-b", "fake/other");
+    other.release();
+  } finally {
+    first.release();
+    db.prepare("DELETE FROM permission_policies WHERE model_ref = 'fake/model'").run();
+  }
+});
+
+test("the pre-auth address map recovers after expired addresses fill it", async (t) => {
+  const { apiGate, resetApiAuthGate } = await import("./auth.js");
+  resetApiAuthGate();
+  const gate = new Hono().use("*", apiGate).get("/", (c) => c.text("ok"));
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  try {
+    for (let index = 0; index < 10_000; index++) {
+      // Stay below the process bucket while retaining the addresses in the bounded map.
+      if (index % 1_000 === 0) t.mock.timers.tick(60_001);
+      assert.equal((await gate.request("http://app/", {}, { incoming: { socket: { remoteAddress: `address-${index}` } } })).status, 200);
+    }
+    t.mock.timers.tick(60_001);
+    assert.equal((await gate.request("http://app/", {}, { incoming: { socket: { remoteAddress: "new-address" } } })).status, 200);
+  } finally {
+    t.mock.timers.reset();
+    resetApiAuthGate();
+  }
+});

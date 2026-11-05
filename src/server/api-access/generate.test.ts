@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -62,7 +62,7 @@ async function fakeProvider(respond: (req: IncomingMessage, res: ServerResponse,
   const port = (server.address() as AddressInfo).port;
   return {
     url: `http://127.0.0.1:${port}`,
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    close: () => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }),
   };
 }
 
@@ -283,4 +283,124 @@ test("UTF-8 pieces never split a code point and stay under the cap", () => {
   const pieces = splitUtf8(text, 1_024);
   assert.ok(pieces.every((piece) => Buffer.byteLength(piece, "utf8") <= 1_024));
   assert.equal(pieces.join(""), text);
+});
+
+test("post-header provider failures emit one error without a finish or DONE", async () => {
+  const fake = await fakeProvider((_req, res) => sse(res, [textChunk("partial"), finishChunk("tool_calls")]));
+  try {
+    store.openApiRequest({ id: "apr_generated", userId: "alice", keyId: "key-a", modelRef: info.ref, stream: true });
+    const response = await generateCompletion(plan(fake.url, { stream: true }));
+    const text = await response.text();
+    assert.match(text, /"code":"unsupported_output"/);
+    assert.equal(text.includes("[DONE]"), false);
+    assert.equal(text.includes('"finish_reason":"stop"'), false);
+    assert.equal(store.apiRequestsPage("alice", { limit: 1 }).rows[0]!.state, "failed");
+  } finally {
+    await fake.close();
+  }
+});
+
+for (const mode of ["cancel", "abort", "stalled"] as const) {
+  test(`${mode} consumer aborts the provider and releases the live registration`, async (t) => {
+    let closed!: () => void;
+    const disconnected = new Promise<void>((resolve) => { closed = resolve; });
+    const fake = await fakeProvider((_req, res) => {
+      res.on("close", closed);
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write(`data: ${JSON.stringify(textChunk("first"))}\n\n`);
+    });
+    try {
+      store.openApiRequest({ id: "apr_generated", userId: "alice", keyId: "key-a", modelRef: info.ref, stream: true });
+      const controller = new AbortController();
+      let released = 0;
+      if (mode === "stalled") t.mock.timers.enable({ apis: ["Date", "setInterval"], now: Date.now() });
+      const response = await generateCompletion({ ...plan(fake.url, { stream: true }), signal: controller.signal, onDone: () => { released++; } });
+      if (mode === "cancel") await response.body!.cancel();
+      else if (mode === "abort") controller.abort();
+      else {
+        t.mock.timers.tick(31_000);
+        t.mock.timers.reset();
+      }
+      await Promise.race([disconnected, new Promise<never>((_, reject) => {
+        const timer = setTimeout(() => reject(new Error("provider was not cancelled")), 2_000);
+        timer.unref();
+      })]);
+      assert.equal(released, 1);
+      const { liveApiCallCount } = await import("./limits.js");
+      assert.equal(liveApiCallCount(), 0);
+      assert.notEqual(store.apiRequestsPage("alice", { limit: 1 }).rows[0]!.state, "running");
+    } finally {
+      await fake.close();
+    }
+  });
+}
+
+test("fresh-database HTTP smoke: session management, bearer models/completions, and revocation", async () => {
+  const { Hono } = await import("hono");
+  const { serve } = await import("@hono/node-server");
+  const { csrf } = await import("hono/csrf");
+  const { bodyLimit } = await import("hono/body-limit");
+  const { requireUser } = await import("../auth.js");
+  const { sha256 } = await import("../crypto.js");
+  const { saveConnection } = await import("../catalog/providers.js");
+  const { apiKeyRoutes, inferenceRoutes } = await import("./routes.js");
+  const { handleAppError } = await import("../errors.js");
+  const fake = await fakeProvider((req, res) => {
+    if (req.url === "/models") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ data: [{ id: "fake-model" }] }));
+    } else sse(res, [textChunk("smoke ok"), finishChunk("stop", { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 })]);
+  });
+  saveConnection("alice", "custom-fake", { baseURL: fake.url, apiKey: "fake", enabled: true });
+  db.prepare("INSERT INTO sessions (token_hash,user_id,expires_at) VALUES (?,'alice',?)").run(sha256("smoke-session"), Date.now() + 60_000);
+  const app = new Hono()
+    .use("/api/*", bodyLimit({ maxSize: 100 * 1024 * 1024 }))
+    .use("/api/*", csrf())
+    .use("/api/*", requireUser)
+    .route("/api", apiKeyRoutes)
+    .route("/v1", inferenceRoutes)
+    .onError(handleAppError);
+  const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port: 0 });
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    const created = await fetch(`${url}/api/api-keys`, { method: "POST", headers: { cookie: "okaychat_session=smoke-session", "content-type": "application/json" }, body: JSON.stringify({ label: "Smoke", scopes: ["models:read", "chat:write"], expiresAt: null }) });
+    assert.equal(created.status, 201);
+    const key = await created.json() as { secret: string; key: { id: string } };
+    const headers = { authorization: `Bearer ${key.secret}`, "content-type": "application/json" };
+    assert.equal((await fetch(`${url}/v1/models`, { headers: { cookie: "okaychat_session=smoke-session" } })).status, 401);
+    assert.equal((await fetch(`${url}/api/api-keys`, { headers })).status, 401);
+    const duplicateStatus = await new Promise<number | undefined>((resolve, reject) => {
+      const request = httpRequest(`${url}/v1/models`, { headers: { authorization: [headers.authorization, "Bearer invalid"] } }, (response) => {
+        response.resume();
+        resolve(response.statusCode);
+      });
+      request.on("error", reject);
+      request.end();
+    });
+    assert.equal(duplicateStatus, 401);
+    const models = await fetch(`${url}/v1/models`, { headers });
+    assert.equal(models.status, 200);
+    assert.match(await models.text(), /custom-fake\/fake-model/);
+    for (const stream of [false, true]) {
+      const response = await fetch(`${url}/v1/chat/completions`, { method: "POST", headers, body: JSON.stringify({ model: info.ref, messages: [{ role: "user", content: "hello" }], stream }) });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      assert.ok(response.headers.get("x-request-id"));
+      const body = await response.text();
+      assert.match(body, /smoke ok/);
+      if (stream) assert.match(body, /data: \[DONE\]\n\n$/);
+    }
+    const listed = await fetch(`${url}/api/api-keys`, { headers: { cookie: "okaychat_session=smoke-session" } });
+    assert.equal((await listed.text()).includes(key.secret), false);
+    assert.equal((await fetch(`${url}/api/api-keys/${key.key.id}`, { method: "DELETE", headers: { cookie: "okaychat_session=smoke-session", origin: url } })).status, 200);
+    assert.equal((await fetch(`${url}/v1/models`, { headers })).status, 401);
+    assert.equal((db.prepare("SELECT count(*) AS n FROM messages").get() as { n: number }).n, 0);
+    assert.equal((db.prepare("SELECT count(*) AS n FROM usage WHERE kind='api' AND api_key_id=? AND api_request_id IS NOT NULL").get(key.key.id) as { n: number }).n, 2);
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await fake.close();
+  }
 });
