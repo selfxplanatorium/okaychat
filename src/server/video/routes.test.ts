@@ -34,3 +34,10 @@ test('video writes are CSRF guarded; SSE terminal snapshot closes immediately',a
   const claimed=claimVideo()!;finishVideo(row.id,claimed.lease_epoch,'failed','provider_failed');
   const response=await app.request(`/video-jobs/${row.id}/events`,{headers});const text=await response.text();assert.match(text,/"state":"failed"/);
 });
+
+test('retry/cancel reject malformed or extra JSON fields with a safe validation response',async()=>{
+  for(const [action,body] of [['retry','{}'],['retry','{"expectedRevision":"not a revision"}'],['cancel','{"url":"https://untrusted.example"}']] as const){
+    const response=await app.request(`/video-jobs/${row.id}/${action}`,{method:'POST',headers:{...headers,'Content-Type':'application/json'},body});
+    assert.equal(response.status,400);const wire=await response.json() as {code:string};assert.equal(wire.code,'validation');
+  }
+});

@@ -78,7 +78,7 @@ export function recordUsage(entry: {
   if (entry.kind === "api" ? !entry.apiKeyId || !entry.apiRequestId : !!entry.apiKeyId || !!entry.apiRequestId) {
     throw new Error("API usage ids do not match the usage kind.");
   }
-  if ((entry.kind === "video") !== !!entry.videoJobId) throw new Error("Video usage id does not match kind.");
+  if (entry.kind === "video" ? !entry.videoJobId : entry.videoJobId !== undefined) throw new Error("Video usage id does not match kind.");
   if (entry.kind === "video" && Object.values(entry.usage).some(n => n !== 0)) throw new Error("Video usage must have zero tokens.");
   if (entry.videoJobId) {
     const previous = db.prepare("SELECT user_id, thread_id, provider_id, model_id, kind, cost, cost_state FROM usage WHERE video_job_id = ?").get(entry.videoJobId);

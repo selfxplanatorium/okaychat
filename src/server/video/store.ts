@@ -63,6 +63,7 @@ export function admitVideo(input:Admission,now=Date.now(),retryOf?:VideoJobRow):
       return row;
     }
     input.authorize();
+    if([input.threadId,input.assistantMessageId,input.toolCallId,input.llmRunId].some(id=>!id||Buffer.byteLength(id)>200))throw new VideoError('unsupported_parameters',400);
     if(!db.prepare('SELECT 1 FROM threads WHERE id=? AND user_id=? AND compare_group_id IS NULL').get(input.threadId,input.userId)) throw new AppError({code:'not_found'});
     const r=input.request;
     if(!r.prompt.trim() || [...r.prompt].length>4000 || Buffer.byteLength(r.prompt)>16384 || r.referenceUploadId && !/^[A-Za-z0-9_-]{1,200}$/.test(r.referenceUploadId)) throw new VideoError('unsupported_parameters',400);

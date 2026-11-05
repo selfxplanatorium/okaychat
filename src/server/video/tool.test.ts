@@ -101,3 +101,14 @@ test('concurrent direct retries create one child, preserve original run, and rec
   assert.equal(db.prepare('SELECT count(*) AS n FROM video_jobs WHERE retry_of=?').get(row.id)!.n,1);finish(a);
   updateSettings(c.user,{videoServices:{xai:{enabled:false}}});assert.throws(()=>assertVideoTurn(c.context,'xai',c.deps));
 });
+
+test('the production worker rechecks model-scoped video revocation before the paid POST',async()=>{
+  const {VideoWorker}=await import('./worker.js');
+  const c=setup();c.run();const accepted=await c.execute();
+  writePolicy({kind:'user',id:c.user},c.context.modelRef,{version:1,features:{videos:false}},null);
+  let submits=0;
+  const worker=new VideoWorker({provider:()=>({service:'xai',async submit(){submits++;return{id:'must_not_submit'};},async poll(){throw new Error('Unexpected poll');},async cancel(){return'unsupported';}})});
+  await worker.runOne();
+  assert.equal(submits,0);assert.equal(jobRow(accepted.jobId)!.error_code,'credentials_changed');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM usage WHERE video_job_id=?').get(accepted.jobId)!.n,0);
+});

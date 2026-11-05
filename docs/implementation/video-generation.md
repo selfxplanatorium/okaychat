@@ -1,6 +1,6 @@
 # Video generation foundation
 
-The durable worker and authenticated status/file routes are implemented. There is still **no settings toggle, player or Library integration**. Importing modules performs no provider work;
+The durable worker and authenticated status/file routes are implemented. There is still **no settings toggle or Library integration**; the inline player is implemented. Importing modules performs no provider work;
 `index.ts` explicitly recovers leases, starts the worker/maintenance, and stops timers on shutdown.
 Paid admission is available only through the guarded interactive tool and direct owned retry.
 
@@ -11,7 +11,7 @@ and versioned USD list prices. Models are curated: xAI `grok-imagine-video-1.5-l
 `grok-imagine-video-1.5`, and Replicate `google/veo-3.1-fast`. The subset is 4/6/8 seconds,
 720p/1080p, landscape/portrait, with audio. Replicate starting images require 8 seconds.
 xAI Lite 1080p is upscaled. Estimates use output seconds plus one starting-image input charge;
-they are not invoices. Settings contracts default to disabled; settings persistence is not wired yet.
+they are not invoices. Settings default to disabled and persist through the strict settings API; there is no settings UI toggle yet.
 
 Private credentials reuse `xai` and `image-replicate` through `getOwnConnection`. The latter ID is
 historical and must not be renamed. Disabled or missing private keys never fall back to shared keys.
@@ -66,8 +66,7 @@ replacement. Revalidate availability before enabling the feature.
 
 `video/core.test.ts` uses fake providers, hand-authored MP4 containers, mocked private DNS and local
 streams. `storage-migrations.test.ts` checks rollback/reopen and rewinds older schema fixtures with
-video tables/columns removed. No test calls a vendor. Worker crash/cancel/unknown-billing recovery,
-reference normalization, ownership routes, quota/accounting and UI tests remain required in later phases.
+video tables/columns removed. No test calls a vendor. Worker crash/cancel/unknown-billing recovery, ownership routes, quota/accounting and client status tests are implemented. The full reference-normalization matrix and remaining settings/Library UI tests are still required.
 No dependencies, binaries, container services or raster/image execution behavior were changed.
 
 ## Worker and recovery
@@ -92,7 +91,7 @@ SSE emits current snapshots, not an event replay log: five streams/account, a 60
 feature checks. Terminal snapshots close streams. Foreign/missing IDs match. No public submit route.
 The worker tests cover pre/post-submit crashes, unknown billing, ID/download/final-file recovery,
 lease replacement, local validation charges, five transient polls, deadlines and cancellation races.
-Retry authorization/UI and full fork/share/archive lifetime integration are still upcoming.
+Retry authorization, confirmed UI retry, completed-reference fork retention and inert share/archive projections are implemented. Dedicated coverage of all reference-image edge cases and the remaining Library lifecycle remains upcoming.
 
 ## Interactive tool boundary
 
@@ -116,3 +115,21 @@ video tool IDs/requests, omit video bytes, and reject video MIME assets. Importe
 Output publication uses a same-filesystem exclusive hard link followed by staging unlink, instead of
 an overwriting rename, so an obsolete lease cannot replace a newer immutable final file. Parent fsync
 and the outcome/file/usage transaction retain the same recovery boundary.
+
+## Inline card (phase 4 started)
+
+`VideoToolCard` renders the native local player with controls/playsInline/preload=metadata and no
+autoplay, plus stage, elapsed time, bounded attempt details, safe errors, cancellation and a confirmed
+paid retry. A decoding failure keeps the download link and never starts another generation. The card
+reconciles missing accepted results through the thread/assistant/tool-call lookup, and follows the
+latest retry. It stays inline through assistant-ui grouping.
+
+`VideoJobClient` keeps status separate from message/LLM metadata, ignores old revisions and late
+account responses, closes terminal/offscreen streams, caps five concurrent streams and a 200-entry
+session cache, and refreshes via GET on reconnect. Sign-out clears it. Pure client tests exercise
+ordering, visibility, account switching, slot limits, offline status, and malformed snapshots.
+Usage totals now label known subtotals and unknown video-charge counts without changing token meters.
+
+Still deferred: Video settings UI and service/key management routes, Library video union/filter/preview,
+full translated video-card copy (the typed English namespace currently falls back normally), and media
+attempt links in message details. No browser playback/manual provider acceptance has been performed.

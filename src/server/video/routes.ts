@@ -20,16 +20,17 @@ export const videoRoutes=new Hono<AppEnv>()
     const assistant=c.req.query('assistantMessageId'),tool=c.req.query('toolCallId'),cursor=c.req.query('cursor');
     if([assistant,tool,cursor].some(v=>v!==undefined&&!/^[A-Za-z0-9_-]{1,200}$/.test(v)))throw new AppError({code:'validation'});
     const rows=db.prepare(`SELECT id FROM video_jobs WHERE user_id=? AND thread_id=? ${assistant?'AND assistant_message_id=?':''} ${tool?'AND tool_call_id=?':''} ${cursor?'AND (created_at,id) < (SELECT created_at,id FROM video_jobs WHERE id=? AND user_id=?)':''} ORDER BY created_at DESC,id DESC LIMIT ?`).all(userId,c.req.param('threadId'),...(assistant?[assistant]:[]),...(tool?[tool]:[]),...(cursor?[cursor,userId]:[]),assistant&&tool?8:101) as Array<{id:string}>;
-    const jobs=rows.slice(0,assistant&&tool?8:100).map(r=>videoJobView(ownJob(userId,r.id)));
+    const jobs=rows.slice(0,assistant&&tool?8:100).map(r=>{const row=ownJob(userId,r.id);return {...videoJobView(row),canRetry:canRetryVideo(row)};});
     return c.json({jobs,cursor:rows.length>100?jobs.at(-1)!.id:null});
   })
   .post('/video-jobs/:id/retry',async c=>{
-    const input=z.object({expectedRevision:z.number().int().positive()}).strict().parse(await videoRouteJson(c.req.raw));
-    const row=await retryVideo(c.get('user').id,c.req.param('id'),input.expectedRevision);
+    const input=z.object({expectedRevision:z.number().int().positive()}).strict().safeParse(await videoRouteJson(c.req.raw));
+    if(!input.success)throw new AppError({code:'validation'});
+    const row=await retryVideo(c.get('user').id,c.req.param('id'),input.data.expectedRevision);
     return c.json({job:videoJobView(row)},202);
   })
   .post('/video-jobs/:id/cancel',async c=>{
-    await videoRouteJson(c.req.raw);
+    if(!z.object({}).strict().safeParse(await videoRouteJson(c.req.raw)).success)throw new AppError({code:'validation'});
     const row=requestVideoCancel(c.get('user').id,c.req.param('id'));videoWorker.tick();
     return c.json(videoJobView(row),isVideoOpen(row.state)?202:200);
   })

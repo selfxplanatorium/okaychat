@@ -1,3 +1,4 @@
+import { VideoToolCard } from "./VideoToolCard";
 import { defineToolkit, type ToolCallMessagePartComponent } from "@assistant-ui/react";
 import type { InjectionReport } from "@shared/types";
 import { toolErrorPresentation } from "@/lib/error-presentation";
@@ -81,6 +82,7 @@ export function ToolShell({ icon, label, running, error, failure, injection, chi
 }
 
 export const toolkit = defineToolkit({
+  generate_video: {type: "backend", render: (props) => <VideoToolCard {...props} />},
   web_search: {
     type: "backend",
     render: ({ args, result, status }) => {

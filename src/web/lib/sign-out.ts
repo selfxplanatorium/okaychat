@@ -1,3 +1,4 @@
+import { setVideoAccount } from "@/state/video-jobs";
 import { api } from "@/lib/api";
 import { resetServices } from "@/state/services";
 import { resetNotifications } from "@/state/notifications";
@@ -28,6 +29,7 @@ export async function signOut() {
   setSavedPromptsAccount(null);
   setAnnotationsAccount(null);
   setTranslationsAccount(null);
+  setVideoAccount(null);
   closeTranslationDialog();
   closePromptPicker();
   closeFeedback();

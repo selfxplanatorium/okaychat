@@ -159,7 +159,10 @@ test('fork keeps only completed owned output alive; deleting the source cannot d
   deleteThread(c.user,c.thread);await maintainVideos(h.now);
   assert.ok(await stat(videoFile(c.user,row.id)));assert.equal(db.prepare('SELECT count(*) AS n FROM video_threads WHERE thread_id=?').get(fork.id)!.n,1);
   assert.equal(db.prepare('SELECT cost FROM usage WHERE video_job_id=?').get(row.id)!.cost,.12);
-  deleteThread(c.user,fork.id);await maintainVideos(h.now);
+  const second=branchThread(c.user,fork.id,'assistant',`${fork.id}_again`);
+  assert.equal(db.prepare('SELECT count(*) AS n FROM video_threads WHERE video_id=?').get(row.id)!.n,2);
+  deleteThread(c.user,fork.id);await maintainVideos(h.now);assert.ok(await stat(videoFile(c.user,row.id)));
+  deleteThread(c.user,second.id);await maintainVideos(h.now);
   assert.equal(db.prepare('SELECT count(*) AS n FROM videos WHERE id=?').get(row.id)!.n,0);
   await assert.rejects(stat(videoFile(c.user,row.id)));
 });
@@ -170,4 +173,27 @@ test('thread deletion during download cancels locally and cannot resurrect outpu
   await h.worker.runOne();h.advance();await h.worker.runOne();
   assert.equal(jobRow(row.id)!.state,'cancelled');assert.equal(jobRow(row.id)!.thread_id,null);assert.equal(jobRow(row.id)!.request_enc,null);
   assert.equal(db.prepare('SELECT count(*) AS n FROM videos WHERE job_id=?').get(row.id)!.n,0);
+});
+
+test('shutdown aborts an in-flight submit and restart marks it unknown without a second POST',async()=>{
+  const c=context(),h=harness(),row=admitVideo(admission(c),h.now);
+  let started!:()=>void;
+  const ready=new Promise<void>(resolve=>{started=resolve;});
+  let submits=0;
+  h.provider.submit=async(_key,_input,signal)=>{
+    submits++;started();
+    return new Promise((_resolve,reject)=>signal!.addEventListener('abort',()=>reject(new VideoError('provider_unavailable',503,'unknown')),{once:true}));
+  };
+  h.worker.start();await ready;await h.worker.stop();
+  assert.equal(jobRow(row.id)!.state,'submitting');recoverVideoJobs(h.now);
+  await harness().worker.runOne();assert.equal(jobRow(row.id)!.state,'submission_unknown');assert.equal(submits,1);
+});
+
+test('a late receipt after cancellation is saved for remote stop, and cleanup failure keeps bytes reserved',async()=>{
+  const c=context(),h=harness({cleanup:async()=>{throw new Error('disk unavailable');}}),row=admitVideo(admission(c,'replicate'),h.now);
+  h.provider.submit=async()=>{requestVideoCancel(c.user,row.id);return{id:'late_provider_receipt'};};
+  await h.worker.runOne();const done=jobRow(row.id)!;
+  assert.equal(done.state,'cancelled');assert.ok(done.provider_id_enc);assert.equal(h.counts().cancels,1);assert.equal(done.cost_state,'unknown');
+  assert.equal(done.reservation_bytes,64*1024*1024+256*1024+32768);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM usage WHERE video_job_id=?').get(row.id)!.n,1);
 });

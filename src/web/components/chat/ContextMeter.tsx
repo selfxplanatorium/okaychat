@@ -169,8 +169,8 @@ export function ContextMeter() {
           {autoCompactAt > 0 && <div className="bg-foreground/40 absolute top-0 h-full w-px" style={{ left: `${autoCompactAt * 100}%` }} title={t("composer.autoCompactThreshold")} />}
         </div>
         <dl className="text-muted-foreground grid grid-cols-2 gap-y-1 text-xs">
-          <dt>{t("composer.threadCost")}</dt>
-          <dd className="text-foreground text-right tabular-nums">{formatCost(meta?.usage?.cost ?? 0)}</dd>
+          <dt>{t(meta?.usage?.unknownCostRequests ? "video.knownSubtotal" : "composer.threadCost")}</dt>
+          <dd className="text-foreground text-right tabular-nums">{formatCost(meta?.usage?.cost ?? 0)}{meta?.usage?.unknownCostRequests ? <span className="text-muted-foreground block">{t("video.unknownCharges",{count:formatNumber(meta.usage.unknownCostRequests)})}</span>:null}</dd>
           <dt>{t("composer.tokensInOut")}</dt>
           <dd className="text-foreground text-right tabular-nums">
             {formatTokens(meta?.usage?.input ?? 0)} / {formatTokens(meta?.usage?.output ?? 0)}

@@ -81,7 +81,7 @@ export async function deleteVideoFile(userId:string,id:string):Promise<boolean> 
   if(!db.prepare('SELECT 1 FROM videos WHERE id=? AND user_id=?').get(id,userId)) return false;
   // Keeping the charged row until unlink succeeds also keeps a failed deletion recoverable.
   await rm(videoFile(userId,id),{force:true});
-  tx(()=>{db.prepare('DELETE FROM videos WHERE id=? AND user_id=?').run(id,userId);changed(id);});
+  tx(()=>{db.prepare('DELETE FROM videos WHERE id=? AND user_id=?').run(id,userId);db.prepare('UPDATE video_jobs SET revision=revision+1,updated_at=? WHERE id=? AND user_id=?').run(Date.now(),id,userId);changed(id);});
   return true;
 }
 export function byteRange(header:string|undefined,size:number):[number,number]|null {
