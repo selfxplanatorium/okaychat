@@ -12,6 +12,9 @@ import { closeFeedback } from "@/state/feedback-dialog";
 import { closeBookmarks } from "@/state/bookmark-dialog";
 import { useMessageJump } from "@/state/message-jump";
 import { useChannels } from "@/state/channels";
+import { resetNotes } from "@/state/notes";
+import { resetCalendar } from "@/state/calendar";
+import { clearNoteHandoff } from "@/state/note-chat-handoff";
 
 /** Every logout goes through here, so the message cache never outlives the session it belongs to. */
 export async function signOut() {
@@ -28,6 +31,9 @@ export async function signOut() {
   resetServices();
   resetNotifications();
   useChannels.getState().stop();
+  resetNotes();
+  resetCalendar();
+  clearNoteHandoff();
   // Drops the previous account's agent summaries and drops any response still in flight.
   useN8nAgents.getState().stop();
   window.location.href = "/";

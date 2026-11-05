@@ -3,7 +3,7 @@ export default {
   bell: "Notifications",
   bellUnread: "Notifications, {count} unread",
   empty: "Nothing yet.",
-  emptyBody: "Scheduled runs and archive jobs show up here.",
+  emptyBody: "Reminders, scheduled runs, archive jobs and room updates show up here.",
   markAllRead: "Mark all read",
   clearRead: "Clear read",
   markRead: "Mark read",
@@ -41,5 +41,7 @@ export default {
   channelAiFinished: "Room reply finished",
   channelOpenRoom: "Open the room to see it.",
   channelOpenMessage: "Open the room to read the message.",
+  calendarReminder: "Calendar reminder",
+  calendarOpenEvent: "Open the event to see the details.",
   unknownChat: "your chat",
 } as const;

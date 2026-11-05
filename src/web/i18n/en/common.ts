@@ -13,6 +13,7 @@ export default {
   edit: "Edit",
   export: "Export",
   loading: "Loading…",
+  loadMore: "Load more",
   more: "More",
   newChat: "New chat",
   next: "Next",

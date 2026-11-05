@@ -34,6 +34,7 @@ export const NOTIFICATION_TITLE_MESSAGES: Record<NotificationTitleKey, MessageKe
   "channel.mention": "notifications.channelMention",
   "channel.message": "notifications.channelMessage",
   "channel.aiFinished": "notifications.channelAiFinished",
+  "calendar.reminder": "notifications.calendarReminder",
 };
 
 export const NOTIFICATION_BODY_MESSAGES: Record<NotificationBodyKey, MessageKey> = {
@@ -46,6 +47,7 @@ export const NOTIFICATION_BODY_MESSAGES: Record<NotificationBodyKey, MessageKey>
   "import.failedBody": "notifications.importFailedBody",
   "channel.openRoom": "notifications.channelOpenRoom",
   "channel.openMessage": "notifications.channelOpenMessage",
+  "calendar.openEvent": "notifications.calendarOpenEvent",
 };
 
 const text = (key: MessageKey, params: Record<string, string | number>): string =>

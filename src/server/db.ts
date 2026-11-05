@@ -1471,6 +1471,153 @@ const migrations: Array<string | (() => void)> = [
     db.prepare("INSERT INTO channel_event_state (singleton, epoch, floor_id) VALUES (1, ?, 0)").run(newId("chev"));
     if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "channels") throw new Error("Injected migration failure");
   },
+  // Personal notes and calendar. One combined migration: the tables, their FTS mirrors, the reminder
+  // ledger, and the notifications rebuild that admits the `calendar` kind and its event link.
+  () => {
+    db.exec(`
+CREATE TABLE notes (
+  search_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL DEFAULT '',
+  favorite INTEGER NOT NULL DEFAULT 0 CHECK(favorite IN (0,1)),
+  pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1)),
+  project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+  source_kind TEXT CHECK(source_kind IN ('message','artifact')),
+  source_thread_id TEXT,
+  source_item_id TEXT,
+  source_version INTEGER,
+  create_key TEXT NOT NULL,
+  create_hash TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(user_id, create_key),
+  CHECK((source_kind IS NULL AND source_thread_id IS NULL AND source_item_id IS NULL AND source_version IS NULL)
+    OR (source_kind IS NOT NULL AND source_kind = 'message' AND source_thread_id IS NOT NULL AND source_item_id IS NOT NULL AND source_version IS NULL)
+    OR (source_kind IS NOT NULL AND source_kind = 'artifact' AND source_thread_id IS NOT NULL AND source_item_id IS NOT NULL AND source_version IS NOT NULL AND source_version >= 1))
+);
+CREATE INDEX notes_user_order ON notes(user_id, pinned DESC, updated_at DESC, id DESC);
+CREATE INDEX notes_user_project ON notes(user_id, project_id, pinned DESC, updated_at DESC, id DESC);
+CREATE TABLE note_tags (
+  note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+  tag TEXT NOT NULL,
+  PRIMARY KEY(note_id, tag)
+);
+CREATE INDEX note_tags_tag ON note_tags(tag, note_id);
+CREATE VIRTUAL TABLE notes_fts USING fts5(
+  title, body, content='notes', content_rowid='search_id',
+  tokenize='unicode61 remove_diacritics 2'
+);
+CREATE TRIGGER notes_fts_insert AFTER INSERT ON notes BEGIN
+  INSERT INTO notes_fts(rowid,title,body) VALUES(new.search_id,new.title,new.body);
+END;
+CREATE TRIGGER notes_fts_delete AFTER DELETE ON notes BEGIN
+  INSERT INTO notes_fts(notes_fts,rowid,title,body) VALUES('delete',old.search_id,old.title,old.body);
+END;
+CREATE TRIGGER notes_fts_update AFTER UPDATE OF title,body ON notes
+WHEN old.title IS NOT new.title OR old.body IS NOT new.body BEGIN
+  INSERT INTO notes_fts(notes_fts,rowid,title,body) VALUES('delete',old.search_id,old.title,old.body);
+  INSERT INTO notes_fts(rowid,title,body) VALUES(new.search_id,new.title,new.body);
+END;
+
+CREATE TABLE calendar_events (
+  search_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  location TEXT NOT NULL DEFAULT '',
+  url TEXT NOT NULL DEFAULT '',
+  all_day INTEGER NOT NULL CHECK(all_day IN (0,1)),
+  time_zone TEXT NOT NULL,
+  start_at INTEGER,
+  end_at INTEGER,
+  start_date TEXT,
+  end_date TEXT,
+  effective_start_at INTEGER NOT NULL,
+  effective_end_at INTEGER NOT NULL,
+  reminder_offsets_json TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(reminder_offsets_json)),
+  reminder_revision INTEGER NOT NULL DEFAULT 1 CHECK(reminder_revision >= 1),
+  thread_id TEXT REFERENCES threads(id) ON DELETE SET NULL,
+  project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+  create_key TEXT NOT NULL,
+  create_hash TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(user_id,create_key),
+  CHECK(effective_end_at > effective_start_at),
+  CHECK((all_day=0 AND start_at IS NOT NULL AND end_at IS NOT NULL AND end_at > start_at AND start_date IS NULL AND end_date IS NULL)
+    OR (all_day=1 AND start_at IS NULL AND end_at IS NULL AND start_date IS NOT NULL AND end_date IS NOT NULL AND end_date > start_date))
+);
+CREATE INDEX calendar_user_range ON calendar_events(user_id,effective_start_at,id);
+CREATE INDEX calendar_user_end ON calendar_events(user_id,effective_end_at,id);
+CREATE INDEX calendar_user_project ON calendar_events(user_id,project_id,effective_start_at,id);
+CREATE INDEX calendar_thread ON calendar_events(thread_id) WHERE thread_id IS NOT NULL;
+CREATE VIRTUAL TABLE calendar_events_fts USING fts5(
+  title,description,location,content='calendar_events',content_rowid='search_id',
+  tokenize='unicode61 remove_diacritics 2'
+);
+CREATE TRIGGER calendar_fts_insert AFTER INSERT ON calendar_events BEGIN
+  INSERT INTO calendar_events_fts(rowid,title,description,location)
+    VALUES(new.search_id,new.title,new.description,new.location);
+END;
+CREATE TRIGGER calendar_fts_delete AFTER DELETE ON calendar_events BEGIN
+  INSERT INTO calendar_events_fts(calendar_events_fts,rowid,title,description,location)
+    VALUES('delete',old.search_id,old.title,old.description,old.location);
+END;
+CREATE TRIGGER calendar_fts_update AFTER UPDATE OF title,description,location ON calendar_events
+WHEN old.title IS NOT new.title OR old.description IS NOT new.description OR old.location IS NOT new.location BEGIN
+  INSERT INTO calendar_events_fts(calendar_events_fts,rowid,title,description,location)
+    VALUES('delete',old.search_id,old.title,old.description,old.location);
+  INSERT INTO calendar_events_fts(rowid,title,description,location)
+    VALUES(new.search_id,new.title,new.description,new.location);
+END;
+CREATE TABLE calendar_reminders (
+  event_id TEXT NOT NULL REFERENCES calendar_events(id) ON DELETE CASCADE,
+  reminder_revision INTEGER NOT NULL CHECK(reminder_revision >= 1),
+  offset_minutes INTEGER NOT NULL CHECK(offset_minutes BETWEEN 0 AND 40320),
+  due_at INTEGER NOT NULL,
+  state TEXT NOT NULL CHECK(state IN ('pending','delivered','suppressed')),
+  processed_at INTEGER,
+  PRIMARY KEY(event_id,reminder_revision,offset_minutes),
+  CHECK((state='pending' AND processed_at IS NULL) OR (state<>'pending' AND processed_at IS NOT NULL))
+);
+CREATE INDEX calendar_reminders_due ON calendar_reminders(due_at,event_id,offset_minutes) WHERE state='pending';
+
+ALTER TABLE notifications RENAME TO notifications_before_calendar;
+CREATE TABLE notifications (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK(kind IN ('schedule','import','export','channel','calendar')),
+  level TEXT NOT NULL CHECK(level IN ('info','success','error')),
+  title_key TEXT NOT NULL,
+  body_key TEXT,
+  params_json TEXT NOT NULL DEFAULT '{}',
+  thread_id TEXT,
+  channel_id TEXT REFERENCES channels(id) ON DELETE CASCADE,
+  channel_message_id TEXT,
+  calendar_event_id TEXT REFERENCES calendar_events(id) ON DELETE CASCADE,
+  action_path TEXT,
+  source_key TEXT,
+  read_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+INSERT INTO notifications(id,user_id,kind,level,title_key,body_key,params_json,thread_id,
+  channel_id,channel_message_id,action_path,source_key,read_at,created_at)
+SELECT id,user_id,kind,level,title_key,body_key,params_json,thread_id,
+  channel_id,channel_message_id,action_path,source_key,read_at,created_at
+FROM notifications_before_calendar;
+DROP TABLE notifications_before_calendar;
+CREATE UNIQUE INDEX notifications_source ON notifications(user_id,source_key) WHERE source_key IS NOT NULL;
+CREATE INDEX notifications_user_time ON notifications(user_id,created_at DESC,id);
+CREATE INDEX notifications_unread ON notifications(user_id,created_at DESC) WHERE read_at IS NULL;
+CREATE INDEX notifications_calendar ON notifications(calendar_event_id) WHERE calendar_event_id IS NOT NULL;
+    `);
+    if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "notes-calendar") throw new Error("Injected migration failure");
+  },
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

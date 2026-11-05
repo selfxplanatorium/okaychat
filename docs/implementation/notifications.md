@@ -4,6 +4,16 @@ Durable in-app notices for scheduled runs and archive jobs, with unread state an
 notifications while the page is open. The bell lives in the sidebar header and in the chat header
 when the phone drawer is closed.
 
+## Calendar reminders
+
+`calendar` is a fifth kind. A reminder notice carries only the allowlisted
+`calendar.reminder`/`calendar.openEvent` keys, empty params, `calendarEventId`, and
+`/calendar?event=<id>`. Visibility composes the existing channel predicate with a calendar predicate
+(account feature allowed and the event still owned); list, unread count, mark read/unread, and dismiss
+all use the composed condition. The durable state is the `calendar_reminders` ledger, not the notice:
+dismissing or pruning a notice never re-arms it, and delivery marks the ledger `delivered` in the same
+transaction as `notify`. See `docs/implementation/calendar.md`.
+
 ## What creates a notice
 
 | Source | Kind/level | Title/body keys | Action |

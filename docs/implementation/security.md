@@ -2,6 +2,13 @@
 
 What okaychat defends against, where each control lives, and what is knowingly left open. Area docs hold the details; this file is the map.
 
+Notes and calendar are private account workspaces: every route and store call checks session, feature,
+and ownership; foreign and missing ids answer the same 404; there is no admin content route. Their
+text is ordinary unencrypted account text (volume security only), never enters model context on its
+own, and note-to-chat is an explicit single-use composer handoff. Note bodies render through the safe
+Markdown path with remote-image consent and link scheme limits. Event URLs are user-click navigation
+only, never fetched server-side. See `docs/implementation/notes.md` and `calendar.md`.
+
 ## Threat model
 
 Defended against:

@@ -139,6 +139,12 @@ export function storageUsedSql(user: string): string {
             THEN MAX(0, 65536 - length(CAST(m.body AS BLOB))) ELSE 0 END), 0)
       FROM channel_ai_runs r JOIN channels c ON c.id = r.channel_id JOIN channel_messages m ON m.id = r.message_id
       WHERE c.owner_id = ${user}
+    -- Notes and calendar events are ordinary account text; only their visible text columns count.
+    UNION ALL SELECT COALESCE(SUM(length(CAST(title AS BLOB)) + length(CAST(body AS BLOB))), 0)
+      FROM notes WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(length(CAST(title AS BLOB)) + length(CAST(description AS BLOB))
+      + length(CAST(location AS BLOB)) + length(CAST(url AS BLOB))), 0)
+      FROM calendar_events WHERE user_id = ${user}
   )), 0)`;
 }
 

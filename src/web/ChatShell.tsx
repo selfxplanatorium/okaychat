@@ -16,6 +16,7 @@ import { ChatPrivacyMenu } from "@/components/chat/ChatPrivacyMenu";
 import { ServiceHealthWatcher, ServiceNotice, ServiceUsageWatcher } from "@/components/chat/ServiceNotice";
 import { NotificationCenter } from "@/components/notifications/NotificationCenter";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
+import { NoteChatHandoff } from "@/components/notes/NoteChatHandoff";
 import { ShareManagerDialog } from "@/components/share/ShareManagerDialog";
 import { StorageNotice } from "@/components/StorageNotice";
 import { ThemeEditorHost } from "@/components/settings/theme/ThemeEditorHost";
@@ -32,6 +33,8 @@ import { useCommand, useShortcutProps } from "@/keyboard/registry";
 const NavigationPage = preloadable(() => import("@/components/layout/NavigationPage").then((m) => m.NavigationPage));
 const SettingsLayout = preloadable(() => import("@/components/settings/SettingsLayout").then((m) => m.SettingsLayout));
 const ChannelsPage = preloadable(() => import("@/components/channels/ChannelsPage").then((m) => m.ChannelsPage));
+const NotesPage = preloadable(() => import("@/components/notes/NotesPage").then((m) => m.NotesPage));
+const CalendarPage = preloadable(() => import("@/components/calendar/CalendarPage").then((m) => m.CalendarPage));
 
 function ChatHeader({ sidebarOpen, onToggle }: { sidebarOpen: boolean; onToggle: () => void }) {
   const aui = useAui();
@@ -153,11 +156,13 @@ export function Shell({ userId }: { userId: string }) {
   const hasAgent = useData((s) => s.models.some(isAgentTarget));
   const onboardingSkipped = useData((s) => s.settings?.onboardingSkipped === true);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
-  const [location] = useLocation();
+  const [location, navigate] = useLocation();
   const inSettings = location.startsWith("/settings");
   const inChannels = location === "/channels" || location.startsWith("/channels/");
-  const inNavigation = inChannels || ["/scheduled", "/library", "/knowledge", "/plugins", "/projects", "/compare", "/evaluations"].includes(location);
-  const route = inSettings ? "settings" : inChannels ? "channels" : inNavigation ? location : "chat";
+  const inNotes = location === "/notes" || location.startsWith("/notes/");
+  const inCalendar = location === "/calendar" || location.startsWith("/calendar?");
+  const inNavigation = inChannels || inNotes || inCalendar || ["/scheduled", "/library", "/knowledge", "/plugins", "/projects", "/compare", "/evaluations"].includes(location);
+  const route = inSettings ? "settings" : inChannels ? "channels" : inNotes ? "notes" : inCalendar ? "calendar" : inNavigation ? location : "chat";
   // The settings layer stays mounted in the sidebar, so it keeps its last section while the chat is shown.
   const lastSection = useRef<string | undefined>(undefined);
   if (inSettings) lastSection.current = location.split("/")[2] || undefined;
@@ -178,6 +183,8 @@ export function Shell({ userId }: { userId: string }) {
   }, [location, closeOnMobile]);
   useDrawerSwipe(sidebarOpen, setSidebarOpen, loaded && !inSettings);
   useCommand("app.toggleSidebar", () => setSidebarOpen((open) => !open), !inSettings);
+  useCommand("nav.notes", () => navigate("/notes"), !inSettings);
+  useCommand("nav.calendar", () => navigate("/calendar"), !inSettings);
   useCommand("nav.chatList", () => {
     setSidebarOpen(true);
     // The rail is mounted while closed, so its rows exist; focus waits for the opening frame.
@@ -231,6 +238,7 @@ export function Shell({ userId }: { userId: string }) {
       <ServiceHealthWatcher />
       <ServiceUsageWatcher />
       <NotificationCenter />
+      <NoteChatHandoff />
       <ShareManagerDialog />
       {/* No fill mode: a held opacity animation makes this a backdrop root, which leaves the sticky
           composer's blur misplaced while the thread scrolls on mobile Chrome. */}
@@ -282,6 +290,27 @@ export function Shell({ userId }: { userId: string }) {
                       <ChannelsPage />
                     </Suspense>
                   </main>
+                )}
+              </Route>
+              <Route path="/notes/:id">
+                {(p) => (
+                  <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">{t("common.loading")}</p>}>
+                    <NotesPage noteId={p.id} />
+                  </Suspense>
+                )}
+              </Route>
+              <Route path="/notes">
+                {() => (
+                  <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">{t("common.loading")}</p>}>
+                    <NotesPage />
+                  </Suspense>
+                )}
+              </Route>
+              <Route path="/calendar">
+                {() => (
+                  <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">{t("common.loading")}</p>}>
+                    <CalendarPage />
+                  </Suspense>
                 )}
               </Route>
               <Route path="/compare">

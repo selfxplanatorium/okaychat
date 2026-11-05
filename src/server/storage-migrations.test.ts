@@ -25,6 +25,7 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       db.exec("DROP INDEX messages_thread_time");
       for (const table of ["evaluation_scores", "evaluation_results", "evaluation_runs", "evaluation_cases", "evaluation_datasets", "chatgpt_login_attempts", "chatgpt_registrations", "chatgpt_hosts", "chatgpt_controls", "saved_prompts", "message_bookmarks", "message_feedback", "assistant_presets", "generation_segments", "generation_runs", "archive_jobs", "provider_model_grants", "provider_model_policies", "knowledge_chunks_fts", "knowledge_chunks", "knowledge_sources", "knowledge_collections", "share_groups", "share_users", "share_audiences", "user_group_members", "user_groups", "n8n_agent_sessions", "n8n_agent_runs", "n8n_agents", "permission_leases", "permission_rate_windows", "permission_audit", "user_model_instructions", "prompt_rules", "permission_policies", "permission_state", "notifications", "tag_filter_presets", "thread_tags", "comparison_panes", "comparison_groups"]) db.exec("DROP TABLE " + table);
       db.exec("DROP TABLE channel_messages_fts; DROP TABLE channel_search_keys; DROP TABLE channel_events; DROP TABLE channel_event_state; DROP TABLE channel_rate_windows; DROP TABLE channel_moderation_audit; DROP TABLE channel_create_keys; DROP TABLE channel_ai_runs; DROP TABLE channel_reactions; DROP TABLE channel_mentions; DROP TABLE channel_messages; DROP TABLE channel_exclusions; DROP TABLE channel_invites; DROP TABLE channel_members; DROP TABLE channel_groups; DROP TABLE channels");
+      for (const table of ["notes_fts", "note_tags", "notes", "calendar_events_fts", "calendar_reminders", "calendar_events"]) db.exec("DROP TABLE " + table);
       db.exec("DROP INDEX IF EXISTS usage_channel_run");
       db.exec("ALTER TABLE usage DROP COLUMN channel_id");
       db.exec("ALTER TABLE usage DROP COLUMN channel_run_id");
@@ -68,7 +69,7 @@ test("integrated migrations are repeatable and backfill legacy generated image s
           oldPromptCount: db.prepare("SELECT count(*) AS n FROM server_settings WHERE key='prompt:anonymous'").get().n,
           original: JSON.parse(db.prepare("SELECT content FROM messages WHERE id='m1'").get().content).parts[0].url,
           users: db.prepare("SELECT count(*) AS n FROM users").get().n,
-          integratedTables: ["provider_model_policies", "provider_model_grants", "email_accounts", "knowledge_collections", "knowledge_sources", "knowledge_chunks", "knowledge_chunks_fts", "email_drafts", "media", "image_threads", "saved_prompts", "message_bookmarks", "message_feedback", "shares", "thread_tags", "tag_filter_presets", "notifications", "comparison_groups", "comparison_panes", "message_search_keys", "evaluation_datasets", "evaluation_cases", "evaluation_runs", "evaluation_results", "evaluation_scores"].map(table => db.prepare("SELECT count(*) AS n FROM " + table).get().n),
+          integratedTables: ["provider_model_policies", "provider_model_grants", "email_accounts", "knowledge_collections", "knowledge_sources", "knowledge_chunks", "knowledge_chunks_fts", "email_drafts", "media", "image_threads", "saved_prompts", "message_bookmarks", "message_feedback", "shares", "thread_tags", "tag_filter_presets", "notifications", "comparison_groups", "comparison_panes", "message_search_keys", "evaluation_datasets", "evaluation_cases", "evaluation_runs", "evaluation_results", "evaluation_scores", "notes", "note_tags", "calendar_events", "calendar_reminders"].map(table => db.prepare("SELECT count(*) AS n FROM " + table).get().n),
           evaluationActiveIndex: db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='evaluation_runs_active'").get()?.sql ?? null,
           evaluationScoreForeignKeys: db.prepare("PRAGMA foreign_key_list(evaluation_scores)").all(),
           edits: db.prepare("SELECT edited_at, original_enc FROM messages WHERE id = 'm1'").get(),
@@ -76,13 +77,13 @@ test("integrated migrations are repeatable and backfill legacy generated image s
           foreignKeys: db.prepare("PRAGMA foreign_key_check").all()
         })); db.exec("DELETE FROM uploads"); db.close();`));
       // The version only grows with appended migrations; the FTS addressing migration is version 36.
-      assert.ok(result.version >= 43, `user_version ${result.version}`);
+      assert.ok(result.version >= 45, `user_version ${result.version}`);
       const { version: _version, ...state } = result as Record<string, unknown>;
       assert.match(String((state as { evaluationActiveIndex: string }).evaluationActiveIndex), /UNIQUE INDEX evaluation_runs_active/);
       assert.deepEqual((state as { evaluationScoreForeignKeys: Array<{ table: string; from: string; to: string }> }).evaluationScoreForeignKeys.map((key) => [key.table, key.from, key.to]), [["evaluation_results", "run_id", "run_id"], ["evaluation_results", "case_id", "case_id"]]);
       delete (state as Record<string, unknown>).evaluationActiveIndex;
       delete (state as Record<string, unknown>).evaluationScoreForeignKeys;
-      assert.deepEqual(state, { image: 42, skills: 0, sandbox: 0, users: 1, uploads: i === 0 ? 1 : 0, temporaryPrompt: "Keep this temporary chat out of history.", oldPromptCount: 0, original: "data:image/png;base64,bGVnYWN5LWZpbGU=", integratedTables: [...Array(19).fill(0), 1, ...Array(5).fill(0)], edits: { edited_at: null, original_enc: null }, foreignKeys: [] });
+      assert.deepEqual(state, { image: 42, skills: 0, sandbox: 0, users: 1, uploads: i === 0 ? 1 : 0, temporaryPrompt: "Keep this temporary chat out of history.", oldPromptCount: 0, original: "data:image/png;base64,bGVnYWN5LWZpbGU=", integratedTables: [...Array(19).fill(0), 1, ...Array(5).fill(0), ...Array(4).fill(0)], edits: { edited_at: null, original_enc: null }, foreignKeys: [] });
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
@@ -137,7 +138,7 @@ test('n8n migration preserves selected audiences and rolls back schema and versi
     db.exec('DROP TABLE permission_leases; DROP TABLE permission_rate_windows; DROP TABLE permission_audit; DROP TABLE user_model_instructions; DROP TABLE prompt_rules; DROP TABLE permission_policies; DROP TABLE permission_state');
     db.exec('DROP TABLE saved_prompts; DROP TABLE message_bookmarks; DROP TABLE message_feedback');
     db.exec('DROP TABLE evaluation_scores; DROP TABLE evaluation_results; DROP TABLE evaluation_runs; DROP TABLE evaluation_cases; DROP TABLE evaluation_datasets');
-    for (const table of ['channel_messages_fts', 'channel_search_keys', 'channel_events', 'channel_event_state', 'channel_rate_windows', 'channel_moderation_audit', 'channel_create_keys', 'channel_ai_runs', 'channel_reactions', 'channel_mentions', 'channel_messages', 'channel_exclusions', 'channel_invites', 'channel_members', 'channel_groups', 'channels', 'notifications', 'tag_filter_presets', 'thread_tags', 'comparison_panes', 'comparison_groups']) db.exec('DROP TABLE ' + table);
+    for (const table of ['channel_messages_fts', 'channel_search_keys', 'channel_events', 'channel_event_state', 'channel_rate_windows', 'channel_moderation_audit', 'channel_create_keys', 'channel_ai_runs', 'channel_reactions', 'channel_mentions', 'channel_messages', 'channel_exclusions', 'channel_invites', 'channel_members', 'channel_groups', 'channels', 'notifications', 'tag_filter_presets', 'thread_tags', 'comparison_panes', 'comparison_groups', 'notes_fts', 'note_tags', 'notes', 'calendar_events_fts', 'calendar_reminders', 'calendar_events']) db.exec('DROP TABLE ' + table);
     db.exec('DROP INDEX IF EXISTS usage_channel_run; ALTER TABLE usage DROP COLUMN channel_id; ALTER TABLE usage DROP COLUMN channel_run_id');
     for (const index of ['shares_user_time', 'shares_thread', 'shares_expiry', 'threads_compare']) db.exec('DROP INDEX ' + index);
     db.exec('ALTER TABLE threads DROP COLUMN compare_group_id');
@@ -208,7 +209,7 @@ test("channels migration rolls back cleanly, keeps notifications intact, and mai
         rejected, fks: db.prepare("PRAGMA foreign_key_check").all(),
         usageColumns: db.prepare("PRAGMA table_info(usage)").all().filter((column) => String(column.name).startsWith("channel")).map((column) => column.name),
       })); db.close();`));
-    assert.ok(result.version >= 44, `user_version ${result.version}`);
+    assert.ok(result.version >= 45, `user_version ${result.version}`);
     assert.deepEqual(result.tables.slice(0, 4), [1, 0, 0, 0]);
     assert.match(String(result.epoch), /^chev_/);
     assert.deepEqual([result.inserted, result.updated, result.found, result.gone], [1, 0, 1, 0]);
@@ -218,4 +219,71 @@ test("channels migration rolls back cleanly, keeps notifications intact, and mai
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("notes-calendar migration rolls back cleanly, preserves every notice, and owns its FTS", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "okaychat-notes-calendar-migration-"));
+  const base = { ...process.env, OKAYCHAT_DATA_DIR: directory, OKAYCHAT_SECRET: "migration-tests-secret-not-for-production" };
+  const dbUrl = new URL("./db.ts", import.meta.url).href;
+  const run = (code: string, env: Record<string, string | undefined> = {}) =>
+    execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", code], { env: { ...base, ...env }, encoding: "utf8" });
+  const inspect = (code: string) =>
+    execFileSync(process.execPath, ["--input-type=module", "-e", `import { DatabaseSync } from 'node:sqlite';
+      const db = new DatabaseSync(${JSON.stringify(path.join(directory, "okaychat.db"))});
+      ${code}
+      db.close();`], { encoding: "utf8" });
+  try {
+    assert.throws(() => run(`await import(${JSON.stringify(dbUrl)});`, { OKAYCHAT_TEST_FAIL_MIGRATION: "notes-calendar" }));
+    const failed = JSON.parse(inspect(`console.log(JSON.stringify({ version: db.prepare("PRAGMA user_version").get().user_version, notes: db.prepare("SELECT name FROM sqlite_master WHERE name='notes'").all() }));`));
+    assert.equal(failed.version, 45);
+    assert.deepEqual(failed.notes, []);
+
+    // The failed run left schema 45. Seed one notice of every existing kind with ACL and read state.
+    inspect(`
+      db.exec("INSERT INTO users (id,email,name,password_hash,role,created_at) VALUES ('u','u@example.test','U','unused','user',1)");
+      db.exec("INSERT INTO channels (id,owner_id,name,visibility,created_at,updated_at) VALUES ('c','u','Room','public',1,1)");
+      db.prepare("INSERT INTO notifications (id,user_id,kind,level,title_key,body_key,params_json,thread_id,channel_id,channel_message_id,action_path,source_key,read_at,created_at) VALUES ('n1','u','schedule','success','schedule.ok',NULL,'{}',NULL,NULL,NULL,'/', 's:1', NULL, 1)").run();
+      db.prepare("INSERT INTO notifications (id,user_id,kind,level,title_key,params_json,source_key,created_at) VALUES ('n2','u','import','info','import.done','{}','i:1',2)").run();
+      db.prepare("INSERT INTO notifications (id,user_id,kind,level,title_key,params_json,read_at,created_at) VALUES ('n3','u','export','error','export.failed','{}',3,3)").run();
+      db.prepare("INSERT INTO notifications (id,user_id,kind,level,title_key,body_key,params_json,channel_id,channel_message_id,action_path,source_key,created_at) VALUES ('n4','u','channel','info','channel.message','channel.openRoom','{}','c',NULL,'/channels/c','m:1',4)").run();
+    `);
+
+    const result = JSON.parse(run(`const { db } = await import(${JSON.stringify(dbUrl)});
+      db.prepare("INSERT INTO notifications (id,user_id,kind,level,title_key,params_json,created_at) VALUES ('n5','u','calendar','info','calendar.reminder','{}',5)").run();
+      let rejected = false;
+      try { db.prepare("INSERT INTO notifications (id,user_id,kind,level,title_key,params_json,created_at) VALUES ('bad','u','other','info','calendar.reminder','{}',6)").run(); } catch { rejected = true; }
+      db.prepare("INSERT INTO notes (id,user_id,title,body,create_key,create_hash,created_at,updated_at) VALUES ('note1','u','Title','Body','k','h',1,1)").run();
+      db.prepare("INSERT INTO note_tags (note_id,tag) VALUES ('note1','tag')").run();
+      const fts = db.prepare("SELECT rowid FROM notes_fts WHERE notes_fts MATCH 'Title'").all().length;
+      const calendarFts = db.prepare("SELECT name FROM sqlite_master WHERE name='calendar_events_fts'").get();
+      const indexes = ["notes_user_order","note_tags_tag","calendar_user_range","calendar_reminders_due","notifications_calendar"].map((name) => db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='index' AND name=?").get(name).n);
+      const triggers = ["notes_fts_insert","notes_fts_update","notes_fts_delete","calendar_fts_insert","calendar_fts_update","calendar_fts_delete"].map((name) => db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='trigger' AND name=?").get(name).n);
+      console.log(JSON.stringify({
+        version: db.prepare("PRAGMA user_version").get().user_version,
+        notices: db.prepare("SELECT id,kind,title_key,channel_id,read_at,source_key FROM notifications ORDER BY id").all(),
+        rejected, fts, calendarFts: !!calendarFts, indexes, triggers,
+        fks: db.prepare("PRAGMA foreign_key_check").all(),
+      })); db.close();`)) as { version: number; notices: Array<Record<string, unknown>>; rejected: boolean; fts: number; calendarFts: boolean; indexes: number[]; triggers: number[]; fks: unknown[] };
+    assert.ok(result.version >= 46);
+    assert.equal(result.rejected, true);
+    assert.equal(result.fts, 1);
+    assert.equal(result.calendarFts, true);
+    assert.deepEqual(result.indexes, [1, 1, 1, 1, 1]);
+    assert.deepEqual(result.triggers, [1, 1, 1, 1, 1, 1]);
+    assert.deepEqual(result.fks, []);
+    assert.deepEqual(result.notices.map((notice) => [notice.id, notice.kind, notice.title_key, notice.channel_id ?? null, notice.read_at ?? null, notice.source_key ?? null]), [
+      ["n1", "schedule", "schedule.ok", null, null, "s:1"],
+      ["n2", "import", "import.done", null, null, "i:1"],
+      ["n3", "export", "export.failed", null, 3, null],
+      ["n4", "channel", "channel.message", "c", null, "m:1"],
+      ["n5", "calendar", "calendar.reminder", null, null, null],
+    ]);
+
+    // A second reopen is a no-op and a deleted account cascades through tags and FTS.
+    const reopened = JSON.parse(run(`const { db } = await import(${JSON.stringify(dbUrl)});
+      db.prepare("DELETE FROM users WHERE id='u'").run();
+      console.log(JSON.stringify({ version: db.prepare("PRAGMA user_version").get().user_version, notes: db.prepare("SELECT count(*) AS n FROM notes").get().n, tags: db.prepare("SELECT count(*) AS n FROM note_tags").get().n, fts: db.prepare("SELECT count(*) AS n FROM notes_fts").get().n, notices: db.prepare("SELECT count(*) AS n FROM notifications").get().n })); db.close();`)) as { version: number; notes: number; tags: number; fts: number; notices: number };
+    assert.equal(reopened.version, result.version);
+    assert.deepEqual([reopened.notes, reopened.tags, reopened.fts, reopened.notices], [0, 0, 0, 0]);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
