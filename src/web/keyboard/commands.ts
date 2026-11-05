@@ -151,6 +151,7 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "agents.save", labelKey: "keyboard.cmdAgentsSave", group: "Settings", keys: [] },
   { id: "agents.test", labelKey: "keyboard.cmdAgentsTest", group: "Settings", keys: [] },
   { id: "agents.stopTest", labelKey: "keyboard.cmdAgentsStopTest", group: "Settings", keys: [] },
+  { id: "settings.permissions", labelKey: "keyboard.cmdSettingsPermissions", group: "Settings", keys: [] },
   { id: "email.addAccount", labelKey: "keyboard.cmdEmailAdd", group: "Settings", keys: [] },
   { id: "email.discover", labelKey: "keyboard.cmdEmailDiscover", group: "Settings", keys: [] },
   { id: "email.test", labelKey: "keyboard.cmdEmailTest", group: "Settings", keys: [] },

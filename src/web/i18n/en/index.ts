@@ -21,6 +21,7 @@ import library from "./library";
 import mcp from "./mcp";
 import memory from "./memory";
 import messageDetails from "./messageDetails";
+import permissions from "./permissions";
 import projects from "./projects";
 import providers from "./providers";
 import savedPrompts from "./savedPrompts";
@@ -62,6 +63,7 @@ export const en = {
   mcp,
   memory,
   messageDetails,
+  permissions,
   projects,
   providers,
   savedPrompts,

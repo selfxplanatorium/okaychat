@@ -57,6 +57,7 @@ export default {
   cmdSettingsChatgptDisconnectChat: "Disconnect the ChatGPT chat connection",
   cmdSettingsChatgptEnablePlan: "Enable ChatGPT plan usage",
   cmdSettingsChatgptForget: "Forget a saved ChatGPT account",
+  cmdSettingsPermissions: "Open the permissions workspace",
   cmdComposerModel: "Choose model",
   cmdComposerEffort: "Reasoning effort",
   cmdComposerSearch: "Turn web search on or off",
