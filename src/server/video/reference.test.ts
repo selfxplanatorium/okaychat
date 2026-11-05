@@ -6,9 +6,11 @@ import { crc32 } from 'node:zlib';
 import sharp from 'sharp';
 import { db } from '../db.js';
 import { saveConnection } from '../catalog/providers.js';
+import { updateSettings } from '../settings.js';
 import { putMedia } from '../media/store.js';
 import { normalizeVideoReference } from '../media/variants.js';
-import { admitVideo,jobRow,requestOf,requestVideoCancel,parametersOf } from './store.js';
+import { admitVideo,finishVideo,jobRow,requestOf,requestVideoCancel,parametersOf } from './store.js';
+import { retryVideo } from './retry.js';
 import { prepareVideoReference } from './files.js';
 import { VideoWorker,recoverVideoJobs } from './worker.js';
 import { videoStaging } from './paths.js';
@@ -21,6 +23,7 @@ function setup(){
   db.prepare("INSERT INTO users(id,email,name,password_hash,role,created_at) VALUES(?,?,?,'x','user',1)").run(user,`${user}@example.test`,user);
   db.prepare('INSERT INTO threads(id,user_id,created_at,updated_at) VALUES(?,?,1,1)').run(thread,user);
   saveConnection(user,'xai',{apiKey:'reference-test-key',enabled:true});
+  updateSettings(user,{videoServices:{xai:{enabled:true,durationSeconds:4}}});
   let now=Date.now(),submits=0,received:Buffer|undefined;
   const provider:VideoProvider={service:'xai',async submit(_key,input){submits++;received=input.referenceJpeg;return{id:'fake_reference_job'};},async poll(){return{state:'running'};},async cancel(){return'unsupported';}};
   const worker=new VideoWorker({now:()=>now,provider:()=>provider,authorize:()=>{}});
@@ -116,4 +119,19 @@ test('tampered staging is rejected on recovery instead of rereading the original
   await writeFile(path.join(videoStaging(c.user,row.id),'reference.jpg'),'tampered');
   await assert.rejects(prepareVideoReference(jobRow(row.id)!),(error:unknown)=>error instanceof VideoError&&error.code==='invalid_reference');
   requestVideoCancel(c.user,row.id);await c.worker.runOne();
+});
+
+test('retrying an image job keeps the normalized frame after the upload is deleted',async()=>{
+  const c=setup();
+  db.prepare("INSERT INTO generation_runs(id,thread_id,user_message_id,assistant_message_id,config_json,state,created_at,updated_at) VALUES('run',?,'u','assistant',?,'finished',1,1)")
+    .run(c.thread,JSON.stringify({version:1,requestKind:'send',turnOrigin:'interactive',modelRef:'xai/test',sampling:{},instructions:'',toolPolicy:{mode:'inherit',builtins:[],mcpTools:[]},knowledgeIds:[],assistantName:null,assistantIcon:null,assistantRevision:null,webSearch:false,deepResearch:false}));
+  const upload=c.upload(await solid(320,180),true);const row=c.admit(upload);
+  await c.worker.runOne();assert.equal(c.submits(),1);
+  const failed=jobRow(row.id)!;finishVideo(failed.id,failed.lease_epoch,'failed','provider_unavailable');
+  db.prepare('DELETE FROM uploads WHERE id=? AND user_id=?').run(upload,c.user);
+  const deps={model:async()=>({toolCall:true}),voice:()=>false};
+  const parent=jobRow(row.id)!;const child=await retryVideo(c.user,row.id,parent.revision,deps);
+  assert.equal(child.retry_of,row.id);
+  c.advance();await c.worker.runOne();assert.equal(c.submits(),2);
+  assert.equal(jobRow(child.id)!.state,'polling');
 });
