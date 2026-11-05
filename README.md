@@ -20,7 +20,7 @@
 
 - **Every model, one place.** OpenCode Go, your own ChatGPT plan, OpenCode Zen, a local Ollama, and any OpenAI-compatible, Anthropic, or Google endpoint. Per-chat model and reasoning controls, live context and cost metering, prompt caching, and automatic compaction.
 - **Tools that actually work.** MCP servers, web search, a real offline code sandbox, document editing, image generation, knowledge bases, memory, deep research, scheduled prompts, and voice — not a chat box with a prompt.
-- **Built for several people.** Accounts, groups, per-audience shared keys, per-model and per-user system prompts, granular feature and limit policies, storage quotas, and admin controls that do not require editing a config file.
+- **Built for several people.** Shared channels, accounts, groups, per-audience shared keys, per-model and per-user system prompts, granular feature and limit policies, storage quotas, and admin controls that do not require editing a config file.
 - **Private by default.** SQLite plus files on your disk. Credentials and memory are encrypted at rest. Outbound requests to user-chosen URLs are DNS-checked, every hop. Chromium runs in its own container, away from app data.
 - **Fast where it counts.** Streaming, reload recovery, a virtualized sidebar, a windowed message list, lazy routes, cached thread history, and a production bundle split so sign-in does not download the app.
 
@@ -67,6 +67,7 @@ The ChatGPT plan uses the official **Sign in with ChatGPT** flow for chat. Set `
 - Streaming Markdown, math, Mermaid, syntax highlighting, and reasoning logs
 - Branches, editable replies, retries, model switching, and full-text search
 - Named assistants, a saved prompt library with variables and `/shortcuts`, bookmarks, feedback, and explicit continuation of truncated replies
+- Shared team channels with rooms, mentions, reactions, realtime updates, and explicit AI replies
 - Tags, saved filters, notifications, and portable chat archives
 - Attachments: images, PDFs, DOCX, and text/code files
 - Prompt-injection envelopes, approval gates, and honest errors
