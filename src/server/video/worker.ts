@@ -4,7 +4,7 @@ import path from 'node:path';
 import { db } from '../db.js';
 import { decrypt, encrypt } from '../crypto.js';
 import type { ResolvedRunConfig } from '../../shared/assistant-presets.js';
-import { assertVideoTurn } from './eligibility.js';
+import { assertVideoTurn, videoVoiceActive } from './eligibility.js';
 import { getSettings } from '../settings.js';
 import { VIDEO_LIMITS, type VideoServiceId } from '../../shared/video.js';
 import { videoCredential, videoServiceStatuses } from './services.js';
@@ -32,7 +32,9 @@ function authorizeJob(row:VideoJobRow):void {
     assertVideoTurn({userId:row.user_id,threadId:row.thread_id,assistantMessageId:row.assistant_message_id,
       getRunId:()=>row.llm_run_id,modelRef:config.modelRef,toolCallModel:true,toolPolicy:config.toolPolicy,
       interactive:config.turnOrigin==='interactive',unattended:false,turnOrigin:config.turnOrigin,
-      temporary:false,restrictedChat:false,comparison:false},row.service);
+      temporary:false,restrictedChat:false,comparison:false},row.service,
+      // A voice call only blocks new paid dispatch; it must not discard work the provider already accepted.
+      {model:async()=>({toolCall:true}),voice:user=>row.submitted_at===null&&videoVoiceActive(user)});
   } catch {throw new VideoError('credentials_changed',403);}
   const status=videoServiceStatuses(row.user_id,getSettings(row.user_id).videoServices??{}).find(s=>s.id===row.service);
   if(!status?.enabled || status.model!==row.model_id) throw new VideoError('credentials_changed',403);

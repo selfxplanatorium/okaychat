@@ -11,7 +11,9 @@ import { putMedia } from '../media/store.js';
 import { normalizeVideoReference } from '../media/variants.js';
 import { admitVideo,finishVideo,jobRow,requestOf,requestVideoCancel,parametersOf } from './store.js';
 import { retryVideo } from './retry.js';
-import { prepareVideoReference } from './files.js';
+import { cleanupVideoJob, prepareVideoReference } from './files.js';
+import { maintainVideos } from './maintenance.js';
+import { VIDEO_LIMITS } from '../../shared/video.js';
 import { VideoWorker,recoverVideoJobs } from './worker.js';
 import { videoStaging } from './paths.js';
 import { VideoError } from './errors.js';
@@ -127,11 +129,23 @@ test('retrying an image job keeps the normalized frame after the upload is delet
     .run(c.thread,JSON.stringify({version:1,requestKind:'send',turnOrigin:'interactive',modelRef:'xai/test',sampling:{},instructions:'',toolPolicy:{mode:'inherit',builtins:[],mcpTools:[]},knowledgeIds:[],assistantName:null,assistantIcon:null,assistantRevision:null,webSearch:false,deepResearch:false}));
   const upload=c.upload(await solid(320,180),true);const row=c.admit(upload);
   await c.worker.runOne();assert.equal(c.submits(),1);
-  const failed=jobRow(row.id)!;finishVideo(failed.id,failed.lease_epoch,'failed','provider_unavailable');
+  const sent=c.received()!;
+  // The worker's own failure path: finish, then clean up staging; hourly maintenance runs too.
+  const failed=jobRow(row.id)!;const done=finishVideo(failed.id,failed.lease_epoch,'failed','provider_unavailable')!;
+  await cleanupVideoJob(done);await maintainVideos();
+  assert.deepEqual(await readFile(path.join(videoStaging(c.user,row.id),'reference.jpg')),sent);
+  assert.equal(jobRow(row.id)!.reservation_bytes,VIDEO_LIMITS.receiptBytes+VIDEO_LIMITS.referenceBytes);
+  assert.equal(jobRow(row.id)!.revision,done.revision);
   db.prepare('DELETE FROM uploads WHERE id=? AND user_id=?').run(upload,c.user);
   const deps={model:async()=>({toolCall:true}),voice:()=>false};
   const parent=jobRow(row.id)!;const child=await retryVideo(c.user,row.id,parent.revision,deps);
   assert.equal(child.retry_of,row.id);
   c.advance();await c.worker.runOne();assert.equal(c.submits(),2);
-  assert.equal(jobRow(child.id)!.state,'polling');
+  assert.equal(jobRow(child.id)!.state,'polling');assert.deepEqual(c.received(),sent);
+  // Once the retry window closes, cleanup frees the frame and its reservation.
+  db.prepare('UPDATE video_jobs SET request_enc=NULL WHERE id=?').run(row.id);
+  await maintainVideos();
+  assert.equal(jobRow(row.id)!.reservation_bytes,VIDEO_LIMITS.receiptBytes);
+  await assert.rejects(stat(videoStaging(c.user,row.id)));
+  const live=jobRow(child.id)!;finishVideo(live.id,live.lease_epoch,'cancelled','cancelled');
 });
