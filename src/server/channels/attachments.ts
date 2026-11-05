@@ -66,7 +66,9 @@ const isSvg = (name: string, mime: string): boolean => /^image\/svg\+xml$/i.test
 const opaqueMime = (name: string, mime: string): string =>
   mime.startsWith("image/") || /\.(png|jpe?g|gif|webp|avif|bmp|heic|tiff?)$/i.test(name) ? "application/octet-stream" : mime || "application/octet-stream";
 
-export function storeChannelAttachment(userId: string, channel: ChannelRow, input: { name: string; mime: string; data: Uint8Array }): AttachmentRow {
+export function storeChannelAttachment(userId: string, room: ChannelRow, input: { name: string; mime: string; data: Uint8Array }): AttachmentRow {
+  // The route awaited the body after its own check: membership and the payer are re-read here.
+  const { channel } = assertChannelMember(userId, room.id);
   assertWritable(channel);
   const name = displayName(input.name);
   const declared = input.mime.slice(0, 200);

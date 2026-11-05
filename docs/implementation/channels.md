@@ -77,7 +77,8 @@ room's `notify_mode='all'` does not apply.
 A DM is a `channels` row with `kind='dm'`, `visibility='private'`, an empty name, and a `dm_key` over the
 sorted member ids. Membership, ACL, events, read state, and quota keep working; the DM appears in `sync`
 with `kind`, `dmMembers`, and `threadsUnread`. Creating the same member set returns the existing row
-(200) or `dm_left` when the caller had left. New DMs and new memberships require a shared group unless
+(200) or `dm_left` when the caller had left. Adding members rekeys the row to the new set, or clears the
+key when another DM already holds it, so the original pair's next request opens its own 1:1. New DMs and new memberships require a shared group unless
 the caller is an admin, reject either direction of a person-level block, and refuse an unknown or
 channel-disabled account with the same 422.
 

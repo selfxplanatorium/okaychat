@@ -80,6 +80,18 @@ test("the member cap and owner-only additions are enforced", async () => {
   assert.deepEqual(members.map((row) => row.user_id), ["alice", "bob", "carol"]);
 });
 
+test("adding a member rekeys the DM, so the original pair gets its own 1:1", async () => {
+  const dm = await createDm("alice", ["bob"]);
+  assert.equal((await call(`/channels/${dm.body.channel.id}/members`, { method: "POST", json: { userIds: ["carol"] }, user: "alice" })).status, 200);
+  const pair = await createDm("alice", ["bob"]);
+  assert.equal(pair.status, 201);
+  assert.notEqual(pair.body.channel.id, dm.body.channel.id);
+  assert.deepEqual(pair.body.channel.dmMembers?.map((member) => member.id), ["alice", "bob"]);
+  const group = await createDm("bob", ["alice", "carol"]);
+  assert.equal(group.status, 200);
+  assert.equal(group.body.channel.id, dm.body.channel.id);
+});
+
 test("leaving transfers ownership, and the last member deletes the conversation and frees storage", async () => {
   const dm = await createDm("alice", ["bob", "carol"]);
   assert.equal((await call(`/channels/${dm.body.channel.id}/leave`, { method: "POST", json: {}, user: "alice" })).status, 200);
