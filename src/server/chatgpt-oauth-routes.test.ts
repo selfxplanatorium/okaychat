@@ -28,6 +28,20 @@ async function request(url: string, method = "GET", body?: unknown, user = "a", 
 async function helper(action: string, capability: string, body: unknown, headers: Record<string,string> = {}) {
   return app.request(`/api/chatgpt/helper/${action}`, { method: "POST", headers: { Authorization: `Bearer ${capability}`, "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
 }
+test("one helper attempt cannot exhaust every other helper's budget", async () => {
+  const csrfA = (await (await request("/api/chatgpt/status", "GET", undefined, "a")).json()).csrfToken as string;
+  const csrfB = (await (await request("/api/chatgpt/status", "GET", undefined, "b")).json()).csrfToken as string;
+  const startA = await (await request("/api/chatgpt/login", "POST", { intent: "connect" }, "a", csrfA)).json();
+  const startB = await (await request("/api/chatgpt/login", "POST", { intent: "connect" }, "b", csrfB)).json();
+  const dataA = await (await request(startA.launchDownloadUrl)).json();
+  const dataB = await (await request(startB.launchDownloadUrl)).json();
+  const bodyA = { attemptId: startA.attemptId, helperSecret: "a".repeat(43), port: 43123 };
+  const bodyB = { attemptId: startB.attemptId, helperSecret: "b".repeat(43), port: 43124 };
+  for (let i = 0; i < 10; i++) assert.equal((await helper("bogus", dataA.helperCapability, bodyA)).status, 404);
+  assert.equal((await helper("bogus", dataA.helperCapability, bodyA)).status, 429);
+  assert.equal((await helper("bogus", dataB.helperCapability, bodyB)).status, 404);
+});
+
 test("canonical deployment rejects forged origins, credentials, paths and fragments", () => {
   assert.equal(canonicalOrigin(origin), origin);
   for (const bad of ["http://a.test", "https://a.test/path", "https://u:p@a.test", "https://a.test/#fragment", "https://a.test/?query"]) assert.equal(canonicalOrigin(bad), null);

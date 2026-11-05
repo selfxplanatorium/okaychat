@@ -11,7 +11,7 @@ import type { AppEnv } from "./auth.js";
 
 // Denial coverage for the enforcement surface outside chat/llm: tools, routes, background work, and the
 // services registry. Every case asserts the guard runs before a network boundary (fetch is mocked and
-// counted), not merely that a control is hidden. See /tmp/opencode/specs/granular-permissions.md §6.
+// counted), not merely that a control is hidden.
 
 const dataDir = mkdtempSync(path.join(os.tmpdir(), "okaychat-feature-gates-"));
 process.env.OKAYCHAT_DATA_DIR = dataDir;
