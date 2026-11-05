@@ -62,6 +62,7 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       for (const column of ["edited_at", "original_enc"]) db.exec("ALTER TABLE messages DROP COLUMN " + column);
       for (const column of ["thread_mode", "thread_attached", "project_id"]) db.exec("ALTER TABLE schedules DROP COLUMN " + column);
       db.prepare("INSERT INTO server_settings (key, value) VALUES ('prompt:anonymous', ?)").run("Keep this temporary chat out of history.");
+      db.exec("DROP TABLE IF EXISTS video_threads; DROP TABLE IF EXISTS videos; DROP TABLE IF EXISTS video_jobs; DROP INDEX IF EXISTS usage_video_job; ALTER TABLE usage DROP COLUMN video_job_id; ALTER TABLE usage DROP COLUMN cost_state");
       db.exec('PRAGMA user_version = 14');
       db.close();`);
     mkdirSync(path.join(directory, "images", "legacy"), { recursive: true });
@@ -172,6 +173,7 @@ test('n8n migration preserves selected audiences and rolls back schema and versi
     db.exec('DROP TABLE IF EXISTS outgoing_webhook_deliveries; DROP TABLE IF EXISTS outgoing_webhook_test_preparations; DROP TABLE IF EXISTS outgoing_webhook_rate_windows; DROP TABLE IF EXISTS outgoing_webhook_endpoints');
     db.exec('ALTER TABLE schedules DROP COLUMN webhook_invocation_id');
     db.exec('ALTER TABLE schedules DROP COLUMN webhook_started_at');
+      db.exec("DROP TABLE IF EXISTS video_threads; DROP TABLE IF EXISTS videos; DROP TABLE IF EXISTS video_jobs; DROP INDEX IF EXISTS usage_video_job; ALTER TABLE usage DROP COLUMN video_job_id; ALTER TABLE usage DROP COLUMN cost_state");
     db.exec('PRAGMA user_version = 38');
     console.log(version); db.close();`;
   try {
@@ -340,6 +342,7 @@ test("channels v2 migration rolls back cleanly and keeps the event high-water", 
       db.exec("DROP TABLE IF EXISTS outgoing_webhook_deliveries; DROP TABLE IF EXISTS outgoing_webhook_test_preparations; DROP TABLE IF EXISTS outgoing_webhook_rate_windows; DROP TABLE IF EXISTS outgoing_webhook_endpoints");
       db.exec("ALTER TABLE schedules DROP COLUMN webhook_invocation_id");
       db.exec("ALTER TABLE schedules DROP COLUMN webhook_started_at");
+      db.exec("DROP TABLE IF EXISTS video_threads; DROP TABLE IF EXISTS videos; DROP TABLE IF EXISTS video_jobs; DROP INDEX IF EXISTS usage_video_job; ALTER TABLE usage DROP COLUMN video_job_id; ALTER TABLE usage DROP COLUMN cost_state");
       db.exec("PRAGMA user_version = 48");
       console.log(JSON.stringify({ high, tail })); db.close();`));
     for (let i = 0; i < 2; i++) {
@@ -478,6 +481,7 @@ test("shared knowledge migration rolls back cleanly, keeps private rows private,
       db.exec("DROP TABLE IF EXISTS outgoing_webhook_deliveries; DROP TABLE IF EXISTS outgoing_webhook_test_preparations; DROP TABLE IF EXISTS outgoing_webhook_rate_windows; DROP TABLE IF EXISTS outgoing_webhook_endpoints");
       db.exec("ALTER TABLE schedules DROP COLUMN webhook_invocation_id");
       db.exec("ALTER TABLE schedules DROP COLUMN webhook_started_at");
+      db.exec("DROP TABLE IF EXISTS video_threads; DROP TABLE IF EXISTS videos; DROP TABLE IF EXISTS video_jobs; DROP INDEX IF EXISTS usage_video_job; ALTER TABLE usage DROP COLUMN video_job_id; ALTER TABLE usage DROP COLUMN cost_state");
       db.exec("PRAGMA user_version = 50");
       console.log(JSON.stringify({ tail })); db.close();`, {}));
     assert.ok(before.tail >= 51);
@@ -577,4 +581,25 @@ test("outgoing webhooks migration rolls back at its seam and creates its own bou
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('video migration rolls back atomically, advances one version, and reopens without work',()=>{
+  const directory=mkdtempSync(path.join(os.tmpdir(),'okaychat-video-migration-'));
+  const base={...process.env,OKAYCHAT_DATA_DIR:directory,OKAYCHAT_SECRET:'video-migration-test-secret-at-least-32-chars'};
+  const url=new URL('./db.ts',import.meta.url).href;
+  const run=(code:string,extra:Record<string,string>={})=>execFileSync(process.execPath,['--import','tsx','--input-type=module','-e',code],{env:{...base,...extra},encoding:'utf8',stdio:['ignore','pipe','pipe']});
+  const inspect=`import {DatabaseSync} from 'node:sqlite';import path from 'node:path';const db=new DatabaseSync(path.join(process.env.OKAYCHAT_DATA_DIR,'okaychat.db'));`;
+  try{
+    assert.throws(()=>run(`await import(${JSON.stringify(url)});`,{OKAYCHAT_TEST_FAIL_MIGRATION:'video-generation'}));
+    const before=JSON.parse(run(inspect+`console.log(JSON.stringify({version:db.prepare('PRAGMA user_version').get().user_version,tables:db.prepare("SELECT name FROM sqlite_master WHERE name IN ('video_jobs','videos','video_threads','usage_video_job')").all(),columns:db.prepare('PRAGMA table_info(usage)').all().map(c=>c.name)}));db.close();`));
+    assert.deepEqual(before.tables,[]);
+    assert.equal(before.columns.includes('video_job_id'),false);
+    assert.equal(before.columns.includes('cost_state'),false);
+    for(let i=0;i<2;i++){
+      const state=JSON.parse(run(`const {db}=await import(${JSON.stringify(url)});console.log(JSON.stringify({version:db.prepare('PRAGMA user_version').get().user_version,tables:db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('video_jobs','videos','video_threads') ORDER BY name").all().map(r=>r.name),fks:db.prepare('PRAGMA foreign_key_check').all(),indexes:db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name='usage_video_job'").get().n}));db.close();`));
+      assert.equal(state.version,before.version+1);
+      assert.deepEqual(state.tables,['video_jobs','video_threads','videos']);
+      assert.equal(state.indexes,1);assert.deepEqual(state.fks,[]);
+    }
+  }finally{rmSync(directory,{recursive:true,force:true});}
 });
