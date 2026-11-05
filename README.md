@@ -76,6 +76,7 @@ The ChatGPT plan uses the official **Sign in with ChatGPT** flow for chat. Set `
 - OpenCode Go, ChatGPT plan, OpenCode Zen, Ollama, and 100+ providers
 - Custom OpenAI-compatible endpoints and side-by-side model comparison
 - Assistant presets with sampling, tool, and knowledge policies
+- Private evaluation datasets, repeatable runs, manual or model-graded scoring, and CSV/JSON export
 - Per-model reasoning effort and context/cost metering
 - Shared keys with per-audience model policies and granular feature limits
 
