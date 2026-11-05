@@ -174,6 +174,16 @@ export function listTranslations(userId: string, threadId: string, messageId: st
   };
 }
 
+/** Rechecked at commit: another request can add or remove a row while the model runs. */
+function checkRowLimits(threadId: string, messageId: string, existing: TranslationRow | undefined): void {
+  const threadRows = (db.prepare("SELECT COUNT(*) AS n FROM message_translations WHERE thread_id = ?").get(threadId) as { n: number }).n;
+  if (threadRows >= MAX_TRANSLATIONS_PER_THREAD && !existing) throw conflict(THREAD_LIMIT);
+  const languageRows = (db.prepare("SELECT COUNT(*) AS n FROM message_translations WHERE thread_id = ? AND message_id = ?").get(threadId, messageId) as {
+    n: number;
+  }).n;
+  if (languageRows >= MAX_TRANSLATIONS_PER_MESSAGE && !existing) throw conflict(MESSAGE_LIMIT);
+}
+
 /** The language name the model is told, always in English so an instruction never follows the UI language. */
 function englishLanguageName(lang: string): string {
   try {
@@ -201,12 +211,7 @@ export async function translateMessage(
   const existing = rowOf(threadId, messageId, canonical);
   if (existing && existing.source_hash === message.sourceHash && input.refresh !== true) return toTranslation(existing);
 
-  const threadRows = (db.prepare("SELECT COUNT(*) AS n FROM message_translations WHERE thread_id = ?").get(threadId) as { n: number }).n;
-  if (threadRows >= MAX_TRANSLATIONS_PER_THREAD && !existing) throw conflict(THREAD_LIMIT);
-  const languageRows = (db.prepare("SELECT COUNT(*) AS n FROM message_translations WHERE thread_id = ? AND message_id = ?").get(threadId, messageId) as {
-    n: number;
-  }).n;
-  if (languageRows >= MAX_TRANSLATIONS_PER_MESSAGE && !existing) throw conflict(MESSAGE_LIMIT);
+  checkRowLimits(threadId, messageId, existing);
 
   // Utility model first, then the request's chat model, then the chat's stored model. An agent is not a model.
   const ref = [settings.utilityModel, input.modelRef, message.thread.modelRef].find((candidate): candidate is string => !!candidate && !candidate.startsWith("n8n/"));
@@ -235,8 +240,10 @@ export async function translateMessage(
   const now = Date.now();
   const createdAt = existing?.created_at ?? now;
   const bytes = Buffer.byteLength(output.text);
-  const previousBytes = existing ? Buffer.byteLength(existing.translated) : 0;
   return tx(() => {
+    const current = rowOf(threadId, messageId, canonical);
+    checkRowLimits(threadId, messageId, current);
+    const previousBytes = current ? Buffer.byteLength(current.translated) : 0;
     assertStorage(userId, bytes - previousBytes);
     db.prepare(
       `INSERT INTO message_translations (thread_id, message_id, lang, source_hash, source_chars, translated, truncated, model_ref, created_at, updated_at)
