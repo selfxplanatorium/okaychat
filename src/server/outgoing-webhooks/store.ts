@@ -999,7 +999,8 @@ export function claimDelivery(deliveryId: string, now: number): ClaimedDelivery 
     }
     const attemptNumber = row.attempts + 1;
     const attempts = attemptLog(row.attempts_json);
-    attempts.push({ number: attemptNumber, startedAt: now, finishedAt: 0, outcome: "uncertain", httpStatus: null, errorCode: null, durationMs: 0 });
+    const manual = row.status === "queued" && row.attempts > 0;
+    attempts.push({ number: attemptNumber, ...(manual ? { manual: true as const } : {}), startedAt: now, finishedAt: 0, outcome: "uncertain", httpStatus: null, errorCode: null, durationMs: 0 });
     db.prepare(
       `UPDATE outgoing_webhook_deliveries SET status = 'sending', attempts = ?, attempts_json = ?, next_attempt_at = ?,
         version = version + 1, last_error_code = NULL, last_http_status = NULL WHERE id = ?`,
@@ -1046,7 +1047,7 @@ export function settleDelivery(input: SettlementInput, now = Date.now()): "succe
       input.errorCode === "timeout" || input.errorCode === "http_retryable");
     let next: "succeeded" | "backoff" | "dead" = input.outcome === "succeeded" ? "succeeded" : "dead";
     let nextAttemptAt = now;
-    if (retryable && !row.is_test && row.attempts < WEBHOOK_LIMITS.automaticAttempts) {
+    if (retryable && !row.is_test && !last?.manual && row.attempts < WEBHOOK_LIMITS.automaticAttempts) {
       next = "backoff";
       nextAttemptAt = now + Math.max(0, input.retryDelayMs ?? 0);
     }
@@ -1093,8 +1094,9 @@ export function recoverSendingDeliveries(now = Date.now()): number {
         db.prepare("UPDATE outgoing_webhook_deliveries SET status = 'dead', last_error_code = 'shutdown', finished_at = ?, version = version + 1 WHERE id = ?").run(now, row.id);
         continue;
       }
-      if (row.created_at < now - WEBHOOK_LIMITS.bodyRetentionMs || row.attempts >= WEBHOOK_LIMITS.totalAttempts) {
-        const code = row.attempts >= WEBHOOK_LIMITS.totalAttempts ? "attempt_limit" : "expired";
+      const exhausted = row.attempts >= WEBHOOK_LIMITS.automaticAttempts || attemptLog(row.attempts_json).at(-1)?.manual;
+      if (row.created_at < now - WEBHOOK_LIMITS.bodyRetentionMs || exhausted) {
+        const code = exhausted ? "attempt_limit" : "expired";
         db.prepare("UPDATE outgoing_webhook_deliveries SET status = 'dead', last_error_code = ?, finished_at = ?, version = version + 1 WHERE id = ?").run(code, now, row.id);
         continue;
       }

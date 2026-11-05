@@ -263,6 +263,42 @@ test("worker succeeds, retries with bounded jitter, and allows one manual retry"
   assert.equal(store.getDelivery("alice", created.endpoint.id, delivery.id).body, bodyBeforeRetry);
 });
 
+test("a failed manual attempt never restarts automatic retries", async () => {
+  const created = await createEndpoint({ subscriptions: ["archive.export.finished"] });
+  await enable(created.endpoint.id, 1);
+  tx(() => emitArchiveFinished({ userId: "alice", kind: "export", jobId: "manual", outcome: "completed", chatCount: 1, failureCode: null }));
+  const { id } = db.prepare("SELECT id FROM outgoing_webhook_deliveries").get() as { id: string };
+  const now = Date.now();
+  const first = store.claimDelivery(id, now);
+  assert.ok(first && first !== "throttled");
+  store.settleDelivery({ deliveryId: id, attemptNumber: 1, expectedVersion: first.row.version, outcome: "failed", httpStatus: 400, errorCode: "http_permanent", durationMs: 1 });
+  store.retryDelivery("alice", created.endpoint.id, id, 2, store.getDelivery("alice", created.endpoint.id, id).version);
+  const manual = store.claimDelivery(id, Date.now());
+  assert.ok(manual && manual !== "throttled");
+  assert.equal(store.settleDelivery({ deliveryId: id, attemptNumber: 2, expectedVersion: manual.row.version, outcome: "failed", httpStatus: 500, errorCode: "http_retryable", durationMs: 1 }), "dead");
+  assert.equal(store.getDelivery("alice", created.endpoint.id, id).attemptLog.at(-1)?.manual, true);
+});
+
+test("restart never extends an exhausted automatic budget or repeats an uncertain manual attempt", async () => {
+  const created = await createEndpoint({ subscriptions: ["archive.export.finished"] });
+  await enable(created.endpoint.id, 1);
+  for (const jobId of ["automatic", "manual", "remaining"]) {
+    tx(() => emitArchiveFinished({ userId: "alice", kind: "export", jobId, outcome: "completed", chatCount: 1, failureCode: null }));
+  }
+  const rows = db.prepare("SELECT id FROM outgoing_webhook_deliveries ORDER BY sequence").all() as Array<{ id: string }>;
+  const now = Date.now();
+  for (const [index, row] of rows.entries()) {
+    const claimed = store.claimDelivery(row.id, now);
+    assert.ok(claimed && claimed !== "throttled");
+    db.prepare("UPDATE outgoing_webhook_deliveries SET attempts = ?, attempts_json = ? WHERE id = ?")
+      .run(index === 0 ? 6 : 2, JSON.stringify([{ number: index === 0 ? 6 : 2, outcome: "uncertain", ...(index === 1 ? { manual: true } : {}) }]), row.id);
+  }
+  store.recoverSendingDeliveries(now);
+  assert.deepEqual(rows.map((row) => store.getDelivery("alice", created.endpoint.id, row.id).status), ["dead", "dead", "backoff"]);
+  assert.deepEqual(rows.map((row) => store.getDelivery("alice", created.endpoint.id, row.id).attempts), [6, 2, 2]);
+  assert.equal(store.getDelivery("alice", created.endpoint.id, rows[2]!.id).nextAttemptAt, now + 30_000);
+});
+
 test("a test preview redacts credentials, sends one attempt, and is never automatically retried", async () => {
   const created = await createEndpoint({ subscriptions: [], headers: { Authorization: "Bearer nope" } });
   const prepared = await call(`/webhooks/${created.endpoint.id}/test/prepare`, { method: "POST", json: { revision: 1 } });

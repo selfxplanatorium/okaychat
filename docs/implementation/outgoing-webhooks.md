@@ -168,6 +168,8 @@ Prepared tests live in a separate table.
 - At 24 hours every nonterminal row becomes dead `expired`; an active request is aborted. On restart a
   `sending` row with attempts left becomes `backoff` due at startup + 30 s (outcome uncertain); an
   exhausted/expired row becomes dead. Attempt counts are never reset. A test becomes dead, never retried.
+  Exhaustion uses the six-attempt automatic budget. Manual attempts carry a durable attempt-log marker;
+  an uncertain manual attempt becomes dead on restart and never starts an automatic retry chain.
 - Endpoint stats keep the last production attempt (time/status/HTTP code/duration/delivery id),
   cumulative failed attempts, the consecutive failure streak, and the automatic-disable time. Ten
   consecutive failed attempts auto-disable the endpoint, bump its revision, and cancel remaining work.
