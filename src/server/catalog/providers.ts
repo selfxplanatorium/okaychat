@@ -188,6 +188,8 @@ export function deleteConnection(scope: ConnectionScope, providerId: string) {
     db.prepare("DELETE FROM shared_connections WHERE provider_id = ?").run(providerId);
     clearAudience("provider", providerId);
   } else db.prepare("DELETE FROM provider_connections WHERE user_id = ? AND provider_id = ?").run(scope, providerId);
+  // A deleted row must not leave its live list (and key fingerprint) cached for another connection.
+  liveCache.clear();
   if (providerId === OLLAMA) forgetOllamaModels();
 }
 
@@ -305,17 +307,39 @@ export async function listProviders(scope: ConnectionScope): Promise<ProviderInf
 // list belongs to its key, so another account must not read it. Short TTL because providers add models often.
 const liveKey = (url: string, apiKey: string | undefined, guarded: boolean) =>
   `${guarded ? "g" : "d"}:${apiKey ? createHash("sha256").update(apiKey).digest("hex").slice(0, 32) : "-"}:${url}`;
+// Bounded because custom provider URLs and keys come from users. Only settled lists live here; an
+// in-flight request stays in liveInflight below, so eviction can never duplicate work.
 const liveCache = new Map<string, { ids: string[]; at: number }>();
 const LIVE_TTL_MS = 15 * 60 * 1000;
+const LIVE_CACHE_LIMIT = 256;
 
 const liveInflight = new Map<string, Promise<string[] | null>>();
+
+/** Reads a settled list and marks it recently used (Map iteration order is the eviction order). */
+function readLive(key: string): { ids: string[]; at: number } | undefined {
+  const hit = liveCache.get(key);
+  if (!hit) return undefined;
+  liveCache.delete(key);
+  liveCache.set(key, hit);
+  return hit;
+}
+
+function rememberLive(key: string, value: { ids: string[]; at: number }): void {
+  liveCache.delete(key);
+  liveCache.set(key, value);
+  while (liveCache.size > LIVE_CACHE_LIMIT) {
+    const oldest = liveCache.keys().next().value;
+    if (oldest === undefined) break;
+    liveCache.delete(oldest);
+  }
+}
 
 function fetchLive(url: string, apiKey?: string, guarded = false): Promise<string[] | null> {
   const key = liveKey(url, apiKey, guarded);
   let pending = liveInflight.get(key);
   if (!pending) {
     pending = (async () => {
-      const hit = liveCache.get(key);
+      const hit = readLive(key);
       try {
         const res = await (guarded ? publicFetch : fetch)(url, {
           headers: { "User-Agent": USER_AGENT, ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
@@ -324,7 +348,7 @@ function fetchLive(url: string, apiKey?: string, guarded = false): Promise<strin
         if (!res.ok) return hit?.ids ?? null;
         const body = (await res.json()) as { data?: Array<{ id: string }> };
         const ids = (body.data ?? []).map((m) => m.id);
-        liveCache.set(key, { ids, at: Date.now() });
+        rememberLive(key, { ids, at: Date.now() });
         return ids;
       } catch {
         return hit?.ids ?? null;
@@ -338,7 +362,7 @@ function fetchLive(url: string, apiKey?: string, guarded = false): Promise<strin
 }
 
 async function fetchLiveIds(url: string, apiKey?: string, guarded = false): Promise<string[] | null> {
-  const hit = liveCache.get(liveKey(url, apiKey, guarded));
+  const hit = readLive(liveKey(url, apiKey, guarded));
   if (!hit) return fetchLive(url, apiKey, guarded);
   // A known list answers at once. An expired one is refreshed behind the request instead of delaying it.
   if (Date.now() - hit.at >= LIVE_TTL_MS) void fetchLive(url, apiKey, guarded);
@@ -403,6 +427,11 @@ export async function listSharedModels(providerId: string): Promise<ModelInfo[]>
   return conn ? listModelsForConnection(conn) : [];
 }
 
+/** The models one already-resolved connection offers to this account, before any sharing policy. */
+async function modelsForResolvedConnection(userId: string, conn: Connection): Promise<ModelInfo[]> {
+  return conn.providerId === CHATGPT ? chatgptModels(userId) : listModelsForConnection(conn);
+}
+
 export async function listModels(userId: string): Promise<ModelInfo[]> {
   // Ollama needs no key and may use its default URL, so it is connected without either field.
   const connections = [...readConnections(userId).values()].filter(
@@ -410,9 +439,7 @@ export async function listModels(userId: string): Promise<ModelInfo[]> {
   );
   const lists = await Promise.all(
     connections.map(async (conn) => {
-      const models = conn.providerId === CHATGPT
-        ? await chatgptModels(userId)
-        : await listModelsForConnection(conn);
+      const models = await modelsForResolvedConnection(userId, conn);
       // Own connections override the shared one in readConnections, so only a shared row carries a policy.
       const access = conn.shared ? sharedModelAccess(userId, conn.providerId) : null;
       return access && !access.all ? models.filter((model) => access.ids.has(model.id)) : models;
@@ -454,8 +481,17 @@ export async function resolveModel(userId: string, ref: string): Promise<{ model
     throw new HTTPException(400, { message: `Provider ${providerId} is not connected` });
   }
   if (conn.shared && denied) throw new HTTPException(403, { message: modelAccessMessage(ref) });
-  const models = await listModels(userId);
-  const model = models.find((m) => m.ref === ref);
+  // Only the selected connection is enumerated. listModels would contact every other configured
+  // provider, so a stalled unrelated custom endpoint could delay a chat that never uses it. Sharing
+  // policy and the live audience check above still apply to this connection; no result is cached
+  // across accounts or requests, so revoking it is effective on the next call.
+  // A row with no key and no URL is not a usable connection (listModels skips it too), so it keeps
+  // answering like an unknown model instead of reaching a provider without credentials. Ollama may
+  // use its default loopback address without either field.
+  const usable = conn.providerId === OLLAMA || !!conn.apiKey || !!conn.baseURL;
+  const models = usable ? await modelsForResolvedConnection(userId, conn) : [];
+  const visible = conn.shared && !access.all ? models.filter((m) => access.ids.has(m.id)) : models;
+  const model = visible.find((m) => m.ref === ref);
   if (!model) {
     // listModels keeps the last good Ollama list when the daemon is down, so a missing id may come from a
     // failed refresh rather than a policy. Ask once more first, so a stopped daemon surfaces its own error.

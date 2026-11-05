@@ -669,6 +669,50 @@ const migrations: Array<string | (() => void)> = [
   INSERT OR IGNORE INTO image_threads (image_id, thread_id)
     SELECT i.id, i.thread_id FROM images i JOIN threads t ON t.id = i.thread_id AND t.user_id = i.user_id;
   `,
+  // FTS addressing (docs/implementation/performance.md). The old triggers located a message's FTS row by
+  // scanning the two UNINDEXED metadata columns, making every UPDATE and DELETE corpus-linear. A stable
+  // integer key addresses the FTS rowid directly. The key has an explicit AUTOINCREMENT primary key, so
+  // VACUUM cannot renumber it, unlike messages.rowid under a composite TEXT primary key. The FTS table
+  // keeps its shape, tokenizer, and columns, so ranking and snippets are unchanged.
+  `
+  DROP TRIGGER IF EXISTS messages_fts_insert;
+  DROP TRIGGER IF EXISTS messages_fts_update;
+  DROP TRIGGER IF EXISTS messages_fts_delete;
+  CREATE TABLE message_search_keys (
+    search_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    UNIQUE(thread_id, message_id),
+    FOREIGN KEY(thread_id, message_id) REFERENCES messages(thread_id, id) ON DELETE CASCADE
+  );
+  INSERT INTO message_search_keys (thread_id, message_id)
+    SELECT thread_id, id FROM messages ORDER BY thread_id, created_at, id;
+  DELETE FROM messages_fts;
+  INSERT INTO messages_fts (rowid, text, thread_id, message_id)
+    SELECT k.search_id, ${MESSAGE_TEXT("m")}, m.thread_id, m.id
+    FROM messages m JOIN message_search_keys k ON k.thread_id = m.thread_id AND k.message_id = m.id
+    ORDER BY k.search_id;
+  CREATE TRIGGER messages_fts_insert AFTER INSERT ON messages BEGIN
+    INSERT INTO message_search_keys (thread_id, message_id) VALUES (new.thread_id, new.id);
+    INSERT INTO messages_fts (rowid, text, thread_id, message_id)
+      VALUES ((SELECT search_id FROM message_search_keys WHERE thread_id = new.thread_id AND message_id = new.id), ${MESSAGE_TEXT("new")}, new.thread_id, new.id);
+  END;
+  CREATE TRIGGER messages_fts_update AFTER UPDATE OF content ON messages
+  WHEN old.content IS NOT new.content AND ${MESSAGE_TEXT("old")} IS NOT ${MESSAGE_TEXT("new")}
+  BEGIN
+    DELETE FROM messages_fts WHERE rowid = (SELECT search_id FROM message_search_keys WHERE thread_id = old.thread_id AND message_id = old.id);
+    INSERT INTO messages_fts (rowid, text, thread_id, message_id)
+      SELECT k.search_id, ${MESSAGE_TEXT("new")}, new.thread_id, new.id
+      FROM message_search_keys k WHERE k.thread_id = new.thread_id AND k.message_id = new.id;
+  END;
+  CREATE TRIGGER messages_fts_delete BEFORE DELETE ON messages BEGIN
+    DELETE FROM messages_fts WHERE rowid = (SELECT search_id FROM message_search_keys WHERE thread_id = old.thread_id AND message_id = old.id);
+    DELETE FROM message_search_keys WHERE thread_id = old.thread_id AND message_id = old.id;
+  END;
+  `,
+  // History reads order by (created_at,rowid) for every thread; the composite primary key cannot serve that
+  // order, so SQLite sorted each thread's rows in a temporary B-tree.
+  `CREATE INDEX messages_thread_time ON messages(thread_id, created_at);`,
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
