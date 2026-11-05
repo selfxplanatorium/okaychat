@@ -1,3 +1,4 @@
+import { importedHistoryText } from "./compaction.js";
 import { envelopeAgentHistory } from "./n8n/provenance.js";
 import { generateText } from "ai";
 import { z } from "zod";
@@ -101,7 +102,7 @@ export async function reviewThread(userId: string, threadId: string): Promise<Me
   const from = branch.findIndex((m) => m.id === state.memory_cursor) + 1;
   const added = branch.slice(from);
   if (!added.some((m) => m.role === "user")) { done(); return []; }
-  const transcript = transcriptText(envelopeAgentHistory(added));
+  const transcript = transcriptText(importedHistoryText(envelopeAgentHistory(added)));
   const scope = thread.projectId;
   const visible = listMemories(userId, scope);
   const candidates = rankMemories(visible, transcript).slice(0, 60);

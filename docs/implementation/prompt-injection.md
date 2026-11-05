@@ -186,3 +186,11 @@ so offering one conservatively taints the turn. Their results are redacted, enve
 `custom_tool` data, and any historical/imported tool key matching the reserved `custom_<24 hex>_r<n>`
 syntax is treated as untrusted even after the definition is deleted. Imported records remain inert and
 public shares keep hiding tool results.
+
+## External transcript core
+
+The unexposed text-transfer core stores allowlisted `importedTranscript` provenance. Its derived model
+projection drops quarantine and envelopes all transcript, inert tool and missing-content text as
+`past_chat`, before both trimmed and untrimmed conversion. Memory review and title generation use the
+same trust boundary; ordinary client appends cannot create this provenance. Stored display text remains
+raw. Public import routes and the durable runner are not implemented. See [transfer core](chat-import.md).

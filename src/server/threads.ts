@@ -190,6 +190,14 @@ export function updateThread(
   if (patch.compareGroupId !== undefined) sets.push("compare_group_id = ?"), values.push(patch.compareGroupId);
   if (!sets.length && patch.tags === undefined) return;
   tx(() => {
+    if (patch.title !== undefined) {
+      const identity = db.prepare("SELECT title_bytes FROM conversation_source_ids WHERE thread_id=? AND user_id=?").get(id,userId) as {title_bytes:number}|undefined;
+      if (identity) {
+        const titleBytes = Buffer.byteLength(patch.title);
+        assertStorage(userId, Math.max(0,titleBytes-identity.title_bytes));
+        db.prepare("UPDATE conversation_source_ids SET title_bytes=? WHERE thread_id=? AND user_id=?").run(titleBytes,id,userId);
+      }
+    }
     if (patch.projectId !== undefined) {
       const before = db.prepare("SELECT project_id FROM threads WHERE user_id = ? AND id = ?").get(userId, id) as { project_id: string | null } | undefined;
       // Replayed memory blocks can hold the old project's facts; only global and current-project memory may enter a turn.
@@ -469,9 +477,12 @@ function markEverEdited(content: unknown): unknown {
 export function appendMessage(userId: string, threadId: string, row: MessageRow) {
   return tx(() => {
     ensureThread(userId, threadId);
-    const previous = db.prepare("SELECT content, bytes, parent_id, format, edited_at, original_enc FROM messages WHERE thread_id = ? AND id = ?").get(threadId, row.id) as
-      | { content: string; bytes: number; parent_id: string | null; format: string; edited_at: number | null; original_enc: string | null }
+    const previous = db.prepare("SELECT content, bytes, parent_id, format, edited_at, original_enc, imported FROM messages WHERE thread_id = ? AND id = ?").get(threadId, row.id) as
+      | { content: string; bytes: number; parent_id: string | null; format: string; edited_at: number | null; original_enc: string | null; imported: number }
       | undefined;
+    // Imported history is immutable through the ordinary append API. Dedicated reply editing keeps
+    // server-owned provenance; a runtime replay must not turn historical data into native instructions.
+    if (previous?.imported) return { ...row, parent_id: previous.parent_id, format: previous.format, content: JSON.parse(previous.content) as unknown };
     // The stored parent is immutable unless this row is genuinely re-parented, and the stored graph has no
     // cycle, so an unchanged parent needs no walk. A brand-new row still walks from its parent.
     if (row.parent_id !== null && previous?.parent_id !== row.parent_id && createsCycle(threadId, row.id, row.parent_id)) {
@@ -481,7 +492,7 @@ export function appendMessage(userId: string, threadId: string, row: MessageRow)
     // compared or charged, so history and later requests never carry the original bytes again. An edited reply
     // only maps resent bytes back to its own references: new bytes there are a stale tab's, refused below.
     const edited = !!previous && (previous.edited_at !== null || previous.original_enc !== null);
-    const storedContent = stripGeneration(row.content);
+    const storedContent = stripGeneration(stripImportClaims(row.content));
     const content = normalizeImages(userId, threadId, storedContent, {
       charge: (size) => { assertStorage(userId, size); },
       previous: previous ? JSON.parse(previous.content) : undefined,
@@ -524,6 +535,24 @@ export function appendMessage(userId: string, threadId: string, row: MessageRow)
     db.prepare("UPDATE threads SET updated_at = ?, preferred_head = NULL WHERE id = ?").run(Date.now(), threadId);
     return { ...row, content };
   });
+}
+
+/** Client writes cannot mint server-owned imported provenance or inert-history parts. */
+function stripImportClaims(content: unknown): unknown {
+  if (!content || typeof content !== "object") return content;
+  const value = content as Record<string,unknown>;
+  const copy = {...value};
+  if (Array.isArray(copy.parts)) copy.parts = copy.parts.filter((part: unknown) => {
+    const type = part && typeof part === "object" ? (part as {type?:unknown}).type : null;
+    return type !== "data-imported-quarantine" && type !== "data-imported-missing-attachment" && type !== "data-imported-tool";
+  });
+  for (const key of ["metadata","custom"]) {
+    if (!copy[key] || typeof copy[key] !== "object") continue;
+    const meta = {...copy[key] as Record<string,unknown>}; delete meta.importedTranscript;
+    if (meta.custom && typeof meta.custom === "object") { meta.custom = {...meta.custom as Record<string,unknown>}; delete (meta.custom as Record<string,unknown>).importedTranscript; }
+    copy[key] = meta;
+  }
+  return copy;
 }
 
 /**

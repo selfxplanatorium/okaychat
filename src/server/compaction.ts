@@ -1,3 +1,4 @@
+import { envelopeTranscript } from "./conversation-import/provenance.js";
 import { envelopeAgentHistory } from "./n8n/provenance.js";
 import { convertToModelMessages, generateText, isToolUIPart, type ModelMessage, type ToolSet, type UIMessage } from "ai";
 import type { AssistantMetadata, CompactionState, ModelInfo } from "../shared/types.js";
@@ -76,7 +77,7 @@ export async function historyMessages(
   tools?: ToolSet,
 ): Promise<ModelMessage[]> {
   const projected = envelopeAgentHistory(applied.messages);
-  const head = projected.slice(0, applied.trimmed).map(trimMessage);
+  const head = importedHistoryText(projected.slice(0, applied.trimmed)).map(trimMessage);
   const imported = importedHistoryText(projected.slice(applied.trimmed));
   const tail = await prepare(imported);
   // Trimmed tool results are plain strings now, so the head skips the tools' own toModelOutput.
@@ -92,7 +93,7 @@ export async function historyMessages(
  * existing untrusted envelope; the raw input/output never becomes a tool call.
  */
 export function importedHistoryText(messages: UIMessage[]): UIMessage[] {
-  return messages.map((message) => {
+  return envelopeTranscript(messages).map((message) => {
     if (!message.parts.some((part) => part.type === "data-imported-tool")) return message;
     return {
       ...message,

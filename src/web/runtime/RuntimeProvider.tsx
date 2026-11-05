@@ -1,3 +1,4 @@
+import { parentFirst } from "./threadCache";
 import { AssistantChatTransport, createResumableSessionStorage, RESUMABLE_STREAM_ID_HEADER, useChatRuntime } from "@assistant-ui/ai-sdk";
 import {
   AssistantRuntimeProvider,
@@ -306,7 +307,7 @@ const threadListAdapter: RemoteThreadListAdapter = {
             const decode = (rows: MessageRow[]) => {
               const headId = initialHeads.get(remoteId);
               return {
-                messages: rows.map((row) => fmt.decode(row as Parameters<typeof fmt.decode>[0])),
+                messages: parentFirst(rows).map((row) => fmt.decode(row as Parameters<typeof fmt.decode>[0])),
                 ...(headId && rows.some((row) => row.id === headId) ? { headId } : {}),
               };
             };
