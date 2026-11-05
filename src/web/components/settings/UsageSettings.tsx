@@ -113,7 +113,7 @@ export function UsageSettings() {
                 className="bg-primary/80 group-hover:bg-primary settings-bar min-h-px rounded-t transition-colors duration-(--motion-fast)"
                 style={{ height: `${(r.cost / maxCost) * 100}%`, "--i": index } as CSSProperties}
               />
-              <div className="dropdown-glass pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 rounded-md border px-2 py-1 text-xs whitespace-nowrap group-hover:block group-hover:animate-fade-in group-focus-visible:block">
+              <div data-glass-surface="overlay" data-glass-tooltip="" className="dropdown-glass pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 rounded-md border px-2 py-1 text-xs whitespace-nowrap group-hover:block group-hover:animate-fade-in group-focus-visible:block">
                 {t("usage.dayTooltip", { day: r.key, cost: formatCost(r.cost), count: r.requests })}
               </div>
             </div>

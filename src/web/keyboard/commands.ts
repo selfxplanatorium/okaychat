@@ -110,6 +110,7 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "message.exit", labelKey: "keyboard.cmdMessageExit", group: "Messages", keys: ["Escape"], scope: "message", palette: false },
 
   { id: "settings.compaction", labelKey: "ux.compactionSettings", group: "Settings", keys: [] },
+  { id: "appearance.resetGlass", labelKey: "keyboard.cmdAppearanceResetGlass", group: "Settings", keys: [] },
   { id: "settings.webTools", labelKey: "ux.openWebToolSettings", group: "Settings", keys: [] },
   { id: "settings.webSearchLimit", labelKey: "ux.openSearchLimitSettings", group: "Settings", keys: [] },
   ...SETTINGS_SECTIONS.map((id): CommandDef => ({ id: `settings.${id}`, labelKey: SETTINGS_LABELS[id], group: "Settings", keys: [] })),

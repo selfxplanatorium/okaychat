@@ -1,3 +1,5 @@
+import { GlassRuntime } from "@/components/glass/GlassRuntime";
+import { useGlassBackdrop } from "@/components/glass/GlassBackdrop";
 import { PanelLeftIcon, SquarePenIcon } from "lucide-react";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Route, Switch, useLocation } from "wouter";
@@ -137,6 +139,7 @@ function ChatUrlSync() {
 }
 
 export function Shell({ userId }: { userId: string }) {
+  const canvasBackdrop = useGlassBackdrop("shell-canvas");
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const load = useData((s) => s.load);
@@ -217,12 +220,14 @@ export function Shell({ userId }: { userId: string }) {
 
   return (
     <RuntimeProvider>
+      <GlassRuntime key={userId} />
       <KeyboardShortcuts />
       <ServiceHealthWatcher />
       <ServiceUsageWatcher />
       {/* No fill mode: a held opacity animation makes this a backdrop root, which leaves the sticky
           composer's blur misplaced while the thread scrolls on mobile Chrome. */}
       <div className="animate-[fade-in_var(--motion-base)_var(--ease-out-quart)] bg-background safe-top safe-x flex h-full">
+        <div ref={canvasBackdrop} aria-hidden className="pointer-events-none absolute inset-0 bg-background" />
         <ThreadSwitchWatcher onSwitch={closeOnMobile} />
         {/* Settings swaps the sidebar's contents for its rail. sidebarOpen is kept here, so the chat sidebar returns in the same state. */}
         <Sidebar open={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} settings={inSettings} section={lastSection.current} />
@@ -232,7 +237,7 @@ export function Shell({ userId }: { userId: string }) {
             aria-hidden
             data-open={sidebarOpen}
             onClick={() => setSidebarOpen(false)}
-            className="shell-scrim fixed inset-0 z-30 bg-black/30 md:hidden"
+            className="shell-scrim fixed inset-0 z-30 bg-foreground/20 md:hidden"
           />
         )}
         <div className="relative flex min-w-0 flex-1">

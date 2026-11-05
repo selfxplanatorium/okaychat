@@ -1,0 +1,326 @@
+/*
+ * Adapted from Glisse 0.5.0 (MIT, Copyright (c) 2026 Kelvin Zhang),
+ * dist/styles.css sections "Switch and slider thumbs", "Switch" and
+ * "Tab bar" / "Segmented control". Only the two controls this app ships are
+ * kept, every class is scoped with the `oc-` prefix, the upstream root palette
+ * and media-query palette are dropped, and geometry comes from tokens measured
+ * in CSS px instead of fixed JS constants. See UPSTREAM.md.
+ *
+ * The `--lg-*` bridge tokens come from theme/glass.css; each has a semantic
+ * fallback so the controls stay coherent before the material layer loads.
+ */
+
+/* ---------------------------------------------------------------- Switch -- */
+
+.oc-switch {
+  /* 48x24 visible track inside a 48x44 hit box. */
+  --oc-switch-track-w: 48px;
+  --oc-switch-track-h: 24px;
+  --oc-switch-inset: 1.3px;
+  --oc-switch-rest: 0.65;
+  --oc-switch-grow: 0.25;
+  --oc-switch-thumb-w: calc(var(--oc-switch-track-w) * 0.9125);
+  --oc-switch-thumb-h: calc(var(--oc-switch-track-h) * 1.373);
+  --oc-switch-travel: calc(
+    var(--oc-switch-track-w) - 2 * var(--oc-switch-inset) - var(--oc-switch-thumb-w) * var(--oc-switch-rest)
+  );
+  /* Written by the lift spring while held; the CSS fallback keeps it at rest. */
+  --oc-switch-lift: 0;
+  position: relative;
+  display: inline-block;
+  flex: none;
+  width: var(--oc-switch-track-w);
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  touch-action: pan-y;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.oc-switch:focus-visible {
+  outline: 2px solid var(--lg-ring, var(--ring));
+  outline-offset: 2px;
+}
+
+.oc-switch:disabled,
+.oc-switch[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* The track's box, with room around it for the whole lifted thumb: a filter
+   paints nothing outside its element, so the lens needs the margin. */
+.oc-switch-bed {
+  position: absolute;
+  top: 50%;
+  inset-inline: -12px;
+  height: calc(var(--oc-switch-track-h) + 12px);
+  translate: 0 -50%;
+  pointer-events: none;
+}
+
+.oc-switch-track,
+.oc-switch-fill {
+  position: absolute;
+  border-radius: 999px;
+}
+
+.oc-switch-track {
+  inset: 6px 12px;
+  background: var(--lg-track, var(--input));
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 18%);
+}
+
+.oc-switch-fill {
+  inset: 0;
+  background: var(--lg-on, var(--primary));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 16%);
+  opacity: 0;
+}
+
+.oc-switch[aria-checked="true"] .oc-switch-fill {
+  opacity: 1;
+}
+
+/* What the lifted thumb shows in place of the track: the track a little
+   smaller, growing with the thumb. Seen only through the thumb's filter. */
+.oc-switch-inset {
+  visibility: hidden;
+}
+
+.oc-switch-inset .oc-switch-track {
+  inset: 0;
+  width: calc((100% - 24px) * (0.85 + 0.1 * var(--oc-switch-lift)));
+  height: calc((100% - 12px) * 0.75 * (0.525 + 0.45 * var(--oc-switch-lift)));
+  margin: auto;
+}
+
+/* At rest a lit knob; held, a lens with only a little frost left on it. */
+.oc-switch-thumb {
+  --oc-switch-settled: calc(1 - var(--oc-switch-lift));
+  --oc-switch-blur: calc(
+    2px * var(--oc-switch-settled) + var(--lg-thumb-frost, 1px) * var(--oc-switch-lift)
+  );
+  position: absolute;
+  top: 50%;
+  inset-inline-start: calc(
+    var(--oc-switch-inset) - var(--oc-switch-thumb-w) * (1 - var(--oc-switch-rest)) / 2
+  );
+  width: var(--oc-switch-thumb-w);
+  height: var(--oc-switch-thumb-h);
+  border-radius: 999px;
+  pointer-events: none;
+  transform: translate(0, -50%) scale(var(--oc-switch-rest));
+  -webkit-backdrop-filter: blur(var(--oc-switch-blur)) brightness(calc(1 + 0.15 * var(--oc-switch-settled)))
+    saturate(1.5);
+  backdrop-filter: blur(var(--oc-switch-blur)) brightness(calc(1 + 0.15 * var(--oc-switch-settled))) saturate(1.5);
+  box-shadow:
+    0 6px 24px rgb(0 0 0 / 20%),
+    inset 0 0 0 1.5px rgb(255 255 255 / 50%),
+    inset 0 2px 1px rgb(255 255 255 / 45%),
+    inset 2px 7px 24px rgb(0 0 0 / 9%),
+    inset -2px -7px 24px rgb(255 255 255 / 16%);
+}
+
+/* Checked rests at the logical end, so RTL mirrors without changing meaning.
+   The enhancement replaces this with an inline transform once it loads. */
+.oc-switch[aria-checked="true"] .oc-switch-thumb {
+  transform: translate(var(--oc-switch-travel), -50%) scale(var(--oc-switch-rest));
+}
+
+/* The app sets dir on <html>; the enhancement then paints the same transform
+   inline from the measured direction. */
+[dir="rtl"] .oc-switch[aria-checked="true"] .oc-switch-thumb {
+  transform: translate(calc(-1 * var(--oc-switch-travel)), -50%) scale(var(--oc-switch-rest));
+}
+
+.oc-thumb-face {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--oc-switch-face, #fff);
+}
+
+/* ------------------------------------------------------- Segmented control -- */
+
+.oc-segmented {
+  --oc-seg-count: 2;
+  --oc-seg-index: 0;
+  --oc-seg-height: 32px;
+  --oc-seg-inset: 2px;
+  --oc-seg-drag: 0px;
+  position: relative;
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  max-width: 100%;
+  height: var(--oc-seg-height);
+  padding: 0;
+  border: 0;
+  border-radius: calc(var(--oc-seg-height) / 2);
+  background: var(--lg-segment-track, var(--muted));
+  touch-action: pan-y;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.oc-segmented-thumb {
+  position: absolute;
+  top: var(--oc-seg-inset);
+  inset-inline-start: calc(
+    var(--oc-seg-inset) + var(--oc-seg-index) * (100% - 2 * var(--oc-seg-inset)) / var(--oc-seg-count) +
+      var(--oc-seg-drag)
+  );
+  width: calc((100% - 2 * var(--oc-seg-inset)) / var(--oc-seg-count));
+  height: calc(var(--oc-seg-height) - 2 * var(--oc-seg-inset));
+  border-radius: calc((var(--oc-seg-height) - 2 * var(--oc-seg-inset)) / 2);
+  background: var(--lg-segment-thumb, var(--card));
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 12%),
+    0 0 0 0.5px rgb(0 0 0 / 6%);
+  pointer-events: none;
+  transition: inset-inline-start var(--motion-base, 220ms) var(--ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1));
+}
+
+/* A held thumb follows the pointer directly and must not lag behind it. */
+.oc-segmented[data-dragging] .oc-segmented-thumb {
+  transition: none;
+}
+
+.oc-segmented[data-empty] .oc-segmented-thumb {
+  opacity: 0;
+}
+
+.oc-segmented-item {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  height: 100%;
+  padding: 0 12px;
+  border: 0;
+  border-radius: inherit;
+  background: none;
+  color: var(--lg-segment-label, var(--foreground));
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-touch-callout: none;
+}
+
+.oc-segmented-item[data-selected] {
+  font-weight: 500;
+}
+
+.oc-segmented-item:focus-visible {
+  outline: 2px solid var(--lg-ring, var(--ring));
+  outline-offset: -2px;
+}
+
+.oc-segmented-item[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.oc-segmented[data-disabled] {
+  opacity: 0.5;
+}
+
+.oc-segmented-label {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------- Preferences, fallback -- */
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-segmented-thumb {
+    transition: none;
+  }
+}
+
+html[data-motion-off~="interface"] .oc-segmented-thumb,
+html[data-motion-off~="transitions"] .oc-segmented-thumb {
+  transition: none;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .oc-switch-thumb {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* Solid tier and the controls family switched off: the thumb keeps its shape
+   and checked state but none of the material. */
+html[data-glass-effective="solid"] .oc-switch-thumb,
+html[data-glass-solid~="controls"] .oc-switch-thumb {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .oc-switch-thumb {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* Forced colors: real borders, Canvas/CanvasText, and the checked state drawn
+   with Highlight instead of transparency. */
+@media (forced-colors: active) {
+  .oc-switch-track {
+    border: 1px solid CanvasText;
+    background: Canvas;
+    box-shadow: none;
+  }
+
+  .oc-switch[aria-checked="true"] .oc-switch-track {
+    background: Highlight;
+  }
+
+  .oc-switch-fill {
+    background: Highlight;
+  }
+
+  .oc-switch-thumb {
+    border: 1px solid CanvasText;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .oc-thumb-face {
+    background: Canvas;
+  }
+
+  .oc-segmented {
+    border: 1px solid CanvasText;
+    background: Canvas;
+  }
+
+  .oc-segmented-thumb {
+    background: Highlight;
+    forced-color-adjust: none;
+  }
+
+  .oc-segmented-item {
+    color: CanvasText;
+  }
+
+  .oc-segmented-item[data-selected] {
+    color: HighlightText;
+  }
+}

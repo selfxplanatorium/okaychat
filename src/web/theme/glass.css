@@ -1,0 +1,422 @@
+/*
+ * Glass material. One theme-derived material for every translucent chrome
+ * surface, with the refraction engine layered on top by `components/glass`.
+ *
+ * Ownership:
+ *   - This file owns fill, frost, rim, border, and the solid/fallback policy.
+ *   - depth.css owns elevation (box-shadow) and geometry utilities.
+ *   - motion/shell.css owns the sidebar's geometry and morph transitions; the
+ *     paint itself lives here, so a solid tier can remove it in one place.
+ *
+ * Tokens are written by `theme/glass.ts` (`--oc-glass-bend|dispersion|frost|
+ * rim|tint`) and `theme/settings.ts` (`--glass-opacity`). Everything else is
+ * derived here from semantic theme colors, never from a hardcoded palette.
+ *
+ * Every rule that removes material (solid tier, a disabled family, reduced
+ * transparency/motion, forced colors, no backdrop-filter) keeps the geometry
+ * and elevation untouched: only paint and filters go away.
+ */
+
+/* ---------------------------------------------------------------------------
+ * 1. Tokens
+ *
+ * The defaults let the first paint be material before React writes the
+ * account's preferences. They mirror GLASS_DEFAULTS / GLASS_PRESET_VALUES.
+ * ------------------------------------------------------------------------- */
+
+:root {
+  --oc-glass-bend: 0.18;
+  --oc-glass-dispersion: 0.12;
+  --oc-glass-frost: 12px;
+  --oc-glass-rim: 0.12;
+  --oc-glass-tint: 3%;
+
+  --oc-glass-accent: var(--app-theme-accent, var(--primary));
+  --oc-glass-border: var(--depth-line);
+  --oc-glass-shadow: var(--depth-highlight), var(--shadow-float);
+
+  /*
+   * A family sets `--oc-glass-base` and `--oc-glass-alpha`; the paint then
+   * derives its fill from them on the same element. `--oc-glass-tinted-fill`
+   * exists so the accent tint never references `--oc-glass-fill` itself,
+   * which would be a cycle.
+   */
+  --oc-glass-base: var(--card);
+  --oc-glass-alpha: max(90%, var(--glass-opacity));
+  --oc-glass-tinted-fill: color-mix(
+    in oklab,
+    var(--oc-glass-base) calc(100% - var(--oc-glass-tint)),
+    var(--oc-glass-accent)
+  );
+  --oc-glass-fill: var(--oc-glass-tinted-fill);
+  --oc-glass-background: color-mix(in srgb, var(--oc-glass-fill) var(--oc-glass-alpha), transparent);
+
+  /* Dark mode frosts more, capped so a bold preset cannot turn into milk. */
+  --oc-glass-frost-effective: var(--oc-glass-frost);
+  --oc-glass-filter: blur(var(--oc-glass-frost-effective)) saturate(var(--glass-saturation));
+
+  /* One-pixel rim: the accent at glassRimShine, fading out immediately. */
+  --oc-glass-rim-image: linear-gradient(
+    to bottom,
+    color-mix(in oklab, var(--oc-glass-accent) calc(var(--oc-glass-rim) * 100%), transparent),
+    transparent 1px
+  );
+
+  /* Intentional dimming, derived from the theme instead of a fixed black. */
+  --oc-glass-scrim: color-mix(in oklab, var(--foreground) 22%, transparent);
+
+  /*
+   * Local bridge for the adapted Glisse controls and the engine. These are the
+   * upstream variable names, remapped onto our semantic tokens so no palette
+   * or theme heuristic from upstream can win. Engine-private `--lg-filter`,
+   * `--lg-rim`, and `--lg-rim-bright` are never set here: they belong to a
+   * live lease.
+   */
+  --lg-glass-bend: var(--oc-glass-bend);
+  --lg-glass-dispersion: var(--oc-glass-dispersion);
+  --lg-blur: var(--oc-glass-frost-effective);
+  --lg-rim-shine: var(--oc-glass-rim);
+  --lg-glass: var(--oc-glass-background);
+  --lg-glass-active: color-mix(in oklab, var(--oc-glass-fill) 94%, var(--foreground));
+  --lg-foreground: var(--foreground);
+  --lg-muted: var(--muted-foreground);
+  --lg-edge: var(--depth-line);
+  --lg-ring: var(--ring);
+  --lg-destructive: var(--destructive);
+  --lg-on: var(--primary);
+  --lg-fill: var(--primary);
+  --lg-track: var(--input);
+  --lg-rail: var(--muted);
+  --lg-selection: var(--accent);
+  --lg-segment-track: var(--muted);
+  --lg-segment-thumb: var(--card);
+  --lg-segment-label: var(--foreground);
+  --lg-segment-lens: transparent;
+  --lg-surface: var(--oc-glass-background);
+  --lg-surface-edge: var(--depth-line);
+  --lg-highlight: var(--accent);
+  --lg-separator: var(--border);
+  --lg-drop: var(--depth-shadow-tint);
+  /* Depth utilities own every surface shadow, so the control draws none. */
+  --lg-shadow: transparent;
+  --lg-lens-drop: transparent;
+  --lg-lens: transparent;
+  --lg-lens-shine: -1.5;
+  --lg-thumb-frost: min(2px, var(--oc-glass-frost-effective));
+}
+
+:root.dark {
+  --oc-glass-frost-effective: min(24px, calc(var(--oc-glass-frost) + 4px));
+  --oc-glass-scrim: color-mix(in oklab, black 55%, transparent);
+  /* The lens shine flips with the palette, so a rim reads as light from above. */
+  --lg-lens-shine: 1;
+}
+
+/* ---------------------------------------------------------------------------
+ * 2. Surface families
+ *
+ * A host opts in with `data-glass-surface="sidebar|composer|overlay|toolbar|
+ * card|control"` (set by `GlassSurface` or a component). The legacy classes
+ * keep working through the same material while their callers migrate.
+ * ------------------------------------------------------------------------- */
+
+[data-glass-surface="sidebar"],
+.sidebar-surface,
+.shell-sidebar {
+  --oc-glass-base: var(--sidebar);
+  --oc-glass-alpha: min(100%, calc(var(--glass-opacity) + 25%));
+}
+
+[data-glass-surface="composer"] {
+  --oc-glass-base: var(--card);
+  --oc-glass-alpha: min(100%, calc(var(--glass-opacity) + 30%));
+}
+
+[data-glass-surface="overlay"],
+.dialog-glass,
+.dropdown-glass,
+[data-slot="tooltip-popup"] {
+  --oc-glass-base: var(--popover);
+  --oc-glass-alpha: max(85%, var(--glass-opacity));
+}
+
+[data-glass-surface="toolbar"],
+.surface-glass {
+  --oc-glass-base: var(--background);
+  --oc-glass-alpha: max(80%, var(--glass-opacity));
+}
+
+[data-glass-surface="card"] {
+  --oc-glass-base: var(--card);
+  --oc-glass-alpha: max(90%, var(--glass-opacity));
+}
+
+[data-glass-surface="control"] {
+  --oc-glass-base: var(--card);
+  --oc-glass-alpha: max(94%, var(--glass-opacity));
+}
+
+/* Tooltips and hover labels read as text: the highest minimum, no refraction. */
+[data-slot="tooltip-popup"],
+[data-glass-tooltip],
+.dropdown-glass.pointer-events-none {
+  --oc-glass-base: var(--popover);
+  --oc-glass-alpha: max(92%, var(--glass-opacity));
+}
+
+/* The sign-in card is a reading surface; it may never go below 92%. */
+form.surface-glass {
+  --oc-glass-base: var(--card);
+  --oc-glass-alpha: max(92%, var(--glass-opacity));
+}
+
+/* ---------------------------------------------------------------------------
+ * 3. Derivation and paint
+ *
+ * Deriving on the host (not on :root) is what makes a family's base, alpha,
+ * and the engine bridge follow that host's own values.
+ * ------------------------------------------------------------------------- */
+
+:is(
+  [data-glass-surface],
+  .surface-glass,
+  .dialog-glass,
+  .dropdown-glass,
+  .sidebar-surface,
+  .shell-sidebar,
+  [data-slot="tooltip-popup"]
+) {
+  --oc-glass-tinted-fill: color-mix(
+    in oklab,
+    var(--oc-glass-base) calc(100% - var(--oc-glass-tint)),
+    var(--oc-glass-accent)
+  );
+  --oc-glass-fill: var(--oc-glass-tinted-fill);
+  --oc-glass-background: color-mix(in srgb, var(--oc-glass-fill) var(--oc-glass-alpha), transparent);
+  --lg-glass: var(--oc-glass-background);
+  --lg-surface: var(--oc-glass-background);
+}
+
+/* Frosted chrome: sidebar, composer, popups, toolbars, and the floating buttons.
+   Border color is left to each host's own utility so focus and drag states keep
+   working; the two compatibility classes, which own their outline, set it below. */
+:is(
+  [data-glass-surface="sidebar"],
+  [data-glass-surface="composer"],
+  [data-glass-surface="overlay"],
+  [data-glass-surface="toolbar"],
+  .surface-glass,
+  .dialog-glass,
+  .dropdown-glass,
+  [data-slot="tooltip-popup"]
+) {
+  background-color: var(--oc-glass-background);
+  background-image: var(--oc-glass-rim-image);
+  -webkit-backdrop-filter: var(--oc-glass-filter);
+  backdrop-filter: var(--oc-glass-filter);
+}
+
+.dialog-glass,
+.dropdown-glass {
+  border-color: var(--oc-glass-border);
+}
+
+/*
+ * Cards are a tinted fill only. A blur per card in a long chat buys nothing
+ * and costs a filter each, so the material stops at the paint. Media and icons
+ * keep their own pixels: a marked image is not a card.
+ */
+[data-glass-surface="card"]:not(img, svg) {
+  background-color: var(--oc-glass-background);
+  background-image: var(--oc-glass-rim-image);
+  border-color: var(--oc-glass-border);
+}
+
+.dialog-glass {
+  box-shadow: var(--oc-glass-shadow);
+}
+
+/*
+ * Uploading and error overlays sit on a thumbnail the user is looking at, so
+ * they keep a lower fill than a reading card and a frost capped at 2 px.
+ */
+:is(.aui-attachment-tile-uploading, .aui-attachment-tile-error)[data-glass-surface="card"] {
+  --oc-glass-base: var(--background);
+  --oc-glass-alpha: min(100%, calc(var(--glass-opacity) + 20%));
+  background-color: var(--oc-glass-background);
+  background-image: none;
+  -webkit-backdrop-filter: blur(min(2px, var(--oc-glass-frost-effective)))
+    saturate(var(--glass-saturation));
+  backdrop-filter: blur(min(2px, var(--oc-glass-frost-effective)))
+    saturate(var(--glass-saturation));
+}
+
+/* Dragging a file over the composer keeps its accent drop state. */
+[data-slot="aui_composer-shell"][data-dragging="true"] {
+  background-color: color-mix(in oklab, var(--accent) 50%, var(--background));
+  background-image: none;
+}
+
+/*
+ * Sidebar paint. shell.css still owns the floating/docked geometry, shadows,
+ * and the morph; this file owns what the panel is made of. Docked means the
+ * panel meets a flat canvas, so it stays opaque and quiet.
+ */
+@media (width >= 48rem) {
+  .sidebar-surface {
+    background-color: var(--oc-glass-background);
+    background-image: var(--oc-glass-rim-image);
+    border-color: var(--oc-glass-border);
+    -webkit-backdrop-filter: var(--oc-glass-filter);
+    backdrop-filter: var(--oc-glass-filter);
+  }
+
+  html[data-sidebar="docked"] .sidebar-surface {
+    background-color: var(--sidebar);
+    background-image: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* The phone drawer is the sidebar surface, edge to edge. */
+@media (width < 48rem) {
+  .shell-sidebar {
+    background-color: var(--oc-glass-background);
+    background-image: var(--oc-glass-rim-image);
+    -webkit-backdrop-filter: var(--oc-glass-filter);
+    backdrop-filter: var(--oc-glass-filter);
+  }
+
+  /* The drawer is solid like the rest of the sidebar family when material is off. */
+  html[data-glass-effective="solid"] .shell-sidebar,
+  html[data-glass-solid~="sidebar"] .shell-sidebar {
+    background-color: var(--oc-glass-fill);
+    background-image: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* A full-screen call body is a reading surface, not chrome. */
+@media (width < 48rem) {
+  .call-surface {
+    background-color: var(--popover);
+    background-image: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* The dialog backdrop dims; it never blurs what it covers a second time. */
+[data-slot="dialog-overlay"],
+.shell-scrim {
+  background-color: var(--oc-glass-scrim);
+}
+
+/* ---------------------------------------------------------------------------
+ * 4. Removal policy
+ *
+ * Solid tier, a switched-off family, reduced transparency/motion, forced
+ * colors, and browsers without backdrop-filter all resolve to the same opaque
+ * family fill with no rim and no filter.
+ * ------------------------------------------------------------------------- */
+
+html[data-glass-effective="solid"]
+  :is(
+    [data-glass-surface]:not([data-glass-surface="control"]):not(img):not(svg),
+    .surface-glass,
+    .dialog-glass,
+    .dropdown-glass,
+    .sidebar-surface,
+    [data-slot="tooltip-popup"]
+  ),
+html[data-glass-solid~="sidebar"] :is([data-glass-surface="sidebar"], .sidebar-surface),
+html[data-glass-solid~="composer"] :is([data-glass-surface="composer"]),
+html[data-glass-solid~="overlays"]
+  :is([data-glass-surface="overlay"], .dialog-glass, .dropdown-glass, [data-slot="tooltip-popup"]),
+html[data-glass-solid~="cards"] [data-glass-surface="card"]:not(img, svg),
+html[data-glass-solid~="toolbars"] :is([data-glass-surface="toolbar"], .surface-glass) {
+  background-color: var(--oc-glass-fill);
+  background-image: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* Controls off: solid track and thumb, no lens, same geometry. */
+html[data-glass-solid~="controls"] [data-glass-surface="control"] {
+  background-image: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  --lg-lens: transparent;
+  --lg-lens-shine: 0;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :is(
+    [data-glass-surface]:not([data-glass-surface="control"]):not(img):not(svg),
+    .surface-glass,
+    .dialog-glass,
+    .dropdown-glass,
+    .sidebar-surface,
+    [data-slot="tooltip-popup"]
+  ) {
+    background-color: var(--oc-glass-fill);
+    background-image: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/*
+ * The OS asks for less motion, so the material stops moving with it. Click and
+ * keyboard behavior in the controls is unaffected.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :is(
+    [data-glass-surface]:not([data-glass-surface="control"]):not(img):not(svg),
+    .surface-glass,
+    .dialog-glass,
+    .dropdown-glass,
+    .sidebar-surface,
+    [data-slot="tooltip-popup"]
+  ) {
+    background-color: var(--oc-glass-fill);
+    background-image: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :is(
+    [data-glass-surface]:not([data-glass-surface="control"]):not(img):not(svg),
+    .surface-glass,
+    .dialog-glass,
+    .dropdown-glass,
+    .sidebar-surface,
+    [data-slot="tooltip-popup"]
+  ) {
+    background-color: var(--oc-glass-fill);
+    background-image: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (forced-colors: active) {
+  :is(
+    [data-glass-surface]:not([data-glass-surface="control"]):not(img):not(svg),
+    .surface-glass,
+    .dialog-glass,
+    .dropdown-glass,
+    .sidebar-surface,
+    [data-slot="tooltip-popup"]
+  ) {
+    background-color: Canvas;
+    background-image: none;
+    border-color: CanvasText;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}

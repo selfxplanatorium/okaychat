@@ -63,7 +63,6 @@ import { markUsedServices } from "@/state/services";
 import { SelectionCheck, useSelectionKeys } from "@/components/ui/selection";
 import { runBatch } from "@/lib/selection";
 import { t, type PlainMessageKey } from "@/i18n";
-import { switchWithHighlight } from "@/components/layout/GlideHighlight";
 import { useThreadSelection } from "@/state/thread-selection";
 import { runCommand, useCommand } from "@/keyboard/registry";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -434,7 +433,7 @@ const VirtualThreadList: FC<{ entries: ListEntry[] }> = ({ entries }) => {
             data-virtual-index={item.index}
             ref={virtualizer.measureElement}
             className="thread-list-virtual-row absolute start-0 w-full"
-            // GlideHighlight reads layout offsets; transforms would hide the virtual position from it.
+            // Virtual rows are positioned with layout `top`, not transforms.
             style={{ top: item.start }}
           >
             {entry.label !== undefined ? <ThreadListGroupLabel label={entry.label} /> : (
@@ -627,9 +626,8 @@ export const ThreadListItem: FC = () => {
   const row = (
     <ThreadListItemPrimitive.Root
       data-slot="aui_thread-list-item"
-      data-glide
       data-selected={selected || undefined}
-      className="group data-selected:bg-primary/10 hover:bg-sidebar-row-hover focus-visible:bg-sidebar-row-hover data-active:depth-row-active has-focus-visible:bg-sidebar-row-hover data-popup-open:bg-sidebar-row-hover active:bg-sidebar-row-hover relative flex h-8 pointer-coarse:h-11 pointer-coarse:select-none items-center rounded-lg transition-[background-color,box-shadow] duration-(--motion-fast) ease-out-quart focus-visible:outline-none"
+      className="group data-selected:bg-primary/10 hover:bg-sidebar-row-hover focus-visible:bg-sidebar-row-hover data-active:depth-row-active has-focus-visible:bg-sidebar-row-hover data-popup-open:bg-sidebar-row-hover active:bg-sidebar-row-hover relative flex h-8 pointer-coarse:h-11 pointer-coarse:select-none items-center rounded-lg focus-visible:outline-none"
     >
       {selecting ? (
         <button
@@ -662,8 +660,9 @@ export const ThreadListItem: FC = () => {
           ref={triggerRef}
           data-slot="aui_thread-list-item-trigger"
           onClick={(event) => {
+            // Keeps the primitive from switching a second time; this handler switches once.
             event.preventDefault();
-            switchWithHighlight(event.currentTarget, () => aui.threadListItem.switchTo());
+            aui.threadListItem.switchTo();
           }}
           className="focus-visible:ring-ring/50 flex h-full min-w-0 flex-1 items-center rounded-md px-2.5 text-start text-sm outline-none pointer-fine:group-hover:pe-9 pointer-fine:group-has-focus-visible:pe-9 focus-visible:ring-1"
         />}>

@@ -1,15 +1,17 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { appearanceSchema, parseAppearancePatch, type UserAppearance } from "../shared/appearance.js";
+import { appearanceSchema, GLASS_DEFAULTS, parseAppearancePatch, type UserAppearance } from "../shared/appearance.js";
 import type { AppEnv } from "./auth.js";
 import { getSettings, updateSettings } from "./settings.js";
 
 // The interface size is per device. Older snapshots still carry it; drop it so no device adopts another's size.
-const stored = (userId: string) => {
+// Snapshots written before a field existed read with its default, without rewriting the row on GET.
+const stored = (userId: string): UserAppearance | undefined => {
   const appearance = getSettings(userId).appearance as (UserAppearance & { fontSizeInterface?: unknown }) | undefined;
   if (!appearance) return undefined;
   const { fontSizeInterface: _device, ...synced } = appearance;
-  return synced;
+  const parsed = appearanceSchema.safeParse(synced);
+  return parsed.success ? parsed.data : { ...GLASS_DEFAULTS, ...synced };
 };
 
 export const appearanceRoutes = new Hono<AppEnv>()
@@ -30,7 +32,9 @@ export const appearanceRoutes = new Hono<AppEnv>()
     const userId = c.get("user").id;
     const current = stored(userId);
     if (!current) return c.json({ error: "Initialize appearance settings first." }, 409);
-    const appearance = { ...current, ...parsed.data };
+    const merged = appearanceSchema.safeParse({ ...current, ...parsed.data });
+    if (!merged.success) return c.json({ error: "Invalid appearance settings." }, 400);
+    const appearance = merged.data;
     updateSettings(userId, { appearance });
     return c.json(appearance);
   });

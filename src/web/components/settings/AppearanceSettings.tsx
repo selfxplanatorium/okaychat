@@ -8,6 +8,7 @@ import { PlusIcon, Trash2Icon, UploadIcon } from "lucide-react";
 import { ThemeLibrary } from "@/components/settings/theme/ThemeLibrary";
 import { useEffect, useId, useRef, useState } from "react";
 import { SettingsPage, SettingsRow, SettingsSection, SettingsSlider } from "@/components/settings/SettingsUI";
+import { GlassSettings } from "@/components/settings/GlassSettings";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, type SelectOption } from "@/components/ui/select";
@@ -42,13 +43,11 @@ import {
 import {
   MAX_APPEARANCE_CONTRAST,
   MAX_CODE_FONT_SIZE,
-  MAX_GLASS_OPACITY,
   MAX_INTERFACE_FONT_SIZE,
   MAX_PANEL_ANIMATION_DURATION_MS,
   MAX_PROMPT_FONT_SIZE,
   MIN_APPEARANCE_CONTRAST,
   MIN_CODE_FONT_SIZE,
-  MIN_GLASS_OPACITY,
   MIN_INTERFACE_FONT_SIZE,
   MIN_PANEL_ANIMATION_DURATION_MS,
   MIN_PROMPT_FONT_SIZE,
@@ -651,22 +650,6 @@ export function AppearanceSettings() {
           }
         />
         <SettingsRow
-          label={t("appearance.glassOpacity")}
-          description={t("appearance.glassOpacityDescription")}
-          reset={s.glassOpacity !== DEFAULT_APPEARANCE.glassOpacity ? () => reset("glassOpacity") : null}
-          control={
-            <SettingsSlider
-              label={t("appearance.glassOpacity")}
-              value={s.glassOpacity}
-              min={MIN_GLASS_OPACITY}
-              max={MAX_GLASS_OPACITY}
-              step={5}
-              format={(v) => formatPercent(v / 100)}
-              onChange={(glassOpacity) => update({ glassOpacity })}
-            />
-          }
-        />
-        <SettingsRow
           label={t("appearance.chatWidth")}
           description={t("appearance.chatWidthDescription")}
           reset={s.chatWidth !== DEFAULT_APPEARANCE.chatWidth ? () => reset("chatWidth") : null}
@@ -700,6 +683,8 @@ export function AppearanceSettings() {
           control={<Switch aria-label={t("appearance.squareCorners")} checked={s.squareCorners} onCheckedChange={(checked) => update({ squareCorners: Boolean(checked) })} />}
         />
       </SettingsSection>
+
+      <GlassSettings />
 
       <SettingsSection title={t("appearance.motion")}>
         <SettingsRow

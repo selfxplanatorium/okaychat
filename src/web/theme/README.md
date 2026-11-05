@@ -112,3 +112,9 @@ After React mounts, call `applyThemePalette(theme, appearance)` with the resolve
 - Environment identification and composer context settings.
 - Upstream T3 chat header rules (`[data-chat-header]`), `[data-app-sidebar]` overrides, and code-chip styling; okaychat uses its own shell and chat components.
 - Stage artwork variables (`--stage-*`) and the T3 composer seam shadows.
+
+Glass tokens and presets live in `glass.ts`/`glass.css`; the shared schema owns
+ranges and defaults. Semantic colors remain the palette authority. Glass
+preferences are account settings, excluded from theme import/export. Palette
+application and live preview invalidate Glass explicitly rather than observing
+all inline style mutations. The local MIT Glisse fork is in `../vendor/glisse`.

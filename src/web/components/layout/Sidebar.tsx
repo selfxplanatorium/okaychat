@@ -1,3 +1,4 @@
+import { useGlassSurface } from "@/components/glass/GlassSurface";
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { useRef } from "react";
 import { t } from "@/i18n";
@@ -22,13 +23,13 @@ import { prefetchLibrary } from "@/state/library-cache";
 import { SettingsNav } from "@/components/settings/SettingsNav";
 import { Brand } from "./Brand";
 import { SidebarResizeHandle } from "./sidebar-width";
-import { GlideHighlight } from "./GlideHighlight";
 
 /**
  * One panel for the whole app. Chat and settings are two layers inside it, so moving
  * between them slides the contents while the surface itself stays still (shell.css).
  */
 export function Sidebar({ open, onToggle, settings, section }: { open: boolean; onToggle: () => void; settings: boolean; section?: string }) {
+  const glassRef = useGlassSurface({ source: "sidebar-content", family: "sidebar", priority: 60 });
   const aui = useAui();
   const searchOpen = useKeyboardDialog((s) => s.open === "search");
   const toggleDialog = useKeyboardDialog((s) => s.toggle);
@@ -43,7 +44,7 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
   // Settings keeps the panel open on desktop; leaving returns it to the chat's own open state.
   const shown = open || settings;
   const [location, navigate] = useLocation();
-  const rowClass = "relative hover:bg-sidebar-row-hover focus-visible:outline-ring flex min-h-9 w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm pointer-coarse:min-h-11 active:bg-sidebar-row-hover transition-colors duration-(--motion-fast) ease-out-quart";
+  const rowClass = "relative hover:bg-sidebar-row-hover aria-[current=page]:depth-row-active focus-visible:outline-ring flex min-h-9 w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm pointer-coarse:min-h-11 active:bg-sidebar-row-hover transition-colors duration-(--motion-fast) ease-out-quart";
   return (
     <>
       <ChatSearch open={searchOpen} onOpenChange={setSearchOpen} />
@@ -55,14 +56,14 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
           // On mobile the rail is an overlay: it keeps its width and slides off screen.
           // Visibility is transitioned too: the hidden drawer keeps its shadow until it has slid off, then disappears.
           // Tailwind translate-* sets `translate`, not `transform`, so that is the property to animate.
-          "max-md:bg-sidebar max-md:safe-top max-md:safe-bottom max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:w-[min(18rem,85vw)] max-md:border-r max-md:shadow-xl max-md:transition-[translate,visibility]",
-          open ? "max-md:translate-x-0" : "max-md:-translate-x-full max-md:invisible",
+          "max-md:bg-sidebar max-md:safe-top max-md:safe-bottom max-md:fixed max-md:inset-y-0 max-md:start-0 max-md:z-40 max-md:w-[min(18rem,85vw)] max-md:border-e max-md:shadow-xl max-md:transition-[translate,visibility]",
+          open ? "max-md:translate-x-0" : "max-md:-translate-x-full rtl:max-md:translate-x-full max-md:invisible",
           // Phones have their own settings index, so the drawer stays out of the way there.
           settings && "max-md:hidden",
         )}
       >
         {/* Floating or docked comes from html[data-sidebar]; shell.css morphs between the two. */}
-        <div className="shell-sidebar-inner sidebar-surface relative h-full shrink-0 overflow-hidden max-md:w-full">
+        <div ref={glassRef} className="shell-sidebar-inner sidebar-surface relative h-full shrink-0 overflow-hidden max-md:w-full">
           <div ref={panelRef} data-layer="chat" data-active={!settings} inert={settings} className="sidebar-layer absolute inset-0 flex flex-col">
             <div className="flex h-12 shrink-0 items-center justify-between px-3">
               <Link href="/" onClick={(event) => { event.preventDefault(); showChat(navigate); }}>
@@ -83,9 +84,8 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
               </button>
               </div>
             </div>
-            <nav aria-label={t("sidebar.mainNavigation")} className="glide-host flex flex-col gap-0.5 px-2 pt-2 pb-4">
-              <GlideHighlight />
-              {visibleItems.includes("newChat") && <button type="button" data-glide aria-current={location === "/" && empty ? "page" : undefined} className={cn(rowClass, location === "/" && empty && "bg-sidebar-row-hover")} onClick={async () => {
+            <nav aria-label={t("sidebar.mainNavigation")} className="flex flex-col gap-0.5 px-2 pt-2 pb-4">
+              {visibleItems.includes("newChat") && <button type="button" aria-current={location === "/" && empty ? "page" : undefined} className={rowClass} onClick={async () => {
                 await aui.threads.switchToNewThread();
                 useChatPrivacyStore.getState().set(aui.threadListItem.getState().id, { temporary: false, personalized: true });
                 showChat(navigate);
@@ -99,10 +99,9 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
               ] as const).filter((item) => visibleItems.includes(item.id)).map((item) => (
                 <div key={item.id} className="flex items-center gap-0.5">
                   <Link
-                    data-glide
                     href={item.href}
                     aria-current={location === item.href ? "page" : undefined}
-                    className={cn(rowClass, "min-w-0 flex-1", location === item.href && "bg-sidebar-row-hover")}
+                    className={cn(rowClass, "min-w-0 flex-1")}
                     // Start the Library's first page while the pointer heads for the click, so it opens with data.
                     {...(item.id === "library" ? { onPointerEnter: prefetchLibrary, onFocus: prefetchLibrary, onPointerDown: prefetchLibrary } : {})}
                   >
@@ -138,7 +137,7 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
               }}
             >
               <div
-                className="glide-host px-2"
+                className="px-2"
                 // Arrows move between chats, like a list. Rows are focusable one by one, so Tab still walks them too.
                 onKeyDown={(event) => {
                   if (event.defaultPrevented) return;
@@ -160,7 +159,6 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
                   if ((event.target as Element).closest?.("[data-slot=aui_thread-list-item-trigger]")) showChat(navigate);
                 }}
               >
-                <GlideHighlight />
                 <ThreadList />
               </div>
             </ScrollArea>
