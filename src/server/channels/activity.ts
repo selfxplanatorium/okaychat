@@ -275,6 +275,8 @@ function clearTyping(conn: Connection): void {
 }
 
 function addGrace(conn: Connection): void {
+  // A session that ended (logout, revocation) must not keep the account online for the grace window.
+  if (!sessionAlive(conn.sessionHash)) return;
   const now = activityNow();
   const state = presenceOf(conn, now);
   if (!state || !share(conn.userId).sharePresence) return;
