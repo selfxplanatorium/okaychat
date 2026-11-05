@@ -66,7 +66,7 @@ export function CustomToolList({ items, onChanged, navigate }: { items: ToolSumm
       ) : (
         <ul className="grid gap-2">
           {visible.map((item) => {
-            const Icon = ICON[item.icon];
+            const Icon = ICON[item.icon] ?? WrenchIcon;
             return (
               <li key={item.id} className="flex items-center gap-3 rounded-lg border p-3">
                 <Link href={customToolsHref({ toolId: item.id })} aria-label={t("customTools.openTool", { name: item.name })} className="hover:bg-muted/40 flex min-w-0 flex-1 items-center gap-3 rounded-md px-1 py-1">

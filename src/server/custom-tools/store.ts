@@ -252,12 +252,14 @@ export function createTool(userId: string, write: unknown, patch: SecretPatch | 
   const validated = validateToolWrite(write);
   if (!validated.ok) throw new AppError({ code: "validation", message: "This tool definition is invalid.", details: { reason: validated.issues[0]!.reason, path: validated.issues[0]!.path } });
   const secrets = patch ? mergeSecrets({}, patch, false) : {};
-  assertSecretState(validated.value.config, secrets);
+  const checkedSecrets = validateSecretMap(secrets);
+  if (!checkedSecrets.ok) throw new AppError({ code: "validation", message: "The secrets are invalid.", details: { reason: checkedSecrets.issues[0]!.reason } });
+  assertSecretState(validated.value.config, checkedSecrets.value);
   const now = Date.now();
   const id = newId("ct");
   const base = unusedBaseKey(id);
   const configEnc = seal(userId, id, validated.value.config);
-  const secretsEnc = seal(userId, id, secrets);
+  const secretsEnc = seal(userId, id, checkedSecrets.value);
   const schemaJson = canonicalJson(validated.value.inputSchema as unknown as Json);
   const bytes = definitionBytes({ ...validated.value, base_key: base, input_schema_json: schemaJson, config_enc: configEnc, secrets_enc: secretsEnc });
   const result = tx(() => {
@@ -302,13 +304,15 @@ export function updateTool(userId: string, id: string, expectedRevision: number,
     const old = configOf(row);
     const originChanged = row.kind === "http" && (old?.kind === "http" ? old.origin : null) !== (validated.value.config.kind === "http" ? validated.value.config.origin : null);
     const merged = mergeSecrets(previous, patch, originChanged);
-    assertSecretState(validated.value.config, merged);
+    const checked = validateSecretMap(merged);
+    if (!checked.ok) throw new AppError({ code: "validation", message: "The secrets are invalid.", details: { reason: checked.issues[0]!.reason } });
+    assertSecretState(validated.value.config, checked.value);
     if (validated.value.enabled) {
       const enabled = db.prepare("SELECT COUNT(*) AS n FROM custom_tools WHERE user_id = ? AND enabled = 1 AND id <> ?").get(userId, id) as { n: number };
       if (enabled.n >= CUSTOM_LIMITS.enabledDefinitions) throw new AppError({ code: "conflict", message: `You can enable at most ${CUSTOM_LIMITS.enabledDefinitions} custom tools.`, details: { reason: "enabled_limit" } });
     }
     const configEnc = seal(userId, id, validated.value.config);
-    const secretsEnc = seal(userId, id, merged);
+    const secretsEnc = seal(userId, id, checked.value);
     const schemaJson = canonicalJson(validated.value.inputSchema as unknown as Json);
     const next = { ...row, ...validated.value, base_key: row.base_key, input_schema_json: schemaJson, config_enc: configEnc, secrets_enc: secretsEnc, revision: row.revision + 1 };
     const delta = definitionBytes(next) - definitionBytes(row);

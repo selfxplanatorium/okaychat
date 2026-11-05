@@ -201,6 +201,9 @@ async function dispatchHttp(row: ToolRow, input: Json, signal: AbortSignal | und
   const secrets = Object.values(secretMap);
   const headers = headerValues(request.value.headers, secretMap);
   if (!headers.ok) return { state: "failed", code: "invalid_result", value: null, outputBytes: 0, httpStatus: null, dispatched: false };
+  let headerBytes = 0;
+  for (const [name, value] of Object.entries(headers.value)) headerBytes += utf8Bytes(name) + utf8Bytes(value) + 4;
+  if (headerBytes > CUSTOM_LIMITS.requestHeadersBytes) return { state: "failed", code: "invalid_result", value: null, outputBytes: 0, httpStatus: null, dispatched: false };
   const timeout = AbortSignal.timeout(bundle.config.timeoutMs);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
   try {

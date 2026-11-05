@@ -1216,7 +1216,7 @@ export function newRequestId(random: (bytes: number) => Uint8Array, now = Date.n
   const rand = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
   const time = now.toString(16).padStart(12, "0");
   const variant = (8 + (bytes[0]! % 4)).toString(16);
-  return `${time.slice(0, 8)}-${time.slice(8, 12)}-7${time.slice(12, 15)}-${variant}${rand.slice(0, 3)}-${rand.slice(3, 15)}`;
+  return `${time.slice(0, 8)}-${time.slice(8, 12)}-7${rand.slice(0, 3)}-${variant}${rand.slice(3, 6)}-${rand.slice(6, 18)}`;
 }
 
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;

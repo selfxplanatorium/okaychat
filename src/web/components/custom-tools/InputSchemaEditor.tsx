@@ -51,6 +51,7 @@ export function InputSchemaEditor({ value, onChange, disabled }: { value: InputS
       {mode === "builder" ? (
         <SchemaFieldEditor
           depth={0}
+          lockType
           field={value}
           onChange={(schema) => onChange(schema as InputSchema)}
         />

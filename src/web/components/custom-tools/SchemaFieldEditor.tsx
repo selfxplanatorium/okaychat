@@ -24,7 +24,7 @@ function defaultFor(type: FieldType): FieldSchema {
 const isScalar = (field: FieldSchema): field is ScalarSchema =>
   field.type === "string" || field.type === "number" || field.type === "integer" || field.type === "boolean";
 
-export function SchemaFieldEditor({ field, name, required, siblingNames, depth, onChange, onRename, onRemove, onRequiredChange }: {
+export function SchemaFieldEditor({ field, name, required, siblingNames, depth, lockType, onChange, onRename, onRemove, onRequiredChange }: {
   field: FieldSchema;
   name?: string;
   required?: boolean;
@@ -34,6 +34,7 @@ export function SchemaFieldEditor({ field, name, required, siblingNames, depth, 
   onRename?: (name: string) => void;
   onRemove?: () => void;
   onRequiredChange?: (required: boolean) => void;
+  lockType?: boolean;
 }) {
   const identifier = (value: string) => /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(value);
   const renameAllowed = (value: string) => identifier(value) && !(siblingNames ?? []).includes(value);
@@ -52,10 +53,12 @@ export function SchemaFieldEditor({ field, name, required, siblingNames, depth, 
             }} />
           </label>
         )}
-        <label className="w-32 text-xs">
-          <span className="text-muted-foreground">{t("customTools.fieldType")}</span>
-          <Select className="mt-1" aria-label={t("customTools.fieldType")} value={field.type} onValueChange={(value) => switchType(value as FieldType)} options={TYPES.map((type) => ({ value: type, label: type }))} />
-        </label>
+        {!lockType && (
+          <label className="w-32 text-xs">
+            <span className="text-muted-foreground">{t("customTools.fieldType")}</span>
+            <Select className="mt-1" aria-label={t("customTools.fieldType")} value={field.type} onValueChange={(value) => switchType(value as FieldType)} options={TYPES.map((type) => ({ value: type, label: type }))} />
+          </label>
+        )}
         {required !== undefined && onRequiredChange && (
           <label className="flex items-center gap-1.5 pb-1 text-xs">
             <input type="checkbox" className="size-4" checked={required} onChange={(event) => onRequiredChange(event.target.checked)} />

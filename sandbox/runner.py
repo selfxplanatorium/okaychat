@@ -978,7 +978,7 @@ class Handler(BaseHTTPRequestHandler):
                 timeout_ms = req.get("timeoutMs", 10000)
                 if not isinstance(timeout_ms, int) or isinstance(timeout_ms, bool) or not 1000 <= timeout_ms <= 30000:
                     raise Failure(400, "invalid timeout")
-                return self.json(200, run_function(ws, req["code"], req["input"], timeout_ms // 1000, job_id(req.get("job"))) )
+                return self.json(200, run_function(ws, req["code"], req["input"], (timeout_ms + 999) // 1000, job_id(req.get("job"))) )
             if method == "POST" and action == "cancel":
                 # No lock: the run holding it sees its process exit and finishes normally.
                 req = json.loads(self.body(4096) or b"{}")

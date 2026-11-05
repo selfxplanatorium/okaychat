@@ -14,6 +14,8 @@ import {
   validateToolWrite,
   type HttpConfig,
   type InputSchema,
+  newRequestId,
+  validRequestId,
   type ToolWrite,
 } from "./custom-tools.js";
 
@@ -176,6 +178,15 @@ test("HTTP requests expand path, query and body without secret values", () => {
   assert.equal(request.value.body, '{"id":"a b","n":2,"tags":["x"]}');
   assert.ok(request.value.headers.some((header) => "secret" in header && header.secret === "key"));
   assert.equal(request.value.warning, "outbound_destructive");
+});
+
+test("workspace request ids are UUIDv7 with a 24-hour freshness window", () => {
+  const now = Date.UTC(2026, 10, 5, 12, 0, 0);
+  const id = newRequestId((bytes) => Uint8Array.from({ length: bytes }, (_, index) => index + 1), now);
+  assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.equal(validRequestId(id, now), true);
+  assert.equal(validRequestId(id, now + 24 * 60 * 60_000 + 1), false);
+  assert.equal(validRequestId("00000000-0000-4000-8000-000000000000", now), false);
 });
 
 test("redaction removes secret values and rejects a secret as a key", () => {

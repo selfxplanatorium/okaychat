@@ -39,7 +39,7 @@ export function CustomToolCallCard(props: ToolCallMessagePartProps) {
             {result.error && (
               <p className="text-destructive flex items-start gap-1 text-xs">
                 <TriangleAlertIcon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-                {t(RUN_ERROR_KEY[result.error.code])}
+                {t(RUN_ERROR_KEY[result.error.code] ?? "customTools.errorInvalidResult")}
               </p>
             )}
             {result.ok && (
