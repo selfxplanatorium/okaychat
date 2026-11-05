@@ -19,6 +19,7 @@ import { closeReplyEditor } from "@/state/message-edits";
 import { CallView } from "@/speech/call/CallView";
 import { BookmarkDialog } from "./BookmarkDialog";
 import { FeedbackDialog } from "./FeedbackDialog";
+import TranslationDialog from "./TranslationDialog";
 import { SavedPromptsDialog } from "./SavedPromptsDialog";
 import { ThreadAnnotationsSync } from "./ThreadAnnotationsSync";
 import { useCommand } from "@/keyboard/registry";
@@ -194,6 +195,7 @@ export function ChatView() {
       <AssistantPickerDialog />
       <BookmarkDialog />
       <FeedbackDialog />
+      <TranslationDialog />
       <KnowledgeCitationHost />
       <CallView />
     </>

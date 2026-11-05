@@ -184,6 +184,29 @@ Deferred: the Responses API, tools/function calling, multimodal input, per-key b
 allowlists, key rotation/recovery, admin key inspection, CORS/browser clients, multi-process limiting,
 and provider-specific parameter bags.
 
+## Pass 13: German and Spanish UI, per-message translation (built)
+
+- **Shipped locales**: German (`de`) and Spanish (`es`) catalogs beside English, loaded as their own chunks.
+  A coverage contract holds every one of them to the core namespaces (`common` … `tags`); everything else
+  falls back to English per key. The picker lists English plus every shipped file, and a new language is one
+  file plus the coverage test. `docs/implementation/i18n.md`.
+- **Account language**: `user_settings.locale` wins on every device. It is mirrored into localStorage and
+  reloads the page once, guarded by a per-session marker so blocked storage cannot loop. The account value is
+  saved before the device changes, so a failed save leaves the device language alone.
+- **Formatting discipline**: `formatLanguageName`/`formatSentenceCase`, a no-direct-Intl test over `src/web`,
+  and an RTL ratchet for new UI files.
+- **Per-message translation**: an additive block under a saved user or assistant message, translated by a
+  standalone `generateText` with the utility model, stored in `message_translations` keyed by
+  `(message, lang, source hash)`, charged to storage, recorded as `translation` usage, and never written
+  into messages, `turn_context`, FTS, shares, exports, or archives. See
+  `docs/implementation/message-translation.md`.
+
+Deferred: RTL languages (133 physical-direction utility occurrences in `src/web` need converting and a full
+layout pass), full coverage of the non-core namespaces, sticky per-message "show translation" across
+reloads, translating team channel messages (`channel_translations`, owner-paid), replacing message text with
+a translation ("reading mode"), translating artifacts/attachments/whole chats, read-aloud of a translation,
+server-side source-language detection, and per-message language memory.
+
 ## Known gaps
 
 - Stream replay is kept in server memory for 15 minutes after the last update. Reload recovery works; pending generations do not survive a server restart.

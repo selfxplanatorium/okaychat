@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { LOCALE_TAG, MAX_LOCALE_TAG } from "../shared/locale-tag.js";
 import { speechSettingsSchema } from "./speech/config.js";
 
 const modelRef = z.string().min(1).max(300);
@@ -38,4 +39,7 @@ export const settingsPatch = z.object({
   codeExecution: z.boolean().optional(),
   editAssistantMessages: z.boolean().optional(),
   notifications: z.object({ browser: z.boolean(), scheduleSuccess: z.boolean() }).strict().optional(),
+  locale: z.string().max(MAX_LOCALE_TAG).regex(LOCALE_TAG).nullable().optional(),
+  translateMessages: z.boolean().optional(),
+  translationTarget: z.string().max(MAX_LOCALE_TAG).regex(LOCALE_TAG).nullable().optional(),
 });

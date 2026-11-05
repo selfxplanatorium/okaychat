@@ -24,7 +24,7 @@ export default {
   cached: "Cached",
   output: "Out",
   byPurpose: "By purpose",
-  byPurposeDescription: "Chat replies, compaction summaries, title generation, deep research, and evaluation cases and judging.",
+  byPurposeDescription: "Chat replies, compaction summaries, title generation, deep research, evaluation cases and judging, and message translation.",
   purposeChat: "Chat",
   purposeCompaction: "Compaction",
   purposeTitle: "Title",
@@ -33,5 +33,6 @@ export default {
   purposeEvaluationJudge: "Evaluation judging",
   kindChannel: "Channels",
   purposeApi: "API requests",
+  purposeTranslation: "Message translation",
   requestCount: { one: "{count} request", other: "{count} requests" },
 } as const;

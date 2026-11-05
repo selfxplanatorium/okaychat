@@ -33,6 +33,7 @@ import { collectionAccessible } from "./knowledge/store.js";
 import { libraryRoutes } from "./library.js";
 import { messageEditRoutes } from "./message-edits.js";
 import { messageAnnotationRoutes } from "./message-annotations.js";
+import { messageTranslationRoutes } from "./message-translations.js";
 import { savedPromptRoutes } from "./saved-prompts.js";
 import { notesRoutes } from "./notes/routes.js";
 import { calendarRoutes } from "./calendar/routes.js";
@@ -258,6 +259,7 @@ const api = new Hono<AppEnv>()
   })
   .route("/", messageEditRoutes)
   .route("/", messageAnnotationRoutes)
+  .route("/", messageTranslationRoutes)
   .route("/", assistantPresetRoutes)
   .route("/", archiveRoutes)
   .route("/saved-prompts", savedPromptRoutes)

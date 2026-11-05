@@ -77,3 +77,5 @@ An explicit continuation is an ordinary new user message after the target reply.
 and the new answer; the original answer's bytes stay unchanged. The target is protected from summarization
 for the turn. Imported archive text is inert and deterministically enveloped, so it never impersonates a
 provider cache prefix.
+
+Message translation is a standalone `generateText` request: it never touches `messages`, `turn_context`, the chat's system prefix, or `threads.updated_at`, and marks no cache breakpoint. It keeps the account cache affinity only, so the chat's prefix is untouched. See `message-translation.md`.

@@ -12,6 +12,7 @@ import {
   MIN_INTERFACE_FONT_SIZE,
   MIN_PROMPT_FONT_SIZE,
 } from "./settings";
+import { compareText } from "@/i18n/format";
 
 // Fontsource variable families include "Variable" in their CSS name, but the picker uses familiar labels.
 const FONT_FAMILY_ALIASES = new Map([
@@ -205,7 +206,7 @@ export async function queryInstalledFontFamilies(): Promise<InstalledFontFamilie
       // Dot-prefixed families are macOS-internal UI faces; selecting one is
       // never intended and most refuse to render for web content anyway.
       .filter((family) => !family.startsWith("."))
-      .sort((left, right) => left.localeCompare(right));
+      .sort((left, right) => compareText(left, right));
     // A denied permission check resolves with an empty list instead of
     // throwing; no machine has zero fonts, so treat empty as denied.
     if (families.length === 0) return { families: [], status: "denied" };

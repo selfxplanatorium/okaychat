@@ -1765,6 +1765,28 @@ CREATE INDEX notifications_calendar ON notifications(calendar_event_id) WHERE ca
     `);
     if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "api-access") throw new Error("Injected migration failure");
   },
+  // Per-message translations (docs/implementation/message-translation.md). Derived text: never message
+  // content, never chat activity, never shared. The composite FK mirrors message_bookmarks.
+  () => {
+    db.exec(`
+    CREATE TABLE message_translations (
+      thread_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      lang TEXT NOT NULL CHECK(length(CAST(lang AS BLOB)) BETWEEN 2 AND 35),
+      source_hash TEXT NOT NULL CHECK(length(source_hash) = 64),
+      source_chars INTEGER NOT NULL CHECK(source_chars >= 0),
+      translated TEXT NOT NULL CHECK(length(CAST(translated AS BLOB)) BETWEEN 1 AND 32768),
+      truncated INTEGER NOT NULL CHECK(truncated IN (0,1)),
+      model_ref TEXT NOT NULL CHECK(length(CAST(model_ref AS BLOB)) BETWEEN 1 AND 1200),
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (thread_id, message_id, lang),
+      FOREIGN KEY (thread_id, message_id) REFERENCES messages(thread_id, id) ON DELETE CASCADE
+    );
+    CREATE INDEX message_translations_message ON message_translations(thread_id, message_id);
+    `);
+    if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "message-translations") throw new Error("Injected migration failure");
+  },
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

@@ -35,8 +35,8 @@ import { useSmoothHeight } from "@/components/ui/smooth-height";
 import { cn } from "@/lib/utils";
 import { toolInjection } from "@/lib/tool-injection";
 import { useData } from "@/state/data";
-import { currentLocale, t } from "@/i18n";
-import { formatDuration, formatList } from "@/i18n/format";
+import { t } from "@/i18n";
+import { formatDuration, formatList, formatSentenceCase } from "@/i18n/format";
 import {
   ActionBarMorePrimitive,
   ActionBarPrimitive,
@@ -100,6 +100,7 @@ import { EditableReplyTexts, EditedReplyBadge, ReplyEditAction, ReplyEditorFoote
 import { editKey, useMessageEdits } from "@/state/message-edits";
 import { RetryMenu } from "@/components/chat/retry-model";
 import { BookmarkCommand, BookmarkMarker, BookmarkMenuItem } from "@/components/chat/MessageBookmark";
+import { MessageTranslationBlock, TranslationChooseMenuItem, TranslationCommand, TranslationMenuItem } from "@/components/chat/MessageTranslation";
 import { SaveNoteMenuItem } from "@/components/notes/SaveNoteMenuItem";
 import { FeedbackCommand, FeedbackMarker, FeedbackMenuItem } from "@/components/chat/MessageFeedback";
 import { PromptSlashInput } from "@/components/chat/PromptSlashInput";
@@ -1321,7 +1322,7 @@ const workLabel = (
     tools ? t("thread.workUsed", { count: tools }) : "",
   ].filter(Boolean);
   const text = phrases.length > 0 ? formatList(phrases) : t("thread.workWorked");
-  const summary = `${text.charAt(0).toLocaleUpperCase(currentLocale())}${text.slice(1)}`;
+  const summary = formatSentenceCase(text);
   const seconds = reasoningDuration(timing);
   return seconds ? t("thread.workWithTime", { summary, time: formatDuration(seconds) }) : summary;
 };
@@ -1539,6 +1540,11 @@ const AssistantMessage: FC = () => {
         </ReplyEditorShell>
       </div>
 
+      <div className="px-2">
+        <MessageTranslationBlock threadId={remoteId} messageId={messageId} />
+        <TranslationCommand threadId={remoteId} messageId={messageId} />
+      </div>
+
       <div
         data-slot="aui_assistant-message-footer"
         className={cn("ms-2 flex flex-wrap items-center gap-y-1", ACTION_BAR_HEIGHT)}
@@ -1610,6 +1616,8 @@ const AssistantActionBar: FC = () => {
           className="aui-action-bar-more-content bg-popover text-popover-foreground data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:animate-out data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 min-w-[8rem] overflow-hidden rounded-xl border p-1.5"
         >
           <BookmarkMenuItem threadId={remoteId} messageId={messageId} />
+          <TranslationMenuItem threadId={remoteId} messageId={messageId} />
+          <TranslationChooseMenuItem threadId={remoteId} messageId={messageId} />
           <FeedbackMenuItem threadId={remoteId} messageId={messageId} />
           <SaveNoteMenuItem threadId={remoteId} messageId={messageId} />
           <ActionBarPrimitive.ExportMarkdown asChild>
@@ -1701,6 +1709,11 @@ const UserMessage: FC = () => {
         </div>
       </div>
 
+      <div className="col-start-2 min-w-0">
+        <MessageTranslationBlock threadId={remoteId} messageId={messageId} />
+        <TranslationCommand threadId={remoteId} messageId={messageId} />
+      </div>
+
       <div
         data-slot="aui_user-message-footer"
         // Fixed height: the bar mounts on hover and must not push the next message.
@@ -1755,6 +1768,8 @@ const UserMoreMenu: FC = () => {
         className="aui-action-bar-more-content bg-popover text-popover-foreground data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:animate-out data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 min-w-[8rem] overflow-hidden rounded-xl border p-1.5"
       >
         <BookmarkMenuItem threadId={remoteId} messageId={messageId} />
+        <TranslationMenuItem threadId={remoteId} messageId={messageId} />
+        <TranslationChooseMenuItem threadId={remoteId} messageId={messageId} />
         <SaveNoteMenuItem threadId={remoteId} messageId={messageId} />
       </ActionBarMorePrimitive.Content>
     </ActionBarMorePrimitive.Root>

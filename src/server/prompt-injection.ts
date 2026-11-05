@@ -28,6 +28,7 @@ export type UntrustedKind =
   | "text_draft"
   | "assistant"
   | "evaluation_output"
+  | "message_translation"
   | "evaluation_expected"
   | "channel_history"
   | "channel_metadata"

@@ -6,6 +6,11 @@ import { isTemporaryChat } from "@/state/chat-privacy";
 import { editKey, useMessageEdits } from "@/state/message-edits";
 import { useThreadSync } from "@/state/thread-sync";
 import { useThreadAnnotations } from "@/state/message-annotations";
+import { useData } from "@/state/data";
+import { useChatModel } from "@/state/thread-meta";
+import { parseAttachmentText } from "@/runtime/message-attachments";
+import { isAgentTarget } from "@shared/n8n-agents";
+import { translationGateState, type TranslationGateInput } from "./translation-gate";
 
 // The shared write gate for private annotations. History is persisted asynchronously after a turn ends, so
 // "not running" is not proof that the server stores the message: only an acknowledged write or GET counts.
@@ -69,4 +74,37 @@ export function useAnnotationGate(threadId: string | null | undefined, messageId
     editing,
     stored,
   };
+}
+
+export interface TranslationGate {
+  available: boolean;
+  /** Why the control is unavailable, for a translated disabled label. */
+  reason: PlainMessageKey | null;
+  temporary: boolean;
+  syncing: boolean;
+  stored: boolean;
+  running: boolean;
+}
+
+/**
+ * Translation has its own gate: it needs no annotations load, because a translation is independent of the
+ * bookmark list, but it does need the stored message, an idle chat, text, the switch, and a model to call.
+ */
+export function useTranslationGate(threadId: string | null | undefined, messageId: string | undefined): TranslationGate {
+  const running = useAuiState((s) => s.thread.isRunning || s.thread.isLoading);
+  const sync = useThreadSync();
+  const stored = useStoredMessage(threadId, messageId);
+  const editing = useMessageEdits((s) => (threadId && messageId ? s.editing === editKey(threadId, messageId) : false));
+  const temporary = isTemporaryChat(threadId);
+  // The same rule the server applies: an attachment placeholder or blank text is not translatable.
+  const hasText = useAuiState((s) =>
+    s.message.parts.some((part) => part.type === "text" && part.text.trim() !== "" && parseAttachmentText(part.text) === undefined),
+  );
+  const enabled = useData((s) => s.settings?.translateMessages !== false);
+  const utilityModel = useData((s) => s.settings?.utilityModel);
+  const chatModel = useChatModel();
+  // The server falls back to the utility model, the request's model, then the chat's; an agent is not a model.
+  const hasModel = !!utilityModel || (!!chatModel && !isAgentTarget(chatModel));
+  const state = translationGateState({ threadId, temporary, sync, stored, running, editing, enabled, hasModel, hasText });
+  return { ...state, temporary, syncing: !!sync, stored, running };
 }

@@ -231,6 +231,12 @@ export interface UserSettings {
   editAssistantMessages?: boolean;
   /** Durable notices: the bell in the app, and optional system notifications. */
   notifications?: NotificationSettings;
+  /** BCP 47 UI language. Absent or null follows the browser. Mirrored to localStorage before the API loads. */
+  locale?: string | null;
+  /** Adds the per-message Translate action. Default true. */
+  translateMessages?: boolean;
+  /** Default target for message translation. Absent or null follows the UI language. */
+  translationTarget?: string | null;
   /**
    * Server-maintained revision of the account's personal instructions (systemPrompt and per-model rules),
    * for compare-and-set. Never accepted from a settings patch.
@@ -253,6 +259,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   codeExecution: true,
   editAssistantMessages: false,
   notifications: { browser: false, scheduleSuccess: false },
+  translateMessages: true,
 };
 
 export interface TokenUsage {
@@ -657,7 +664,8 @@ export type PromptKey =
   | "evaluationCase"
   | "evaluationJudge"
   | "channelReply"
-  | "apiSystem";
+  | "apiSystem"
+  | "translation";
 
 /** A server-wide system prompt as the admin page shows it. */
 export interface AdminPrompt {

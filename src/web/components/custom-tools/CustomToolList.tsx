@@ -24,8 +24,8 @@ export function CustomToolList({ items, onChanged, navigate }: { items: ToolSumm
   const [enabledOnly, setEnabledOnly] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const visible = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
-    return items.filter((item) => (!enabledOnly || item.enabled) && (!needle || `${item.name} ${item.description}`.toLocaleLowerCase().includes(needle)));
+    const needle = query.trim().toLowerCase();
+    return items.filter((item) => (!enabledOnly || item.enabled) && (!needle || `${item.name} ${item.description}`.toLowerCase().includes(needle)));
   }, [items, query, enabledOnly]);
 
   const toggle = async (item: ToolSummary, enabled: boolean) => {

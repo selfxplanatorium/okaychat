@@ -4,7 +4,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { en } from "./en/index.js";
-import { formatBytes, formatCost, formatDuration, formatList, formatTokens } from "./format.js";
+import { formatBytes, formatCost, formatDate, formatDuration, formatLanguageName, formatList, formatNumber, formatTokens } from "./format.js";
 import { applyLocale, matchLocale, t, textDirection, type Translation } from "./index.js";
 
 afterEach(() => applyLocale("en", {}));
@@ -102,4 +102,83 @@ test("translations only use English keys and placeholders", async () => {
       }
     }
   }
+});
+
+/** The namespaces every shipped locale must translate completely; the rest fall back to English per key. */
+const LOCALE_COVERAGE_REQUIRED = [
+  "common", "shell", "auth", "sidebar", "composer", "thread", "messageDetails", "generation", "annotations",
+  "translation", "settings", "general", "account", "usage", "format", "errors", "services", "tags",
+] as const;
+
+test("every literal t() key exists in the English catalog", () => {
+  // The unused-key test catches text nobody shows; this catches text somebody shows but nobody wrote.
+  const code = sources(webRoot).map((path) => readFileSync(path, "utf8")).join("\n");
+  // A bare `t(` also matches `commandTarget(` and `useShortcut(`, which take command ids: require a
+  // non-identifier character before it, and a standalone `k=` so `data-command=` cannot slip in.
+  const patterns = [
+    /(?:^|[^\w$])t\("([a-z][A-Za-z0-9]*\.[A-Za-z0-9]+)"/g,
+    /(?:^|[^\w-])k="([a-z][A-Za-z0-9]*\.[A-Za-z0-9]+)"/g,
+    /labelKey:\s*"([a-z][A-Za-z0-9]*\.[A-Za-z0-9]+)"/g,
+  ];
+  const keys = new Set(patterns.flatMap((pattern) => [...code.matchAll(pattern)].map((match) => match[1]!)));
+  const catalog = en as Record<string, Record<string, unknown>>;
+  const missing = [...keys].filter((key) => {
+    const dot = key.indexOf(".");
+    const ns = key.slice(0, dot);
+    return !(ns in catalog) || !(key.slice(dot + 1) in catalog[ns]!);
+  });
+  assert.deepEqual(missing, []);
+});
+
+test("shipped locales are complete for the required namespaces and use their own plurals", async () => {
+  const dir = join(import.meta.dirname, "locales");
+  const files = readdirSync(dir).filter((name) => name.endsWith(".ts"));
+  assert.ok(files.length >= 2, "German and Spanish ship");
+  const catalog = en as Record<string, Record<string, unknown>>;
+  for (const file of files) {
+    const tag = file.replace(/\.ts$/, "");
+    const translation = ((await import(join(dir, file))) as { default: Translation }).default as Record<string, Record<string, unknown>>;
+    const categories = new Set(new Intl.PluralRules(tag).resolvedOptions().pluralCategories);
+    assert.equal(textDirection(tag), "ltr");
+    for (const ns of LOCALE_COVERAGE_REQUIRED) {
+      const source = catalog[ns]!;
+      const entries = translation[ns];
+      for (const key of Object.keys(source)) assert.ok(entries && key in entries, `${file}: ${ns}.${key} is missing`);
+      for (const [key, value] of Object.entries(entries ?? {})) {
+        const english = source[key];
+        assert.ok(english !== undefined, `${file}: unknown key ${ns}.${key}`);
+        const textsOfEntry = texts(value);
+        const allowed = new Set(texts(english).flatMap(placeholders));
+        const required = new Set(texts(english).flatMap(placeholders).filter((name) => name !== "count"));
+        if (typeof value !== "string") {
+          const forms = value as Record<string, string>;
+          assert.ok("other" in forms, `${file}: ${ns}.${key} needs an "other" form`);
+          for (const rule of Object.keys(forms)) {
+            assert.ok(categories.has(rule as Intl.LDMLPluralRule), `${file}: ${ns}.${key}.${rule} is not a ${tag} plural category`);
+          }
+        }
+        for (const text of textsOfEntry) {
+          assert.ok(text.trim() !== "", `${file}: ${ns}.${key} is empty`);
+          const used = new Set(placeholders(text));
+          for (const name of used) assert.ok(allowed.has(name), `${file}: ${ns}.${key} uses {${name}}`);
+          for (const name of required) assert.ok(used.has(name), `${file}: ${ns}.${key} is missing {${name}}`);
+        }
+      }
+    }
+  }
+});
+
+test("formatters follow German and Spanish", async () => {
+  const de = ((await import("./locales/de.js")) as { default: Translation }).default;
+  const es = ((await import("./locales/es.js")) as { default: Translation }).default;
+  applyLocale("de", de);
+  assert.equal(formatNumber(1234.5), "1.234,5");
+  assert.equal(formatBytes(1536), "1,5 KB");
+  assert.equal(formatDate(0, { dateStyle: "medium", timeZone: "UTC" }), "01.01.1970");
+  assert.equal(formatLanguageName("es"), "Spanisch");
+  applyLocale("es", es);
+  assert.equal(formatNumber(1234.5), "1234,5");
+  assert.equal(formatList(["a", "b"]), "a y b");
+  assert.equal(formatDate(0, { dateStyle: "medium", timeZone: "UTC" }), "1 ene 1970");
+  assert.equal(formatCost(0.004), "0,0040\u00A0US$");
 });

@@ -54,6 +54,7 @@ export const FEATURE_LABEL: Record<FeatureKey, PlainMessageKey> = {
   notes: "permissions.featureNotesLabel",
   calendar: "permissions.featureCalendarLabel",
   apiAccess: "permissions.featureApiAccess",
+  translation: "permissions.featureTranslation",
 };
 
 export const FEATURE_HELP: Record<FeatureKey, PlainMessageKey> = {
@@ -80,6 +81,7 @@ export const FEATURE_HELP: Record<FeatureKey, PlainMessageKey> = {
   notes: "permissions.featureNotesHelp",
   calendar: "permissions.featureCalendarHelp",
   apiAccess: "permissions.featureApiAccessHelp",
+  translation: "permissions.featureTranslationHelp",
 };
 
 export const LIMIT_LABEL: Record<LimitKey, PlainMessageKey> = {

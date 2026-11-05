@@ -172,6 +172,8 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: "message.branch", labelKey: "keyboard.cmdMessageBranch", group: "Messages", keys: ["B"], scope: "message", palette: false },
   { id: "message.more", labelKey: "keyboard.cmdMessageMore", group: "Messages", keys: ["M"], scope: "message", palette: false },
   { id: "message.bookmark", labelKey: "keyboard.cmdMessageBookmark", group: "Messages", keys: [], scope: "message", palette: false },
+  { id: "message.translate", labelKey: "keyboard.cmdMessageTranslate", group: "Messages", keys: ["Alt+Shift+F"], scope: "message", palette: false },
+  { id: "message.translateChoose", labelKey: "keyboard.cmdMessageTranslateChoose", group: "Messages", keys: [], scope: "message", palette: false },
   { id: "message.feedback", labelKey: "keyboard.cmdMessageFeedback", group: "Messages", keys: [], scope: "message", palette: false },
   { id: "message.details", labelKey: "keyboard.cmdMessageDetails", group: "Messages", keys: [], scope: "message", palette: false },
   { id: "message.continue", labelKey: "keyboard.cmdMessageContinue", group: "Messages", keys: [], scope: "message", palette: false },

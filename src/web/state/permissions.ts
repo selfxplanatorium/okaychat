@@ -352,7 +352,7 @@ export function membershipDraftFor(state: Pick<PermissionsState, "bootstrap" | "
 export function groupOrderFor(state: Pick<PermissionsState, "bootstrap" | "groupOrderDraft">): string[] {
   if (state.groupOrderDraft) return state.groupOrderDraft.draft;
   return [...(state.bootstrap?.subjects.groups ?? [])]
-    .sort((a, b) => (a.promptOrder ?? Number.MAX_SAFE_INTEGER) - (b.promptOrder ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id))
+    .sort((a, b) => (a.promptOrder ?? Number.MAX_SAFE_INTEGER) - (b.promptOrder ?? Number.MAX_SAFE_INTEGER) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .map((group) => group.id);
 }
 
@@ -743,7 +743,7 @@ export const usePermissions = create<PermissionsState>((set, get) => ({
     const groupOrderDraft = state.groupOrderDraft
       ? {
           baseline: [...(state.bootstrap?.subjects.groups ?? [])]
-            .sort((a, b) => (a.promptOrder ?? Number.MAX_SAFE_INTEGER) - (b.promptOrder ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id))
+            .sort((a, b) => (a.promptOrder ?? Number.MAX_SAFE_INTEGER) - (b.promptOrder ?? Number.MAX_SAFE_INTEGER) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
             .map((group) => group.id),
           draft: state.groupOrderDraft.draft,
         }

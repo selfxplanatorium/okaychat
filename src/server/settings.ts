@@ -1,3 +1,4 @@
+import { canonicalLocaleTag } from "../shared/locale-tag.js";
 import { REASONING_EFFORTS } from "../shared/reasoning.js";
 import { imageServiceDef } from "../shared/image-services.js";
 import { DEFAULT_USER_SETTINGS, SIDEBAR_ITEMS, type UserSettings } from "../shared/types.js";
@@ -25,6 +26,11 @@ export function getSettings(userId: string): UserSettings {
   if (settings.imageServices !== undefined && !validImageServices(settings.imageServices)) delete settings.imageServices;
   if (settings.speech !== undefined && !validSpeechSettings(settings.speech)) delete settings.speech;
   if (settings.notifications !== undefined && !validNotificationSettings(settings.notifications)) delete settings.notifications;
+  // A tag stored by an older client (or a hand-edited row) follows the browser instead of blocking settings.
+  for (const key of ["locale", "translationTarget"] as const) {
+    const value = settings[key];
+    if (value != null && (typeof value !== "string" || canonicalLocaleTag(value) === null)) delete settings[key];
+  }
   return settings;
 }
 
@@ -49,8 +55,17 @@ export function updateSettings(userId: string, patch: Partial<UserSettings>): Us
   if (Object.hasOwn(patch, "notifications") && !validNotificationSettings(patch.notifications)) {
     throw new HTTPException(400, { message: "notifications must set browser and scheduleSuccess to true or false" });
   }
+  const normalized: Partial<UserSettings> = { ...patch };
+  for (const key of ["locale", "translationTarget"] as const) {
+    const value = patch[key];
+    // `null` means "follow the browser/UI language"; anything else must name a real language.
+    if (value == null) continue;
+    const canonical = canonicalLocaleTag(value);
+    if (canonical === null) throw new HTTPException(400, { message: "locale must be a BCP 47 language tag" });
+    normalized[key] = canonical;
+  }
   const current = getSettings(userId);
-  const next = { ...current, ...patch, instructionsRevision: current.instructionsRevision };
+  const next = { ...current, ...normalized, instructionsRevision: current.instructionsRevision };
   // Personal instructions share one revision with per-model rules (prompt-policy.ts) for compare-and-set.
   if (Object.hasOwn(patch, "systemPrompt") && patch.systemPrompt !== current.systemPrompt) next.instructionsRevision = (current.instructionsRevision ?? 0) + 1;
   db.prepare(

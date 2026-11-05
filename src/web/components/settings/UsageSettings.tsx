@@ -18,7 +18,8 @@ const PURPOSE_LABELS = {
   evaluation_judge: "usage.purposeEvaluationJudge",
   channel: "usage.kindChannel",
   api: "usage.purposeApi",
-} as const satisfies Record<"chat" | "compaction" | "title" | "research" | "evaluation" | "evaluation_judge" | "channel" | "api", PlainMessageKey>;
+  translation: "usage.purposeTranslation",
+} as const satisfies Record<"chat" | "compaction" | "title" | "research" | "evaluation" | "evaluation_judge" | "channel" | "api" | "translation", PlainMessageKey>;
 
 type UsageResponse = { rows: UsageRow[]; go: GoWindow[]; agents?: AgentUsageCounters };
 

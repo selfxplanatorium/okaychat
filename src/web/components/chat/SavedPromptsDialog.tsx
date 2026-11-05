@@ -325,9 +325,9 @@ export function SavedPromptsDialog() {
     () => searchSavedPrompts(prompts, query, compareText),
     [prompts, query],
   );
-  const externalTerm = query.trim().toLocaleLowerCase();
+  const externalTerm = query.trim().toLowerCase();
   const externalFiltered = externalTerm
-    ? mcpPrompts.filter((prompt) => (prompt.title ?? prompt.name).toLocaleLowerCase().includes(externalTerm) || prompt.server.toLocaleLowerCase().includes(externalTerm))
+    ? mcpPrompts.filter((prompt) => (prompt.title ?? prompt.name).toLowerCase().includes(externalTerm) || prompt.server.toLowerCase().includes(externalTerm))
     : mcpPrompts;
   const externalServers = [...new Set(externalFiltered.map((prompt) => prompt.server))];
 
