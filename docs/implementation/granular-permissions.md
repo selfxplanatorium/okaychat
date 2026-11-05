@@ -29,7 +29,12 @@ driven and rendered by `AdminSettings` when `?view=` is one of `people`, `groups
 The feature keys include `evaluations`: when it is denied the `/evaluations` routes answer 403 and the
 workspace shows a disabled state. Every evaluation case and judge call is an ordinary `llm.call`, so
 model allowlists, `operationsPerMinute`, and `concurrentOperations` apply unchanged; a mid-run denial
-stops further dispatch.
+stops further dispatch. Generation and judge dispatch each resolve the `evaluations` feature for
+their own exact model, in addition to the account-level management guard.
+
+n8n webhook turns also enforce `modelAllowed` for the canonical `n8n/<agent-id>` target before
+constructing the stream and again immediately before POST, so hand-crafted requests and a
+revocation during request preparation cannot bypass a target denial.
 
 - `src/web/components/settings/permissions/`: workspace rail, subject/model detail with Access / Features /
   Limits / Prompts tabs, prompt editor, impact review, inspector, audit.

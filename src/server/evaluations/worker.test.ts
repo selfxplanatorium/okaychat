@@ -452,3 +452,24 @@ test("the judge cost cap stops the pass with the remaining cases unjudged", asyn
   assert.equal(detail.scores.filter((score) => score.source === "judge").length, 1);
   assert.equal(calls.length, 1);
 });
+
+test("exact-model evaluation denial blocks both generation and judge dispatch", async () => {
+  const created = dataset([fields("one")], "Exact deny");
+  const { run } = launch(created.id);
+  const calls: LanguageModelV4CallOptions[] = [];
+  worker.setEvaluationModelFactoryForTests(() => fakeModel("gpt-eval", calls, () => answer("ok")));
+  writePolicy({ kind: "user", id: "alice" }, "openai/gpt-eval", { version: 1, features: { evaluations: false } }, "alice");
+  worker.enqueueRun("alice", run.id);
+  await waitTerminal(run.id);
+  assert.equal(calls.length, 0, "a model-specific feature deny must prevent provider execution");
+  assert.equal(store.getRun("alice", run.id)!.errorCode, "forbidden");
+
+  const second = launch(created.id).run;
+  finishRun(second.id, [{ caseId: created.cases[0]!.caseId, output: "answer" }]);
+  store.queueJudge("alice", second.id, judgeConfig());
+  writePolicy({ kind: "user", id: "alice" }, "openai/gpt-judge", { version: 1, features: { evaluations: false } }, "alice");
+  worker.enqueueJudge("alice", second.id);
+  await waitFor(() => ["done", "failed"].includes(store.runById(second.id)!.judge_state), "judge terminal");
+  assert.equal(calls.length, 0, "judge execution follows its own model-specific feature policy");
+  assert.equal(store.runById(second.id)!.judge_state, "failed");
+});
