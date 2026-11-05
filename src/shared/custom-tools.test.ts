@@ -197,3 +197,17 @@ test("redaction removes secret values and rejects a secret as a key", () => {
   const collision = redactResult({ [secret]: 1 }, [secret]);
   assert.equal(collision.ok, false);
 });
+
+
+test("redaction covers short secrets, authentication payloads and scalar echoes", () => {
+  for (const secret of ["x", "ab", "123", "Bearer opaque-token", "Basic dXNlcjpwYXNz"]) {
+    const payload = secret.replace(/^(?:Bearer|Basic) /, "");
+    const result = redactResult({ echo: payload, nested: [secret] }, [secret]);
+    assert.ok(result.ok);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), { echo: "[redacted]", nested: ["[redacted]"] });
+    assert.equal(redactResult({ [payload]: "value" }, [secret]).ok, false);
+  }
+  for (const scalar of [123, true, null]) {
+    assert.deepEqual(redactResult(scalar, [String(scalar)]), { ok: true, value: "[redacted]" });
+  }
+});

@@ -59,7 +59,8 @@ request timeout covering DNS, connection and body. JSON responses require `appli
 `application/*+json` and strict UTF-8; text responses accept `text/plain`, `text/csv` or
 `application/json`. 3xx becomes `redirect_blocked`; other non-2xx becomes `http_status` with the numeric
 status only. Response headers are discarded. Known secret values and common credential patterns are
-redacted before persistence, scanning, and model delivery; a result key containing a secret fails
+redacted before persistence, scanning, and model delivery, including short secrets, bare Bearer/Basic
+credential payloads and exact scalar echoes; a result key containing a secret fails
 `invalid_result`.
 
 ## Approvals and runtimes

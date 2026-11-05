@@ -182,7 +182,20 @@ export function CustomToolEditor({ userId, detail, newKind, onBack }: {
           <p className="font-medium">{t("customTools.conflict")}</p>
           <p className="text-muted-foreground text-xs">{t("customTools.changedElsewhere")}</p>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" variant="outline" onClick={() => { setDirty(false); setConflict(false); }}>{t("customTools.reloadStored")}</Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                // Discard the draft against the stored revision, not just the local flags: saving again
+                // with the stale revision would repeat the same conflict.
+                setDirty(false);
+                setConflict(false);
+                void refresh(userId, detail?.id ?? null);
+              }}
+            >
+              {t("customTools.reloadStored")}
+            </Button>
             <Button type="button" size="sm" variant="outline" onClick={copyDraft}>{t("customTools.copyDraft")}</Button>
           </div>
         </div>

@@ -98,3 +98,42 @@ test("malformed bodies and unknown fields are refused", async () => {
   const missingRevision = await call("PATCH", "/nope/enabled", { enabled: true });
   assert.equal(missingRevision.status, 400);
 });
+
+test("cancelling a running workspace test stops the live request", async () => {
+  const created = await call("POST", "/", { tool: { ...write, enabled: true }, secrets: { set: { apiKey: "secret-key" }, remove: [] } });
+  assert.equal(created.status, 201);
+  const { tool } = await created.json() as { tool: { id: string; revision: number } };
+  const { setExecutionDeps } = await import("./execute.js");
+  // Request ids are UUIDv7: the timestamp prefix must be recent, so a fixed id cannot pass.
+  const uuidv7 = () => {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    const stamp = Date.now();
+    for (let i = 0; i < 6; i++) bytes[i] = Math.floor(stamp / 2 ** (8 * (5 - i))) & 0xff;
+    bytes[6] = (bytes[6]! & 0x0f) | 0x70;
+    bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+    const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  };
+  let started = false;
+  setExecutionDeps({
+    fetch: ((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      started = true;
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    })) as typeof fetch,
+  });
+  try {
+    const review = await call("POST", `/${tool.id}/test`, { expectedRevision: tool.revision, input: { id: "a" }, requestId: uuidv7() });
+    assert.equal(review.status, 202);
+    const body = await review.json() as { review: { runId: string; token: string } };
+    const execution = call("POST", `/${tool.id}/test/execute`, { runId: body.review.runId, token: body.review.token });
+    for (let i = 0; i < 200 && !started; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(started, true, "the request must be in flight before cancelling");
+    const cancelled = await call("POST", `/${tool.id}/runs/${body.review.runId}/cancel`, {});
+    assert.equal(cancelled.status, 200);
+    const finished = await execution;
+    const run = await finished.json() as { run: { state: string } };
+    assert.equal(run.run.state, "cancelled");
+  } finally {
+    setExecutionDeps(null);
+  }
+});

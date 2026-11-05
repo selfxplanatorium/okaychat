@@ -67,6 +67,12 @@ let deps: ExecutionDeps = {};
 export function setExecutionDeps(next: ExecutionDeps | null): void {
   deps = next ?? {};
 }
+// The executor registers a controller per running id so a cancel request arriving from another
+// connection can stop the live fetch or sandbox call; a cancel for a queued or finished run is a no-op.
+const activeExecutions = new Map<string, AbortController>();
+export function abortExecution(runId: string): void {
+  activeExecutions.get(runId)?.abort(new Error("cancelled"));
+}
 const now = () => (deps.now ?? Date.now)();
 const fetcher = (): typeof fetch => deps.fetch ?? publicFetch;
 const sandbox = () => deps.sandbox ?? runSandboxFunction;
@@ -342,6 +348,7 @@ export async function executePrepared(opts: ExecutePreparedOptions): Promise<Too
     }
   }
   let release: (() => void) | undefined;
+  let activeId: string | undefined;
   try {
     const claim = claimRun(
       { userId: opts.actor.userId, runId: run.id, requestHash: opts.requestHash, sessionHash: opts.sessionHash },
@@ -354,9 +361,14 @@ export async function executePrepared(opts: ExecutePreparedOptions): Promise<Too
       now(),
     );
     const started = now();
+    // A running test can be stopped from the workspace; the controller is only reachable by run id.
+    const controller = new AbortController();
+    const signal = opts.signal ? AbortSignal.any([opts.signal, controller.signal]) : controller.signal;
+    activeId = claim.row.id;
+    activeExecutions.set(activeId, controller);
     const outcome = bundle.config.kind === "http"
-      ? await dispatchHttp(tool, opts.input, opts.signal)
-      : await dispatchPython(tool, run.id, opts.input, opts.signal);
+      ? await dispatchHttp(tool, opts.input, signal)
+      : await dispatchPython(tool, run.id, opts.input, signal);
     const finished = finishRun({
       userId: opts.actor.userId,
       runId: claim.row.id,
@@ -392,6 +404,7 @@ export async function executePrepared(opts: ExecutePreparedOptions): Promise<Too
     }
     return errorResult(tool, errorCodeOf(error), run.id);
   } finally {
+    if (activeId) activeExecutions.delete(activeId);
     release?.();
   }
 }

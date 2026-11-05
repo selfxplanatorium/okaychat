@@ -9,6 +9,7 @@ import { assertFeature, requireFeature } from "../permissions/guard.js";
 import { assertServiceAvailable } from "../services.js";
 import { sandboxConfigured } from "../sandbox-client.js";
 import {
+  abortExecution,
   approvedInvocation,
   executePrepared,
   prepareExecution,
@@ -238,6 +239,8 @@ export const customToolRoutes = new Hono<AppEnv>()
     if (!run || run.tool_id !== toolId) throw notFound();
     const updated = cancelRun(user.id, runId);
     if (!updated) throw notFound();
+    // A live execution is stopped where it runs; the executor then records the cancelled terminal state.
+    abortExecution(runId);
     return c.json({ run: updated });
   })
   .get("/:id/runs", requireFeature("customTools"), (c) => {
