@@ -447,3 +447,94 @@ test("startup recovery retains partial output and releases encrypted input and r
   assert.equal(runRow(run.runId)!.reserved_bytes, 0);
   assert.equal((db.prepare("SELECT body FROM channel_messages WHERE id = ?").get(run.messageId) as { body: string }).body, "Partial output");
 });
+
+test("ephemeral frames share the stream without entering the durable cursor or replay", { timeout: 30000 }, async () => {
+  const setup = await createRoom({ name: "Activity stream", visibility: "public" }, "carol");
+  const channelId = setup.body.channel.id;
+  await call(`/channels/${channelId}/join`, { method: "POST", json: {}, user: "bob" });
+
+  const open = async (user: string, cursor?: string) => {
+    const response = await call(`/channels/events?ephemeral=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, { user });
+    assert.equal(response.status, 200);
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    const state = { text: "", closed: false };
+    let pending: Promise<unknown> | null = null;
+    const readOnce = (ms: number) =>
+      Promise.race([
+        (pending ??= reader.read().then((part) => {
+          pending = null;
+          return part as { value?: Uint8Array; done: boolean };
+        })),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+      ]);
+    const waitFor = async (needle: string, ms: number): Promise<boolean> => {
+      const deadline = Date.now() + ms;
+      for (;;) {
+        if (state.text.includes(needle)) return true;
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) return false;
+        const part = await readOnce(Math.min(remaining, 200));
+        if (!part) continue;
+        const result = part as { value?: Uint8Array; done: boolean };
+        if (result.done) { state.closed = true; return false; }
+        if (result.value) state.text += decoder.decode(result.value);
+      }
+    };
+    return { state, waitFor, close: () => reader.cancel() };
+  };
+
+  const watcher = await open("carol");
+  const publisher = await open("bob");
+  try {
+    assert.ok(await watcher.waitFor("event: ready", 2_000));
+    assert.ok(await publisher.waitFor("event: ready", 2_000));
+    const ready = JSON.parse(/event: ready\ndata: (.+)\n/.exec(watcher.state.text)![1]!) as { ephemeral?: { connectionId: string } };
+    assert.ok(ready.ephemeral?.connectionId);
+    const publisherReady = JSON.parse(/event: ready\ndata: (.+)\n/.exec(publisher.state.text)![1]!) as { ephemeral?: { connectionId: string } };
+
+    const activity = (user: string, connectionId: string, seq: number, next: "active" | "idle") =>
+      call("/channels/activity", { method: "POST", json: { connectionId, seq, state: next, watch: { channelId, rootId: null } }, user });
+    assert.equal((await activity("carol", ready.ephemeral!.connectionId, 1, "active")).status, 200);
+    assert.equal((await activity("bob", publisherReady.ephemeral!.connectionId, 1, "active")).status, 200);
+    assert.ok(await watcher.waitFor("event: ephemeral", 6_000));
+    const first = JSON.parse(/event: ephemeral\ndata: (.+)\n/.exec(watcher.state.text)![1]!) as { kind: string; presence: Array<{ userId: string; state: string }> };
+    assert.equal(first.kind, "snapshot");
+    assert.equal(first.presence.find((entry) => entry.userId === "bob")?.state, "online");
+
+    // A typing start arrives as an ephemeral frame; it never carries an id.
+    const typing = (seq: number, value: boolean) =>
+      call("/channels/typing", { method: "POST", json: { connectionId: publisherReady.ephemeral!.connectionId, seq, channelId, rootId: null, typing: value }, user: "bob" });
+    assert.equal((await typing(2, true)).status, 200);
+    assert.ok(await watcher.waitFor("\"remainingMs\"", 6_000));
+
+    // Durable invalidations keep their ids and interleave with ephemeral frames.
+    const posted = await call(`/channels/${channelId}/messages`, { method: "POST", json: { clientId: crypto.randomUUID(), body: "Hello" }, user: "bob" });
+    assert.equal(posted.status, 201);
+    assert.ok(await watcher.waitFor("event: message.changed", 6_000));
+    const durableFrame = /id: ([A-Za-z0-9_.-]+)\nevent: message\.changed/.exec(watcher.state.text)?.[1];
+    assert.ok(durableFrame);
+    assert.equal((await typing(3, false)).status, 200);
+
+    // An activity wake alone must not append a heartbeat.
+    const heartbeatsBefore = (watcher.state.text.match(/: heartbeat/g) ?? []).length;
+    assert.equal((await activity("bob", publisherReady.ephemeral!.connectionId, 4, "idle")).status, 200);
+    await watcher.waitFor("\"userId\":\"bob\",\"state\":\"away\"", 6_000);
+    assert.equal((watcher.state.text.match(/: heartbeat/g) ?? []).length, heartbeatsBefore);
+
+    // Reconnect: durable rows after the cursor replay, and no typing/presence frame does.
+    assert.equal((await call(`/channels/${channelId}/messages`, { method: "POST", json: { clientId: crypto.randomUUID(), body: "Second" }, user: "bob" })).status, 201);
+    await watcher.close();
+    const rejoined = await open("carol", durableFrame);
+    try {
+      assert.ok(await rejoined.waitFor("event: message.changed", 6_000));
+      assert.ok(!new RegExp(`id: ${durableFrame.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\n`).test(rejoined.state.text));
+      assert.ok(!/event: ephemeral/.test(rejoined.state.text), "ephemeral state is never replayed");
+    } finally {
+      await rejoined.close();
+    }
+  } finally {
+    await watcher.close();
+    await publisher.close();
+  }
+});

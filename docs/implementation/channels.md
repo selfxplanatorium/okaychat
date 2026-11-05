@@ -120,7 +120,13 @@ membership state.
   15-second heartbeat. `Last-Event-ID` wins over `?cursor=`. A missing cursor starts at the current
   high-water and sends an initial reset. Maximum lifetime is 5 minutes; two streams per account and 256
   per process are allowed (429 beyond); frames are capped at 256 KiB and 256 signals; a stalled consumer
-  times out without advancing its undelivered cursor.
+  times out without advancing its undelivered cursor. Heartbeats run on a 15-second deadline, never
+  after every wake, so activity traffic cannot multiply keepalives.
+- `?ephemeral=1` opts a stream into presence/typing. Its `ready` adds
+  `{ephemeral:{v:1,connectionId,activityLeaseMs:75000,typingLeaseMs:6000}}`; a client that does not opt
+  in sees the unchanged `{"v":1}`. Ephemeral frames use the event name `ephemeral`, carry **no** `id`,
+  never enter `channel_events`, `/changes`, `/sync`, or any durable cursor, and are therefore never
+  replayed after a reconnect. A malformed or unknown-version frame clears only indicators.
 - `GET /api/channels/changes` is the polling fallback: at most 1,000 raw rows scanned, 200 emitted, and
   the cursor advances through every scanned row. `GET /api/channels/sync` reads joined summaries,
   invitations, and its cursor in one synchronous snapshot.
@@ -128,6 +134,69 @@ membership state.
   transport then refetches and drops caches for rooms that vanished. One transport runs per tab; the
   server allows two streams per account across tabs. Hidden tabs close the stream after 30 s and poll
   once a minute.
+
+## Presence and typing
+
+Presence and typing are advisory, ephemeral, and process-local. They describe an account connected to
+okaychat's channel transport, not which conversation it is reading, and they are never delivery or read
+receipts. Nothing is stored: a restart shows everyone offline, and the same empty view follows a
+reconnect. No activity path writes SQLite; a keystroke never becomes a row.
+
+The two account preferences live in `user_settings.json` as
+`channelActivity: {sharePresence, shareTyping}` (missing or invalid means both true). They are
+independent: hiding presence can still share typing. Hidden presence projects as `offline`, which the UI
+labels "Offline or not sharing status"; no hidden flag, setting value, or last-online time is sent to
+another account. Turning either switch off removes the account's contributions at once and needs a fresh
+activity update (presence) or new input (typing) to come back.
+
+| Item | Bound |
+| --- | --- |
+| Connection registry | The existing 256 streams, two per account; one activity entry per opted-in stream |
+| Presence lease | Client activity accepted at most every 30 s while active; online for 60 s, `away` until 75 s |
+| Idle declaration | 60 s without trusted input; the client sends `idle` once and does not refresh |
+| Hidden tab | Idle and typing stop on hide; the durable stream closes after 30 s and no indicators run |
+| Disconnect grace | A closed but valid contribution bridges rotation for 10 s; it can never type or publish |
+| Typing lease | 6 s; refresh no faster than 3 s and only after more input; stop after 4 s of silence |
+| Watches per stream | One channel plus an optional live root; published typing is one scope at a time |
+| Output | One replaceable dirty marker per stream, at most one frame per 2 s, a full snapshot every 30 s |
+| Frame | 64 KiB UTF-8, 200 presence entries, 400 typing entries; overflow sends `clear` and disables ephemeral output only for that stream |
+| Requests | Strict JSON under 4 KiB, identifiers 1–128 URL-safe characters, positive safe sequence |
+| In-memory rates | Account 12 activity + 60 typing + 72 combined per aligned minute; connection 8 + 24; 1,024 buckets, 120 s idle expiry, saturation refused with 429 |
+
+`POST /api/channels/activity` replaces the whole connection state
+`{connectionId, seq, state, watch}`. The connection id exists only while its stream is live and is bound
+to the account **and** the exact session token hash, so a second session cannot drive it; it is never a
+credential on its own and never enters storage. Equal or lower `seq` is a successful no-op that renews
+nothing. A watch must be a live membership; private/foreign/guessed rooms, bad roots, and a root on a DM
+all share one 404. Archived rooms keep presence but ignore the root and expose no typing. The response
+is `{acceptedSeq, watchRevision}`; a watch change clears that connection's typing and forces a snapshot.
+
+`POST /api/channels/typing` accepts only the connection's current scope, requires a live active lease,
+and answers `409 archived` for an archived room. Disabled sharing or a stale lease accepts as a no-op
+after removing the connection's own contribution, so preferences are never disclosed through an error.
+Stop is idempotent and only affects that connection: another tab keeps its own lease. A successful human
+post clears its author's contributions in the resolved scope after commit, including a top-level quote
+that resolves into a thread; an exact idempotent replay does not, and a rolled-back send never does.
+Root deletion, room archive, deletion, leaving, removal, and blocking clear affected typing after commit.
+
+Frames are strict unions in `src/shared/channel-activity.ts`: `snapshot` (all currently eligible members
+with `online|away|offline`, plus live typing in the watched scopes), `patch` (presence entries and whole
+typing scopes replaced), and `clear` (no identifiers at all). Entries are sorted by account id. The
+projection checks, for every subject/viewer pair, the live account feature, membership, group
+eligibility, archive/root state, and a block in either direction; suppressed presence is `offline` with
+no reason. Admin rights grant nothing here, and a status shown in a room never implies a DM. Watches are
+indexed by channel, fan-out touches at most the registered watchers, and projection is serialized again
+after any backpressure wait, so a revoked identifier is never emitted.
+
+The web keeps one controller per tab (`state/channel-activity.ts`): it starts with the transport, merges
+activity and typing to the latest intent, sends one serial request at a time, and keeps no payload,
+token, or state in browser storage. Input means trusted keydown, pointerdown, touch, wheel, or scrolling
+in the app — never mousemove, animation, synthetic events, or a restored draft. The controller publishes
+typing only from the focused composer on real text input (paste, dictation, and IME included) and never
+submits on a composition Enter. A frame older than 45 s clears indicators and asks the transport to
+reconnect; any bytes reset the separate stall deadline. Polling, offline, hidden, and revoked streams
+clear everything and publish nothing. Only the open member panel and a pair DM header show status;
+there are no room counts, all-DM subscriptions, or status sorting.
 
 ## AI replies
 
@@ -209,7 +278,7 @@ or add/remove on an existing message, image annotation, camera capture, client-s
 attachment byte caps beyond the owner quota, deduplication of identical attachment bytes, virus scanning,
 PDF thumbnails, audio/video playback, per-DM AI bindings, DM topics/names/icons/invite links/
 discoverability/cross-room search/retention/admin inspection/export, blocking scoped per DM, read
-receipts, typing/presence, forwarding, guests, federation, custom emoji, everyone/group mentions, rich
+receipts, forwarding, guests, federation, custom emoji, everyone/group mentions, rich
 text, pins, room export/import/sharing, schedule targets, tools/MCP/knowledge/memory/delegation in room AI,
 autonomous AI triggers, in-place regeneration/continuation, owner credential lending, custom room prompts
 beyond the reduced snapshot, retention/legal hold, edit history/undo, delivery receipts, offline send,
@@ -218,7 +287,7 @@ push digests, multiple app writers, cross-tab leader election, and a global sear
 ## Verification
 
 `channels.test.ts` exercises authenticated REST, SSE ready/reset/heartbeat/revoked frames and slot
-release, live notification ACL filtering, stale mutation cancellation, AI admission, streamed worker
+release, ephemeral negotiation and idless-frame isolation, live notification ACL filtering, stale mutation cancellation, AI admission, streamed worker
 settlement and usage, idle-provider revocation, event pruning/high-water, and restart recovery.
 `attachments.test.ts` covers owner charging, authorization on every read, tombstone retention, pending TTL,
 binding guards, SVG/fake types, caps, quota, and room deletion. `threads.test.ts` covers placement,
@@ -226,6 +295,12 @@ paging, read cursors, the room dot, AI exclusion, notices, and the reply cap. `d
 creation/idempotency, shared-group and block rules, member changes, leaving/deletion, admin exclusion,
 room-only refusals, AI refusal, and notices. Worker provider calls use a deterministic mocked HTTP
 transport through the real AI SDK.
+
+`activity.test.ts` covers the 60/75-second boundaries, sweep/grace/rotation, two-tab typing, scope
+switches, opt-outs, blocks, rate windows, frame overflow, rollback-safe hooks, and the no-SQL
+invariant. `activity-routes.test.ts` covers auth/session binding, strict bodies and CSRF, uniform 404,
+archives, 429, admin non-membership, and stream negotiation. The web suites cover batching, refresh
+thresholds, coalescing, stale generations, and the poll-loop/cooldown regression.
 
 A thread jump may name the reply to land on (`?focus=`). Without a cursor the server bounds the page at
 that reply, so an old reply opens on its own page instead of the newest page where it does not appear.

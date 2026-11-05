@@ -88,4 +88,9 @@ export default {
   customInstructions: "Custom instructions",
   customInstructionsDescription: "Added to the system prompt of every chat. Changing it resets the prompt cache once.",
   customInstructionsPlaceholder: "e.g. Be concise. I'm a backend engineer. Prefer TypeScript examples.",
+  channelActivityTitle: "Activity indicators",
+  channelSharePresence: "Share my online status",
+  channelShareTyping: "Show when I am typing",
+  channelActivityHelp: "Status is approximate and shown only to people in your conversations. Idle connections can stop sharing status. Typing can be shared independently.",
+  channelActivityFailed: "Could not save activity settings. Try again.",
 } as const;

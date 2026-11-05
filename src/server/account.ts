@@ -11,6 +11,7 @@ import { chargeReplacement, getMedia, mediaPath, putMedia, releaseMedia } from "
 import { MediaProcessingError, normalizeAvatar, serveImage } from "./media/variants.js";
 import { tx, afterCommit } from "./db.js";
 import { notifyAllRevoked, revokeAllApiKeys } from "./api-access/keys.js";
+import { requestChannelRevocation } from "./channels/revocation.js";
 
 export const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
 const MAX_IMAGE_PIXELS = 16_777_216;
@@ -98,6 +99,7 @@ export const accountRoutes = new Hono<AppEnv>()
       db.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?").run(id, c.get("session"));
       revokeAllApiKeys(id, "password_revoked");
       afterCommit(() => notifyAllRevoked(id));
+      afterCommit(requestChannelRevocation);
       return true;
     });
     if (outcome === null) return c.json({ error: "Your password was just changed. Sign in again." }, 409);
@@ -105,6 +107,8 @@ export const accountRoutes = new Hono<AppEnv>()
   })
   .post("/sessions/revoke-others", (c) => {
     const result = db.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?").run(c.get("user").id, c.get("session"));
+    // Other devices lose their channel streams and any ephemeral contribution with them.
+    requestChannelRevocation();
     return c.json({ revoked: Number(result.changes) });
   })
   .put("/avatar", bodyLimit({ maxSize: MAX_AVATAR_BYTES + 64 * 1024, onError: (c) => c.json({ error: "Choose a profile picture smaller than 5 MB." }, 413) }), async (c) => {

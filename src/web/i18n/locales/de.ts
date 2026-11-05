@@ -624,6 +624,11 @@ const de: Translation = {
     customInstructions: "Eigene Anweisungen",
     customInstructionsDescription: "Wird dem System-Prompt jedes Chats hinzugefügt. Eine Änderung setzt den Prompt-Cache einmal zurück.",
     customInstructionsPlaceholder: "z. B. Antworte knapp. Ich bin Backend-Entwickler. Bevorzuge TypeScript-Beispiele.",
+    channelActivityTitle: "Aktivitätsanzeigen",
+    channelSharePresence: "Meinen Online-Status teilen",
+    channelShareTyping: "Zeigen, wenn ich tippe",
+    channelActivityHelp: "Der Status ist ungefähr und nur für Personen in deinen Unterhaltungen sichtbar. Untätige Verbindungen teilen den Status eventuell nicht. Tippen kann unabhängig geteilt werden.",
+    channelActivityFailed: "Die Aktivitätseinstellungen konnten nicht gespeichert werden. Versuche es erneut.",
   },
   account: {
     storage: "Speicher",
@@ -864,6 +869,17 @@ const de: Translation = {
     loadFailed: "Tags konnten nicht geladen werden.",
     searchTags: "Tags durchsuchen",
     selectedTags: "Ausgewählte Tags",
+  },
+  channels: {
+    presenceOnline: "Online",
+    presenceAway: "Abwesend",
+    presenceOffline: "Offline oder Status nicht geteilt",
+    presenceUnavailable: "Status nicht verfügbar",
+    presenceLabel: "{name}: {status}",
+    typingOne: "{name} tippt…",
+    typingTwo: "{names} tippen…",
+    typingMany: { one: "{count} Person tippt…", other: "{count} Personen tippen…" },
+    activitySettings: "Aktivitätseinstellungen",
   },
 };
 

@@ -13,6 +13,7 @@ test("settings links name their section and carry anchors as a focus query", () 
   assert.equal(settingsHref("compaction"), "/settings/general?focus=compaction");
   assert.equal(settingsHref("webTools"), "/settings/general?focus=web-tools");
   assert.equal(settingsHref("webSearchLimit"), "/settings/general?focus=web-search-limit");
+  assert.equal(settingsHref("channelActivity"), "/settings/general?focus=channel-activity");
 });
 
 test("every anchor in the helper exists as a focusable row in its settings page", () => {

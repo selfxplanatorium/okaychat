@@ -1,3 +1,4 @@
+import type { ChannelActivitySettings } from "./channel-activity.js";
 import type { UserAppearance } from "./appearance.js";
 import type { AssistantIcon } from "./assistant-presets.js";
 import type { GenerationSummary } from "./generation.js";
@@ -231,6 +232,11 @@ export interface UserSettings {
   editAssistantMessages?: boolean;
   /** Durable notices: the bell in the app, and optional system notifications. */
   notifications?: NotificationSettings;
+  /**
+   * Ephemeral channel activity preferences. Missing means both are shared, so an older account opts
+   * in exactly like a new one; the two switches are deliberately independent.
+   */
+  channelActivity?: ChannelActivitySettings;
   /** BCP 47 UI language. Absent or null follows the browser. Mirrored to localStorage before the API loads. */
   locale?: string | null;
   /** Adds the per-message Translate action. Default true. */
@@ -259,6 +265,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   codeExecution: true,
   editAssistantMessages: false,
   notifications: { browser: false, scheduleSuccess: false },
+  channelActivity: { sharePresence: true, shareTyping: true },
   translateMessages: true,
 };
 

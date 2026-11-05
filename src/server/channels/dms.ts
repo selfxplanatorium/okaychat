@@ -9,6 +9,7 @@ import { insertEvent, insertSync } from "./events.js";
 import { chargeRate } from "./rate.js";
 import { purgeChannelNotices } from "../notifications.js";
 import { requestChannelRevocation } from "./revocation.js";
+import { channelActivityBlocksChanged, clearChannelActivityForChannel, clearChannelActivityForMember } from "./activity.js";
 import { removeChannelMedia } from "./attachments.js";
 import { channelStorageBytes, dmCounts, type StoreResult } from "./store.js";
 
@@ -131,6 +132,7 @@ export function addDmMembers(userId: string, channelId: string, userIds: string[
     db.prepare("UPDATE channels SET dm_key = ? WHERE id = ?").run(taken ? null : key, channelId);
     const revision = bumpRevision(channelId);
     insertEvent({ channelId, kind: "members.changed", entityId: null, version: revision });
+    afterCommit(() => clearChannelActivityForChannel(channelId));
     return channelRow(channelId)!;
   });
 }
@@ -141,6 +143,7 @@ function leaveInTx(userId: string, channel: ChannelRow): void {
   if (!member) throw notFound();
   db.prepare("DELETE FROM channel_members WHERE channel_id = ? AND user_id = ?").run(channel.id, userId);
   purgeChannelNotices(channel.id, userId);
+  afterCommit(() => clearChannelActivityForMember(channel.id, userId));
   const remaining = db
     .prepare("SELECT user_id, role FROM channel_members WHERE channel_id = ? ORDER BY joined_at, user_id")
     .all(channel.id) as Array<{ user_id: string; role: string }>;
@@ -150,6 +153,7 @@ function leaveInTx(userId: string, channel: ChannelRow): void {
     db.prepare("DELETE FROM channels WHERE id = ?").run(channel.id);
     insertSync();
     afterCommit(() => removeChannelMedia(channel.id));
+    afterCommit(() => clearChannelActivityForChannel(channel.id));
     return;
   }
   if (member.role === "owner") {
@@ -191,6 +195,7 @@ export function deleteDm(userId: string, channelId: string, revision: number): v
     insertSync();
     afterCommit(() => removeChannelMedia(channelId));
     afterCommit(requestChannelRevocation);
+    afterCommit(() => clearChannelActivityForChannel(channelId));
   });
 }
 
@@ -219,6 +224,7 @@ export function blockUser(blockerId: string, targetId: string): void {
     }
     insertSync();
     afterCommit(requestChannelRevocation);
+    afterCommit(() => channelActivityBlocksChanged());
   });
 }
 
@@ -226,6 +232,7 @@ export function unblockUser(blockerId: string, targetId: string): void {
   tx(() => {
     db.prepare("DELETE FROM channel_dm_blocks WHERE blocker_id = ? AND blocked_id = ?").run(blockerId, targetId);
     insertSync();
+    afterCommit(() => channelActivityBlocksChanged());
   });
 }
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { MoreHorizontalIcon, UserPlusIcon } from "lucide-react";
+import { Link } from "wouter";
 import type { ChannelMemberSummary, ChannelSummary } from "@shared/channels";
 import { t } from "@/i18n";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -7,6 +8,21 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
 import { channelsApi } from "@/state/channels-api";
+import { useChannelActivity } from "@/state/channel-activity";
+import { settingsHref } from "@/lib/settings-link";
+import { ChannelPresenceDot, ChannelPresenceText } from "./ChannelPresenceDot";
+
+function MemberStatus({ userId }: { userId: string }) {
+  // A missing entry while a snapshot is current means the server suppressed or omitted this account.
+  const state = useChannelActivity((view) => view.presence[userId]);
+  const synchronized = useChannelActivity((view) => view.synchronized);
+  return (
+    <span className="mt-0.5 flex items-center gap-1.5">
+      <ChannelPresenceDot state={state} />
+      <ChannelPresenceText state={synchronized ? (state ?? "offline") : state} />
+    </span>
+  );
+}
 
 export function ChannelMemberPanel({
   open,
@@ -65,6 +81,9 @@ export function ChannelMemberPanel({
         <DialogHeader>
           <DialogTitle>{t("channels.members")}</DialogTitle>
           <DialogDescription>{t("channels.memberCount", { count: room.memberCount })}</DialogDescription>
+          <Link href={settingsHref("channelActivity")} className="text-primary mt-1 inline-block text-xs underline underline-offset-2">
+            {t("channels.activitySettings")}
+          </Link>
         </DialogHeader>
         {canModerate && (
           <div className="flex flex-col gap-2">
@@ -147,6 +166,7 @@ export function ChannelMemberPanel({
                 <span className="min-w-0 flex-1">
                   <span className="block truncate">{member.name}</span>
                   <span className="text-muted-foreground block text-xs">{t(member.role === "owner" ? "channels.owner" : member.role === "moderator" ? "channels.moderator" : "channels.member")}</span>
+                  <MemberStatus userId={member.id} />
                 </span>
                 {canModerate && member.role !== "owner" && member.id !== meId && (
                   <Menu>

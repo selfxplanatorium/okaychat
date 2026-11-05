@@ -22,9 +22,15 @@ import {
   invalid,
   memberRow,
   notFound,
+  requireChannelsFeature,
 } from "./access.js";
 import { channelHistory } from "./history.js";
 import { currentCursor, decodeCursor, eventVisible, eventWakeGeneration, latestEventId, projectEvent, readEvents, scanChanges, acquireStream, cursorFor, eventState, waitForEvents } from "./events.js";
+import { applyChannelActivity, applyChannelTyping, registerChannelActivity, type ChannelActivityStream } from "./activity.js";
+import { activityRequestSchema, parseActivity, readActivityBody, typingRequestSchema } from "./activity-schema.js";
+import { chargeAccountActivityRate } from "./activity-rate.js";
+import { activityNow } from "./activity-clock.js";
+import { CHANNEL_ACTIVITY_LIMITS } from "../../shared/channel-activity.js";
 import { buildSnapshot, prepareChannelPrompt, resolveChannelBinding, storedBinding, trimSnapshot } from "./ai.js";
 import { channelSummary, directoryEntry, inviteSummary, projectMessages, unreadCounts, type ChannelMessageRow } from "./projections.js";
 import { chargeRate } from "./rate.js";
@@ -118,6 +124,24 @@ function parseMemberCursor(raw: string | undefined): { name: string; id: string 
 }
 
 const like = (query: string) => `%${query.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+
+/**
+ * One pump waits on either a durable commit or a targeted ephemeral wake. Whichever loses the race is
+ * released at once so a short coalescing deadline cannot leave a 15-second durable waiter behind.
+ */
+async function waitForChannelWork(ms: number, signal: AbortSignal, ephemeral: ChannelActivityStream | null): Promise<void> {
+  if (!ephemeral) {
+    await waitForEvents(ms, signal);
+    return;
+  }
+  const stop = new AbortController();
+  const combined = AbortSignal.any([signal, stop.signal]);
+  try {
+    await Promise.race([waitForEvents(ms, combined), ephemeral.waitForWake(ms, combined)]);
+  } finally {
+    stop.abort();
+  }
+}
 
 function pageLimit(raw: string | undefined, fallback: number, max: number): number {
   if (raw === undefined) return fallback;
@@ -344,6 +368,22 @@ export const channelRoutes = new Hono<AppEnv>()
       cursor: currentCursor(userId),
     });
   })
+  .post("/activity", async (c) => {
+    const userId = c.get("user").id;
+    requireChannelsFeature(userId);
+    // An authenticated attempt spends the account window before parsing, so malformed bodies and
+    // replays cannot probe for free.
+    chargeAccountActivityRate(userId, "activity");
+    const body = parseActivity(activityRequestSchema, await readActivityBody(c));
+    return json(c, applyChannelActivity(userId, c.get("session"), body));
+  })
+  .post("/typing", async (c) => {
+    const userId = c.get("user").id;
+    requireChannelsFeature(userId);
+    chargeAccountActivityRate(userId, "typing");
+    const body = parseActivity(typingRequestSchema, await readActivityBody(c));
+    return json(c, applyChannelTyping(userId, c.get("session"), body));
+  })
   .get("/events", (c) => {
     const userId = c.get("user").id;
     const session = c.get("session");
@@ -357,6 +397,16 @@ export const channelRoutes = new Hono<AppEnv>()
     const state = eventState();
     const expired = !!supplied && (supplied.epoch !== state.epoch || supplied.seq < state.floor);
     let cursor = supplied?.seq ?? latestEventId();
+    // Only an explicit opt-in allocates an activity registry entry or can emit an ephemeral frame.
+    const optedIn = c.req.query("ephemeral") === "1";
+    let ephemeral: ChannelActivityStream | null = null;
+    if (optedIn) {
+      try {
+        ephemeral = registerChannelActivity({ userId, sessionHash: session });
+      } catch {
+        ephemeral = null; // At the stream cap registration fails; the slot itself still opened.
+      }
+    }
     let pullResolve: (() => void) | null = null;
     const encoder = new TextEncoder();
     const internal = new AbortController();
@@ -371,6 +421,8 @@ export const channelRoutes = new Hono<AppEnv>()
       internal.abort();
       pullResolve?.();
       pullResolve = null;
+      ephemeral?.release();
+      ephemeral = null;
       release();
     };
     const signal = internal.signal;
@@ -380,9 +432,10 @@ export const channelRoutes = new Hono<AppEnv>()
         // backpressure wait here would deadlock the ready frame.
         void (async () => {
         let pendingBytes = 0;
-        const write = async (text: string, allowed = () => true) => {
+        // Wait for the consumer to pull when the queue is full. The same wait gates ephemeral output,
+        // which is only serialized after it so a stalled request cannot send a stale roster.
+        const ensureCapacity = async () => {
           if (signal.aborted) throw new Error("closed");
-          // Native streams have no awaited write: wait for the consumer to pull when the queue is full.
           if (controller.desiredSize !== null && controller.desiredSize <= 0) {
             await Promise.race([
               new Promise<void>((resolve) => { pullResolve = resolve; }),
@@ -393,7 +446,8 @@ export const channelRoutes = new Hono<AppEnv>()
             ]);
           }
           if (signal.aborted) throw new Error("closed");
-          if (!allowed()) return;
+        };
+        const enqueue = async (text: string) => {
           const bytes = encoder.encode(text);
           pendingBytes += bytes.byteLength;
           if (pendingBytes > 256 * 1024) throw new Error("overflow");
@@ -411,9 +465,38 @@ export const channelRoutes = new Hono<AppEnv>()
             pendingBytes -= bytes.byteLength;
           }
         };
+        const write = async (text: string, allowed = () => true) => {
+          await ensureCapacity();
+          if (!allowed()) return;
+          await enqueue(text);
+        };
+        /** Serializes after the backpressure wait and re-authorizes the watch inside. */
+        const writeEphemeral = async (): Promise<boolean> => {
+          if (!ephemeral || signal.aborted) return false;
+          await ensureCapacity();
+          // A backpressure wait can outlive a logout or a feature change; the projection inside
+          // takeFrame rechecks membership and the watch, and this rechecks the session/feature.
+          if (signal.aborted || !featureAllowed(userId, "channels") || !sessionAlive(session)) return false;
+          const payload = ephemeral.takeFrame();
+          if (!payload) return false;
+          // No `id:` field: an ephemeral frame must never advance the durable cursor.
+          await enqueue(`event: ephemeral\ndata: ${payload}\n\n`);
+          return true;
+        };
         try {
           await write("retry: 3000\n\n");
-          await write('event: ready\ndata: {"v":1}\n\n');
+          const ready = ephemeral
+            ? {
+                v: 1,
+                ephemeral: {
+                  v: 1,
+                  connectionId: ephemeral.connectionId,
+                  activityLeaseMs: CHANNEL_ACTIVITY_LIMITS.activityLeaseMs,
+                  typingLeaseMs: CHANNEL_ACTIVITY_LIMITS.typingLeaseMs,
+                },
+              }
+            : { v: 1 };
+          await write(`event: ready\ndata: ${JSON.stringify(ready)}\n\n`);
           if (!supplied) await write('event: reset\ndata: {"reason":"initial"}\n\n');
           if (expired) {
             await write('event: reset\ndata: {"reason":"history_expired"}\n\n');
@@ -423,6 +506,7 @@ export const channelRoutes = new Hono<AppEnv>()
           }
           const startedAt = Date.now();
           let signals = 0;
+          let heartbeatAt = Date.now() + CHANNEL_ACTIVITY_LIMITS.heartbeatMs;
           while (!signal.aborted && Date.now() - startedAt < 5 * 60_000) {
             if (!featureAllowed(userId, "channels") || !sessionAlive(session)) {
               await write('event: revoked\ndata: {}\n\n').catch(() => {});
@@ -434,14 +518,6 @@ export const channelRoutes = new Hono<AppEnv>()
             }
             const generation = eventWakeGeneration();
             const rows = readEvents(cursor, 200);
-            if (!rows.length) {
-              // A commit between the scan and the waiter registration is not lost: it bumps the
-              // generation synchronously, so this iteration scans again instead of sleeping.
-              if (eventWakeGeneration() !== generation) continue;
-              await waitForEvents(15_000, signal);
-              if (!signal.aborted) await write(": heartbeat\n\n");
-              continue;
-            }
             for (const row of rows) {
               cursor = row.id;
               if (!eventVisible(userId, row)) continue;
@@ -450,6 +526,21 @@ export const channelRoutes = new Hono<AppEnv>()
               const frame: ChannelEventFrame = { cursor: cursorFor(userId, row.id), event: projectEvent(row) };
               await write(`id: ${frame.cursor}\nevent: ${row.kind}\ndata: ${JSON.stringify(frame.event)}\n\n`, () => featureAllowed(userId, "channels") && sessionAlive(session) && eventVisible(userId, row));
             }
+            await writeEphemeral();
+            const now = Date.now();
+            if (now >= heartbeatAt) {
+              await write(": heartbeat\n\n");
+              heartbeatAt = now + CHANNEL_ACTIVITY_LIMITS.heartbeatMs;
+            }
+            if (rows.length) continue; // More durable rows may remain; this turn already yielded ephemeral.
+            // A commit between the scan and the waiter registration is not lost: it bumps the
+            // generation synchronously, so this iteration scans again instead of sleeping.
+            if (eventWakeGeneration() !== generation) continue;
+            // `nextDueAt` is monotonic activity time, the heartbeat is wall time: compare each to its own clock.
+            const due = ephemeral?.nextDueAt() ?? null;
+            const waitMs = Math.max(0, Math.min(heartbeatAt - Date.now(), due === null ? Number.POSITIVE_INFINITY : due - activityNow()));
+            if (waitMs <= 0) continue;
+            await waitForChannelWork(waitMs, signal, ephemeral);
           }
           controller.close();
         } catch {

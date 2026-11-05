@@ -39,6 +39,7 @@ export const SETTINGS_ANCHOR_PREFIX = "setting-";
 export const SETTINGS_DESTINATIONS = {
   compaction: { section: "general", anchor: "compaction" },
   notifications: { section: "general", anchor: "notifications" },
+  channelActivity: { section: "general", anchor: "channel-activity" },
   webTools: { section: "general", anchor: "web-tools" },
   webSearchLimit: { section: "general", anchor: "web-search-limit" },
   providers: { section: "providers" },

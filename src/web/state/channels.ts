@@ -20,7 +20,8 @@ import { CHANNEL_LIMITS } from "@shared/channels";
 import { t } from "@/i18n";
 import { channelError } from "@/lib/channel-error";
 import { channelsApi, type ChannelBindingRequest } from "./channels-api";
-import { startChannelTransport, type TransportState } from "./channels-events";
+import { startChannelTransport, type ChannelTransportHandle, type TransportState } from "./channels-events";
+import { channelActivity, setChannelActivityReconnect, startChannelActivityInput } from "./channel-activity";
 import { capMessages, mergeMessages, mergeRoomMessages, mergeMessage, mergeThread, newestSeq, reconcileRooms, sortMessages, totalUnread, MAX_THREADS_IN_MEMORY, type ChannelThreadState } from "./channels-derive";
 
 /** In-memory channel workspace state. No room text, drafts, or history may touch browser storage. */
@@ -134,7 +135,8 @@ interface ChannelsState {
   resetForAccount: (accountId: string | null) => void;
 }
 
-let stopTransport: (() => void) | null = null;
+let stopTransport: ChannelTransportHandle | null = null;
+let stopActivityInput: (() => void) | null = null;
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
 let messageTimer: ReturnType<typeof setTimeout> | null = null;
 const roomRefreshes = new Set<string>();
@@ -364,8 +366,12 @@ export const useChannels = create<ChannelsState>((set, get) => {
   };
 
   const resetData = (accountId: string | null) => {
-    stopTransport?.();
+    stopTransport?.stop();
     stopTransport = null;
+    stopActivityInput?.();
+    stopActivityInput = null;
+    setChannelActivityReconnect(null);
+    channelActivity.streamLost();
     if (syncTimer) clearTimeout(syncTimer);
     if (messageTimer) clearTimeout(messageTimer);
     syncTimer = null;
@@ -410,7 +416,8 @@ export const useChannels = create<ChannelsState>((set, get) => {
   };
 
   const beginTransport = () => {
-    stopTransport?.();
+    stopTransport?.stop();
+    if (!stopActivityInput) stopActivityInput = startChannelActivityInput();
     stopTransport = startChannelTransport({
       getCursor: () => get().cursor ?? undefined,
       onFrames: handleFrames,
@@ -436,7 +443,18 @@ export const useChannels = create<ChannelsState>((set, get) => {
         resetData(get().accountId);
         set({ disabled: true });
       },
-      onState: (connection) => set({ connection }),
+      onState: (connection) => {
+        set({ connection });
+        // Polling, offline, reconnecting, and EOF never publish or display ephemeral state.
+        if (connection !== "streaming") channelActivity.streamLost();
+      },
+      onReady: (capability) => {
+        if (capability) channelActivity.setAvailable(capability);
+        else channelActivity.streamLost();
+      },
+      onEphemeral: (payload) => channelActivity.receive(payload),
+      onEphemeralInvalid: () => channelActivity.invalidFrame(),
+      onBytes: () => channelActivity.noteBytes(),
       onSyncRequested: () => {
         void get().loadSync().then(() => {
           const state = get();
@@ -444,6 +462,7 @@ export const useChannels = create<ChannelsState>((set, get) => {
         });
       },
     });
+    setChannelActivityReconnect(() => stopTransport?.reconnect() ?? null);
   };
 
   return {

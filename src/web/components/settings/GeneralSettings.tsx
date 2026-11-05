@@ -54,6 +54,8 @@ export function GeneralSettings() {
   const [savingNotifications, setSavingNotifications] = useState(false);
   const [notificationError, setNotificationError] = useState<string | null>(null);
   const [notificationBlocked, setNotificationBlocked] = useState(false);
+  const [savingActivity, setSavingActivity] = useState(false);
+  const [activityError, setActivityError] = useState<string | null>(null);
   const sandboxStatus = useServices((s) => s.statuses?.find((status) => status.id === "sandbox"));
   const sandbox = sandboxStatus ? { configured: sandboxStatus.state !== "unconfigured", reachable: sandboxStatus.state === "up" || sandboxStatus.state === "degraded", refuses: sandboxStatus.reasonKey === "refuses" } : null;
   useEffect(() => setPrompt(settings?.systemPrompt ?? ""), [settings?.systemPrompt]);
@@ -80,6 +82,20 @@ export function GeneralSettings() {
   };
   const editRepliesOn = settings.editAssistantMessages === true;
   const notifications: NotificationSettings = settings.notifications ?? DEFAULT_USER_SETTINGS.notifications ?? { browser: false, scheduleSuccess: false };
+  const channelActivity = settings.channelActivity ?? DEFAULT_USER_SETTINGS.channelActivity ?? { sharePresence: true, shareTyping: true };
+
+  /** One whole object per save: the server rejects a partial pair instead of merging a stale half. */
+  const saveChannelActivity = async (next: { sharePresence: boolean; shareTyping: boolean }) => {
+    setActivityError(null);
+    setSavingActivity(true);
+    try {
+      await update({ channelActivity: next });
+    } catch {
+      setActivityError(t("general.channelActivityFailed"));
+    } finally {
+      setSavingActivity(false);
+    }
+  };
 
   const saveNotifications = async (next: NotificationSettings) => {
     const previous = { ...notifications };
@@ -368,6 +384,33 @@ export function GeneralSettings() {
         />
         {notificationBlocked && <p role="alert" className="text-destructive px-4 pb-3 text-xs">{t("general.browserBlocked")}</p>}
         {notificationError && <p role="alert" className="text-destructive px-4 pb-3 text-xs">{notificationError}</p>}
+      </SettingsSection>
+
+      <SettingsSection title={t("general.channelActivityTitle")} description={t("general.channelActivityHelp")}>
+        <SettingsRow
+          id="setting-channel-activity"
+          label={t("general.channelSharePresence")}
+          control={
+            <Switch
+              aria-label={t("general.channelSharePresence")}
+              checked={channelActivity.sharePresence}
+              disabled={savingActivity}
+              onCheckedChange={(sharePresence) => void saveChannelActivity({ ...channelActivity, sharePresence })}
+            />
+          }
+        />
+        <SettingsRow
+          label={t("general.channelShareTyping")}
+          control={
+            <Switch
+              aria-label={t("general.channelShareTyping")}
+              checked={channelActivity.shareTyping}
+              disabled={savingActivity}
+              onCheckedChange={(shareTyping) => void saveChannelActivity({ ...channelActivity, shareTyping })}
+            />
+          }
+        />
+        {activityError && <p role="alert" className="text-destructive px-4 pb-3 text-xs">{activityError}</p>}
       </SettingsSection>
 
       <SettingsSection title={t("general.toolsTitle")}>

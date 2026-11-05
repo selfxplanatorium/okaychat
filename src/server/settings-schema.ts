@@ -39,6 +39,9 @@ export const settingsPatch = z.object({
   codeExecution: z.boolean().optional(),
   editAssistantMessages: z.boolean().optional(),
   notifications: z.object({ browser: z.boolean(), scheduleSuccess: z.boolean() }).strict().optional(),
+  // Both switches are required together: a partial object would silently keep a stale copy on the
+  // client, and "missing" is already the documented default, not a merge instruction.
+  channelActivity: z.object({ sharePresence: z.boolean(), shareTyping: z.boolean() }).strict().optional(),
   locale: z.string().max(MAX_LOCALE_TAG).regex(LOCALE_TAG).nullable().optional(),
   translateMessages: z.boolean().optional(),
   translationTarget: z.string().max(MAX_LOCALE_TAG).regex(LOCALE_TAG).nullable().optional(),
