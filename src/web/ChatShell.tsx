@@ -274,6 +274,15 @@ export function Shell({ userId }: { userId: string }) {
                   </Suspense>
                 )}
               </Route>
+              <Route path="/channels/:channelId/thread/:rootId">
+                {(p) => (
+                  <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                    <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">{t("common.loading")}</p>}>
+                      <ChannelsPage channelId={p.channelId} threadRootId={p.rootId} />
+                    </Suspense>
+                  </main>
+                )}
+              </Route>
               <Route path="/channels/:channelId">
                 {(p) => (
                   <main className="flex min-h-0 flex-1 flex-col overflow-hidden">

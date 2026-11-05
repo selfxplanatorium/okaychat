@@ -102,10 +102,10 @@ export async function exportImageData(userId: string, images: ExportImage[]): Pr
       if (image.upload) {
         const row = db.prepare("SELECT media_id FROM uploads WHERE id = ? AND user_id = ?").get(image.upload, userId) as { media_id: string | null } | undefined;
         const media = row?.media_id ? getMedia(row.media_id) : undefined;
-        if (media && media.user_id === userId) source = { userId, key: media.id, file: mediaPath(media), mime: media.mime, size: media.size, etag: media.sha256 };
+        if (media && media.user_id === userId) source = { namespace: userId, key: media.id, file: mediaPath(media), mime: media.mime, size: media.size, etag: media.sha256 };
       } else if (image.image) {
         const row = db.prepare("SELECT id, mime, size FROM images WHERE id = ? AND user_id = ?").get(image.image, userId) as { id: string; mime: string; size: number } | undefined;
-        if (row) source = { userId, key: row.id, file: imagePath(userId, row.id), mime: row.mime, size: row.size, etag: row.id };
+        if (row) source = { namespace: userId, key: row.id, file: imagePath(userId, row.id), mime: row.mime, size: row.size, etag: row.id };
       }
       if (source) {
         const chosen = await variantFile(source, "large");

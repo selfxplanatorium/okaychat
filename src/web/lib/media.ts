@@ -11,7 +11,7 @@ export const UPLOAD_REF = "okaychat-upload:";
 export const VARIANT_WIDTH: Record<ImageVariant, number> = { thumb: 256, medium: 640, large: 1280 };
 
 const VARIANT_ROUTE =
-  /^\/api\/(?:images\/[A-Za-z0-9_-]+|uploads\/[A-Za-z0-9_.-]+\/file|sandbox\/[A-Za-z0-9_-]+\/stored|account\/avatar|public\/shares\/[A-Za-z0-9_-]+\/(?:images|uploads)\/[A-Za-z0-9_.-]+)(?:\?[^#]*)?$/;
+  /^\/api\/(?:images\/[A-Za-z0-9_-]+|uploads\/[A-Za-z0-9_.-]+\/file|sandbox\/[A-Za-z0-9_-]+\/stored|channels\/[A-Za-z0-9_-]+\/attachments\/[A-Za-z0-9_.-]+|account\/avatar|public\/shares\/[A-Za-z0-9_-]+\/(?:images|uploads)\/[A-Za-z0-9_.-]+)(?:\?[^#]*)?$/;
 
 /**
  * The app URL of an owned reference (`okaychat-upload:<id>`, optionally with a `#sha256=` content digest the

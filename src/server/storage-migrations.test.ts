@@ -24,7 +24,8 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       db.exec("DROP TABLE message_search_keys");
       db.exec("DROP INDEX messages_thread_time");
       for (const table of ["evaluation_scores", "evaluation_results", "evaluation_runs", "evaluation_cases", "evaluation_datasets", "chatgpt_login_attempts", "chatgpt_registrations", "chatgpt_hosts", "chatgpt_controls", "saved_prompts", "message_bookmarks", "message_feedback", "assistant_presets", "generation_segments", "generation_runs", "archive_jobs", "provider_model_grants", "provider_model_policies", "knowledge_chunks_fts", "knowledge_chunks", "knowledge_sources", "knowledge_collections", "share_groups", "share_users", "share_audiences", "user_group_members", "user_groups", "n8n_agent_sessions", "n8n_agent_runs", "n8n_agents", "permission_leases", "permission_rate_windows", "permission_audit", "user_model_instructions", "prompt_rules", "permission_policies", "permission_state", "notifications", "tag_filter_presets", "thread_tags", "comparison_panes", "comparison_groups"]) db.exec("DROP TABLE " + table);
-      db.exec("DROP TABLE channel_messages_fts; DROP TABLE channel_search_keys; DROP TABLE channel_events; DROP TABLE channel_event_state; DROP TABLE channel_rate_windows; DROP TABLE channel_moderation_audit; DROP TABLE channel_create_keys; DROP TABLE channel_ai_runs; DROP TABLE channel_reactions; DROP TABLE channel_mentions; DROP TABLE channel_messages; DROP TABLE channel_exclusions; DROP TABLE channel_invites; DROP TABLE channel_members; DROP TABLE channel_groups; DROP TABLE channels");
+      db.exec("DROP TRIGGER channel_messages_fts_insert; DROP TRIGGER channel_messages_fts_update; DROP TRIGGER channel_messages_fts_delete; DROP TRIGGER channel_search_keys_fts_delete");
+      db.exec("DROP TABLE channel_messages_fts; DROP TABLE channel_search_keys; DROP TABLE channel_events; DROP TABLE channel_event_state; DROP TABLE channel_rate_windows; DROP TABLE channel_moderation_audit; DROP TABLE channel_create_keys; DROP TABLE channel_ai_runs; DROP TABLE channel_reactions; DROP TABLE channel_mentions; DROP TABLE channel_messages; DROP TABLE channel_exclusions; DROP TABLE channel_invites; DROP TABLE channel_members; DROP TABLE channel_groups; DROP TABLE channel_attachments; DROP TABLE channel_thread_reads; DROP TABLE channel_thread_state; DROP TABLE channel_dm_blocks; DROP TABLE channels");
       for (const table of ["notes_fts", "note_tags", "notes", "calendar_events_fts", "calendar_reminders", "calendar_events"]) db.exec("DROP TABLE " + table);
       db.exec("DROP TABLE api_requests; DROP TABLE api_rate_windows; DROP TABLE api_key_audit; DROP TABLE api_telemetry_floors; DROP TABLE api_keys");
       db.exec("DROP INDEX IF EXISTS usage_api_request; DROP INDEX IF EXISTS usage_api_key_time");
@@ -145,7 +146,8 @@ test('n8n migration preserves selected audiences and rolls back schema and versi
     db.exec('DROP TABLE permission_leases; DROP TABLE permission_rate_windows; DROP TABLE permission_audit; DROP TABLE user_model_instructions; DROP TABLE prompt_rules; DROP TABLE permission_policies; DROP TABLE permission_state');
     db.exec('DROP TABLE saved_prompts; DROP TABLE message_bookmarks; DROP TABLE message_feedback');
     db.exec('DROP TABLE evaluation_scores; DROP TABLE evaluation_results; DROP TABLE evaluation_runs; DROP TABLE evaluation_cases; DROP TABLE evaluation_datasets');
-    for (const table of ['channel_messages_fts', 'channel_search_keys', 'channel_events', 'channel_event_state', 'channel_rate_windows', 'channel_moderation_audit', 'channel_create_keys', 'channel_ai_runs', 'channel_reactions', 'channel_mentions', 'channel_messages', 'channel_exclusions', 'channel_invites', 'channel_members', 'channel_groups', 'channels', 'notifications', 'tag_filter_presets', 'thread_tags', 'comparison_panes', 'comparison_groups', 'notes_fts', 'note_tags', 'notes', 'calendar_events_fts', 'calendar_reminders', 'calendar_events']) db.exec('DROP TABLE ' + table);
+    db.exec('DROP TRIGGER IF EXISTS channel_messages_fts_insert; DROP TRIGGER IF EXISTS channel_messages_fts_update; DROP TRIGGER IF EXISTS channel_messages_fts_delete; DROP TRIGGER IF EXISTS channel_search_keys_fts_delete');
+    for (const table of ['channel_messages_fts', 'channel_search_keys', 'channel_events', 'channel_event_state', 'channel_rate_windows', 'channel_moderation_audit', 'channel_create_keys', 'channel_ai_runs', 'channel_reactions', 'channel_mentions', 'channel_messages', 'channel_exclusions', 'channel_invites', 'channel_members', 'channel_groups', 'channel_attachments', 'channel_thread_reads', 'channel_thread_state', 'channel_dm_blocks', 'channels', 'notifications', 'tag_filter_presets', 'thread_tags', 'comparison_panes', 'comparison_groups', 'notes_fts', 'note_tags', 'notes', 'calendar_events_fts', 'calendar_reminders', 'calendar_events']) db.exec('DROP TABLE ' + table);
     db.exec('DROP TABLE api_requests; DROP TABLE api_rate_windows; DROP TABLE api_key_audit; DROP TABLE api_telemetry_floors; DROP TABLE api_keys');
     db.exec('DROP INDEX IF EXISTS usage_api_request; DROP INDEX IF EXISTS usage_api_key_time; ALTER TABLE usage DROP COLUMN api_key_id; ALTER TABLE usage DROP COLUMN api_request_id');
     db.exec('DROP INDEX IF EXISTS usage_channel_run; ALTER TABLE usage DROP COLUMN channel_id; ALTER TABLE usage DROP COLUMN channel_run_id');
@@ -295,6 +297,56 @@ test("notes-calendar migration rolls back cleanly, preserves every notice, and o
     assert.equal(reopened.version, result.version);
     assert.deepEqual([reopened.notes, reopened.tags, reopened.fts, reopened.notices], [0, 0, 0, 0]);
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("channels v2 migration rolls back cleanly and keeps the event high-water", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "okaychat-channels-v2-migration-"));
+  const base = { ...process.env, OKAYCHAT_DATA_DIR: directory, OKAYCHAT_SECRET: "migration-tests-secret-not-for-production" };
+  const dbUrl = new URL("./db.ts", import.meta.url).href;
+  const run = (code: string, env: Record<string, string | undefined> = {}) =>
+    execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", code], { env: { ...base, ...env }, encoding: "utf8" });
+  try {
+    // A failure after the channels-v2 DDL rolls the whole migration back with its version.
+    assert.throws(() => run(`await import(${JSON.stringify(dbUrl)});`, { OKAYCHAT_TEST_FAIL_MIGRATION: "channels-v2" }));
+    const result = JSON.parse(run(`const { db } = await import(${JSON.stringify(dbUrl)});
+      db.prepare("INSERT INTO users (id,email,name,password_hash,role,created_at) VALUES ('u','u@example.test','U','unused','user',1)").run();
+      db.prepare("INSERT INTO channels (id,owner_id,name,visibility,created_at,updated_at) VALUES ('c','u','Room','public',1,1)").run();
+      db.prepare("INSERT INTO channel_events (channel_id,kind,created_at) VALUES (NULL,'sync',1)").run();
+      const high = db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'channel_events'").get().seq;
+      // Rewind to just before channels-v2 (the last appended migration).
+      db.exec("DROP INDEX IF EXISTS channel_dm_key; DROP INDEX IF EXISTS channels_kind_owner; DROP INDEX IF EXISTS channel_messages_thread; DROP INDEX IF EXISTS channel_thread_state_room; DROP INDEX IF EXISTS channel_thread_reads_user; DROP INDEX IF EXISTS channel_attachments_message; DROP INDEX IF EXISTS channel_attachments_owner; DROP INDEX IF EXISTS channel_attachments_channel; DROP INDEX IF EXISTS channel_attachments_pending; DROP INDEX IF EXISTS channel_attachments_purge; DROP INDEX IF EXISTS channel_dm_blocks_blocked");
+      db.exec("DROP TABLE channel_attachments; DROP TABLE channel_thread_reads; DROP TABLE channel_thread_state; DROP TABLE channel_dm_blocks");
+      db.exec("ALTER TABLE channel_messages DROP COLUMN thread_root; ALTER TABLE channel_events DROP COLUMN root_id; ALTER TABLE notifications DROP COLUMN channel_root_id; ALTER TABLE channels DROP COLUMN dm_key; ALTER TABLE channels DROP COLUMN kind");
+      db.exec("PRAGMA user_version = 48");
+      console.log(JSON.stringify({ high })); db.close();`));
+    for (let i = 0; i < 2; i++) {
+      const reopened = JSON.parse(run(`const { db } = await import(${JSON.stringify(dbUrl)});
+        const high = db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'channel_events'").get().seq;
+        const columns = (table) => db.prepare("PRAGMA table_info(" + table + ")").all().map((column) => column.name);
+        console.log(JSON.stringify({
+          version: db.prepare("PRAGMA user_version").get().user_version,
+          high,
+          tables: ["channel_attachments", "channel_thread_state", "channel_thread_reads", "channel_dm_blocks"].map((table) => db.prepare("SELECT count(*) AS n FROM " + table).get().n),
+          kind: db.prepare("SELECT kind FROM channels WHERE id = 'c'").get().kind,
+          channelColumns: columns("channels").filter((name) => name === "kind" || name === "dm_key"),
+          eventRoot: columns("channel_events").includes("root_id"),
+          noticeRoot: columns("notifications").includes("channel_root_id"),
+          dmIndex: db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='channel_dm_key'").get()?.sql ?? null,
+          fks: db.prepare("PRAGMA foreign_key_check").all(),
+        })); db.close();`));
+      assert.equal(reopened.version, 49);
+      assert.equal(reopened.high, result.high, "the AUTOINCREMENT high-water survives the migration");
+      assert.deepEqual(reopened.tables, [0, 0, 0, 0]);
+      assert.equal(reopened.kind, "room", "pre-existing rows default to a room");
+      assert.deepEqual(reopened.channelColumns.sort(), ["dm_key", "kind"]);
+      assert.equal(reopened.eventRoot, true);
+      assert.equal(reopened.noticeRoot, true);
+      assert.match(String(reopened.dmIndex), /UNIQUE INDEX channel_dm_key/);
+      assert.deepEqual(reopened.fks, []);
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("api access migration rolls back cleanly and creates its own tables", () => {

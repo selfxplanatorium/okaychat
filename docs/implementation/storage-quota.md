@@ -117,11 +117,14 @@ n8n definitions charge name/description/avatar/config ciphertext to the owner; e
 ## Team channels
 
 Room metadata (name, description, reduced AI binding), every member's message bodies, run config and
-encrypted frozen input, a 1 KiB run receipt, and an open run's 64 KiB output reservation count against
-the current room owner. Body bytes are counted once; an open run only tops the reservation up to 64 KiB.
-Transfer checks the target owner's full limit before changing `owner_id`. Events, rate windows, members,
-read cursors, reactions, audit rows, notices, and FTS copies are bounded operational metadata and are not
-charged. See `docs/implementation/channels.md`.
+encrypted frozen input, a 1 KiB run receipt, an open run's 64 KiB output reservation, and every channel
+attachment count against the current room owner. Body bytes are counted once; an open run only tops the
+reservation up to 64 KiB. Attachments are charged once at upload at their stored size and recorded with
+that `owner_id`; pending uploads and tombstoned-until-purged bytes still count. Transfer checks the target
+owner's full limit (including attachments) before changing `owner_id` and moves every attachment row to
+the new payer. Events, rate windows, members, read cursors, reactions, audit rows, notices, thread
+state/cursors, blocks, and FTS copies are bounded operational metadata and are not charged. See
+`docs/implementation/channels.md`.
 
 
 ## Custom tools

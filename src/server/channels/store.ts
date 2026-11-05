@@ -4,13 +4,16 @@ import { AppError } from "../errors.js";
 import { assertStorage } from "../quota.js";
 import { CHANNEL_LIMITS } from "../../shared/channels.js";
 import type { ChannelAiBinding, ChannelMentionInput } from "../../shared/channels.js";
-import { assertChannelMember, assertWritable, requireChannelsFeature, channelRow, conflict, exclusionRow, groupEligible, inviteRow, memberRow, notFound, type ChannelRow, type MemberRow } from "./access.js";
+import { assertChannelMember, assertRoom, assertWritable, requireChannelsFeature, channelRow, conflict, exclusionRow, groupEligible, inviteRow, memberRow, notFound, type ChannelRow, type MemberRow } from "./access.js";
 import { requestChannelRevocation } from "./revocation.js";
 import { insertEvent, insertSync } from "./events.js";
 import { chargeRate } from "./rate.js";
-import { notifyAiFinished, notifyHumanMessage, notifyInvite, purgeMessageNotices } from "./notifications.js";
+import { notifyAiFinished, notifyHumanMessage, notifyInvite, notifyThreadReply, purgeMessageNotices, purgeThreadNotices } from "./notifications.js";
 import { markChannelNoticesReadThrough, purgeChannelNotices } from "../notifications.js";
-import { assertBody, assertDescription, assertName, assertReason, normalizeMentions, requestHash } from "./schema.js";
+import { assertContent, assertDescription, assertName, assertReason, normalizeMentions, requestHash } from "./schema.js";
+import { bindAttachments, removeChannelMedia } from "./attachments.js";
+import { recountThread } from "./thread-counts.js";
+import { resolveThreadPlacement } from "./threads.js";
 
 /** Synchronous channel transactions. Async orchestration (model calls, SSE) lives in routes/worker/events. */
 
@@ -91,11 +94,22 @@ export function assertGroupsExist(groupIds: string[]): void {
 }
 
 function roomCounts(userId: string): { total: number; owned: number; joined: number; invites: number } {
-  const total = (db.prepare("SELECT COUNT(*) AS n FROM channels").get() as { n: number }).n;
-  const owned = (db.prepare("SELECT COUNT(*) AS n FROM channels WHERE owner_id = ?").get(userId) as { n: number }).n;
-  const joined = (db.prepare("SELECT COUNT(*) AS n FROM channel_members WHERE user_id = ?").get(userId) as { n: number }).n;
+  const total = (db.prepare("SELECT COUNT(*) AS n FROM channels WHERE kind = 'room'").get() as { n: number }).n;
+  const owned = (db.prepare("SELECT COUNT(*) AS n FROM channels WHERE kind = 'room' AND owner_id = ?").get(userId) as { n: number }).n;
+  const joined = (
+    db.prepare("SELECT COUNT(*) AS n FROM channel_members m JOIN channels c ON c.id = m.channel_id WHERE c.kind = 'room' AND m.user_id = ?").get(userId) as { n: number }
+  ).n;
   const invites = (db.prepare("SELECT COUNT(*) AS n FROM channel_invites WHERE user_id = ?").get(userId) as { n: number }).n;
   return { total, owned, joined, invites };
+}
+
+/** DMs never consume room limits: they have their own pair of caps. */
+export function dmCounts(userId: string): { owned: number; joined: number } {
+  const owned = (db.prepare("SELECT COUNT(*) AS n FROM channels WHERE kind = 'dm' AND owner_id = ?").get(userId) as { n: number }).n;
+  const joined = (
+    db.prepare("SELECT COUNT(*) AS n FROM channel_members m JOIN channels c ON c.id = m.channel_id WHERE c.kind = 'dm' AND m.user_id = ?").get(userId) as { n: number }
+  ).n;
+  return { owned, joined };
 }
 
 function pruneCreateKeys(userId: string, now: number): number {
@@ -129,8 +143,8 @@ export function createChannel(userId: string, input: CreateChannelStoreInput): S
     chargeRate(userId, "create");
     const id = newId("chn");
     db.prepare(
-      `INSERT INTO channels (id, owner_id, name, description, icon, visibility, ai_json, revision, next_seq, archived_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1, NULL, ?, ?)`,
+      `INSERT INTO channels (id, owner_id, name, description, icon, visibility, kind, ai_json, revision, next_seq, archived_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'room', ?, 1, 1, NULL, ?, ?)`,
     ).run(id, userId, fields.name, fields.description, fields.icon, input.visibility, input.aiJson, now, now);
     db.prepare("INSERT INTO channel_members (channel_id, user_id, role, read_seq, notify_mode, joined_at) VALUES (?, ?, 'owner', 0, 'mentions', ?)").run(id, userId, now);
     for (const groupId of fields.groupIds) db.prepare("INSERT INTO channel_groups (channel_id, group_id) VALUES (?, ?)").run(id, groupId);
@@ -156,6 +170,8 @@ export function updateChannel(
   return tx(() => {
     const channel = channelRow(channelId);
     if (!channel) throw notFound();
+    // A DM has no mutable metadata; the generic room-only refusal covers every field, AI included.
+    assertRoom(channel);
     assertChannelRevision(channel, input.revision);
     const groupIds = input.groupIds ?? groupIdsOf(channelId);
     const nextVisibility = channel.visibility;
@@ -202,6 +218,7 @@ export function archiveChannel(userId: string, channelId: string, revision: numb
   return tx(() => {
     const channel = channelRow(channelId);
     if (!channel) throw notFound();
+    assertRoom(channel);
     assertChannelRevision(channel, revision);
     chargeRate(userId, "membership");
     db.prepare("UPDATE channels SET archived_at = ? WHERE id = ?").run(archived ? Date.now() : null, channelId);
@@ -217,6 +234,7 @@ export function deleteChannel(userId: string, channelId: string, revision: numbe
   tx(() => {
     const channel = channelRow(channelId);
     if (!channel) throw notFound();
+    assertRoom(channel);
     assertChannelRevision(channel, revision);
     db.prepare("UPDATE channel_create_keys SET channel_id = NULL WHERE channel_id = ?").run(channelId);
     db.prepare("DELETE FROM channel_ai_runs WHERE channel_id = ?").run(channelId);
@@ -224,6 +242,8 @@ export function deleteChannel(userId: string, channelId: string, revision: numbe
     audit(userId, channelId, "delete", null, reason);
     // The room is gone, so the invalidation has no private metadata and reaches every client.
     insertSync();
+    // Files go after the commit: a rollback must leave every row's bytes in place.
+    afterCommit(() => removeChannelMedia(channelId));
   });
 }
 
@@ -231,6 +251,7 @@ export function transferOwner(userId: string, channelId: string, revision: numbe
   return tx(() => {
     const channel = channelRow(channelId);
     if (!channel) throw notFound();
+    assertRoom(channel);
     assertChannelRevision(channel, revision);
     const target = memberRow(channelId, targetId);
     if (!target) throw new AppError({ code: "validation", status: 422, message: "Choose a current member." });
@@ -243,6 +264,8 @@ export function transferOwner(userId: string, channelId: string, revision: numbe
     db.prepare("UPDATE channel_members SET role = 'moderator' WHERE channel_id = ? AND role = 'owner' AND user_id <> ?").run(channelId, targetId);
     db.prepare("UPDATE channel_members SET role = 'owner' WHERE channel_id = ? AND user_id = ?").run(channelId, targetId);
     db.prepare("UPDATE channels SET owner_id = ? WHERE id = ?").run(targetId, channelId);
+    // The payer of every stored attachment moves with the room; otherwise the old owner pays forever.
+    db.prepare("UPDATE channel_attachments SET owner_id = ? WHERE channel_id = ?").run(targetId, channelId);
     const next = bumpRevision(channelId);
     audit(userId, channelId, "transfer", targetId, "");
     insertEvent({ channelId, kind: "members.changed", entityId: targetId, version: next });
@@ -254,6 +277,7 @@ export function setMemberRole(userId: string, channelId: string, revision: numbe
   tx(() => {
     const channel = channelRow(channelId);
     if (!channel) throw notFound();
+    assertRoom(channel);
     assertChannelRevision(channel, revision);
     const target = memberRow(channelId, targetId);
     if (!target) throw notFound();
@@ -270,6 +294,7 @@ export function joinChannel(userId: string, channelId: string): StoreResult<Memb
   return tx(() => {
     const channel = channelRow(channelId);
     if (!channel) throw notFound();
+    assertRoom(channel);
     if (channel.visibility === "private") throw notFound();
     if (channel.archived_at !== null) throw conflict("archived", "This room is archived.");
     if (!groupEligible(userId, channel)) throw notFound();
@@ -300,6 +325,7 @@ export function acceptInvite(userId: string, channelId: string): MemberRow {
     const channel = channelRow(channelId);
     const invite = inviteRow(channelId, userId);
     if (!channel || !invite) throw notFound();
+    assertRoom(channel);
     if (channel.archived_at !== null) throw conflict("archived", "This room is archived.");
     if (!groupEligible(userId, channel)) throw notFound();
     if (exclusionRow(channelId, userId)) throw conflict("excluded", "You cannot join this room until a moderator unblocks you.");
@@ -326,6 +352,9 @@ export function acceptInvite(userId: string, channelId: string): MemberRow {
 
 export function declineInvite(userId: string, channelId: string): void {
   tx(() => {
+    const channel = channelRow(channelId);
+    if (!channel) throw notFound();
+    assertRoom(channel);
     if (!inviteRow(channelId, userId)) throw notFound();
     chargeRate(userId, "membership");
     db.prepare("DELETE FROM channel_invites WHERE channel_id = ? AND user_id = ?").run(channelId, userId);
@@ -336,6 +365,9 @@ export function declineInvite(userId: string, channelId: string): void {
 
 export function leaveChannel(userId: string, channelId: string): void {
   tx(() => {
+    const channel = channelRow(channelId);
+    if (!channel) throw notFound();
+    assertRoom(channel);
     const member = memberRow(channelId, userId);
     if (!member) throw notFound();
     if (member.role === "owner") throw conflict("owner_transfer_required", "Transfer ownership or delete the room before leaving.");
@@ -353,6 +385,7 @@ export function inviteMembers(userId: string, channelId: string, userIds: string
   return tx(() => {
     const channel = channelRow(channelId);
     if (!channel) throw notFound();
+    assertRoom(channel);
     const unique = [...new Set(userIds)];
     const count = (db.prepare("SELECT COUNT(*) AS n FROM channel_invites WHERE channel_id = ?").get(channelId) as { n: number }).n;
     const memberCount = (db.prepare("SELECT COUNT(*) AS n FROM channel_members WHERE channel_id = ?").get(channelId) as { n: number }).n;
@@ -393,7 +426,9 @@ export function inviteMembers(userId: string, channelId: string, userIds: string
 
 export function revokeInvite(userId: string, channelId: string, targetId: string): void {
   tx(() => {
-    if (!channelRow(channelId)) throw notFound();
+    const channel = channelRow(channelId);
+    if (!channel) throw notFound();
+    assertRoom(channel);
     if (!inviteRow(channelId, targetId)) throw notFound();
     chargeRate(userId, "membership");
     db.prepare("DELETE FROM channel_invites WHERE channel_id = ? AND user_id = ?").run(channelId, targetId);
@@ -406,6 +441,7 @@ export function removeMember(userId: string, channelId: string, targetId: string
   tx(() => {
     const channel = channelRow(channelId);
     if (!channel) throw notFound();
+    assertRoom(channel);
     const target = memberRow(channelId, targetId);
     if (!target) throw notFound();
     if (target.role === "owner") throw conflict("owner_transfer_required", "The owner must transfer ownership or delete the room.");
@@ -424,7 +460,9 @@ export function removeMember(userId: string, channelId: string, targetId: string
 
 export function unblockMember(userId: string, channelId: string, targetId: string): void {
   tx(() => {
-    if (!channelRow(channelId)) throw notFound();
+    const channel = channelRow(channelId);
+    if (!channel) throw notFound();
+    assertRoom(channel);
     if (!db.prepare("SELECT 1 FROM channel_exclusions WHERE channel_id = ? AND user_id = ?").get(channelId, targetId)) {
       return;
     }
@@ -500,7 +538,9 @@ export interface PostMessageInput {
   clientId: string;
   body: string;
   replyTo?: string;
+  threadRootId?: string;
   mentions?: ChannelMentionInput[];
+  attachmentIds?: string[];
   requestAi?: boolean;
   requestHash: string;
 }
@@ -525,18 +565,36 @@ export function postHumanMessage(
       return { value: { messageId: existing.id, seq: existing.seq, runId: run?.id ?? null, replay: true }, replay: true };
     }
     assertMessageCapacity(channelId);
-    const body = assertBody(input.body);
+    const { threadRoot } = resolveThreadPlacement(channelId, input.threadRootId, input.replyTo);
+    // AI never runs in a DM or on a reply; the route refuses first, this is the in-transaction guard.
+    if (input.requestAi && channel.kind === "dm") {
+      throw new AppError({ code: "validation", status: 422, message: "Direct messages do not support assistant replies.", details: { reason: "dm_ai" } });
+    }
+    if (input.requestAi && threadRoot) {
+      throw new AppError({ code: "validation", status: 422, message: "Assistant replies are not available in threads.", details: { reason: "thread_ai" } });
+    }
+    const body = assertContent(input.body, (input.attachmentIds ?? []).length > 0);
+    if (input.requestAi && !body.trim()) {
+      throw new AppError({ code: "validation", status: 422, message: "Add a line of text before asking the assistant.", details: { reason: "attachments_only" } });
+    }
     const replyTo = validateReply(channelId, input.replyTo);
     const mentions = validateMentions(channelId, body, normalizeMentions(body, input.mentions));
+    if (threadRoot) {
+      const live = (
+        db.prepare("SELECT COUNT(*) AS n FROM channel_messages WHERE channel_id = ? AND thread_root = ? AND deleted_at IS NULL").get(channelId, threadRoot) as { n: number }
+      ).n;
+      if (live >= CHANNEL_LIMITS.threadReplies) throw conflict("capacity", "This thread has reached its reply limit.");
+    }
     assertStorage(channel.owner_id, bytesOf(body));
     chargeRate(userId, "write");
     const now = Date.now();
     const seq = allocateSeq(channelId);
     const id = newId("cmsg");
     db.prepare(
-      `INSERT INTO channel_messages (id, channel_id, seq, author_id, kind, body, reply_to, client_id, request_hash, revision, created_at, edited_at, deleted_at)
-       VALUES (?, ?, ?, ?, 'human', ?, ?, ?, ?, 1, ?, NULL, NULL)`,
-    ).run(id, channelId, seq, userId, body, replyTo, input.clientId, input.requestHash, now);
+      `INSERT INTO channel_messages (id, channel_id, seq, author_id, kind, body, reply_to, thread_root, client_id, request_hash, revision, created_at, edited_at, deleted_at)
+       VALUES (?, ?, ?, ?, 'human', ?, ?, ?, ?, ?, 1, ?, NULL, NULL)`,
+    ).run(id, channelId, seq, userId, body, replyTo, threadRoot, input.clientId, input.requestHash, now);
+    bindAttachments(channel, userId, id, input.attachmentIds);
     for (const mention of mentions) {
       db.prepare("INSERT INTO channel_mentions (message_id, user_id, start_offset, end_offset) VALUES (?, ?, ?, ?)").run(
         id,
@@ -546,13 +604,27 @@ export function postHumanMessage(
       );
     }
     touchActivity(channelId, now);
+    if (threadRoot) {
+      db.prepare(
+        `INSERT INTO channel_thread_state (root_id, channel_id, reply_count, last_seq, last_at, last_author_id)
+         VALUES (?, ?, 1, ?, ?, ?)
+         ON CONFLICT(root_id) DO UPDATE SET
+           reply_count = reply_count + 1, last_seq = excluded.last_seq, last_at = excluded.last_at,
+           last_author_id = excluded.last_author_id`,
+      ).run(threadRoot, channelId, seq, now, userId);
+    }
     let runId: string | null = null;
     if (input.requestAi) {
       const run = makeRun({ messageId: id, seq });
       runId = run?.runId ?? null;
     }
-    notifyHumanMessage(channel, id, seq, userId, mentions.map((mention) => mention.userId));
-    insertEvent({ channelId, kind: "message.changed", entityId: id, version: 1 });
+    if (threadRoot) {
+      const rootAuthor = (db.prepare("SELECT author_id FROM channel_messages WHERE id = ?").get(threadRoot) as { author_id: string | null } | undefined)?.author_id ?? null;
+      notifyThreadReply(channel, threadRoot, id, seq, userId, mentions.map((mention) => mention.userId), rootAuthor);
+    } else {
+      notifyHumanMessage(channel, id, seq, userId, mentions.map((mention) => mention.userId));
+    }
+    insertEvent({ channelId, kind: "message.changed", entityId: id, version: 1, rootId: threadRoot });
     insertEvent({ channelId, kind: "channel.changed", entityId: channelId, version: channel.revision });
     return { value: { messageId: id, seq, runId, replay: false }, replay: false };
   });
@@ -571,7 +643,7 @@ export function editHumanMessage(userId: string, channelId: string, messageId: s
     if (db.prepare("SELECT 1 FROM channel_ai_runs WHERE source_id = ? AND state IN ('queued', 'running')").get(messageId)) {
       throw conflict("source_busy", "A reply to this message is still being written.");
     }
-    const body = assertBody(bodyInput);
+    const body = assertContent(bodyInput, true);
     const mentions = validateMentions(channelId, body, normalizeMentions(body, mentionsInput));
     const growth = bytesOf(body) - bytesOf(message.body);
     if (growth > 0) assertStorage(channel.owner_id, growth);
@@ -591,12 +663,12 @@ export function editHumanMessage(userId: string, channelId: string, messageId: s
   });
 }
 
-/** Tombstone: text, mentions, and reactions go; id, sequence, replies, and the original digest stay. */
+/** Tombstone: text, mentions, reactions, and attachments go; id, sequence, and the original digest stay. */
 export function deleteHumanMessage(userId: string, channelId: string, messageId: string, revision: number, options: { moderator: boolean; reason: string }): { seq: number } {
   return tx(() => {
     const channel = channelRow(channelId);
     const message = db.prepare("SELECT * FROM channel_messages WHERE channel_id = ? AND id = ?").get(channelId, messageId) as
-      | { id: string; author_id: string | null; kind: string; revision: number; deleted_at: number | null; seq: number }
+      | { id: string; author_id: string | null; kind: string; revision: number; deleted_at: number | null; seq: number; thread_root: string | null }
       | undefined;
     if (!channel || !message) throw notFound();
     if (message.deleted_at !== null) throw conflict("revision", "That message is already deleted.");
@@ -604,13 +676,34 @@ export function deleteHumanMessage(userId: string, channelId: string, messageId:
     if (message.kind !== "human") throw new AppError({ code: "forbidden", message: "Stop the reply instead of deleting it." });
     if (message.author_id !== userId && !options.moderator) throw new AppError({ code: "forbidden", message: "You can only delete your own messages." });
     chargeRate(userId, "write");
-    db.prepare("UPDATE channel_messages SET body = '', deleted_at = ?, revision = revision + 1 WHERE channel_id = ? AND id = ?").run(Date.now(), channelId, messageId);
-    db.prepare("DELETE FROM channel_mentions WHERE message_id = ?").run(messageId);
-    db.prepare("DELETE FROM channel_reactions WHERE message_id = ?").run(messageId);
-    purgeMessageNotices(channelId, messageId);
+    const now = Date.now();
+    const tombstone = (id: string) => {
+      db.prepare("UPDATE channel_messages SET body = '', deleted_at = ?, revision = revision + 1 WHERE channel_id = ? AND id = ?").run(now, channelId, id);
+      db.prepare("DELETE FROM channel_mentions WHERE message_id = ?").run(id);
+      db.prepare("DELETE FROM channel_reactions WHERE message_id = ?").run(id);
+      db.prepare("UPDATE channel_attachments SET deleted_at = ? WHERE message_id = ? AND deleted_at IS NULL").run(now, id);
+      purgeMessageNotices(channelId, id);
+    };
+    tombstone(messageId);
+    const replies = message.thread_root === null
+      ? (db.prepare("SELECT id FROM channel_messages WHERE channel_id = ? AND thread_root = ? AND deleted_at IS NULL").all(channelId, messageId) as Array<{ id: string }>)
+      : [];
+    for (const reply of replies) tombstone(reply.id);
+    if (message.thread_root === null) {
+      // The root is gone, so its chip and every thread notice go with it.
+      db.prepare("DELETE FROM channel_thread_state WHERE root_id = ?").run(messageId);
+      purgeThreadNotices(channelId, messageId);
+    } else {
+      recountThread(message.thread_root);
+    }
     const next = (db.prepare("SELECT revision FROM channel_messages WHERE id = ?").get(messageId) as { revision: number }).revision;
-    audit(userId, channelId, "deleteMessage", messageId, options.reason);
-    insertEvent({ channelId, kind: "message.changed", entityId: messageId, version: next });
+    if (channel.kind !== "dm") audit(userId, channelId, "deleteMessage", messageId, options.reason);
+    insertEvent({ channelId, kind: "message.changed", entityId: messageId, version: next, rootId: message.thread_root });
+    // Each tombstoned reply invalidates its own panel; the root event alone would not converge an open thread.
+    for (const reply of replies) {
+      const version = (db.prepare("SELECT revision FROM channel_messages WHERE id = ?").get(reply.id) as { revision: number }).revision;
+      insertEvent({ channelId, kind: "message.changed", entityId: reply.id, version, rootId: messageId });
+    }
     return { seq: message.seq };
   });
 }
@@ -707,10 +800,16 @@ export function createRunInTx(
   input: CreateRunInput,
 ): { runId: string; messageId: string } {
   const current = assertChannelMember(userId, channel.id).channel;
+  assertRoom(current);
   assertWritable(current);
   if (current.ai_json !== channel.ai_json) throw conflict("binding_unavailable", "This room's AI binding changed.");
-  const sourceRow = db.prepare("SELECT kind, deleted_at FROM channel_messages WHERE channel_id = ? AND id = ?").get(channel.id, source.messageId) as { kind: string; deleted_at: number | null } | undefined;
+  const sourceRow = db.prepare("SELECT kind, deleted_at, thread_root FROM channel_messages WHERE channel_id = ? AND id = ?").get(channel.id, source.messageId) as
+    | { kind: string; deleted_at: number | null; thread_root: string | null }
+    | undefined;
   if (!sourceRow || sourceRow.deleted_at !== null || sourceRow.kind !== "human") throw notFound();
+  if (sourceRow.thread_root !== null) {
+    throw new AppError({ code: "validation", status: 422, message: "Assistant replies are not available in threads.", details: { reason: "thread_ai" } });
+  }
   const existing = runByClient(channel.id, userId, input.clientId);
   if (existing) {
     if (existing.request_hash !== input.requestHash) throw conflict("capacity", "That reply id was already used for a different request.");
@@ -871,9 +970,10 @@ export function channelStorageBytes(channelId: string): number {
         (SELECT COALESCE(SUM(length(CAST(body AS BLOB))), 0) FROM channel_messages WHERE channel_id = ?) +
         (SELECT COALESCE(SUM(length(CAST(config_json AS BLOB)) + COALESCE(length(CAST(input_enc AS BLOB)), 0) + 1024
            + CASE WHEN r.state IN ('queued', 'running') THEN MAX(0, 65536 - length(CAST(m.body AS BLOB))) ELSE 0 END), 0)
-           FROM channel_ai_runs r JOIN channel_messages m ON m.id = r.message_id WHERE r.channel_id = ?) AS bytes`,
+           FROM channel_ai_runs r JOIN channel_messages m ON m.id = r.message_id WHERE r.channel_id = ?) +
+        (SELECT COALESCE(SUM(size), 0) FROM channel_attachments WHERE channel_id = ?) AS bytes`,
     )
-    .get(channelId, channelId, channelId) as { bytes: number };
+    .get(channelId, channelId, channelId, channelId) as { bytes: number };
   return row.bytes;
 }
 
@@ -889,11 +989,13 @@ export function audit(actorId: string | null, channelId: string | null, action: 
 }
 
 /** The canonical hash of a message post: replay compares meaning, not whitespace. */
-export function postRequestHash(input: { body: string; replyTo?: string; mentions?: ChannelMentionInput[]; requestAi?: boolean }): string {
+export function postRequestHash(input: { body: string; replyTo?: string; threadRootId?: string; mentions?: ChannelMentionInput[]; attachmentIds?: string[]; requestAi?: boolean }): string {
   return requestHash({
     body: input.body.replace(/\r\n/g, "\n"),
     replyTo: input.replyTo ?? null,
+    threadRootId: input.threadRootId ?? null,
     mentions: [...(input.mentions ?? [])].sort((a, b) => a.start - b.start).map((m) => [m.userId, m.start, m.end]),
+    attachmentIds: [...(input.attachmentIds ?? [])].sort(),
     requestAi: input.requestAi === true,
   });
 }

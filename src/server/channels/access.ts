@@ -16,6 +16,8 @@ export interface ChannelRow {
   description: string;
   icon: string;
   visibility: ChannelVisibility;
+  kind: string;
+  dm_key: string | null;
   ai_json: string | null;
   revision: number;
   next_seq: number;
@@ -144,6 +146,14 @@ export function assertWritable(channel: ChannelRow): void {
   if (channel.archived_at !== null) {
     throw new AppError({ code: "conflict", status: 409, message: "This room is archived.", details: { reason: "archived" } });
   }
+}
+
+/**
+ * Room-only paths (join, invites, roles, archive, AI, metadata). A DM is a conversation, not a room:
+ * every such action answers one generic 403 so a DM id cannot be probed through the error text.
+ */
+export function assertRoom(channel: Pick<ChannelRow, "kind">): void {
+  if (channel.kind === "dm") throw new AppError({ code: "forbidden", message: "Direct messages do not support that action." });
 }
 
 export function notFound(): AppError {

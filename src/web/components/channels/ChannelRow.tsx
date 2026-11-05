@@ -23,21 +23,25 @@ function titleOf(entry: ChannelListEntry): string {
 
 export function ChannelRow({
   entry,
+  title,
   selected,
   onSelect,
   secondary,
   action,
 }: {
   entry: ChannelListEntry;
+  title?: string;
   selected?: boolean;
   onSelect?: () => void;
   secondary?: string;
   action?: React.ReactNode;
 }) {
-  const Icon = ICONS[entry.icon as keyof typeof ICONS] ?? HashIcon;
   const summary = "membership" in entry ? (entry as ChannelSummary) : null;
+  const dm = summary?.kind === "dm";
+  const Icon = dm ? UsersIcon : ICONS[entry.icon as keyof typeof ICONS] ?? HashIcon;
   const unread = summary?.unread ?? 0;
   const mentions = summary?.mentionsUnread ?? 0;
+  const threadsUnread = summary?.threadsUnread ?? 0;
   const archived = "archivedAt" in entry && entry.archivedAt !== null;
   return (
     <div className={cn("group/room flex items-center gap-0.5", selected && "depth-row-active rounded-lg")}>
@@ -53,14 +57,17 @@ export function ChannelRow({
         <Icon aria-hidden className="size-4 shrink-0 opacity-80" />
         <span className="min-w-0 flex-1">
           <span className={cn("flex items-center gap-1 truncate", (unread > 0 || mentions > 0) && "font-medium")}>
-            <span className="truncate">{titleOf(entry)}</span>
+            <span className="truncate">{title ?? titleOf(entry)}</span>
             {archived && <span className="text-muted-foreground shrink-0 text-[0.65rem]">{t("channels.archived")}</span>}
-            {entry.visibility !== "public" && (
+            {!dm && entry.visibility !== "public" && (
               <span className="text-muted-foreground shrink-0 text-[0.65rem]">{t(entry.visibility === "private" ? "channels.private" : "channels.group")}</span>
             )}
           </span>
           {secondary && <span className="text-muted-foreground block truncate text-xs">{secondary}</span>}
         </span>
+        {threadsUnread > 0 && (
+          <span className="bg-primary size-1.5 shrink-0 rounded-full" aria-label={t("channels.threadsUnread", { count: threadsUnread })} />
+        )}
         {mentions > 0 ? (
           <span className="depth-primary text-primary-foreground rounded-full px-1.5 py-0.5 text-[0.65rem] font-medium" aria-label={t("channels.mentionsUnread", { count: mentions })}>
             {formatUnreadBadge(mentions)}

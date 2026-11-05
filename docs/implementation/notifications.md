@@ -97,13 +97,19 @@ individual (non-archive) exports or comparisons, or notification actions beyond 
 ## Team channels
 
 Channel notices use the `channel` kind and generic title/body keys with empty params: no room name,
-sender, text, or private id appears in a displayed string. Structured mentions win over a plain message;
-`all` adds posts by others and terminal AI replies; `none` suppresses them; invitations always notify.
-Edits, reactions, and read cursors never create notices. The server stores `channel_id` and
-`channel_message_id`, filters list and unread counts against live membership/eligibility/feature, purges
-on ACL mutation and tombstones, and marks matching notices read when the room cursor advances. Source
-keys are `channel:invite:<room>:<user>:<time>`, `channel:message:<message>:<user>`, and
-`channel:ai:<run>:<requester>`.
+sender, text, filename, or private id appears in a displayed string. Structured mentions win over a plain
+message; `all` adds posts by others and terminal AI replies; `none` suppresses them; invitations always
+notify. A DM notice uses `channel.dmMessage` for every other member whose mode is `all` or who is mentioned
+(DMs default to `all`). A thread reply uses `channel.threadReply` and notifies only the root author and
+structured mentions; `notify_mode='all'` does not apply, and a viewer whose thread cursor already covers
+the reply is skipped. Edits, reactions, and read cursors never create notices. The server stores
+`channel_id`, `channel_message_id`, and `channel_root_id`, filters list and unread counts against live
+membership/eligibility/feature, purges on ACL mutation and tombstones, marks matching notices read when
+the room cursor advances, and marks reply notices read through a thread cursor. Source keys are
+`channel:invite:<room>:<user>:<time>`, `channel:message:<message>:<user>`,
+`channel:thread:<reply>:<user>`, and `channel:ai:<run>:<requester>`. `channel_root_id` deliberately has no
+foreign key: `channel_id` already cascades on room deletion, and a per-message FK would make a hard message
+delete fail or drop unrelated notices.
 
 The channel panel link uses `settingsHref("notifications")`; the General settings browser-notification row
 carries `setting-notifications` for that deep link.

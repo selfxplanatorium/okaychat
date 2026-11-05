@@ -76,7 +76,7 @@ export function searchChannels(
   chargeRate(userId, "search");
   const rows = db
     .prepare(
-      `SELECT cm.channel_id AS channelId, cm.id AS messageId, cm.seq AS seq,
+      `SELECT cm.channel_id AS channelId, cm.id AS messageId, cm.seq AS seq, cm.thread_root AS threadRootId,
               snippet(channel_messages_fts, 0, '${SNIPPET_OPEN}', '${SNIPPET_CLOSE}', '…', 12) AS snippet,
               cm.created_at AS createdAt
        FROM channel_messages_fts
@@ -85,6 +85,7 @@ export function searchChannels(
        JOIN channels c ON c.id = cm.channel_id
        JOIN channel_members m ON m.channel_id = c.id AND m.user_id = ?
        WHERE channel_messages_fts MATCH ? AND cm.deleted_at IS NULL
+         ${channelId ? "" : "AND c.kind = 'room'"}
          AND (c.visibility <> 'group' OR EXISTS (
            SELECT 1 FROM channel_groups g JOIN user_group_members gm ON gm.group_id = g.group_id
            WHERE g.channel_id = c.id AND gm.user_id = ?))
@@ -104,7 +105,7 @@ export function searchChannels(
       ],
     ) as unknown as Array<ChannelSearchHit & { createdAt: number }>;
   const page = rows.slice(0, limit);
-  const items: ChannelSearchHit[] = page.map(({ channelId: room, messageId, seq, snippet }) => ({ channelId: room, messageId, seq, snippet }));
+  const items: ChannelSearchHit[] = page.map(({ channelId: room, messageId, seq, snippet, threadRootId }) => ({ channelId: room, messageId, seq, snippet, threadRootId }));
   const last = page.at(-1);
   return {
     items,

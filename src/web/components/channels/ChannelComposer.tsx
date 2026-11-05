@@ -7,20 +7,28 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
+import { useChannels } from "@/state/channels";
 import { ChannelMentionPicker } from "./ChannelMentionPicker";
+import { ChannelAttachmentPicker } from "./ChannelAttachmentPicker";
 
 interface SelectedMention extends ChannelMentionInput {
   name: string;
 }
 
-/** Text-only composer with a structured mention picker and an explicit, visually distinct AI chip. */
+// A stable empty list: a fresh `[]` from a selector re-renders forever.
+const NO_CHIPS: never[] = [];
+
+/** Text composer with a structured mention picker, attachments, and an explicit, visually distinct AI chip. */
 export function ChannelComposer({
   room,
   members,
+  composerKey,
   draft,
   reply,
   aiArmed,
   sending,
+  showAi = true,
+  threadMode = false,
   onDraftChange,
   onSend,
   onCancelReply,
@@ -28,10 +36,13 @@ export function ChannelComposer({
 }: {
   room: ChannelSummary;
   members: ChannelMemberSummary[];
+  composerKey: string;
   draft: string;
   reply: ChannelMessage | null;
   aiArmed: boolean;
   sending: boolean;
+  showAi?: boolean;
+  threadMode?: boolean;
   onDraftChange: (text: string) => void;
   onSend: (text: string, mentions: ChannelMentionInput[]) => void;
   onCancelReply: () => void;
@@ -41,8 +52,12 @@ export function ChannelComposer({
   const ref = useRef<HTMLTextAreaElement>(null);
   const [mentions, setMentions] = useState<SelectedMention[]>([]);
   const [picker, setPicker] = useState<{ start: number; query: string } | null>(null);
+  const chips = useChannels((state) => state.pendingAttachments[composerKey] ?? NO_CHIPS);
+  const uploading = useChannels((state) => state.uploading[composerKey] ?? 0);
+  const ready = chips.filter((chip) => chip.status === "ready").length;
   const offline = typeof navigator !== "undefined" && navigator.onLine === false;
   const disabled = !room.capabilities.post || sending || offline;
+  const canSend = !disabled && (draft.trim().length > 0 || ready > 0) && uploading === 0;
 
   useEffect(() => {
     if (!draft) setMentions([]);
@@ -85,10 +100,15 @@ export function ChannelComposer({
   };
 
   const send = () => {
-    if (disabled || !draft.trim()) return;
+    if (!canSend) return;
     const valid = mentions.filter((mention) => draft.slice(mention.start, mention.end) === `@${mention.name}`);
     onSend(draft, valid.map(({ userId, start, end }) => ({ userId, start, end })));
     setMentions([]);
+  };
+
+  const attachDropped = (files: FileList | null) => {
+    if (!files?.length || !room.capabilities.attach) return;
+    void useChannels.getState().attachFiles(composerKey, [...files]);
   };
 
   return (
@@ -97,7 +117,7 @@ export function ChannelComposer({
         {reply && (
           <div className="border-border bg-muted/40 flex items-center gap-2 rounded-lg border px-2 py-1 text-xs">
             <span className="text-muted-foreground min-w-0 flex-1 truncate">
-              {t("channels.replyTo", { name: reply.author?.name ?? t("channels.deletedAccount") })}
+              {threadMode ? t("channels.replyingInThread") : t("channels.replyTo", { name: reply.author?.name ?? t("channels.deletedAccount") })}
             </span>
             <button type="button" onClick={onCancelReply} aria-label={t("channels.cancelReply")} className="text-muted-foreground hover:text-foreground rounded p-1">
               <XIcon aria-hidden className="size-3.5" />
@@ -113,8 +133,20 @@ export function ChannelComposer({
             </button>
           </div>
         )}
-        <div className="border-border bg-muted/40 focus-within:bg-background relative flex items-end gap-1 rounded-xl border p-1 transition-colors">
+        <div
+          className="border-border bg-muted/40 focus-within:bg-background relative flex items-end gap-1 rounded-xl border p-1 transition-colors"
+          onDragOver={(event) => {
+            if (!room.capabilities.attach) return;
+            event.preventDefault();
+          }}
+          onDrop={(event) => {
+            if (!room.capabilities.attach) return;
+            event.preventDefault();
+            attachDropped(event.dataTransfer.files);
+          }}
+        >
           {picker && <ChannelMentionPicker members={members} query={picker.query} onSelect={selectMention} onClose={() => setPicker(null)} />}
+          <ChannelAttachmentPicker room={room} composerKey={composerKey} />
           <button
             type="button"
             aria-label={t("channels.mentionPicker")}
@@ -139,6 +171,14 @@ export function ChannelComposer({
             aria-label={t("channels.composerPlaceholder")}
             placeholder={room.archivedAt ? t("channels.archivedReadOnly") : t("channels.composerPlaceholder")}
             onChange={(event) => update(event.target.value, event.target.selectionStart ?? event.target.value.length)}
+            onPaste={(event) => {
+              if (!room.capabilities.attach) return;
+              const files = event.clipboardData.files;
+              if (files.length) {
+                event.preventDefault();
+                attachDropped(files);
+              }
+            }}
             onKeyDown={(event) => {
               if (picker) return;
               const mod = event.metaKey || event.ctrlKey;
@@ -150,28 +190,30 @@ export function ChannelComposer({
             }}
             className="max-h-40 min-h-9 resize-none border-0 bg-transparent px-0 py-1.5 shadow-none focus-visible:bg-transparent"
           />
-          <button
-            type="button"
-            aria-label={aiArmed ? t("channels.aiDisarm") : t("channels.aiAsk")}
-            aria-pressed={aiArmed}
-            disabled={disabled || !room.ai}
-            title={room.ai ? (aiArmed ? t("channels.aiArmed") : t("channels.aiAsk")) : t("channels.aiNone")}
-            onClick={onAiToggle}
-            className={cn(
-              "rounded-lg p-2 pointer-coarse:p-3 transition-colors",
-              aiArmed ? "depth-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
-              !room.ai && "opacity-40",
-            )}
-          >
-            <BotIcon aria-hidden className="size-4" />
-          </button>
-          <Button type="button" size="icon-sm" aria-label={sending ? t("channels.sending") : t("channels.send")} disabled={disabled || !draft.trim()} onClick={send}>
+          {showAi && (
+            <button
+              type="button"
+              aria-label={aiArmed ? t("channels.aiDisarm") : t("channels.aiAsk")}
+              aria-pressed={aiArmed}
+              disabled={disabled || !room.ai}
+              title={room.ai ? (aiArmed ? t("channels.aiArmed") : t("channels.aiAsk")) : t("channels.aiNone")}
+              onClick={onAiToggle}
+              className={cn(
+                "rounded-lg p-2 pointer-coarse:p-3 transition-colors",
+                aiArmed ? "depth-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                !room.ai && "opacity-40",
+              )}
+            >
+              <BotIcon aria-hidden className="size-4" />
+            </button>
+          )}
+          <Button type="button" size="icon-sm" aria-label={sending ? t("channels.sending") : t("channels.send")} disabled={!canSend} onClick={send}>
             <SendIcon aria-hidden />
           </Button>
         </div>
         <div className="text-muted-foreground flex items-center justify-between gap-2 text-[0.7rem]">
-          <span className="truncate">{room.ai ? `${t("channels.aiBinding")}: ${room.ai.label}` : t("channels.aiNone")}</span>
-          <span>{t("channels.storageOwner")}</span>
+          <span className="truncate">{showAi ? (room.ai ? `${t("channels.aiBinding")}: ${room.ai.label}` : t("channels.aiNone")) : t("channels.storageOwner")}</span>
+          <span>{showAi ? t("channels.storageOwner") : ""}</span>
         </div>
       </div>
     </div>

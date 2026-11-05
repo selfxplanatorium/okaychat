@@ -20,6 +20,8 @@ export const NOTIFICATION_TITLE_KEYS = [
   "channel.invited",
   "channel.mention",
   "channel.message",
+  "channel.dmMessage",
+  "channel.threadReply",
   "channel.aiFinished",
   "calendar.reminder",
 ] as const;
@@ -35,6 +37,7 @@ export const NOTIFICATION_BODY_KEYS = [
   "import.failedBody",
   "channel.openRoom",
   "channel.openMessage",
+  "channel.openThread",
   "calendar.openEvent",
 ] as const;
 export type NotificationBodyKey = (typeof NOTIFICATION_BODY_KEYS)[number];

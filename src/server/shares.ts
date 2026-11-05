@@ -598,7 +598,7 @@ export const publicShareRoutes = new Hono()
       WHERE i.id = ? AND i.user_id = ? AND (i.thread_id = ? OR EXISTS (SELECT 1 FROM image_threads r WHERE r.image_id = i.id AND r.thread_id = ?))`)
       .get(id, share.user_id, share.thread_id, share.thread_id) as { id: string; mime: string; size: number } | undefined);
     if (!image) return publicJson(c, { error: "Not found" }, 404);
-    return serveImage(c, { userId: share.user_id, key: image.id, file: imagePath(share.user_id, image.id), mime: image.mime, size: image.size, etag: image.id });
+    return serveImage(c, { namespace: share.user_id, key: image.id, file: imagePath(share.user_id, image.id), mime: image.mime, size: image.size, etag: image.id });
   })
   .get("/:token/uploads/:id", async (c) => {
     const result = gated(c, c.req.param("token"));
@@ -608,5 +608,5 @@ export const publicShareRoutes = new Hono()
     const upload = assetsFor(share).uploads.includes(id) && (db.prepare("SELECT media_id FROM uploads WHERE id = ? AND user_id = ?").get(id, share.user_id) as { media_id: string | null } | undefined);
     const media = upload && upload.media_id ? getMedia(upload.media_id) : undefined;
     if (!media || media.user_id !== share.user_id) return publicJson(c, { error: "Not found" }, 404);
-    return serveImage(c, { userId: share.user_id, key: media.id, file: mediaPath(media), mime: media.mime, size: media.size, etag: media.sha256.slice(0, 32) });
+    return serveImage(c, { namespace: share.user_id, key: media.id, file: mediaPath(media), mime: media.mime, size: media.size, etag: media.sha256.slice(0, 32) });
   });

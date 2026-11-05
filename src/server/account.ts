@@ -149,7 +149,7 @@ export const accountRoutes = new Hono<AppEnv>()
     // The URL is the same for every account; the digest validator and the per-request owner lookup make sure
     // a device that switches accounts never reuses the previous account's image.
     if (media && media.user_id === userId) {
-      return serveImage(c, { userId, key: media.id, file: mediaPath(media), mime: media.mime, size: media.size, etag: media.sha256.slice(0, 32) });
+      return serveImage(c, { namespace: userId, key: media.id, file: mediaPath(media), mime: media.mime, size: media.size, etag: media.sha256.slice(0, 32) });
     }
     return c.body(new Uint8Array(row.data), 200, { "Content-Type": row.mime, "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff" });
   })

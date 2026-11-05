@@ -85,12 +85,13 @@ export interface RawEvent {
   kind: ChannelEventKind;
   entity_id: string | null;
   version: number | null;
+  root_id: string | null;
   created_at: number;
 }
 
 export function readEvents(after: bigint, limit: number): RawEvent[] {
   const statement = db.prepare(
-    `SELECT id, channel_id, target_user_id, kind, entity_id, version, created_at
+    `SELECT id, channel_id, target_user_id, kind, entity_id, version, root_id, created_at
      FROM channel_events WHERE id > ? ORDER BY id LIMIT ?`,
   );
   statement.setReadBigInts(true);
@@ -116,6 +117,7 @@ export function projectEvent(row: RawEvent): ChannelEvent {
     ...(row.channel_id ? { channelId: row.channel_id } : {}),
     ...(row.entity_id ? { entityId: row.entity_id } : {}),
     ...(row.version !== null ? { version: row.version } : {}),
+    ...(row.root_id ? { rootId: row.root_id } : {}),
   };
 }
 
@@ -126,11 +128,12 @@ export function insertEvent(input: {
   kind: ChannelEventKind;
   entityId?: string | null;
   version?: number | null;
+  rootId?: string | null;
 }): void {
   db.prepare(
-    `INSERT INTO channel_events (channel_id, target_user_id, kind, entity_id, version, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(input.channelId ?? null, input.targetUserId ?? null, input.kind, input.entityId ?? null, input.version ?? null, Date.now());
+    `INSERT INTO channel_events (channel_id, target_user_id, kind, entity_id, version, root_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(input.channelId ?? null, input.targetUserId ?? null, input.kind, input.entityId ?? null, input.version ?? null, input.rootId ?? null, Date.now());
   afterCommit(wakeEvents);
 }
 

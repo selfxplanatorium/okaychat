@@ -70,6 +70,7 @@ export function AdminChannels() {
       <div>
         <h2 className="text-sm font-medium">{t("channels.adminTitle")}</h2>
         <p className="text-muted-foreground text-xs">{t("channels.adminDescription")}</p>
+        <p className="text-muted-foreground text-xs">{t("channels.adminDmExcluded")}</p>
 
       </div>
       {error && <p role="alert" className="text-destructive text-xs">{error}</p>}

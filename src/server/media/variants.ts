@@ -11,7 +11,8 @@ import { MAX_IMAGE_PIXELS, VARIANTS, isVariant, variantPath, type VariantName } 
 // use. SVG and anything that does not sniff as raster never reach it. See docs/implementation/media.md.
 
 export interface ImageSource {
-  userId: string;
+  /** Cache namespace: an account id for owned media, `ch-<channelId>` for channel attachments. */
+  namespace: string;
   /** Cache key: a media id or a generated image id. Unique per original bytes. */
   key: string;
   file: string;
@@ -118,8 +119,8 @@ export async function normalizeAvatar(input: Buffer): Promise<Buffer> {
 /** The file to serve for a variant, generating it once (single flight) when missing. */
 export async function variantFile(src: ImageSource, variant: VariantName): Promise<{ file: string; original: boolean }> {
   if (!DECODABLE.has(src.mime)) return { file: src.file, original: true };
-  const webp = variantPath(src.userId, src.key, variant, "webp");
-  const marker = variantPath(src.userId, src.key, variant, "orig");
+  const webp = variantPath(src.namespace, src.key, variant, "webp");
+  const marker = variantPath(src.namespace, src.key, variant, "orig");
   if (existsSync(webp)) return { file: webp, original: false };
   if (existsSync(marker)) return { file: src.file, original: true };
   const pending = inflight.get(webp);

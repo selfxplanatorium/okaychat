@@ -18,9 +18,19 @@ export function channelError(error: unknown, fallback: PlainMessageKey, options:
       return t("channels.notFound");
     case "conflict":
     case "validation":
-      if (/capacity|limit/i.test(error.message)) return t("channels.limitReached");
+      if (/capacity|limit/i.test(error.message)) {
+        if (/thread/i.test(error.message)) return t("channels.threadLimit");
+        return t("channels.limitReached");
+      }
       if (/still being written|source/i.test(error.message)) return t("channels.sourceBusy");
       if (/already running|reply/i.test(error.message)) return t("channels.aiBusy");
+      if (/thread/i.test(error.message)) return t("channels.threadAiUnavailable");
+      if (/owner/i.test(error.message)) return t("channels.attachmentOwnerChanged");
+      if (/attachment|file/i.test(error.message)) return t("channels.attachmentFailed");
+      if (/text before asking/i.test(error.message)) return t("channels.attachmentOnlyNeedsText");
+      if (/left this conversation|dm_left/i.test(error.message)) return t("channels.dmLeft");
+      if (/blocked/i.test(error.message)) return t("channels.dmBlocked");
+      if (/direct message/i.test(error.message)) return t("channels.dmUnavailable");
       return t("channels.invalidMessage");
     default:
       return t(fallback);

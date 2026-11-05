@@ -142,10 +142,13 @@ visibility, charts, and tool-using or multi-turn cases.
 - **Explicit room AI**: model or reduced-preset binding, transactional admission with a frozen source
   boundary and encrypted transcript, an in-process two-slot worker with checkpoints/cancellation and
   exactly-once usage kind `channel`, and no tools, memory, projects, files, RAG, or personal context.
+- **Channels v2 (built)**: owner-charged attachments with bounded previews, one level of thread replies
+  with their own read cursors and notices, and member-only DMs excluded from admin, discover, and global
+  search. See `docs/implementation/channels.md`.
 
-Deferred: uploads/images, nested threads, DMs, presence, custom emoji, room sharing/export/import,
-scheduled room posting, autonomous AI, in-place regeneration, per-room retention, and multi-writer
-deployment.
+Deferred: attachment editing/annotation/compression, multiple reply levels, thread-level AI, per-DM AI or
+metadata, DM admin inspection/export, presence, custom emoji, room sharing/export/import, scheduled room
+posting, autonomous AI, in-place regeneration, per-room retention, and multi-writer deployment.
 
 ## Pass 10: custom tools (built)
 

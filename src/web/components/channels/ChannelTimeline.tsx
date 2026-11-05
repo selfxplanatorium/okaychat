@@ -15,6 +15,8 @@ export function ChannelTimeline({
   nextBeforeSeq,
   meId,
   focusedId,
+  activeThreadId = null,
+  title,
   actions,
   onFocus,
   onLoadOlder,
@@ -25,6 +27,8 @@ export function ChannelTimeline({
   nextBeforeSeq: number | null;
   meId: string | null;
   focusedId: string | null;
+  activeThreadId?: string | null;
+  title: string;
   actions: MessageActions;
   onFocus: (id: string) => void;
   onLoadOlder: () => void;
@@ -83,7 +87,7 @@ export function ChannelTimeline({
       ref={scroller}
       role="log"
       aria-live="polite"
-      aria-label={room.name}
+      aria-label={title}
       className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain"
       onScroll={(event) => {
         const element = event.currentTarget;
@@ -126,6 +130,7 @@ export function ChannelTimeline({
                   focused={focusedId === message.id}
                   actions={actions}
                   onFocus={() => onFocus(message.id)}
+                  threadOpen={activeThreadId === message.id}
                 />
               </div>
             );

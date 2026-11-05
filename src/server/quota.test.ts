@@ -62,6 +62,17 @@ test("used bytes cover every kind of user storage and nobody else's", () => {
   assert.equal(storageUsed("bob"), 14);
 });
 
+test("channel attachments count against the owner and are freed when removed", () => {
+  const before = storageUsed("alice");
+  insert("INSERT INTO channels (id, owner_id, name, visibility, kind, created_at, updated_at) VALUES ('chq', 'alice', 'Q', 'public', 'room', 1, 1)");
+  insert("INSERT INTO channel_attachments (id, channel_id, message_id, uploader_id, owner_id, name, mime, size, file, data, created_at) VALUES ('cat_q', 'chq', NULL, 'bob', 'alice', 'f', 'text/plain', 123, 0, ?, 1)", Buffer.alloc(123));
+  assert.equal(storageUsed("alice") - before, 123 + Buffer.byteLength("Q"));
+  assert.equal(storageUsed("bob"), 0);
+  insert("DELETE FROM channel_attachments WHERE id = 'cat_q'");
+  insert("DELETE FROM channels WHERE id = 'chq'");
+  assert.equal(storageUsed("alice"), before);
+});
+
 test("the storage endpoint reports the user's usage, their limit, and the default", async () => {
   const res = await as("alice", "/storage");
   assert.equal(res.status, 200);

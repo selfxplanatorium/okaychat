@@ -1,13 +1,14 @@
 import { useState } from "react";
-import { ArchiveIcon, CheckIcon, CompassIcon, MailIcon, PlusIcon, SearchIcon, XIcon } from "lucide-react";
+import { ArchiveIcon, CheckIcon, CompassIcon, MailIcon, PlusIcon, SearchIcon, UsersIcon, XIcon } from "lucide-react";
 import type { ChannelDirectoryEntry, ChannelInviteSummary, ChannelSummary } from "@shared/channels";
 import { t } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { dmTitle, dmsOf, roomsOf } from "@/state/channels-derive";
 import { ChannelRow } from "./ChannelRow";
 
-export type ChannelListMode = "joined" | "discover" | "invitations";
+export type ChannelListMode = "joined" | "dm" | "discover" | "invitations";
 
 export function ChannelList({
   joined,
@@ -16,12 +17,14 @@ export function ChannelList({
   mode,
   onMode,
   selectedId,
+  meId,
   onSelect,
   onDiscoverQuery,
   onJoin,
   onAccept,
   onDecline,
   onCreate,
+  onNewDm,
   onLoadMore,
   hasMore,
 }: {
@@ -31,19 +34,22 @@ export function ChannelList({
   mode: ChannelListMode;
   onMode: (mode: ChannelListMode) => void;
   selectedId: string | null;
+  meId: string | null;
   onSelect: (id: string) => void;
   onDiscoverQuery: (query: string) => void;
   onJoin: (id: string) => void;
   onAccept: (id: string) => void;
   onDecline: (id: string) => void;
   onCreate: () => void;
+  onNewDm: () => void;
   onLoadMore: () => void;
   hasMore: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [archivedOnly, setArchivedOnly] = useState(false);
   // Archived is a view of the joined rooms, not a scope of its own, so it selects like the other tabs.
-  const rooms = joined.filter((room) => (archivedOnly ? room.archivedAt !== null : room.archivedAt === null));
+  const rooms = roomsOf(joined).filter((room) => (archivedOnly ? room.archivedAt !== null : room.archivedAt === null));
+  const dms = dmsOf(joined).filter((room) => (archivedOnly ? room.archivedAt !== null : room.archivedAt === null));
   const select = (tab: ChannelListMode | "archived") => {
     if (tab === "archived") {
       onMode("joined");
@@ -55,6 +61,7 @@ export function ChannelList({
   };
   const tabs = [
     ["joined", "channels.joined", CompassIcon],
+    ["dm", "channels.directMessages", UsersIcon],
     ["discover", "channels.discover", SearchIcon],
     ["invitations", "channels.invites", MailIcon],
     ["archived", "channels.archived", ArchiveIcon],
@@ -66,6 +73,9 @@ export function ChannelList({
       <div className="flex items-center gap-1 px-2 pt-2">
         <Button type="button" size="sm" className="flex-1" onClick={onCreate}>
           <PlusIcon aria-hidden /> {t("channels.create")}
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={onNewDm} aria-label={t("channels.newDm")}>
+          <UsersIcon aria-hidden /> {t("channels.newDm")}
         </Button>
       </div>
       <div role="tablist" aria-label={t("channels.title")} className="grid grid-cols-2 gap-0.5 px-2 pt-2">
@@ -98,6 +108,17 @@ export function ChannelList({
               secondary={room.description || undefined}
             />
           )) : <p className="text-muted-foreground px-2 py-6 text-sm">{t(archivedOnly ? "channels.emptyArchived" : "channels.emptyRooms")}</p>
+        )}
+        {mode === "dm" && (
+          dms.length ? dms.map((room) => (
+            <ChannelRow
+              key={room.id}
+              entry={room}
+              title={dmTitle(room, meId)}
+              selected={selectedId === room.id}
+              onSelect={() => onSelect(room.id)}
+            />
+          )) : <p className="text-muted-foreground px-2 py-6 text-sm">{t("channels.emptyDms")}</p>
         )}
         {mode === "discover" && (
           <>

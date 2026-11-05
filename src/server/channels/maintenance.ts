@@ -2,6 +2,7 @@ import { db, tx } from "../db.js";
 import { CHANNEL_LIMITS } from "../../shared/channels.js";
 import { eventState } from "./events.js";
 import { pruneRateWindows } from "./rate.js";
+import { collectAttachmentGarbage, purgePendingAttachments, purgeTombstonedAttachments } from "./attachments.js";
 
 /**
  * Bounded operational cleanup. Events keep at most 100,000 rows and 24 hours; the floor advances in
@@ -54,6 +55,11 @@ export function runChannelMaintenance(): void {
   pruneCreateKeys();
   for (let i = 0; i < 4 && pruneEventsOnce(); i++) { /* bounded batches */ }
   for (let i = 0; i < 2 && pruneAuditOnce(); i++) { /* bounded batches */ }
+  // Disk sweeps come last so a slow filesystem cannot starve cursor pruning.
+  const now = Date.now();
+  purgePendingAttachments(now);
+  purgeTombstonedAttachments(now);
+  collectAttachmentGarbage();
 }
 
 export function startChannelMaintenance(): void {

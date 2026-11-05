@@ -10,6 +10,10 @@
 export const CHANNEL_VISIBILITIES = ["public", "private", "group"] as const;
 export type ChannelVisibility = (typeof CHANNEL_VISIBILITIES)[number];
 
+/** A room is the shared surface; a DM is a member-only conversation stored as a channel row. */
+export const CHANNEL_KINDS = ["room", "dm"] as const;
+export type ChannelKind = (typeof CHANNEL_KINDS)[number];
+
 export const CHANNEL_ROLES = ["owner", "moderator", "member"] as const;
 export type ChannelRole = (typeof CHANNEL_ROLES)[number];
 
@@ -73,6 +77,22 @@ export const CHANNEL_LIMITS = {
   auditRetentionMs: 90 * 24 * 60 * 60 * 1000,
   auditMaxRows: 10_000,
   reasonChars: 500,
+  /** One attachment's bytes; the upload router enforces the same cap with its own body limit. */
+  attachmentBytes: 10 * 1024 * 1024,
+  attachmentsPerMessage: 5,
+  attachmentNameChars: 200,
+  attachmentsPerRoom: 2_000,
+  attachmentPendingPerUser: 20,
+  attachmentPendingMs: 60 * 60 * 1000,
+  /** Tombstoned attachments keep their bytes this long so an undo-style restore never loses them. */
+  attachmentRetentionMs: 30 * 24 * 60 * 60 * 1000,
+  threadReplies: 500,
+  threadPage: 50,
+  dmMembers: 8,
+  dmsOwned: 50,
+  dmsJoined: 200,
+  peopleQueryChars: 200,
+  dmBlockedMax: 500,
 } as const;
 
 export interface ChannelMembershipView {
@@ -86,6 +106,10 @@ export interface ChannelCapabilities {
   moderate: boolean;
   manage: boolean;
   requestAi: boolean;
+  /** Post with attachments (post && not archived). */
+  attach: boolean;
+  /** Post into a thread (post && not archived). Reading a thread needs no capability. */
+  thread: boolean;
 }
 
 /** Public binding summary. Instructions and sampling are detail-only and never sent to ordinary readers. */
@@ -119,6 +143,11 @@ export interface ChannelSummary {
   mentionsUnread: number;
   ai: ChannelAiSummary | null;
   capabilities: ChannelCapabilities;
+  kind: ChannelKind;
+  /** DM only: the other members (owner included), bounded by CHANNEL_LIMITS.dmMembers, id+name only. */
+  dmMembers: ChannelMessageAuthor[] | null;
+  /** Rooms with at least one unread thread reply (see docs/implementation/channels.md). */
+  threadsUnread: number;
 }
 
 /** What an eligible nonmember or invitee may see. No counts, owner id, members, history, or AI settings. */
@@ -172,6 +201,49 @@ export interface ChannelReactionSummary {
   mine: boolean;
 }
 
+export interface ChannelAttachment {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  width: number | null;
+  height: number | null;
+  /** Raster the browser can preview (png/jpeg/webp/gif/avif). */
+  image: boolean;
+  /** App-owned, authorization-checked on every request. Never a storage path. */
+  url: string;
+}
+
+export interface ChannelThreadSummary {
+  replyCount: number;
+  lastReplySeq: number;
+  lastReplyAt: number;
+  /** Replies after this viewer's thread cursor, excluding their own. */
+  unread: number;
+}
+
+export interface ChannelThreadPage {
+  root: ChannelMessage;
+  items: ChannelMessage[];
+  /** The reply the caller asked for, when the requested id was a reply. */
+  focusId: string | null;
+  nextBeforeSeq: number | null;
+  hasMore: boolean;
+  readSeq: number;
+  replyCount: number;
+  channelRevision: number;
+  cursor: string;
+}
+
+export interface ChannelDmBlock {
+  id: string;
+  name: string;
+}
+
+/** The app-owned URL of one channel attachment. Pure, shared by the server projection and the web. */
+export const channelAttachmentUrl = (channelId: string, attachmentId: string): string =>
+  `/api/channels/${encodeURIComponent(channelId)}/attachments/${encodeURIComponent(attachmentId)}`;
+
 export interface ChannelRunProjection {
   id: string;
   messageId: string;
@@ -209,6 +281,9 @@ export interface ChannelMessage {
   aiRequester?: ChannelMessageAuthor | null;
   /** Advisory scanner result for the frozen input; never a security guarantee. */
   injectionFlagged?: boolean;
+  threadRootId: string | null;
+  thread: ChannelThreadSummary | null;
+  attachments: ChannelAttachment[];
 }
 
 export interface ChannelMessagePage {
@@ -226,6 +301,8 @@ export interface ChannelEvent {
   channelId?: string;
   entityId?: string;
   version?: number;
+  /** Thread root for a reply invalidation or a thread read. */
+  rootId?: string;
 }
 
 export interface ChannelEventFrame {
@@ -256,6 +333,8 @@ export interface ChannelSearchHit {
   messageId: string;
   seq: number;
   snippet: string;
+  /** Set when the hit is a thread reply; the client opens that thread. */
+  threadRootId: string | null;
 }
 
 export interface ChannelSearchPage {
@@ -287,6 +366,24 @@ export interface ChannelMentionInput {
   start: number;
   end: number;
 }
+
+export interface PostChannelMessageInput {
+  clientId: string;
+  body: string;
+  replyTo?: string;
+  threadRootId?: string;
+  mentions?: ChannelMentionInput[];
+  attachmentIds?: string[];
+  requestAi?: boolean;
+}
+
+export interface CreateDmInput {
+  clientId: string;
+  /** The other members; 1..dmMembers-1. */
+  userIds: string[];
+}
+
+export const isChannelKind = (value: string): value is ChannelKind => (CHANNEL_KINDS as readonly string[]).includes(value);
 
 export const isChannelReaction = (value: string): value is ChannelReaction => (CHANNEL_REACTIONS as readonly string[]).includes(value);
 export const isChannelVisibility = (value: string): value is ChannelVisibility => (CHANNEL_VISIBILITIES as readonly string[]).includes(value);

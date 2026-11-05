@@ -35,6 +35,7 @@ export interface NotificationInput {
   threadId?: string | null;
   channelId?: string | null;
   channelMessageId?: string | null;
+  channelRootId?: string | null;
   calendarEventId?: string | null;
   actionPath?: string | null;
   sourceKey?: string | null;
@@ -88,8 +89,8 @@ export function notify(input: NotificationInput): void {
   const now = Date.now();
   tx(() => {
     db.prepare(
-      `INSERT OR IGNORE INTO notifications (id, user_id, kind, level, title_key, body_key, params_json, thread_id, channel_id, channel_message_id, calendar_event_id, action_path, source_key, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO notifications (id, user_id, kind, level, title_key, body_key, params_json, thread_id, channel_id, channel_message_id, channel_root_id, calendar_event_id, action_path, source_key, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       newId("ntf"),
       input.userId,
@@ -101,6 +102,7 @@ export function notify(input: NotificationInput): void {
       input.threadId ?? null,
       input.channelId ?? null,
       input.channelMessageId ?? null,
+      input.channelRootId ?? null,
       input.calendarEventId ?? null,
       safeActionPath(input.actionPath),
       input.sourceKey ?? null,
@@ -257,7 +259,7 @@ export function markChannelNoticesReadThrough(userId: string, channelId: string,
   db.prepare(
     `UPDATE notifications SET read_at = ?
      WHERE user_id = ? AND channel_id = ? AND read_at IS NULL AND channel_message_id IN (
-       SELECT id FROM channel_messages WHERE channel_id = ? AND seq <= ? AND deleted_at IS NULL
+       SELECT id FROM channel_messages WHERE channel_id = ? AND thread_root IS NULL AND seq <= ? AND deleted_at IS NULL
      )`,
   ).run(Date.now(), userId, channelId, channelId, throughSeq);
 }
@@ -271,6 +273,21 @@ export function purgeChannelNotices(channelId: string, userId?: string): void {
 /** Message notices disappear with a tombstoned source message. */
 export function purgeChannelMessageNotices(channelId: string, messageId: string): void {
   db.prepare("DELETE FROM notifications WHERE channel_id = ? AND channel_message_id = ?").run(channelId, messageId);
+}
+
+/** Marks notices that point at a reply in this thread read through `throughSeq`. */
+export function markChannelThreadNoticesReadThrough(userId: string, channelId: string, rootId: string, throughSeq: number): void {
+  db.prepare(
+    `UPDATE notifications SET read_at = ?
+     WHERE user_id = ? AND channel_id = ? AND channel_root_id = ? AND read_at IS NULL AND channel_message_id IN (
+       SELECT id FROM channel_messages WHERE channel_id = ? AND thread_root = ? AND seq <= ? AND deleted_at IS NULL
+     )`,
+  ).run(Date.now(), userId, channelId, rootId, channelId, rootId, throughSeq);
+}
+
+/** A tombstoned thread root takes its reply notices with it. */
+export function purgeChannelRootNotices(channelId: string, rootId: string): void {
+  db.prepare("DELETE FROM notifications WHERE channel_id = ? AND channel_root_id = ?").run(channelId, rootId);
 }
 
 export function clearRead(userId: string): number {
