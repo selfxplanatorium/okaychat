@@ -477,6 +477,101 @@ function PermissionsEntry() {
   );
 }
 
+
+interface SharedKnowledgeRow {
+  id: string;
+  ownerId: string;
+  visibility: string;
+  status: string;
+  sourceCount: number;
+  chunkCount: number;
+  bytes: number;
+  accessRevision: number;
+}
+
+/** Metadata-only shared collection cleanup: no name, description, passage, or reader chat is shown. */
+function SharedKnowledgeAdmin() {
+  const [rows, setRows] = useState<SharedKnowledgeRow[] | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [target, setTarget] = useState<SharedKnowledgeRow | null>(null);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async (cursor?: string) => {
+    try {
+      const page = await api<{ collections: SharedKnowledgeRow[]; nextCursor: string | null }>(`/admin/knowledge${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`);
+      setRows((previous) => (cursor && previous ? [...previous, ...page.collections] : page.collections));
+      setNextCursor(page.nextCursor);
+      setError(null);
+    } catch {
+      setError(t("knowledge.sharingFailed"));
+    }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  return (
+    <SettingsSection title={t("knowledge.adminTitle")} description={t("knowledge.adminCleanupConfirm")}>
+      <div className="flex flex-col gap-2 px-4 py-3">
+        {error && <p role="alert" className="text-destructive text-xs">{error}</p>}
+        {!rows && !error && <p role="status" className="text-muted-foreground text-xs">{t("common.loading")}</p>}
+        {rows?.length === 0 && <p className="text-muted-foreground text-xs">{t("knowledge.sharedEmpty")}</p>}
+        {rows && rows.length > 0 && (
+          <ul className="flex flex-col gap-1.5">
+            {rows.map((row) => (
+              <li key={row.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-2.5 py-2 text-xs">
+                <span className="min-w-0 break-all">
+                  <span className="font-mono">{row.id}</span>
+                  <span className="text-muted-foreground ms-2">{row.ownerId}</span>
+                </span>
+                <span className="text-muted-foreground flex flex-wrap gap-x-2">
+                  <span>{t("knowledge.sources", { count: row.sourceCount })}</span>
+                  <span>{t("knowledge.chunks", { count: row.chunkCount })}</span>
+                  <span>{formatBytes(row.bytes)}</span>
+                </span>
+                <Button size="sm" variant="destructive" onClick={() => { setTarget(row); setReason(""); }}>{t("knowledge.adminCleanup")}</Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {nextCursor && <Button size="sm" variant="outline" onClick={() => void load(nextCursor)}>{t("knowledge.loadMore")}</Button>}
+      </div>
+      <Dialog open={!!target} onOpenChange={(open) => !open && setTarget(null)}>
+        <DialogContent className="max-h-[85vh] gap-3 overflow-y-auto sm:max-w-md">
+          <DialogTitle className="text-base">{t("knowledge.adminCleanup")}</DialogTitle>
+          <DialogDescription>{t("knowledge.adminCleanupConfirm")}</DialogDescription>
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="font-medium">{t("knowledge.adminReason")}</span>
+            <Textarea value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} rows={3} />
+          </label>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setTarget(null)}>{t("common.cancel")}</Button>
+            <Button
+              variant="destructive"
+              disabled={busy || !reason.trim()}
+              onClick={async () => {
+                if (!target) return;
+                setBusy(true);
+                try {
+                  await api(`/admin/knowledge/${encodeURIComponent(target.id)}`, { method: "DELETE", json: { reason: reason.trim() } });
+                  setTarget(null);
+                  await load();
+                } catch {
+                  setError(t("knowledge.deleteFailed"));
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {busy && <Loader2Icon className="animate-spin motion-reduce:animate-none" />} {t("knowledge.adminCleanup")}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </SettingsSection>
+  );
+}
+
 export function AdminSettings() {
   const search = useSearch();
   const [allowSignup, setAllowSignup] = useState<boolean | null>(null);
@@ -517,6 +612,7 @@ export function AdminSettings() {
         />
       </SettingsSection>
       <Users defaultLimit={defaultLimit} />
+      <SharedKnowledgeAdmin />
       <Groups />
       <AdminChannels />
       <SystemPrompts />

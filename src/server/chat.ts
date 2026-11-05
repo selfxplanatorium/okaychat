@@ -52,6 +52,8 @@ import { errorJson, AppError } from "./errors.js";
 import { describeBoundaryError, describeProviderError, toolErrorWireText, wireErrorText } from "./provider-errors.js";
 import { conversationMemory, factsContext, memoryPreferences, temporaryMemory } from "./memory.js";
 import { attachedCollectionIds, conversationKnowledge, type KnowledgeTurn } from "./knowledge/tools.js";
+import { assertThreadContentReadable, knowledgeAccessRevoked, restrictedThreadReadable, restrictedThreadSignal, threadKnowledgeAccess } from "./knowledge/thread-policy.js";
+import { registerKnowledgeOperation } from "./knowledge/revocation.js";
 import { contextText, insertTurnContexts, saveTurnContext, shownFactIds, storedTurnContexts, turnBlock } from "./turn-context.js";
 import { isVoiceTurn, withVoiceNotes } from "./voice/turn.js";
 import { adaptPdfParts } from "./pdf-parts.js";
@@ -229,7 +231,7 @@ export interface TurnOptions {
 
 /** One assistant turn as a UI message stream. Used by /api/chat and by scheduled runs. */
 export async function turnStream(opts: TurnOptions) {
-  const { userId, threadId, modelRef, signal } = opts;
+  const { userId, threadId, modelRef } = opts;
   const temporary = isTemporaryThread(threadId);
   // An edited reply is sent as stored, also from a tab that still shows the text from before the edit.
   const uiMessages = temporary ? opts.uiMessages : withStoredEdits(userId, threadId, opts.uiMessages);
@@ -241,7 +243,15 @@ export async function turnStream(opts: TurnOptions) {
   if (opts.deepResearch) assertFeature(actor, "research");
   const target = await resolveChatTarget(userId, modelRef);
   if (target.kind === "agent") {
-    if (!temporary) { ensureThread(userId, threadId); if (!opts.keepThreadModel) updateThread(userId, threadId, { modelRef }); }
+    if (!temporary) {
+      assertThreadContentReadable(userId, threadId);
+      // A restricted chat carries third-party knowledge provenance; an external agent would copy it out.
+      if (getThread(userId, threadId)?.sharedKnowledgeRestricted) {
+        throw new AppError({ code: "validation", message: "Agent chats cannot use shared knowledge." });
+      }
+      ensureThread(userId, threadId);
+      if (!opts.keepThreadModel) updateThread(userId, threadId, { modelRef });
+    }
     return agentTurnStream({ ...opts, uiMessages }, target.agentId);
   }
   const policy = assertModelAllowed(userId, modelRef);
@@ -257,10 +267,26 @@ export async function turnStream(opts: TurnOptions) {
     return wireErrorText(wire);
   };
   if (!temporary) {
+    // The row must exist before the policy can answer ownership; creation never bypasses the lock check.
     ensureThread(user.id, threadId);
+    // Admission before any history read or compaction: a locked restricted chat never dispatches.
+    assertThreadContentReadable(user.id, threadId);
     if (!opts.keepThreadModel) updateThread(user.id, threadId, { modelRef });
   }
-  const thread = temporary ? { projectId: null, compaction: null } : getThread(user.id, threadId)!;
+  const thread = temporary ? { projectId: null, compaction: null, sharedKnowledgeRestricted: false, modelRef: null } : getThread(user.id, threadId)!;
+  const restrictedChat = !temporary && thread.sharedKnowledgeRestricted;
+  if (restrictedChat && (modelRef.startsWith("n8n/") || thread.modelRef?.startsWith("n8n/"))) {
+    throw new AppError({ code: "validation", message: "Agent chats cannot use shared knowledge." });
+  }
+  // A restricted turn holds a live dependency lease. It aborts at the provider boundary if any collection
+  // becomes unreadable, and `prepareStep` rechecks before every following request.
+  const accessController = new AbortController();
+  const accessRelease = restrictedChat
+    ? registerKnowledgeOperation(accessController, () => threadKnowledgeAccess(user.id, threadId) === "available")
+    : () => {};
+  const signal = restrictedChat
+    ? opts.signal ? AbortSignal.any([opts.signal, accessController.signal]) : accessController.signal
+    : opts.signal;
   // The copied snapshot is immutable for the run. It can narrow permissions but never widen them.
   const assistant = resolveAssistantForTurn(userId, threadId, temporary ? opts.temporaryAssistant : undefined);
   if (!temporary && opts.assistantRevision !== undefined && opts.assistantRevision !== assistant.revision) {
@@ -281,7 +307,7 @@ export async function turnStream(opts: TurnOptions) {
     assertContinuation(userId, threadId, opts.continuation, uiMessages);
   }
   // A retry or edit ends with a user message and researches again; a tool continuation does not.
-  const research = opts.deepResearch === true && uiMessages.at(-1)?.role === "user" && !researchedThisTurn(uiMessages) && assistantAllowsResearch(toolPolicy);
+  const research = !restrictedChat && opts.deepResearch === true && uiMessages.at(-1)?.role === "user" && !researchedThisTurn(uiMessages) && assistantAllowsResearch(toolPolicy);
   if (research) {
     if (!model.toolCall) throw new AppError({ code: "validation", message: `Deep research needs a model that can use tools. ${model.name} cannot.` });
     if (!settings.webTools) throw new AppError({ code: "validation", message: "Deep research needs web tools. Turn them on in Settings → General." });
@@ -303,6 +329,7 @@ export async function turnStream(opts: TurnOptions) {
     originalMessages: uiMessages,
     generateId: () => assistantMessageId,
     onError: describeError,
+    onEnd: () => accessRelease(),
     execute: async ({ writer }) => {
       let compaction = thread.compaction;
 
@@ -348,16 +375,16 @@ export async function turnStream(opts: TurnOptions) {
       // Ask only about services whose tools this turn could actually offer. A plain reply, a temporary chat,
       // a non-tool model, or artifacts/code execution switched off must not probe or repeat a down note.
       const wantsBrowser = useArtifacts && canViewImages && rendererAvailable();
-      const customTurnEligible = !temporary && opts.interactive === true && opts.unattended !== true && !hasActiveVoiceCall(user.id, threadId) && allowed("customTools");
+      const customTurnEligible = !restrictedChat && !temporary && opts.interactive === true && opts.unattended !== true && !hasActiveVoiceCall(user.id, threadId) && allowed("customTools");
       const customHasPython = customTurnEligible && featureAllowed(actor, "code") &&
         listCustomTools(user.id).some((tool) => tool.enabled && !tool.invalid && tool.kind === "python");
-      const runCodeWanted = model.toolCall && !temporary && allowed("code") && settings.codeExecution && sandboxConfigured();
+      const runCodeWanted = !restrictedChat && model.toolCall && !temporary && allowed("code") && settings.codeExecution && sandboxConfigured();
       const wantsSandbox = model.toolCall && !temporary && (runCodeWanted || (customHasPython && sandboxConfigured()));
       const sidecarIds: FixedServiceId[] = [...(wantsBrowser ? ["browser" as const] : []), ...(wantsSandbox ? ["sandbox" as const] : [])];
       const sidecars = continuation || !sidecarIds.length
         ? Promise.resolve(new Map<FixedServiceId, ServiceStatus | undefined>())
         : turnServiceStates(sidecarIds);
-      const mcp = model.toolCall && !temporary && allowed("mcp")
+      const mcp = !restrictedChat && model.toolCall && !temporary && allowed("mcp")
         ? await toolsForUser(user.id, {
             threadId,
             images: canViewImages ? toolImages : undefined,
@@ -391,22 +418,26 @@ export async function turnStream(opts: TurnOptions) {
       const searchBudget = new SearchBudget(settings.maxSearches, searchesInCurrentTurn(uiMessages));
       // Research workers spend from this too; the reply's own loop gets what is left.
       const stepBudget = new StepBudget(settings.maxSteps, agentStepsInCurrentTurn(uiMessages));
-      const builtInWeb = model.toolCall && settings.webTools && allows("web") ? webTools({ searchBudget, search: opts.deepResearch !== true && (opts.webSearch ?? true) }) : {};
+      const builtInWeb = !restrictedChat && model.toolCall && settings.webTools && allows("web") ? webTools({ searchBudget, search: opts.deepResearch !== true && (opts.webSearch ?? true) }) : {};
       const lastUser = uiMessages.findLast((message) => message.role === "user");
       const query = lastUser?.parts.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n") ?? "";
       const memory: ReturnType<typeof conversationMemory> = !allowed("memory") || !allows("memory") ? { context: "", instructions: undefined, tools: {} } : temporary
         ? personalized ? temporaryMemory(userId, query) : { context: "", instructions: undefined, tools: {} }
         : conversationMemory(userId, threadId, query);
+      // Read-only memory injection may stay, but automatic extraction and every memory-writing tool are out.
+      if (restrictedChat) memory.tools = {};
       // Sub-agents get the read-only pair (load/read) but never source search, install, or create.
-      const skills = turnSkills(user.id, { temporary, canCallTools: model.toolCall && allowed("skills") && allows("skills") });
+      // A restricted chat assembles only the read-only knowledge tools; every other family (including
+      // skills whose bodies could carry instructions) stays out of the tool block.
+      const skills = restrictedChat ? { context: "", tools: {}, subTools: {} } : turnSkills(user.id, { temporary, canCallTools: model.toolCall && allowed("skills") && allows("skills") });
       // Email tools exist only for stored chats with at least one account. Read/send toggles are
       // re-checked inside each call, so a switch flipped mid-turn takes effect immediately.
-      const email = model.toolCall && !temporary && allowed("email") && (allows("email-read") || allows("email-write")) && hasAccounts(user.id)
+      const email = !restrictedChat && model.toolCall && !temporary && allowed("email") && (allows("email-read") || allows("email-write")) && hasAccounts(user.id)
         ? emailTools({ userId: user.id, signal })
         : { tools: {}, subTools: {} };
       // Drafts need no mailbox (the card can copy, download, or open them in a mail app), so the tool
       // is offered in every stored chat and the tool block stays the same when an account is added.
-      const drafts = model.toolCall && !temporary && allowed("email") && allows("drafts") ? draftTools({ userId: user.id, threadId }) : {};
+      const drafts = !restrictedChat && model.toolCall && !temporary && allowed("email") && allows("drafts") ? draftTools({ userId: user.id, threadId }) : {};
       // Attached knowledge is read from the thread, never from the request body, so a forged list cannot
       // widen scope. A restrictive assistant further intersects it with its selected collections.
       const knowledgeRestrict = snapshot?.knowledge.mode === "selected" ? snapshot.knowledge.ids : undefined;
@@ -435,8 +466,8 @@ export async function turnStream(opts: TurnOptions) {
         ...mcp.subTools,
       }, { mcpIdentities: mcp.identities });
       const readOnlyTools = filteredReadOnly;
-      const subagentModels = model.toolCall && settings.subagents && !temporary && allowed("delegation") && assistantAllowsDelegation(toolPolicy) ? await allowedSubagentModels(user.id, settings, model.ref) : [];
-      const useGenerativeUI = model.toolCall && settings.generativeUI && !!opts.clientTools && !temporary && allowed("generativeUI");
+      const subagentModels = !restrictedChat && model.toolCall && settings.subagents && !temporary && allowed("delegation") && assistantAllowsDelegation(toolPolicy) ? await allowedSubagentModels(user.id, settings, model.ref) : [];
+      const useGenerativeUI = !restrictedChat && model.toolCall && settings.generativeUI && !!opts.clientTools && !temporary && allowed("generativeUI");
       const widgetTools = useGenerativeUI && allows("widgets") ? frontendTools(opts.clientTools!) : {};
       const customPythonAvailable = sandboxConfigured() && !sandboxDown;
       const custom = customTurnEligible && model.toolCall
@@ -464,8 +495,12 @@ export async function turnStream(opts: TurnOptions) {
       const shots = new Map<string, VisualShot>();
       const injectedShots = new Set<string>();
       const sandboxTurn = new SandboxTurn();
-      const imageServices = model.toolCall && !temporary && allowed("images") && allows("images") ? enabledImageServices(user.id, settings) : [];
-      const offeredTools: ToolSet = guardTools(actor, {
+      const imageServices = !restrictedChat && model.toolCall && !temporary && allowed("images") && allows("images") ? enabledImageServices(user.id, settings) : [];
+      // The final assembly is explicit: a restricted chat gets the knowledge pair and nothing else, so a
+      // future family cannot leak in by forgetting its own guard.
+      const offeredTools: ToolSet = guardTools(actor, restrictedChat ? {
+        ...(model.toolCall ? knowledge.tools : {}),
+      } : {
         ...builtInWeb,
         ...(model.toolCall ? memory.tools : {}),
         ...(model.toolCall ? knowledge.tools : {}),
@@ -744,6 +779,9 @@ export async function turnStream(opts: TurnOptions) {
           return risk && taintedNow ? { type: "user-approval", reason: approvalRiskReason(risk, label) } : "user-approval";
         },
         prepareStep: ({ stepNumber, messages: stepMessages }) => {
+          // Authoritative dispatch guard: abort is best-effort with a provider that ignores signals, so the
+          // next request is never built when the dependency changed.
+          if (restrictedChat && threadKnowledgeAccess(userId, threadId) !== "available") throw knowledgeAccessRevoked();
           const injected = injectToolImages(injectScreenshots(stepMessages, shots, injectedShots), toolImages, injectedToolImages);
           const withShots = stepNumber > 0 && handle.markStep ? handle.markStep(injected) : injected;
           return {
@@ -836,7 +874,7 @@ const resumable = createResumableStreamContext({
   ttlMs: RESUME_TTL_MS,
   onFinalize: (streamId) => setTimeout(() => runs.delete(streamId), RESUME_TTL_MS).unref(),
 });
-const runs = new Map<string, { userId: string; controller: AbortController }>();
+const runs = new Map<string, { userId: string; threadId: string; controller: AbortController }>();
 
 // Each turn can fan out into sub-agents, browser renders, and sandbox runs, possibly on a server-wide key.
 // The counter lives in turn-slots.ts so the external API shares the same hard ceiling.
@@ -937,7 +975,7 @@ export const chatRoutes = new Hono<AppEnv>()
         signal: controller.signal,
         abortRun: () => controller.abort(),
       });
-      runs.set(streamId, { userId: user.id, controller });
+      runs.set(streamId, { userId: user.id, threadId: parsed.data.id, controller });
       const response = createUIMessageStreamResponse({ stream: releasing(stream, release, controller.signal) });
       const body = await resumable.run(streamId, () => response.body!);
       const headers = new Headers(response.headers);
@@ -954,9 +992,17 @@ export const chatRoutes = new Hono<AppEnv>()
     const run = runs.get(c.req.param("streamId"));
     // 204 is the AI SDK's "no active stream" answer.
     if (!run || run.userId !== c.get("user").id) return c.body(null, 204);
+    assertThreadContentReadable(run.userId, run.threadId);
     const body = await resumable.resume(c.req.param("streamId"));
+    assertThreadContentReadable(run.userId, run.threadId);
     if (!body) return c.body(null, 204);
-    return new Response(body, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "x-vercel-ai-ui-message-stream": "v1" } });
+    const guarded = body.pipeThrough(new TransformStream({
+      transform(chunk, controller) {
+        assertThreadContentReadable(run.userId, run.threadId);
+        controller.enqueue(chunk);
+      },
+    }));
+    return new Response(guarded, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store", "x-vercel-ai-ui-message-stream": "v1" } });
   })
   .post("/chat/:streamId/cancel", (c) => {
     const run = runs.get(c.req.param("streamId"));
@@ -979,6 +1025,7 @@ export const chatRoutes = new Hono<AppEnv>()
     const parsed = z.object({ messages: z.array(z.any()), modelRef: z.string().min(3).max(300) }).safeParse(await c.req.json());
     if (!parsed.success) return c.json({ error: "Invalid compaction request" }, 400);
     const body = parsed.data as { messages: UIMessage[]; modelRef: string };
+    assertThreadContentReadable(user.id, threadId);
     if (body.modelRef.startsWith("n8n/") || getThread(user.id, threadId)?.modelRef?.startsWith("n8n/")) throw new AppError({ code: "validation", message: "Agent chats do not use compaction." });
     const thread = getThread(user.id, threadId);
     if (!thread) return c.json({ error: "Thread not found" }, 404);
@@ -986,6 +1033,7 @@ export const chatRoutes = new Hono<AppEnv>()
     // Edits wait while the thread is busy, so a reply cannot change after its old text went to the summary.
     if (threadBusy(threadId)) return c.json({ error: "This chat is busy. Try again when the reply finishes." }, 409);
     const release = markBusy(threadId);
+    const access = restrictedThreadSignal(user.id, threadId, c.req.raw.signal);
     try {
       // A stale tab may hold text from before an edit or Undo; the stored edits are authoritative.
       const messages = withStoredEdits(user.id, threadId, body.messages);
@@ -995,16 +1043,19 @@ export const chatRoutes = new Hono<AppEnv>()
       // Provider errors explain themselves; the global handler would hide them behind a generic 500.
       let state;
       try {
-        state = await compact({ userId: user.id, threadId, messages, previous: thread.compaction, model, conn, signal: c.req.raw.signal });
+        assertThreadContentReadable(user.id, threadId);
+        state = await compact({ userId: user.id, threadId, messages, previous: thread.compaction, model, conn, signal: access.signal });
       } catch (error) {
         const failure = describeProviderError(error, { model: model.ref, provider: model.providerId });
         // A provider 401 is not this session's 401; keep the upstream failure away from the auth handler.
         const status = failure.code === "validation" || failure.code === "model_not_found" ? 400 : 502;
         return errorJson(c, failure, status);
       }
+      assertThreadContentReadable(user.id, threadId);
       setCompaction(user.id, threadId, state);
       return c.json(state);
     } finally {
+      access.release();
       release();
     }
   })
@@ -1014,6 +1065,7 @@ export const chatRoutes = new Hono<AppEnv>()
     if (isTemporaryThread(threadId)) return c.json({ error: "Temporary chats cannot save compaction" }, 400);
     const parsed = z.object({ messageId: z.string().min(1).max(200) }).safeParse(await c.req.json());
     if (!parsed.success) return c.json({ error: "Invalid trim request" }, 400);
+    assertThreadContentReadable(user.id, threadId);
     const thread = getThread(user.id, threadId);
     if (!thread) return c.json({ error: "Thread not found" }, 404);
     if (thread.modelRef?.startsWith("n8n/")) throw new AppError({ code: "validation", message: "Agent chats do not use trimming." });
@@ -1032,6 +1084,7 @@ export const chatRoutes = new Hono<AppEnv>()
     const user = c.get("user");
     const threadId = c.req.param("id");
     if (isTemporaryThread(threadId)) return c.json({ title: "Temporary chat" });
+    assertThreadContentReadable(user.id, threadId);
     if (!getThread(user.id, threadId)) return c.json({ error: "Thread not found" }, 404);
     const body = (await c.req.json().catch(() => ({}))) as { text?: string; modelRef?: string };
     // Regenerating from the sidebar sends no text: title the stored conversation instead.
@@ -1041,7 +1094,8 @@ export const chatRoutes = new Hono<AppEnv>()
     const fallback = text.trim().split("\n")[0]!.slice(0, 60) || "New chat";
     const ref = getSettings(user.id).utilityModel ?? body.modelRef;
     let title = fallback;
-    if (ref && !body.modelRef?.startsWith("n8n/") && !getThread(user.id, threadId)?.modelRef?.startsWith("n8n/")) {
+    const restrictedTitle = getThread(user.id, threadId)?.sharedKnowledgeRestricted === true;
+    if (!restrictedTitle && ref && !body.modelRef?.startsWith("n8n/") && !getThread(user.id, threadId)?.modelRef?.startsWith("n8n/")) {
       try {
         const { model, conn } = await resolveModel(user.id, ref);
         const handle = createModel(model, conn, { userId: user.id });

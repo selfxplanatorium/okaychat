@@ -17,6 +17,7 @@ import { useChannels } from "@/state/channels";
 import { resetNotes } from "@/state/notes";
 import { resetCalendar } from "@/state/calendar";
 import { clearNoteHandoff } from "@/state/note-chat-handoff";
+import { resetChatKnowledgeForAccount } from "@/state/chat-knowledge";
 
 /** Every logout goes through here, so the message cache never outlives the session it belongs to. */
 export async function signOut() {
@@ -38,6 +39,7 @@ export async function signOut() {
   resetNotes();
   resetCalendar();
   clearNoteHandoff();
+  resetChatKnowledgeForAccount();
   // Drops the previous account's agent summaries and drops any response still in flight.
   useN8nAgents.getState().stop();
   window.location.href = "/";

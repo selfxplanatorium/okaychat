@@ -23,7 +23,7 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       db.exec("DROP TRIGGER messages_fts_insert; DROP TRIGGER messages_fts_update; DROP TRIGGER messages_fts_delete");
       db.exec("DROP TABLE message_search_keys");
       db.exec("DROP INDEX messages_thread_time");
-      for (const table of ["evaluation_scores", "evaluation_results", "evaluation_runs", "evaluation_cases", "evaluation_datasets", "chatgpt_login_attempts", "chatgpt_registrations", "chatgpt_hosts", "chatgpt_controls", "saved_prompts", "message_bookmarks", "message_feedback", "message_translations", "assistant_presets", "generation_segments", "generation_runs", "archive_jobs", "provider_model_grants", "provider_model_policies", "knowledge_chunks_fts", "knowledge_chunks", "knowledge_sources", "knowledge_collections", "share_groups", "share_users", "share_audiences", "user_group_members", "user_groups", "n8n_agent_sessions", "n8n_agent_runs", "n8n_agents", "permission_leases", "permission_rate_windows", "permission_audit", "user_model_instructions", "prompt_rules", "permission_policies", "permission_state", "notifications", "tag_filter_presets", "thread_tags", "comparison_panes", "comparison_groups"]) db.exec("DROP TABLE " + table);
+      for (const table of ["evaluation_scores", "evaluation_results", "evaluation_runs", "evaluation_cases", "evaluation_datasets", "chatgpt_login_attempts", "chatgpt_registrations", "chatgpt_hosts", "chatgpt_controls", "saved_prompts", "message_bookmarks", "message_feedback", "message_translations", "assistant_presets", "generation_segments", "generation_runs", "archive_jobs", "provider_model_grants", "provider_model_policies", "knowledge_chunks_fts", "knowledge_chunks", "knowledge_sources", "knowledge_collections", "knowledge_thread_dependencies", "share_groups", "share_users", "share_audiences", "user_group_members", "user_groups", "n8n_agent_sessions", "n8n_agent_runs", "n8n_agents", "permission_leases", "permission_rate_windows", "permission_audit", "user_model_instructions", "prompt_rules", "permission_policies", "permission_state", "notifications", "tag_filter_presets", "thread_tags", "comparison_panes", "comparison_groups"]) db.exec("DROP TABLE " + table);
       db.exec("DROP TRIGGER channel_messages_fts_insert; DROP TRIGGER channel_messages_fts_update; DROP TRIGGER channel_messages_fts_delete; DROP TRIGGER channel_search_keys_fts_delete");
       db.exec("DROP TABLE channel_messages_fts; DROP TABLE channel_search_keys; DROP TABLE channel_events; DROP TABLE channel_event_state; DROP TABLE channel_rate_windows; DROP TABLE channel_moderation_audit; DROP TABLE channel_create_keys; DROP TABLE channel_ai_runs; DROP TABLE channel_reactions; DROP TABLE channel_mentions; DROP TABLE channel_messages; DROP TABLE channel_exclusions; DROP TABLE channel_invites; DROP TABLE channel_members; DROP TABLE channel_groups; DROP TABLE channel_attachments; DROP TABLE channel_thread_reads; DROP TABLE channel_thread_state; DROP TABLE channel_dm_blocks; DROP TABLE channels");
       for (const table of ["notes_fts", "note_tags", "notes", "calendar_events_fts", "calendar_reminders", "calendar_events"]) db.exec("DROP TABLE " + table);
@@ -160,6 +160,10 @@ test('n8n migration preserves selected audiences and rolls back schema and versi
     db.exec('ALTER TABLE user_groups DROP COLUMN prompt_order');
     db.exec('ALTER TABLE threads DROP COLUMN custom_instructions');
     db.exec('ALTER TABLE threads DROP COLUMN instructions_revision');
+    // Drop the shared-knowledge additions so replaying from 38 can apply them again on this database.
+    db.exec('DROP TRIGGER IF EXISTS knowledge_audience_cleanup; DROP TRIGGER IF EXISTS knowledge_shared_project_insert; DROP TRIGGER IF EXISTS knowledge_shared_project_update');
+    db.exec('DROP TABLE IF EXISTS knowledge_thread_dependencies; DROP INDEX IF EXISTS knowledge_collections_visibility');
+    for (const column of ['visibility', 'access_revision', 'embedding_connection_scope', 'embedding_connection_created_at', 'embedding_endpoint_hash']) db.exec('ALTER TABLE knowledge_collections DROP COLUMN ' + column);
     // Migration 39 is n8n agents and 40 is granular permissions. Versions are append-only, so
     // replaying from 38 exercises the n8n migration and everything appended after it.
     db.exec('PRAGMA user_version = 38');
@@ -320,6 +324,10 @@ test("channels v2 migration rolls back cleanly and keeps the event high-water", 
       db.exec("DROP TABLE channel_attachments; DROP TABLE channel_thread_reads; DROP TABLE channel_thread_state; DROP TABLE channel_dm_blocks");
       db.exec("ALTER TABLE channel_messages DROP COLUMN thread_root; ALTER TABLE channel_events DROP COLUMN root_id; ALTER TABLE notifications DROP COLUMN channel_root_id; ALTER TABLE channels DROP COLUMN dm_key; ALTER TABLE channels DROP COLUMN kind");
       db.exec("DROP TABLE IF EXISTS message_translations");
+      // Drop the shared-knowledge migration's own objects so the appended migration can run again.
+      db.exec("DROP TRIGGER IF EXISTS knowledge_audience_cleanup; DROP TRIGGER IF EXISTS knowledge_shared_project_insert; DROP TRIGGER IF EXISTS knowledge_shared_project_update");
+      db.exec("DROP TABLE IF EXISTS knowledge_thread_dependencies; DROP INDEX IF EXISTS knowledge_collections_visibility");
+      for (const column of ["visibility", "access_revision", "embedding_connection_scope", "embedding_connection_created_at", "embedding_endpoint_hash"]) db.exec("ALTER TABLE knowledge_collections DROP COLUMN " + column);
       db.exec("PRAGMA user_version = 48");
       console.log(JSON.stringify({ high, tail })); db.close();`));
     for (let i = 0; i < 2; i++) {
@@ -422,6 +430,90 @@ test("message translations migration rolls back cleanly, then creates its table 
     // A translation for a message that does not exist is refused by the composite foreign key.
     assert.equal(applied.rejected, true);
     assert.deepEqual(applied.foreignKeys, []);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("shared knowledge migration rolls back cleanly, keeps private rows private, and preserves audiences", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "okaychat-team-knowledge-migration-"));
+  const base = { ...process.env, OKAYCHAT_DATA_DIR: directory, OKAYCHAT_SECRET: "migration-tests-secret-not-for-production" };
+  const dbUrl = new URL("./db.ts", import.meta.url).href;
+  const run = (code: string, env: Record<string, string | undefined> = {}) =>
+    execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", code], { env: { ...base, ...env }, encoding: "utf8" });
+  const inspect = (code: string) =>
+    execFileSync(process.execPath, ["--input-type=module", "-e", `import { DatabaseSync } from 'node:sqlite';
+      const db = new DatabaseSync(${JSON.stringify(path.join(directory, "okaychat.db"))});
+      ${code}
+      db.close();`], { encoding: "utf8" });
+  try {
+    // Rewind to immediately before this appended migration, dropping only the objects it owns.
+    const before = JSON.parse(run(`const { db } = await import(${JSON.stringify(dbUrl)});
+      const tail = db.prepare("PRAGMA user_version").get().user_version;
+      db.prepare("INSERT INTO users (id,email,name,password_hash,role,created_at) VALUES ('owner','owner@example.test','Owner','unused','user',1),('reader','reader@example.test','Reader','unused','user',1)").run();
+      db.prepare("INSERT INTO user_groups (id,name,created_at) VALUES ('g','Group',1)").run();
+      db.prepare("INSERT INTO user_group_members (group_id,user_id) VALUES ('g','reader')").run();
+      db.prepare("INSERT INTO knowledge_collections (id,user_id,name,description,embedding_provider,status,created_at,updated_at) VALUES ('knc_private','owner','Private','', 'openai','empty',1,1)").run();
+      db.exec("INSERT INTO share_audiences VALUES ('provider','p'),('mcp','m'),('n8n','a')");
+      db.exec("INSERT INTO share_users VALUES ('provider','p','owner')");
+      db.exec("INSERT INTO share_groups VALUES ('mcp','m','g')");
+      db.exec("INSERT INTO n8n_agents (id,owner_id,name,config_enc,enabled,created_at,updated_at) VALUES ('a','owner','Agent','x',1,1,1)");
+      db.exec("DROP TRIGGER IF EXISTS knowledge_audience_cleanup; DROP TRIGGER IF EXISTS knowledge_shared_project_insert; DROP TRIGGER IF EXISTS knowledge_shared_project_update");
+      db.exec("DROP TABLE IF EXISTS knowledge_thread_dependencies; DROP INDEX IF EXISTS knowledge_collections_visibility");
+      for (const column of ["visibility", "access_revision", "embedding_connection_scope", "embedding_connection_created_at", "embedding_endpoint_hash"]) db.exec("ALTER TABLE knowledge_collections DROP COLUMN " + column);
+      db.exec("PRAGMA user_version = 50");
+      console.log(JSON.stringify({ tail })); db.close();`, {}));
+    assert.ok(before.tail >= 51);
+
+    // The seam after the table copies rolls the whole migration back with its version.
+    assert.throws(() => run(`await import(${JSON.stringify(dbUrl)});`, { OKAYCHAT_TEST_FAIL_MIGRATION: "team-knowledge" }));
+    const failed = JSON.parse(inspect(`
+      const columns = db.prepare("PRAGMA table_info(knowledge_collections)").all().map((column) => column.name);
+      console.log(JSON.stringify({
+        version: db.prepare("PRAGMA user_version").get().user_version,
+        visibility: columns.includes("visibility"),
+        dependencies: db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='knowledge_thread_dependencies'").all(),
+        leftovers: db.prepare("SELECT name FROM sqlite_master WHERE name LIKE '%_new'").all(),
+        n8nTrigger: db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name='n8n_agent_audience_cleanup'").all(),
+      }));`));
+    assert.equal(failed.version, 50);
+    assert.equal(failed.visibility, false);
+    assert.deepEqual(failed.dependencies, []);
+    assert.deepEqual(failed.leftovers, []);
+    assert.equal(failed.n8nTrigger.length, 1);
+
+    for (let i = 0; i < 2; i++) {
+      const state = JSON.parse(run(`const { db } = await import(${JSON.stringify(dbUrl)});
+        const row = db.prepare("SELECT visibility, access_revision, embedding_connection_scope, embedding_connection_created_at, embedding_endpoint_hash FROM knowledge_collections WHERE id='knc_private'").get();
+        console.log(JSON.stringify({
+          version: db.prepare("PRAGMA user_version").get().user_version,
+          row,
+          dependencies: db.prepare("SELECT count(*) AS n FROM knowledge_thread_dependencies").get().n,
+          audiences: db.prepare("SELECT * FROM share_audiences ORDER BY kind,resource_id").all(),
+          users: db.prepare("SELECT * FROM share_users").all(),
+          groups: db.prepare("SELECT * FROM share_groups").all(),
+          triggers: db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name IN ('n8n_agent_audience_cleanup','knowledge_audience_cleanup','knowledge_shared_project_insert','knowledge_shared_project_update') ORDER BY name").all().map((t) => t.name),
+          fks: db.prepare("PRAGMA foreign_key_check").all(),
+        })); db.close();`));
+      assert.equal(state.version, before.tail);
+      assert.deepEqual(state.row, {
+        visibility: "private",
+        access_revision: 1,
+        embedding_connection_scope: null,
+        embedding_connection_created_at: null,
+        embedding_endpoint_hash: null,
+      });
+      assert.equal(state.dependencies, 0);
+      assert.deepEqual(state.audiences, [
+        { kind: "mcp", resource_id: "m" },
+        { kind: "n8n", resource_id: "a" },
+        { kind: "provider", resource_id: "p" },
+      ]);
+      assert.deepEqual(state.users, [{ kind: "provider", resource_id: "p", user_id: "owner" }]);
+      assert.deepEqual(state.groups, [{ kind: "mcp", resource_id: "m", group_id: "g" }]);
+      assert.deepEqual(state.triggers, ["knowledge_audience_cleanup", "knowledge_shared_project_insert", "knowledge_shared_project_update", "n8n_agent_audience_cleanup"]);
+      assert.deepEqual(state.fks, []);
+    }
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

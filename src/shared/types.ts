@@ -345,6 +345,13 @@ export interface ThreadSummary {
   tags: string[];
   /** The chat this one was forked from, while that chat still exists. */
   branchedFrom: { id: string; title: string | null } | null;
+  /**
+   * True once this chat has ever attached another account's collection. Dependencies are durable, so
+   * detaching does not clear it and the chat stays unable to share, export, branch, or schedule.
+   */
+  sharedKnowledgeRestricted: boolean;
+  /** `revoked` when not every dependency is still readable; all content of that chat is withheld. */
+  knowledgeAccess: "available" | "revoked";
   /** Selected assistant snapshot label. Only `GET /threads/:id` fills it; sidebar rows leave it out. */
   assistant?: ThreadAssistantSummary | null;
   /** Snapshot CAS revision. Only `GET /threads/:id` fills it. */

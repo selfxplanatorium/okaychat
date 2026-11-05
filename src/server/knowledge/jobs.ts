@@ -7,11 +7,15 @@ import { chunkDocument } from "./chunker.js";
 import { createEmbedder, EmbeddingError, type Embedder } from "./embeddings.js";
 import { featureAllowed } from "../permissions/guard.js";
 import { invalidateKnowledgeVectors } from "./retrieval.js";
+import { registerKnowledgeOperation } from "./revocation.js";
+import { resolvePinnedConnection } from "../catalog/providers.js";
 import {
+  embeddingNeedsReindex,
   failSource,
   getCollectionRow,
   KnowledgeInputError,
   markCollectionStatus,
+  pinMatches,
   replaceChunks,
   setSourceProgress,
   setSourceText,
@@ -41,12 +45,18 @@ interface Job {
 
 type EmbedderFactory = (userId: string, collection: CollectionRow) => Embedder | null;
 
-const embedderFactory: EmbedderFactory = (userId, collection) =>
-  createEmbedder(userId, {
+const embedderFactory: EmbedderFactory = (userId, collection) => {
+  if (collection.embedding_provider === "none") return null;
+  const providerId = collection.embedding_provider === "compatible" ? collection.embedding_provider_id : collection.embedding_provider;
+  if (!providerId || !pinMatches(collection)) return null;
+  const pin = resolvePinnedConnection(userId, providerId);
+  if (!pin) return null;
+  return createEmbedder(userId, {
     provider: collection.embedding_provider,
     providerId: collection.embedding_provider_id ?? undefined,
     model: collection.embedding_model ?? undefined,
-  });
+  }, {}, { connection: pin.connection, providerId });
+};
 
 let factory: EmbedderFactory = embedderFactory;
 /** Tests replace the provider; production never calls this. */
@@ -258,10 +268,22 @@ async function runJob(job: Job, controller: AbortController) {
   const generation = job.generation;
   const collection = getCollectionRow(userId, row.collection_id);
   if (!collection) return;
-  setSourceProgress(userId, sourceId, generation, "extracting", 0.04);
-  markCollectionStatus(userId, collection.id, "processing");
+  // An owner whose authority is gone (feature, account, collection, pin) can never write chunks. A reader
+  // audience change does not affect this registration: the owner still resolves, so ingestion continues.
+  const release = registerKnowledgeOperation(controller, () => {
+    const live = sourceRow(userId, sourceId);
+    const current = getCollectionRow(userId, collection.id);
+    return !!live && live.generation === generation && !!current && pinMatches(current) && featureAllowed(userId, "knowledge");
+  });
   try {
+    setSourceProgress(userId, sourceId, generation, "extracting", 0.04);
+    markCollectionStatus(userId, collection.id, "processing");
     abortIfStale(userId, sourceId, generation, signal);
+    // A legacy non-lexical collection has no pin; it keeps its old vectors for keyword search but cannot
+    // ingest until the owner runs an explicit reindex that binds a connection.
+    if (collection.embedding_provider !== "none" && (!pinMatches(collection) || embeddingNeedsReindex(collection))) {
+      throw new EmbeddingError("Reindex this collection to bind its embedding connection before adding sources.");
+    }
     const text = await extractSource(row);
     abortIfStale(userId, sourceId, generation, signal);
     if (!setSourceText(userId, sourceId, generation, text)) return;
@@ -271,6 +293,9 @@ async function runJob(job: Job, controller: AbortController) {
     const current = sourceRow(userId, sourceId);
     if (!current) return;
     const embedder = current.status === "embedding" && collection.embedding_provider !== "none" ? factory(userId, collection) : null;
+    if (collection.embedding_provider !== "none" && !embedder) {
+      throw new EmbeddingError("This collection's embedding connection is unavailable. Repair it, then reindex.");
+    }
     let dimensions: number | null = null;
     const stored: Array<{ chunk: (typeof chunks)[number]; vector: Float32Array | null }> = [];
     if (embedder) {
@@ -278,6 +303,8 @@ async function runJob(job: Job, controller: AbortController) {
         abortIfStale(userId, sourceId, generation, signal);
         // A revoke during a long ingest stops it before the next provider batch; the row is marked cancelled.
         if (!featureAllowed(userId, "knowledge")) throw new DOMException("Superseded", "AbortError");
+        const liveCollection = getCollectionRow(userId, collection.id);
+        if (!liveCollection || !pinMatches(liveCollection)) throw new DOMException("Superseded", "AbortError");
         const slice = chunks.slice(i, i + EMBED_SLICE);
         const vectors = await embedder.embed(slice.map((chunk) => chunk.text), signal);
         if (vectors.length !== slice.length) throw new EmbeddingError("The embedding provider returned the wrong number of vectors.");
@@ -307,5 +334,7 @@ async function runJob(job: Job, controller: AbortController) {
     }
     failSource(userId, sourceId, generation, ingestFailureMessage(error));
     markCollectionStatus(userId, collection.id, "failed");
+  } finally {
+    release();
   }
 }

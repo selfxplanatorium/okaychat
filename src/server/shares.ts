@@ -41,6 +41,7 @@ import {
 import { imagePath } from "./tools/image.js";
 import { currentBranch, getThread, isTemporaryThread } from "./threads.js";
 import { threadBusy } from "./thread-runs.js";
+import { assertThreadRedistributable, isRestrictedKnowledgeThread } from "./knowledge/thread-policy.js";
 
 // Read-only public links. A link is live (the chat's current branch) or frozen (a captured snapshot),
 // may expire, and may need a password. Only text, generated images, artifacts, and generative UI are
@@ -88,6 +89,8 @@ const ownedByToken = (userId: string, token: string) =>
 const publicShare = (token: string): ShareRow | undefined => {
   const share = byToken(token);
   if (!share || shareExpired(share.expires_at) || !featureAllowed(share.user_id, "sharing")) return undefined;
+  // A chat using shared knowledge never has a public page, even if a stale row predates the policy.
+  if (isRestrictedKnowledgeThread(share.thread_id)) return undefined;
   return share;
 };
 
@@ -326,6 +329,7 @@ export const shareRoutes = new Hono<AppEnv>()
     assertFeature(user.id, "sharing");
     const thread = getThread(user.id, c.req.param("id"));
     if (!thread) return c.json({ error: "Thread not found" }, 404);
+    assertThreadRedistributable(thread.id);
     if (isTemporaryThread(thread.id)) return c.json({ error: "A temporary chat cannot be shared." }, 409);
     if (thread.compareGroupId) return c.json({ error: "Open this answer as a chat before sharing it." }, 409);
     const existing = db
@@ -362,6 +366,7 @@ export const shareRoutes = new Hono<AppEnv>()
     if (!body.success) return c.json({ error: "Invalid share settings" }, 400);
     const thread = getThread(user.id, c.req.param("id"));
     if (!thread) return c.json({ error: "Thread not found" }, 404);
+    assertThreadRedistributable(thread.id);
     if (isTemporaryThread(thread.id)) return c.json({ error: "A temporary chat cannot be shared." }, 409);
     if (thread.compareGroupId) return c.json({ error: "Open this answer as a chat before sharing it." }, 409);
     const threadLinks = db.prepare("SELECT COUNT(*) AS n FROM shares WHERE user_id = ? AND thread_id = ?").get(user.id, thread.id) as { n: number };

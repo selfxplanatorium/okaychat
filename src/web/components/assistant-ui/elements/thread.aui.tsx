@@ -34,7 +34,7 @@ import { originalImageUrl, UPLOAD_REF } from "@/lib/media";
 import { useSmoothHeight } from "@/components/ui/smooth-height";
 import { cn } from "@/lib/utils";
 import { toolInjection } from "@/lib/tool-injection";
-import { useData } from "@/state/data";
+import { showChat, useData } from "@/state/data";
 import { t } from "@/i18n";
 import { formatDuration, formatList, formatSentenceCase } from "@/i18n/format";
 import {
@@ -67,8 +67,10 @@ import {
   DownloadIcon,
   MicIcon,
   MoreHorizontalIcon,
+  ShieldOffIcon,
   SquarePenIcon,
   SquareIcon,
+  TrashIcon,
   Volume2Icon,
   VolumeXIcon,
 } from "lucide-react";
@@ -114,6 +116,8 @@ import { useThreadSync, type ThreadSync } from "@/state/thread-sync";
 import { useChatResearch } from "@/state/chat-research";
 import { useChatModel, useCurrentThreadId } from "@/state/thread-meta";
 import { useUnavailableTargetRef } from "@/state/data";
+import { useThreadMetaStore } from "@/state/thread-meta";
+import { useLocation } from "wouter";
 import { isAgentTarget } from "@shared/n8n-agents";
 import { AgentNotice } from "@/components/chat/AgentNotice";
 import { DictationWaveform } from "@/speech/Waveform";
@@ -460,6 +464,40 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
     observer.observe(viewport);
     return () => observer.disconnect();
   }, []);
+
+  const remoteId = useAuiState((s) => s.threadListItem.remoteId ?? null);
+  const locked = useThreadMetaStore((s) => (remoteId ? s.byId[remoteId]?.knowledgeAccess : undefined) === "revoked");
+  const aui = useAui();
+  const [, navigate] = useLocation();
+  if (locked) {
+    // Deliberately no message components, tool cards, or composer: a locked chat has nothing to mount.
+    return (
+      <div className="mx-auto flex min-h-full w-full max-w-(--thread-max-width, 46rem) flex-col items-center justify-center gap-4 px-4 py-16 text-center">
+        <ShieldOffIcon aria-hidden className="text-muted-foreground size-8" />
+        <div className="flex flex-col gap-1.5">
+          <h2 className="text-base font-semibold">{t("knowledge.revokedTitle")}</h2>
+          <p className="text-muted-foreground max-w-md text-sm">{t("knowledge.revokedBody")}</p>
+          <p className="text-muted-foreground text-xs">{t("knowledge.restrictedAction")}</p>
+        </div>
+        <div className="flex flex-wrap justify-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (!remoteId) return;
+              try {
+                aui.threadListItem.delete();
+              } finally {
+                showChat(navigate);
+              }
+            }}
+          >
+            <TrashIcon /> {t("common.delete")}
+          </Button>
+          <Button onClick={() => showChat(navigate)}>{t("common.newChat")}</Button>
+        </div>
+      </div>
+    );
+  }
 
   if (loadingHistory) {
     seen.pending = true;

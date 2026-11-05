@@ -221,3 +221,5 @@ server-side source-language detection, and per-message language memory.
 ## ChatGPT plan OAuth release gate
 
 The SIWC desktop helper, encrypted store, and transport are implemented behind a default-off deployment flag. Live server-exchange admission, namespaced tool round trips, rotation, deployment eligibility, mobile resume, and image independence must pass before enabling it in a release. The CLI remains image-only; see `docs/implementation/codex-chat.md`.
+
+- **Shared team knowledge**: owners publish a global collection to everyone/selected users/groups read-only; readers retrieve lexically from their own chats; durable dependency chats lock on revocation. Deferred: cross-account vectors/credential lending, editors/contributors, ownership transfer, room knowledge, per-source ACLs, bulk sharing, public collections, and dependency-aware redaction/recovery. See `docs/implementation/knowledge.md`.

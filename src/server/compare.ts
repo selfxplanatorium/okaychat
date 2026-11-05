@@ -14,6 +14,7 @@ import { appendMessage, branchThread, currentBranch, deleteThread, ensureThread,
 import { threadBusy } from "./thread-runs.js";
 import { deleteThreadImages } from "./tools/image.js";
 import { deleteSandboxWorkspace } from "./tools/sandbox.js";
+import { assertThreadRedistributable, isRestrictedKnowledgeThread } from "./knowledge/thread-policy.js";
 
 /**
  * Side-by-side model comparison. Each pane is a real hidden chat (`threads.compare_group_id`) that runs
@@ -198,6 +199,10 @@ export const compareRoutes = new Hono<AppEnv>()
       const source = getThread(userId, sourceThreadId);
       if (!source) return c.json({ error: "Chat not found" }, 404);
       if (source.compareGroupId) return c.json({ error: "Start from a normal chat, not a comparison pane." }, 409);
+      // A comparison branches the source into hidden panes, which a restricted chat cannot do.
+      if (isRestrictedKnowledgeThread(sourceThreadId)) {
+        return c.json({ error: "This action is unavailable for a chat that uses shared knowledge.", code: "shared_knowledge_restricted" }, 409);
+      }
     }
     // Model checks touch the catalog and the account's policies; do them before any write.
     const resolved: Array<{ ref: string; name: string }> = [];
@@ -238,6 +243,7 @@ export const compareRoutes = new Hono<AppEnv>()
     const group = ownedGroup(userId, c.req.param("id"));
     if (!group) return c.json({ error: "Not found" }, 404);
     const threadId = c.req.param("threadId");
+    assertThreadRedistributable(threadId);
     const pane = db.prepare("SELECT * FROM comparison_panes WHERE group_id = ? AND thread_id = ?").get(group.id, threadId) as PaneRow | undefined;
     if (!pane) return c.json({ error: "Not found" }, 404);
     if (threadBusy(threadId)) return c.json({ error: "Stop the reply first." }, 409);

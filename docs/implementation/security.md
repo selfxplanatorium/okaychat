@@ -162,3 +162,18 @@ bounded, and the provider transport is cancelled on overflow. Only `apiSystem` i
 personal instructions, memory, projects, tools, and account data are never read, and caller history is not
 enveloped because it is the caller's own request. No transcript, token, IP, user agent, or provider prose is
 stored. See `docs/implementation/api-access.md`.
+
+## Shared knowledge
+
+Publishing uses the existing audience tables with kind `knowledge`. Every reader route resolves the live
+viewer, live owner, both accounts' knowledge feature, and the collection's live audience; private rows are
+never exposed by a missing audience row. Readers get lexical retrieval only: no owner embedding credential,
+private endpoint, or budget is used, even when the reader has the same provider/model. Reader projections
+strip bytes, project, embedding configuration, audience identities, and source originals. A chat that ever
+attached another account's collection keeps durable dependencies and is locked as a whole when any is
+unreadable; all history, replay, translation, annotation, search, share, export, archive, schedule, and copy
+paths check that policy. Revocation aborts live retrievals, restricted turns, and owner ingests at permission
+changes, group edits, publication changes, provider changes, and demotion. Citation lookup returns one
+generic 404 for unknown, deleted, revoked, and forged ids. Administrators get metadata-only cleanup with a
+reason and audit row, not passage access. Residual risk: bytes already delivered to a browser, copied
+manually, or retained by a provider cannot be recalled.

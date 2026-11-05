@@ -29,7 +29,9 @@ import { exportRoutes } from "./export.js";
 import { fileRoutes } from "./files.js";
 import { fontRoutes } from "./fonts.js";
 import { knowledgeRoutes } from "./knowledge/routes.js";
-import { collectionAccessible } from "./knowledge/store.js";
+import { adminKnowledgeRoutes } from "./knowledge/admin-routes.js";
+import { applyKnowledgeAttachments, assertThreadContentReadable, KnowledgeAttachError, knowledgeAccessRevoked, threadKnowledgeAccess } from "./knowledge/thread-policy.js";
+import { readableCollectionsForChat } from "./knowledge/access.js";
 import { libraryRoutes } from "./library.js";
 import { messageEditRoutes } from "./message-edits.js";
 import { messageAnnotationRoutes } from "./message-annotations.js";
@@ -188,7 +190,13 @@ const api = new Hono<AppEnv>()
   })
   .get("/threads/:id", (c) => {
     const thread = getThread(c.get("user").id, c.req.param("id"));
-    return thread ? c.json({ ...thread, usage: { ...threadUsage(c.get("user").id, thread.id), agentRequests: threadAgentRequests(c.get("user").id, thread.id) } }) : c.json({ error: "Not found" }, 404);
+    if (!thread) return c.json({ error: "Not found" }, 404);
+    // A locked chat's detail is metadata only: title, tags, attachments, compaction, and branch are withheld
+    // by getThread's projection, so the client can render the generic locked state and still delete it.
+    if (thread.knowledgeAccess === "revoked") {
+      return c.json({ ...thread, compaction: null, usage: null });
+    }
+    return c.json({ ...thread, usage: { ...threadUsage(c.get("user").id, thread.id), agentRequests: threadAgentRequests(c.get("user").id, thread.id) } });
   })
   .patch("/threads/:id", async (c) => {
     const parsed = z.object({
@@ -199,6 +207,8 @@ const api = new Hono<AppEnv>()
       projectId: z.string().nullable().optional(),
       modelRef: z.string().min(1).max(300).optional(),
       knowledgeIds: z.array(z.string().min(1).max(200)).max(20).optional(),
+      /** Required before the first attachment of another account's collection becomes durable. */
+      acceptSharedRestrictions: z.boolean().optional(),
       /** Flat private labels; refused on temporary and comparison chats. */
       tags: z.array(z.string()).max(10).optional(),
       /** Required when this chat has a copied assistant and the request changes model or knowledge. */
@@ -216,23 +226,52 @@ const api = new Hono<AppEnv>()
     // A foreign project would expose its files and memories to this chat. Memory tools already offered
     // re-check the thread's project on every call, so a move needs no extra revocation here.
     if (parsed.data.projectId && !getProject(userId, parsed.data.projectId)) return c.json({ error: "Project not found" }, 404);
-    // Attachment ids are ownership-checked here and again on every tool call. A collection bound to
-    // another project cannot be attached through a forged request.
+    // Attachment ids are checked live (own or shared-to-this-viewer) and again on every tool call. A
+    // collection bound to another project cannot be attached through a forged request.
     const projectId = parsed.data.projectId === undefined ? thread.projectId : parsed.data.projectId;
     let knowledgeIds = parsed.data.knowledgeIds;
+    let transition: "ordinary" | "restricted" | null = null;
     if (knowledgeIds) {
-      if (knowledgeIds.some((id) => !collectionAccessible(userId, id, projectId))) return c.json({ error: "Knowledge collection not found" }, 404);
+      try {
+        transition = applyKnowledgeAttachments(userId, thread.id, {
+          knowledgeIds,
+          acceptSharedRestrictions: parsed.data.acceptSharedRestrictions === true,
+        });
+      } catch (error) {
+        if (!(error instanceof KnowledgeAttachError)) throw error;
+        if (error.reason === "ack_required") return c.json({ error: "Attach shared knowledge and restrict this chat?", code: "shared_knowledge_ack_required" }, 409);
+        if (error.reason === "limit") return c.json({ error: "This chat has reached its shared collection limit. Start a new chat.", code: "knowledge_dependency_limit" }, 409);
+        if (error.reason === "busy") return c.json({ error: "This chat is busy. Try again when the reply finishes.", code: "conflict" }, 409);
+        if (error.reason === "conflict") return c.json({ error: "Remove existing shares and cancel background work before attaching shared knowledge.", code: "shared_attach_conflict" }, 409);
+        return c.json({ error: "Knowledge collection not found" }, 404);
+      }
     } else if (parsed.data.projectId !== undefined && thread.knowledgeIds.length) {
-      // Moving a chat drops attachments that no longer apply to its project.
-      knowledgeIds = thread.knowledgeIds.filter((id) => collectionAccessible(userId, id, projectId));
+      // Moving a chat drops attachments that no longer apply to its project. A dropped shared attachment's
+      // durable dependency stays, so the chat remains restricted.
+      const stillReadable = new Set(readableCollectionsForChat(userId, thread.knowledgeIds, projectId).map((row) => row.id));
+      knowledgeIds = thread.knowledgeIds.filter((id) => stillReadable.has(id));
+      if (knowledgeIds.length !== thread.knowledgeIds.length) {
+        try {
+          transition = applyKnowledgeAttachments(userId, thread.id, { knowledgeIds, acceptSharedRestrictions: false, projectId });
+        } catch (error) {
+          if (!(error instanceof KnowledgeAttachError)) throw error;
+          return c.json({ error: "Knowledge collection not found" }, 404);
+        }
+      }
     }
     // A selected assistant freezes its instructions and tool policy; a model or knowledge change must name
     // the revision it is based on, so two tabs cannot silently combine into one configuration.
     const configChange = parsed.data.modelRef !== undefined || parsed.data.knowledgeIds !== undefined;
     if (configChange && thread.assistant) assertAssistantRevision(userId, thread.id, parsed.data.assistantRevision);
-    updateThread(userId, c.req.param("id"), { ...parsed.data, ...(knowledgeIds ? { knowledgeIds } : {}) });
+    const { knowledgeIds: _ids, acceptSharedRestrictions: _ack, ...patch } = parsed.data;
+    updateThread(userId, c.req.param("id"), patch);
     if (configChange && thread.assistant) bumpAssistantRevision(thread.id);
-    return c.json({ ok: true });
+    const updated = getThread(userId, thread.id);
+    return c.json({
+      ok: true,
+      ...(transition ? { sharedKnowledgeRestricted: transition === "restricted" } : {}),
+      ...(updated ? { sharedKnowledgeRestricted: updated.sharedKnowledgeRestricted, knowledgeAccess: updated.knowledgeAccess } : {}),
+    });
   })
   .delete("/threads/:id", async (c) => {
     deleteThread(c.get("user").id, c.req.param("id"));
@@ -246,8 +285,14 @@ const api = new Hono<AppEnv>()
     return c.json(branchThread(c.get("user").id, c.req.param("id"), parsed.data.messageId, newId("thr"), parsed.data.modelRef));
   })
   .route("/", exportRoutes)
-  .get("/threads/:id/messages", (c) => c.body(listMessagesJson(c.get("user").id, c.req.param("id")), 200, { "Content-Type": "application/json" }))
+  .get("/threads/:id/messages", (c) => {
+    // Missing and foreign ids keep the historical empty list; only an owned locked chat is refused.
+    if (threadKnowledgeAccess(c.get("user").id, c.req.param("id")) === "revoked") throw knowledgeAccessRevoked();
+    return c.body(listMessagesJson(c.get("user").id, c.req.param("id")), 200, { "Content-Type": "application/json" });
+  })
   .post("/threads/:id/messages", async (c) => {
+    // A locked restricted chat accepts no new rows either; a missing thread is still created by the write.
+    if (threadKnowledgeAccess(c.get("user").id, c.req.param("id")) === "revoked") throw knowledgeAccessRevoked();
     const parsed = z.object({
       id: clientId,
       parent_id: clientId.nullable().optional(),
@@ -451,6 +496,7 @@ const api = new Hono<AppEnv>()
   .route("/", apiKeyRoutes)
   .route("/", shareRoutes)
   .route("/", adminRoutes)
+  .route("/", adminKnowledgeRoutes)
   .route("/", permissionRoutes)
   // One API boundary: every sub-router's AppError becomes the same safe wire shape, also when a
   // router is mounted on its own in tests.

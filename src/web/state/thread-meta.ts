@@ -16,6 +16,9 @@ interface ThreadMeta {
   compaction: CompactionState | null;
   usage: ThreadUsage | null;
   branchedFrom: ThreadSummary["branchedFrom"];
+  /** A chat that ever attached another account's collection, and whether its content is currently locked. */
+  sharedKnowledgeRestricted: boolean;
+  knowledgeAccess: ThreadSummary["knowledgeAccess"];
 }
 
 /** `GET /threads/:id`: the thread list adapter's `fetch()` and the metadata refresh read the same response. */
@@ -45,7 +48,14 @@ export function loadThreadDetail(threadId: string, options?: { reuse?: boolean }
   const promise = api<ThreadDetail>(`/threads/${threadId}`).then((t) => {
     if (seq > (applied.get(threadId) ?? 0)) {
       applied.set(threadId, seq);
-      const meta = { compaction: t.compaction, usage: t.usage, memoryDisabled: t.memoryDisabled, branchedFrom: t.branchedFrom };
+      const meta = {
+        compaction: t.compaction,
+        usage: t.usage,
+        memoryDisabled: t.memoryDisabled,
+        branchedFrom: t.branchedFrom,
+        sharedKnowledgeRestricted: t.sharedKnowledgeRestricted,
+        knowledgeAccess: t.knowledgeAccess,
+      };
       useThreadMetaStore.setState((s) => ({ byId: { ...s.byId, [threadId]: meta } }));
     }
     return t;

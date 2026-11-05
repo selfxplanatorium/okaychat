@@ -14,6 +14,7 @@ import { getSettings } from "./settings.js";
 import { currentBranch, getThread } from "./threads.js";
 import { costOf, normalizeUsage, recordUsage } from "./usage.js";
 import { assertFeature, featureAllowed } from "./permissions/guard.js";
+import { isRestrictedKnowledgeThread } from "./knowledge/thread-policy.js";
 
 // Background memory work, off the reply's critical path (Letta's "sleep-time" agent, ChatGPT's and
 // Claude's asynchronous memory generation). Two jobs:
@@ -87,6 +88,8 @@ interface ReviewState { user_id: string; id: string; updated_at: number; memory_
  */
 export async function reviewThread(userId: string, threadId: string): Promise<MemoryOperation[] | null> {
   if (!featureAllowed(userId, "memory")) return null;
+  // Restricted history is never mined into independently stored facts, even while it is readable.
+  if (isRestrictedKnowledgeThread(threadId)) return null;
   const preferences = memoryPreferences(userId);
   const thread = getThread(userId, threadId);
   const state = db.prepare("SELECT user_id, id, updated_at, memory_cursor, model_ref FROM threads WHERE user_id = ? AND id = ?").get(userId, threadId) as ReviewState | undefined;
@@ -110,10 +113,12 @@ export async function reviewThread(userId: string, threadId: string): Promise<Me
   const operations = parseOperations(text);
   const applied: MemoryOperation[] = [];
   tx(() => {
-    // The user may have paused memory, excluded this chat, moved it, or edited memory meanwhile.
+    // The user may have paused memory, excluded this chat, moved it, edited memory meanwhile, or attached
+    // shared knowledge while the model was answering. Recheck immediately before committing facts.
     const now = memoryPreferences(userId);
     const current = getThread(userId, threadId);
     if (!now.enabled || !now.autoSave || now.revision !== preferences.revision || !current || current.memoryDisabled || current.projectId !== scope) return;
+    if (isRestrictedKnowledgeThread(threadId)) return;
     const known = new Map<string, MemoryEntry>(candidates.map((e) => [e.id, e]));
     for (const op of operations) {
       try {
@@ -179,6 +184,7 @@ export async function memoryTick(now = Date.now()): Promise<void> {
   let summaries = 0;
   const threads = db.prepare(`SELECT t.user_id, t.id FROM threads t JOIN memory_preferences p ON p.user_id = t.user_id
     WHERE p.enabled = 1 AND p.auto_save = 1 AND t.memory_disabled = 0 AND t.compare_group_id IS NULL AND t.updated_at > t.memory_scanned_at
+      AND NOT EXISTS (SELECT 1 FROM knowledge_thread_dependencies d WHERE d.thread_id = t.id)
       AND t.updated_at < ? AND t.updated_at > ? ORDER BY t.updated_at LIMIT ?`).all(now - IDLE_MS, now - LOOKBACK_MS, JOBS_PER_TICK) as Array<{ user_id: string; id: string }>;
   for (const t of threads) {
     try { await reviewThread(t.user_id, t.id); } catch (error) {

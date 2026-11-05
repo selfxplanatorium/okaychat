@@ -1,6 +1,7 @@
 import { abortRevokedAgentRuns } from "./n8n/store.js";
 import { afterCommit } from "./db.js";
 import { requestChannelRevocation } from "./channels/revocation.js";
+import { requestKnowledgeRevocation } from "./knowledge/revocation.js";
 import { HTTPException } from "hono/http-exception";
 import type { ShareAudience, UserGroup } from "../shared/types.js";
 import { newId } from "./crypto.js";
@@ -15,7 +16,7 @@ import {
 // Admin-defined user groups, and the audience of each shared resource: everyone, or only listed users and
 // members of listed groups. Shared provider connections, shared MCP servers, and shared n8n agents use it.
 
-export type ShareKind = "provider" | "mcp" | "n8n";
+export type ShareKind = "provider" | "mcp" | "n8n" | "knowledge";
 
 export function listGroups(): UserGroup[] {
   const groups = db.prepare("SELECT id, name FROM user_groups ORDER BY name").all() as Array<{ id: string; name: string }>;
@@ -34,6 +35,7 @@ export function createGroup(name: string, userIds: string[] = []): UserGroup {
     setMembers(id, userIds);
   });
   afterCommit(abortRevokedAgentRuns);
+  afterCommit(requestKnowledgeRevocation);
   return listGroups().find((g) => g.id === id)!;
 }
 
@@ -46,6 +48,7 @@ export function updateGroup(id: string, patch: { name?: string; userIds?: string
   });
   afterCommit(abortRevokedAgentRuns);
   afterCommit(requestChannelRevocation);
+  afterCommit(requestKnowledgeRevocation);
   return listGroups().find((g) => g.id === id)!;
 }
 
@@ -56,6 +59,8 @@ export function deleteGroup(id: string) {
     db.prepare("DELETE FROM user_groups WHERE id = ?").run(id);
     afterCommit(abortRevokedAgentRuns);
     afterCommit(requestChannelRevocation);
+    // Removing a group deletes its audience arms; readers using it lose access immediately.
+    afterCommit(requestKnowledgeRevocation);
   });
 }
 
@@ -87,6 +92,7 @@ export function setAudience(kind: ShareKind, resourceId: string, audience: Share
     }
     if (isModelAccessKind(kind)) pruneModelAccessPolicies(resourceId);
     if (kind === "n8n") afterCommit(abortRevokedAgentRuns);
+    if (kind === "knowledge") afterCommit(requestKnowledgeRevocation);
   });
 }
 
@@ -94,6 +100,23 @@ export function setAudience(kind: ShareKind, resourceId: string, audience: Share
 export function clearAudience(kind: ShareKind, resourceId: string) {
   db.prepare("DELETE FROM share_audiences WHERE kind = ? AND resource_id = ?").run(kind, resourceId);
   if (isModelAccessKind(kind)) clearModelAccessPolicies(resourceId);
+  if (kind === "knowledge") afterCommit(requestKnowledgeRevocation);
+}
+
+/** Audiences for a page of resources in one query, so a list does not issue one lookup per row. */
+export function audiencesFor(kind: ShareKind, resourceIds: readonly string[]): Map<string, ShareAudience> {
+  const out = new Map<string, ShareAudience>();
+  for (const id of resourceIds) out.set(id, { mode: "all", userIds: [], groupIds: [] });
+  if (!resourceIds.length) return out;
+  const marks = resourceIds.map(() => "?").join(",");
+  const rows = db.prepare(`SELECT resource_id FROM share_audiences WHERE kind = ? AND resource_id IN (${marks})`).all(kind, ...resourceIds) as Array<{ resource_id: string }>;
+  const selected = new Set(rows.map((row) => row.resource_id));
+  const users = db.prepare(`SELECT resource_id, user_id FROM share_users WHERE kind = ? AND resource_id IN (${marks})`).all(kind, ...resourceIds) as Array<{ resource_id: string; user_id: string }>;
+  const groups = db.prepare(`SELECT resource_id, group_id FROM share_groups WHERE kind = ? AND resource_id IN (${marks})`).all(kind, ...resourceIds) as Array<{ resource_id: string; group_id: string }>;
+  for (const id of selected) out.set(id, { mode: "selected", userIds: [], groupIds: [] });
+  for (const row of users) out.get(row.resource_id)?.userIds.push(row.user_id);
+  for (const row of groups) out.get(row.resource_id)?.groupIds.push(row.group_id);
+  return out;
 }
 
 /**

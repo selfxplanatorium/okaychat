@@ -18,6 +18,7 @@ import { AppError, errorJson } from "./errors.js";
 import { assertStorage } from "./quota.js";
 import { threadBusy } from "./thread-runs.js";
 import { getThread, isTemporaryThread } from "./threads.js";
+import { assertThreadContentReadable } from "./knowledge/thread-policy.js";
 
 // Private per-message bookmarks and feedback. They hang off (thread id, message id), never enter message
 // content, prompts, FTS, exports, or shares, and do not count as chat activity. See
@@ -51,6 +52,8 @@ function annotatable(userId: string, threadId: string, messageId: string, option
   if (!getThread(userId, threadId)) throw notFound(MESSAGE_NOT_FOUND);
   const row = db.prepare("SELECT format, content, edited_at FROM messages WHERE thread_id = ? AND id = ?").get(threadId, messageId) as MessageRow | undefined;
   if (!row) throw notFound(MESSAGE_NOT_FOUND);
+  // The lock gate runs only after the route's own not-found answer, so foreign/missing stay identical.
+  assertThreadContentReadable(userId, threadId);
   const rejection = options.assistantOnly ? FEEDBACK_INVALID : BOOKMARK_INVALID;
   let role: unknown;
   try {
@@ -69,6 +72,7 @@ function annotatable(userId: string, threadId: string, messageId: string, option
 
 function readAnnotations(userId: string, threadId: string): ThreadAnnotations {
   if (isTemporaryThread(threadId) || !getThread(userId, threadId)) throw notFound(THREAD_NOT_FOUND);
+  assertThreadContentReadable(userId, threadId);
   const bookmarkRows = db
     .prepare("SELECT message_id, created_at FROM message_bookmarks WHERE thread_id = ? ORDER BY created_at, message_id")
     .all(threadId) as unknown as Array<{ message_id: string; created_at: number }>;

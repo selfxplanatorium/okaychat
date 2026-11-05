@@ -137,3 +137,12 @@ Each retained `api_keys` row reserves exactly 1,024 bytes. Requests, audit, rate
 usage ledger are bounded operational metadata and are not charged. Revoking or editing a key cannot grow
 the reservation, so it works when storage is full; pruning a tombstone frees 1 KiB. Generation writes no
 transcript or files, so an API call does not require spare content storage.
+
+## Shared knowledge
+
+A published collection stays owned by its original account: originals, extracted text, chunk copies,
+vectors, ingestion operations, and provider billing are all the owner's. Reader chats pay only their own
+stored messages, generation, and bounded retrieved `turn_context`/tool-result copies. Retrieval by a
+non-owner writes nothing and makes no embedding request. Audience, dependency, and audit rows are
+operational metadata and are not charged. A reader quota failure leaves the owner's index and jobs
+untouched; an owner quota failure never reserves a reader slot.

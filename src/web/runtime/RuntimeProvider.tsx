@@ -41,8 +41,22 @@ import { useAssistantPresets, temporaryAssistantOf } from "@/state/assistant-pre
 import { continuationIntentOf } from "@/components/chat/continue-run";
 
 /** Thread metadata the sidebar reads from `threadListItem.custom`. */
-export type ThreadCustom = { pinned: boolean; projectId: string | null; branchedFrom: ThreadSummary["branchedFrom"]; tags: string[] };
-const threadCustom = (t: ThreadSummary): ThreadCustom => ({ pinned: t.pinned, projectId: t.projectId, branchedFrom: t.branchedFrom, tags: t.tags });
+export type ThreadCustom = {
+  pinned: boolean;
+  projectId: string | null;
+  branchedFrom: ThreadSummary["branchedFrom"];
+  tags: string[];
+  sharedKnowledgeRestricted: boolean;
+  knowledgeAccess: ThreadSummary["knowledgeAccess"];
+};
+const threadCustom = (t: ThreadSummary): ThreadCustom => ({
+  pinned: t.pinned,
+  projectId: t.projectId,
+  branchedFrom: t.branchedFrom,
+  tags: t.tags,
+  sharedKnowledgeRestricted: t.sharedKnowledgeRestricted,
+  knowledgeAccess: t.knowledgeAccess,
+});
 
 type MessageRow = { id: string; parent_id: string | null; format: string; content: unknown; edited_at?: number };
 
@@ -204,7 +218,12 @@ const threadListAdapter: RemoteThreadListAdapter = {
     // Persist a choice made on the optimistic chat before the first message is sent, and only then mirror
     // it into the stored chat. A failed PATCH clears the remote entry, so the selector never claims an
     // attachment the next request does not have; the error reaches the thread-initialisation path.
-    if (knowledgeIds?.length) await persistKnowledgeAttachments(thread.id, knowledgeIds);
+    // A reader collection was acknowledged in the selector before it was toggled; forward that consent.
+    const sharedAttachment = knowledgeIds?.some((id) => {
+      const view = useChatKnowledgeStore.getState().collections?.find((entry) => entry.id === id);
+      return view?.access === "reader";
+    });
+    if (knowledgeIds?.length) await persistKnowledgeAttachments(thread.id, knowledgeIds, !!sharedAttachment);
     useChatKnowledgeStore.getState().bind(localId, thread.id);
     bindModel(thread.id);
     // A preset chosen before the chat existed becomes its copied snapshot now, through the same validated API.

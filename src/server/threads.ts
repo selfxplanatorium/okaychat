@@ -12,6 +12,7 @@ import { newId } from "./crypto.js";
 import { assistantSummary } from "./assistant-presets.js";
 import { overlayGenerationMetadata, projectGenerationsForThread } from "./generation-runs.js";
 import { normalizeTags } from "../shared/tags.js";
+import { assertThreadRedistributable, isRestrictedKnowledgeThread, lockedThreadIds, restrictedThreadIds, restrictedThreadReadable } from "./knowledge/thread-policy.js";
 
 /** Temporary conversations exist only in browser memory; their ids must never become stored threads. */
 export const isTemporaryThread = (id: string): boolean => id.startsWith("tmp_");
@@ -56,20 +57,27 @@ const parseIds = (value: string | null): string[] => {
   }
 };
 
-const toSummary = (r: ThreadRow, tags: string[] = []): ThreadSummary => ({
-  id: r.id,
-  title: r.title,
-  status: r.status,
-  modelRef: r.model_ref,
-  projectId: r.project_id,
-  memoryDisabled: !!r.memory_disabled,
-  pinned: !!r.pinned,
-  knowledgeIds: parseIds(r.knowledge_ids),
-  tags,
-  branchedFrom: r.branched_from && r.branched_exists ? { id: r.branched_from, title: r.branched_title } : null,
-  createdAt: r.created_at,
-  updatedAt: r.updated_at,
-});
+/** A locked row keeps only the shape the sidebar needs; stale titles/tags/attachments are withheld. */
+const toSummary = (r: ThreadRow, tags: string[] = [], state?: { restricted: boolean; locked: boolean }): ThreadSummary => {
+  const restricted = state?.restricted ?? false;
+  const locked = state?.locked ?? false;
+  return {
+    id: r.id,
+    title: locked ? null : r.title,
+    status: r.status,
+    modelRef: r.model_ref,
+    projectId: r.project_id,
+    memoryDisabled: !!r.memory_disabled,
+    pinned: !!r.pinned,
+    knowledgeIds: locked ? [] : parseIds(r.knowledge_ids),
+    tags: locked ? [] : tags,
+    branchedFrom: !locked && r.branched_from && r.branched_exists ? { id: r.branched_from, title: r.branched_title } : null,
+    sharedKnowledgeRestricted: restricted,
+    knowledgeAccess: locked ? "revoked" : "available",
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+};
 
 const TAG_CHUNK = 400;
 
@@ -110,7 +118,9 @@ export function listThreads(
   if (status !== undefined) where.push("t.status = ?"), values.push(status);
   const rows = db.prepare(`${SELECT_THREADS} WHERE ${where.join(" AND ")} ORDER BY t.updated_at DESC`).all(...values) as unknown as ThreadRow[];
   const tags = tagsFor(rows.map((row) => row.id));
-  return rows.map((row) => toSummary(row, tags.get(row.id) ?? []));
+  const restricted = restrictedThreadIds(userId);
+  const locked = lockedThreadIds(userId);
+  return rows.map((row) => toSummary(row, tags.get(row.id) ?? [], { restricted: restricted.has(row.id), locked: locked.has(row.id) }));
 }
 
 export function getThread(userId: string, id: string): (ThreadSummary & { compaction: CompactionState | null; compareGroupId: string | null }) | null {
@@ -118,13 +128,16 @@ export function getThread(userId: string, id: string): (ThreadSummary & { compac
     | (ThreadRow & { compaction_json: string | null })
     | undefined;
   if (!row) return null;
+  const restricted = isRestrictedKnowledgeThread(row.id);
+  const locked = restricted && !restrictedThreadReadable(userId, row.id);
   const snapshot = assistantSummary(row.assistant_json ?? null);
   return {
-    ...toSummary(row, tagsFor([row.id]).get(row.id) ?? []),
-    compaction: row.compaction_json ? (JSON.parse(row.compaction_json) as CompactionState) : null,
+    ...toSummary(row, locked ? [] : tagsFor([row.id]).get(row.id) ?? [], { restricted, locked }),
+    // A locked chat's compaction summary and import selection are content too; neither leaves the server.
+    compaction: !locked && row.compaction_json ? (JSON.parse(row.compaction_json) as CompactionState) : null,
     assistant: snapshot,
     assistantRevision: row.assistant_revision ?? 0,
-    preferredHead: row.preferred_head ?? null,
+    preferredHead: locked ? null : row.preferred_head ?? null,
     compareGroupId: row.compare_group_id ?? null,
   };
 }
@@ -251,6 +264,8 @@ export function ancestry<T extends { id: string; parent_id: string | null }>(byI
 export function branchThread(userId: string, sourceId: string, messageId: string, id: string, modelRef?: string): ThreadSummary {
   const source = getThread(userId, sourceId);
   if (!source) throw new HTTPException(404, { message: "Thread not found" });
+  // A fork would carry shared-derived content into a chat with no dependency provenance this cycle.
+  assertThreadRedistributable(sourceId);
   const rows = listMessages(userId, sourceId);
   const byId = new Map(rows.map((r) => [r.id, r]));
   const chain = ancestry(byId, byId.get(messageId));
@@ -387,6 +402,8 @@ export interface MessageRow {
 
 export function listMessages(userId: string, threadId: string): MessageRow[] {
   if (!ownsThread(userId, threadId)) return [];
+  // Durable policy also protects raw readers: a locked restricted chat returns no history.
+  if (isRestrictedKnowledgeThread(threadId) && !restrictedThreadReadable(userId, threadId)) return [];
   const rows = db
     .prepare("SELECT id, parent_id, format, content FROM messages WHERE thread_id = ? ORDER BY created_at, rowid")
     .all(threadId) as Array<{ id: string; parent_id: string | null; format: string; content: string }>;
@@ -399,6 +416,7 @@ export function listMessages(userId: string, threadId: string): MessageRow[] {
  */
 export function listMessagesJson(userId: string, threadId: string): string {
   if (!ownsThread(userId, threadId)) return "[]";
+  if (isRestrictedKnowledgeThread(threadId) && !restrictedThreadReadable(userId, threadId)) return "[]";
   const rows = db
     .prepare("SELECT id, parent_id, format, content, edited_at, imported, original_enc FROM messages WHERE thread_id = ? ORDER BY created_at, rowid")
     .all(threadId) as Array<{ id: string; parent_id: string | null; format: string; content: string; edited_at: number | null; imported: number; original_enc: string | null }>;

@@ -813,6 +813,9 @@ const migrations: Array<string | (() => void)> = [
       created_at INTEGER NOT NULL
     );
     CREATE INDEX n8n_agent_runs_user_time ON n8n_agent_runs(user_id, created_at);
+    -- A migration-test rewind can leave a later shared-knowledge trigger behind; it references the table
+    -- this block rebuilds, so drop it before touching the audience tables.
+    DROP TRIGGER IF EXISTS knowledge_audience_cleanup;
     CREATE TABLE share_audiences_new (
       kind TEXT NOT NULL CHECK (kind IN ('provider', 'mcp', 'n8n')),
       resource_id TEXT NOT NULL,
@@ -1868,6 +1871,83 @@ CREATE INDEX notifications_calendar ON notifications(calendar_event_id) WHERE ca
     ALTER TABLE notifications ADD COLUMN channel_root_id TEXT;
     `);
     if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "channels-v2") throw new Error("Injected migration failure");
+  },
+  // Shared team knowledge (docs/implementation/knowledge.md): publication state, an embedding connection pin,
+  // durable chat dependencies, and a `knowledge` audience kind. The dependency has no foreign key to the
+  // collection on purpose: deleting a shared collection must leave a deny-all tombstone in the reader's chat,
+  // never unlock it by cascading the row away. No existing private data is published or re-indexed.
+  () => {
+    db.exec(`
+    ALTER TABLE knowledge_collections ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'
+      CHECK (visibility IN ('private', 'shared'));
+    ALTER TABLE knowledge_collections ADD COLUMN access_revision INTEGER NOT NULL DEFAULT 1
+      CHECK (access_revision > 0);
+    ALTER TABLE knowledge_collections ADD COLUMN embedding_connection_scope TEXT
+      CHECK (embedding_connection_scope IN ('own', 'shared'));
+    ALTER TABLE knowledge_collections ADD COLUMN embedding_connection_created_at INTEGER;
+    ALTER TABLE knowledge_collections ADD COLUMN embedding_endpoint_hash TEXT;
+    CREATE INDEX knowledge_collections_visibility ON knowledge_collections(visibility, updated_at DESC, id);
+
+    CREATE TABLE knowledge_thread_dependencies (
+      thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+      collection_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (thread_id, collection_id)
+    );
+    CREATE INDEX knowledge_dependencies_collection ON knowledge_thread_dependencies(collection_id, thread_id);
+
+    -- Rebuild the audience tables to admit the knowledge kind. The old CHECK cannot be altered in place.
+    DROP TRIGGER n8n_agent_audience_cleanup;
+    -- A database rewound for a migration test can still carry the shared-knowledge trigger from a later
+    -- version; it references share_audiences, so it must not survive the rebuild below.
+    DROP TRIGGER IF EXISTS knowledge_audience_cleanup;
+    CREATE TABLE share_audiences_new (
+      kind TEXT NOT NULL CHECK(kind IN ('provider','mcp','n8n','knowledge')),
+      resource_id TEXT NOT NULL,
+      PRIMARY KEY(kind, resource_id)
+    );
+    CREATE TABLE share_users_new (
+      kind TEXT NOT NULL, resource_id TEXT NOT NULL,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      PRIMARY KEY(kind, resource_id, user_id),
+      FOREIGN KEY(kind, resource_id) REFERENCES share_audiences_new(kind, resource_id) ON DELETE CASCADE
+    );
+    CREATE TABLE share_groups_new (
+      kind TEXT NOT NULL, resource_id TEXT NOT NULL,
+      group_id TEXT NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+      PRIMARY KEY(kind, resource_id, group_id),
+      FOREIGN KEY(kind, resource_id) REFERENCES share_audiences_new(kind, resource_id) ON DELETE CASCADE
+    );
+    INSERT INTO share_audiences_new SELECT kind, resource_id FROM share_audiences;
+    INSERT INTO share_users_new SELECT kind, resource_id, user_id FROM share_users;
+    INSERT INTO share_groups_new SELECT kind, resource_id, group_id FROM share_groups;
+    `);
+    if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "team-knowledge") throw new Error("Injected migration failure");
+    db.exec(`
+    DROP TABLE share_users;
+    DROP TABLE share_groups;
+    DROP TABLE share_audiences;
+    ALTER TABLE share_audiences_new RENAME TO share_audiences;
+    ALTER TABLE share_users_new RENAME TO share_users;
+    ALTER TABLE share_groups_new RENAME TO share_groups;
+    CREATE TRIGGER n8n_agent_audience_cleanup AFTER DELETE ON n8n_agents BEGIN
+      DELETE FROM share_audiences WHERE kind='n8n' AND resource_id=OLD.id;
+    END;
+    CREATE TRIGGER knowledge_audience_cleanup AFTER DELETE ON knowledge_collections BEGIN
+      DELETE FROM share_audiences WHERE kind='knowledge' AND resource_id=OLD.id;
+    END;
+    -- A shared collection is global: its owner project id/title must never become an audience-visible field.
+    CREATE TRIGGER knowledge_shared_project_insert BEFORE INSERT ON knowledge_collections
+    WHEN NEW.visibility='shared' AND NEW.project_id IS NOT NULL BEGIN
+      SELECT RAISE(ABORT, 'shared knowledge must be global');
+    END;
+    CREATE TRIGGER knowledge_shared_project_update BEFORE UPDATE OF visibility, project_id ON knowledge_collections
+    WHEN NEW.visibility='shared' AND NEW.project_id IS NOT NULL BEGIN
+      SELECT RAISE(ABORT, 'shared knowledge must be global');
+    END;
+    `);
+    const broken = db.prepare("PRAGMA foreign_key_check").all();
+    if (broken.length) throw new Error(`Knowledge migration left ${broken.length} broken foreign keys`);
   },
 ];
 

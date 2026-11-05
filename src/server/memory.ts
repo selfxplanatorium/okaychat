@@ -13,6 +13,7 @@ import { promptText } from "./prompts.js";
 import { assertFeature, featureAllowed } from "./permissions/guard.js";
 import { riskMetadata, scanForInjection, wrapUntrusted } from "./prompt-injection.js";
 import { attachmentName, currentBranch, getThread } from "./threads.js";
+import { isRestrictedKnowledgeThread } from "./knowledge/thread-policy.js";
 
 const MAX_ENTRIES = 500;
 const MAX_CONTENT = 2000;
@@ -353,7 +354,10 @@ const CLOSE = "\u0003";
 function recallTools(userId: string, threadId: string, scope: string | null, allowed: () => boolean): ToolSet {
   const scopeSql = scope ? "t.project_id = ?" : "t.project_id IS NULL";
   const scopeArgs = scope ? [scope] : [];
-  const readable = (id: string) => allowed() && !!db.prepare(`SELECT 1 FROM threads t WHERE t.user_id = ? AND t.id = ? AND t.id != ? AND t.memory_disabled = 0 AND t.compare_group_id IS NULL AND ${scopeSql}`)
+  // A restricted chat's history carries shared-derived content and is never copied into another chat,
+  // locked or not. Only ordinary chats are searchable here.
+  const ordinary = "NOT EXISTS (SELECT 1 FROM knowledge_thread_dependencies d WHERE d.thread_id = t.id)";
+  const readable = (id: string) => allowed() && !!db.prepare(`SELECT 1 FROM threads t WHERE t.user_id = ? AND t.id = ? AND t.id != ? AND t.memory_disabled = 0 AND t.compare_group_id IS NULL AND ${ordinary} AND ${scopeSql}`)
     .get(userId, id, threadId, ...scopeArgs);
   return {
     conversation_search: tool({
@@ -366,7 +370,7 @@ function recallTools(userId: string, threadId: string, scope: string | null, all
         if (!allowed()) return { chats: [] };
         const until = before ? Date.parse(`${before}T00:00:00Z`) : Number.MAX_SAFE_INTEGER;
         const words = [...new Set(query.match(/[\p{L}\p{N}_]+/gu) ?? [])].slice(0, 12);
-        const base = `t.user_id = ? AND t.id != ? AND t.memory_disabled = 0 AND t.compare_group_id IS NULL AND ${scopeSql} AND t.updated_at < ?`;
+        const base = `t.user_id = ? AND t.id != ? AND t.memory_disabled = 0 AND t.compare_group_id IS NULL AND ${ordinary} AND ${scopeSql} AND t.updated_at < ?`;
         if (!words.length) {
           const rows = db.prepare(`SELECT t.id, t.title, t.updated_at FROM threads t WHERE ${base} AND EXISTS (SELECT 1 FROM messages m WHERE m.thread_id = t.id) ORDER BY t.updated_at DESC LIMIT 15`)
             .all(userId, threadId, ...scopeArgs, until) as Array<{ id: string; title: string | null; updated_at: number }>;
@@ -397,7 +401,13 @@ function recallTools(userId: string, threadId: string, scope: string | null, all
       description: "Read the text of one earlier chat found with conversation_search. Long chats are returned in parts; pass the returned next offset to continue.",
       inputSchema: z.object({ id: z.string().max(200), offset: z.number().int().min(0).optional() }),
       execute: async ({ id, offset = 0 }) => {
-        if (!readable(id)) return invalid("Chat not found or not available from this conversation", 404);
+        if (!readable(id)) {
+          // Naming the reason is safe: it reveals only that this reader's own chat is restricted, not content.
+          if (isRestrictedKnowledgeThread(id) && getThread(userId, id)) {
+            return { id, title: "", date: "", text: "", next: undefined, note: "This chat uses shared knowledge and cannot be read from another chat." };
+          }
+          return invalid("Chat not found or not available from this conversation", 404);
+        }
         const thread = getThread(userId, id)!;
         const text = transcriptText(currentBranch(userId, id), { assistantMax: 6000, max: Number.MAX_SAFE_INTEGER });
         const part = text.slice(offset, offset + 16_000);

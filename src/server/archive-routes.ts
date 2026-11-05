@@ -13,6 +13,7 @@ import { listModels } from "./catalog/providers.js";
 import { AppError } from "./errors.js";
 import { threadBusy } from "./thread-runs.js";
 import { notify } from "./notifications.js";
+import { isRestrictedKnowledgeThread } from "./knowledge/thread-policy.js";
 
 /**
  * Portable archive API. Every response is private and uncached; every job is owned by the caller, and a
@@ -78,9 +79,12 @@ export const archiveRoutes = new Hono<AppEnv>()
     if (!parsed.success) return c.json({ error: `Choose between 1 and ${ARCHIVE_LIMITS.chats} chats.` }, 400);
     // Waiting receipts and active turns have not finished storing; an archive must not capture a half turn.
     if (parsed.data.threads.some((thread) => threadBusy(thread.id))) return c.json({ error: "A selected chat is busy. Finish or stop its reply first." }, 409);
+    // A chat using shared knowledge cannot be redistributed; a bulk export skips it, a single one is refused.
+    const exportable = parsed.data.threads.filter((thread) => !isRestrictedKnowledgeThread(thread.id));
+    if (!exportable.length) return c.json({ error: "This action is unavailable for a chat that uses shared knowledge.", code: "shared_knowledge_restricted" }, 409);
     const job = createJob(userId, "export");
     try {
-      const built = buildArchive({ userId, threads: parsed.data.threads });
+      const built = buildArchive({ userId, threads: exportable });
       const zip = writeArchive(built.manifest, built.assets);
       const file = path.join(jobDir(userId, job.id), "archive.okaychat.zip");
       writeFileSync(file, zip, { mode: 0o600 });

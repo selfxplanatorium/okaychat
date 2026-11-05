@@ -15,6 +15,7 @@ import { describeBoundaryError } from "./provider-errors.js";
 import { appendMessage, currentBranch, ensureThread, getThread, updateThread } from "./threads.js";
 import { assertFeature, assertModelAllowed, featureAllowed } from "./permissions/guard.js";
 import { notify } from "./notifications.js";
+import { isRestrictedKnowledgeThread } from "./knowledge/thread-policy.js";
 
 // Scheduled prompts run on the server with nobody watching: append the prompt to the schedule's thread (or a new
 // one per run), run one turn, and persist both messages in the client's history format so the thread opens normally.
@@ -109,6 +110,11 @@ export async function runSchedule(row: Row, reserved?: () => void): Promise<void
   // (never a rapid retry).
   if (!featureAllowed({ userId: row.user_id, modelRef: row.model_ref }, "schedules")) {
     recordSkipped(row, "Scheduled prompts are disabled for this account.");
+    return reserved?.();
+  }
+  // A restricted chat never becomes an unattended turn, even if the schedule predates the transition.
+  if (row.thread_id && isRestrictedKnowledgeThread(row.thread_id)) {
+    recordSkipped(row, "This schedule's chat uses shared knowledge.");
     return reserved?.();
   }
   try {
@@ -312,10 +318,13 @@ function target(userId: string, body: Input, prev?: Row): Target | string {
   if (body.projectId && !project_id) return "Project not found";
   if (body.threadMode === "new") return { thread_mode: "new", thread_id: prev?.thread_mode === "new" ? prev.thread_id : null, thread_attached: 0, project_id };
   if (body.threadId) {
+    if (isRestrictedKnowledgeThread(body.threadId)) return "Choose a chat that does not use shared knowledge.";
     if (body.threadId === prev?.thread_id) return { thread_mode: "same", thread_id: prev.thread_id, thread_attached: prev.thread_attached, project_id };
     const chosen = getThread(userId, body.threadId);
     if (!chosen) return "Chat not found";
     if (chosen.compareGroupId) return "Choose a regular chat for this schedule.";
+    // A restricted chat cannot hand its history to an unattended run or a new chat.
+    if (isRestrictedKnowledgeThread(body.threadId)) return "Choose a chat that does not use shared knowledge.";
     return { thread_mode: "same", thread_id: body.threadId, thread_attached: 1, project_id };
   }
   // Keep the chat this schedule created; a picked chat or the latest per-run chat is let go.
