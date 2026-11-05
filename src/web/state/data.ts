@@ -13,6 +13,7 @@ import { useMessageJump } from "./message-jump";
 import { clearStoredMessages } from "@/runtime/message-persistence";
 import { useServices } from "./services";
 import { startAgentAccount } from "./n8n-agents";
+import { rememberAssistantRevision, assistantRevisionOf, startAssistantAccount } from "./assistant-presets";
 import { warmThreadCache } from "@/runtime/threadCache";
 
 interface DataState {
@@ -135,7 +136,13 @@ export const useData = create<DataState>((set, get) => ({
   selectModel: (ref, threadId) => {
     if (!threadId) return set({ selectedModel: ref });
     set((s) => ({ threadModels: { ...s.threadModels, [threadId]: ref } }));
-    if (!isTemporaryThread(threadId)) void api(`/threads/${threadId}`, { method: "PATCH", json: { modelRef: ref } }).catch(() => {});
+    if (!isTemporaryThread(threadId)) {
+      // A chat with a copied assistant freezes its snapshot; the change must name the revision it edits.
+      const revision = assistantRevisionOf(threadId);
+      void api(`/threads/${threadId}`, { method: "PATCH", json: { modelRef: ref, ...(revision !== undefined ? { assistantRevision: revision } : {}) } })
+        .then(() => revision !== undefined && rememberAssistantRevision(threadId, revision + 1))
+        .catch(() => {});
+    }
   },
   rememberThreadModels: (models) => set((s) => ({ threadModels: { ...models, ...s.threadModels } })),
   resetModel: () => {
@@ -219,6 +226,7 @@ export function preloadData(userId: string) {
   // Agent summaries and last-response evidence are account-scoped; a late answer for the previous
   // account must never paint the new one.
   startAgentAccount(userId);
+  startAssistantAccount(userId);
   // A new account must not inherit the previous one's edited-reply badges or open editor.
   if (preloaded?.userId !== userId) {
     clearMessageEdits();

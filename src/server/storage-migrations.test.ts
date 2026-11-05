@@ -23,8 +23,9 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       db.exec("DROP TRIGGER messages_fts_insert; DROP TRIGGER messages_fts_update; DROP TRIGGER messages_fts_delete");
       db.exec("DROP TABLE message_search_keys");
       db.exec("DROP INDEX messages_thread_time");
-      for (const table of ["chatgpt_login_attempts", "chatgpt_registrations", "chatgpt_hosts", "chatgpt_controls", "saved_prompts", "message_bookmarks", "message_feedback", "provider_model_grants", "provider_model_policies", "knowledge_chunks_fts", "knowledge_chunks", "knowledge_sources", "knowledge_collections", "share_groups", "share_users", "share_audiences", "user_group_members", "user_groups", "n8n_agent_sessions", "n8n_agent_runs", "n8n_agents", "permission_leases", "permission_rate_windows", "permission_audit", "user_model_instructions", "prompt_rules", "permission_policies", "permission_state"]) db.exec("DROP TABLE " + table);
-      for (const column of ["custom_instructions", "instructions_revision"]) db.exec("ALTER TABLE threads DROP COLUMN " + column);
+      for (const table of ["chatgpt_login_attempts", "chatgpt_registrations", "chatgpt_hosts", "chatgpt_controls", "saved_prompts", "message_bookmarks", "message_feedback", "assistant_presets", "generation_segments", "generation_runs", "archive_jobs", "provider_model_grants", "provider_model_policies", "knowledge_chunks_fts", "knowledge_chunks", "knowledge_sources", "knowledge_collections", "share_groups", "share_users", "share_audiences", "user_group_members", "user_groups", "n8n_agent_sessions", "n8n_agent_runs", "n8n_agents", "permission_leases", "permission_rate_windows", "permission_audit", "user_model_instructions", "prompt_rules", "permission_policies", "permission_state"]) db.exec("DROP TABLE " + table);
+      for (const column of ["custom_instructions", "instructions_revision", "assistant_json", "assistant_revision", "imported_assistant_json", "preferred_head"]) db.exec("ALTER TABLE threads DROP COLUMN " + column);
+      db.exec("ALTER TABLE messages DROP COLUMN imported");
       db.exec("ALTER TABLE threads DROP COLUMN knowledge_ids");
       db.exec("DROP TABLE image_threads");
       db.exec("DROP TABLE media");
@@ -90,6 +91,9 @@ test('n8n migration preserves selected audiences and rolls back schema and versi
     db.exec('DROP TABLE n8n_agent_sessions; DROP TABLE n8n_agent_runs; DROP TABLE n8n_agents');
     db.exec('DROP TABLE permission_leases; DROP TABLE permission_rate_windows; DROP TABLE permission_audit; DROP TABLE user_model_instructions; DROP TABLE prompt_rules; DROP TABLE permission_policies; DROP TABLE permission_state');
     db.exec('DROP TABLE saved_prompts; DROP TABLE message_bookmarks; DROP TABLE message_feedback');
+    db.exec('DROP TABLE assistant_presets; DROP TABLE generation_segments; DROP TABLE generation_runs; DROP TABLE archive_jobs');
+    for (const column of ['assistant_json', 'assistant_revision', 'imported_assistant_json', 'preferred_head']) db.exec('ALTER TABLE threads DROP COLUMN ' + column);
+    db.exec('ALTER TABLE messages DROP COLUMN imported');
     db.exec('DROP INDEX user_groups_prompt_order');
     db.exec('ALTER TABLE user_groups DROP COLUMN prompt_order');
     db.exec('ALTER TABLE threads DROP COLUMN custom_instructions');

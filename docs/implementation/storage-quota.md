@@ -77,3 +77,14 @@ deletion freeing capacity for another write.
 ## n8n agents
 
 n8n definitions charge name/description/avatar/config ciphertext to the owner; encrypted sessions and transcript hashes charge the chatting account. Request rows are bounded operational counters, without prompts or response text. See [n8n agents](n8n-agents.md).
+
+## Wave 2 additions
+
+- Assistant preset name/description/config bytes and each thread's `assistant_json`/`imported_assistant_json`
+  count. Replacement writes charge net growth, so clearing or shrinking stays possible over quota.
+- A generation receipt reserves a fixed 64 KiB (`RUN_RECEIPT_BYTES`) plus its `config_json` before upstream,
+  covering numeric usage/status and at most 100 deduped segments. This keeps the final accounting write
+  possible after a provider was already paid.
+- Archive staging is disk-bounded separately (512 MiB global, 256 MiB/job, 30 minutes) and is not charged to
+  the account. Final imported messages, uploads/media, artifacts, and inactive assistant settings count
+  through the normal sums when confirmed.

@@ -1,8 +1,10 @@
 import { useAuiState } from "@assistant-ui/react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Thread } from "@/components/assistant-ui/elements/thread.aui";
 import { CompactionMarker, ContextMeter, MessageMeta } from "./ContextMeter";
 import { MobileComposerMenu, PromptsButton, ResearchToggle, SearchToggle } from "./ComposerControls";
+import { AssistantPickerButton, AssistantPickerDialog } from "./AssistantPicker";
+import { ChatArchiveDialog } from "./ChatArchiveDialog";
 import { KnowledgeCitationHost } from "@/components/knowledge/KnowledgeCitation";
 import { EffortPicker, ModelPicker } from "./ModelPicker";
 import { BranchedFromBanner, BranchMenu, PendingBranchRun } from "./branch";
@@ -20,6 +22,8 @@ import { FeedbackDialog } from "./FeedbackDialog";
 import { SavedPromptsDialog } from "./SavedPromptsDialog";
 import { ThreadAnnotationsSync } from "./ThreadAnnotationsSync";
 import { useCommand } from "@/keyboard/registry";
+import { commandTarget, press } from "@/keyboard/registry";
+import { closeAssistantPicker } from "@/state/assistant-picker";
 import { closeBookmarks, openBookmarks } from "@/state/bookmark-dialog";
 import { closeFeedback } from "@/state/feedback-dialog";
 import { closePromptPicker, openPromptPicker, usePromptPicker } from "@/state/prompt-picker";
@@ -66,6 +70,7 @@ function ComposerToolbar() {
   return (
     <>
       <MobileComposerMenu />
+      <AssistantPickerButton />
       <ModelPicker />
       <div className="flex shrink-0 max-sm:hidden pointer-coarse:hidden">
         <EffortPicker />
@@ -95,6 +100,16 @@ function BeforeMessages() {
 function ChatCommands() {
   const threadId = useCurrentThreadId();
   const temporary = isTemporaryChat(threadId);
+  const [archive, setArchive] = useState<{ open: boolean; ids: string[] }>({ open: false, ids: [] });
+  useCommand(
+    "chat.exportArchive",
+    () => {
+      if (!threadId || temporary) return false;
+      setArchive({ open: true, ids: [threadId] });
+      return true;
+    },
+    !!threadId && !temporary,
+  );
   const openManager = usePromptPicker((s) => s.openManager);
   useCommand("composer.prompts", () => {
     openPromptPicker();
@@ -113,7 +128,22 @@ function ChatCommands() {
     },
     !!threadId && !temporary,
   );
-  return null;
+  // The latest displayed eligible reply owns the only rendered Continue control; if none exists this
+  // command reports unavailable instead of choosing an arbitrary reply.
+  useCommand("chat.continue", () => {
+    const target = commandTarget("message.continue");
+    if (!target) return false;
+    press(target);
+    return true;
+  });
+  return (
+    <ChatArchiveDialog
+      open={archive.open}
+      mode="export"
+      initialThreadIds={archive.ids}
+      onOpenChange={(open) => setArchive({ open, ids: archive.ids })}
+    />
+  );
 }
 
 /** A pending prompt insertion belongs to the chat where it was chosen, stored or not. */
@@ -148,6 +178,7 @@ export function ChatView() {
       closePromptPicker();
       closeBookmarks();
       closeFeedback();
+      closeAssistantPicker();
     },
     [],
   );
@@ -160,6 +191,7 @@ export function ChatView() {
       <ChatCommands />
       <Thread components={{ Welcome, ComposerToolbar, MessageMeta, AfterMessage, BeforeMessages, BranchAction: BranchMenu }} />
       <SavedPromptsDialog />
+      <AssistantPickerDialog />
       <BookmarkDialog />
       <FeedbackDialog />
       <KnowledgeCitationHost />

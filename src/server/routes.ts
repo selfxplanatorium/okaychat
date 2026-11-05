@@ -19,6 +19,9 @@ import { ollamaManagementRoutes } from "./catalog/ollama-routes.js";
 import { adminRoutes, audienceInput } from "./admin.js";
 import { permissionRoutes } from "./permissions/routes.js";
 import { artifactRoutes } from "./artifacts.js";
+import { assistantPresetRoutes } from "./assistant-presets.js";
+import { assertAssistantRevision, bumpAssistantRevision } from "./assistant-presets.js";
+import { archiveRoutes } from "./archive-routes.js";
 import { chatRoutes } from "./chat.js";
 import { emailRoutes } from "./email/routes.js";
 import { draftRoutes } from "./email/draft-routes.js";
@@ -184,6 +187,8 @@ const api = new Hono<AppEnv>()
       projectId: z.string().nullable().optional(),
       modelRef: z.string().min(1).max(300).optional(),
       knowledgeIds: z.array(z.string().min(1).max(200)).max(20).optional(),
+      /** Required when this chat has a copied assistant and the request changes model or knowledge. */
+      assistantRevision: z.number().int().min(0).optional(),
     }).safeParse(await c.req.json());
     if (!parsed.success) return c.json({ error: "Invalid chat settings" }, 400);
     const userId = c.get("user").id;
@@ -202,7 +207,12 @@ const api = new Hono<AppEnv>()
       // Moving a chat drops attachments that no longer apply to its project.
       knowledgeIds = thread.knowledgeIds.filter((id) => collectionAccessible(userId, id, projectId));
     }
+    // A selected assistant freezes its instructions and tool policy; a model or knowledge change must name
+    // the revision it is based on, so two tabs cannot silently combine into one configuration.
+    const configChange = parsed.data.modelRef !== undefined || parsed.data.knowledgeIds !== undefined;
+    if (configChange && thread.assistant) assertAssistantRevision(userId, thread.id, parsed.data.assistantRevision);
     updateThread(userId, c.req.param("id"), { ...parsed.data, ...(knowledgeIds ? { knowledgeIds } : {}) });
+    if (configChange && thread.assistant) bumpAssistantRevision(thread.id);
     return c.json({ ok: true });
   })
   .delete("/threads/:id", async (c) => {
@@ -231,6 +241,8 @@ const api = new Hono<AppEnv>()
   })
   .route("/", messageEditRoutes)
   .route("/", messageAnnotationRoutes)
+  .route("/", assistantPresetRoutes)
+  .route("/", archiveRoutes)
   .route("/saved-prompts", savedPromptRoutes)
 
   // Usage

@@ -77,12 +77,38 @@ export async function historyMessages(
 ): Promise<ModelMessage[]> {
   const projected = envelopeAgentHistory(applied.messages);
   const head = projected.slice(0, applied.trimmed).map(trimMessage);
-  const tail = await prepare(projected.slice(applied.trimmed));
+  const imported = importedHistoryText(projected.slice(applied.trimmed));
+  const tail = await prepare(imported);
   // Trimmed tool results are plain strings now, so the head skips the tools' own toModelOutput.
   return [
     ...(await convertToModelMessages(head, { ignoreIncompleteToolCalls: true })),
     ...(await convertToModelMessages(tail, { tools, ignoreIncompleteToolCalls: true })),
   ];
+}
+
+/**
+ * Restored archives keep their historical tools as inert data parts so they can never execute. The model
+ * still needs to know what happened, so each becomes one deterministic user-data text block inside the
+ * existing untrusted envelope; the raw input/output never becomes a tool call.
+ */
+export function importedHistoryText(messages: UIMessage[]): UIMessage[] {
+  return messages.map((message) => {
+    if (!message.parts.some((part) => part.type === "data-imported-tool")) return message;
+    return {
+      ...message,
+      parts: message.parts.map((part) =>
+        part.type === "data-imported-tool"
+          ? {
+              type: "text" as const,
+              text: wrapUntrusted(
+                JSON.stringify((part as { data?: unknown }).data ?? {}),
+                { kind: "past_chat", name: "imported conversation tool record" },
+              ).text,
+            }
+          : part,
+      ),
+    };
+  });
 }
 
 const RESULT_REMOVED = "[Result removed from the conversation to save context. Call the tool again if you need it.]";

@@ -5,6 +5,14 @@ import type { KnowledgeCollection } from "@shared/knowledge";
 import { api } from "@/lib/api";
 import { isTemporaryChat } from "./chat-privacy";
 import { useData } from "./data";
+import { assistantRevisionOf, rememberAssistantRevision } from "./assistant-presets";
+
+/** A knowledge change on a chat with a copied assistant names the snapshot revision it edits. */
+async function patchKnowledge(threadId: string, ids: string[]): Promise<void> {
+  const revision = assistantRevisionOf(threadId);
+  await api(`/threads/${threadId}`, { method: "PATCH", json: { knowledgeIds: ids, ...(revision !== undefined ? { assistantRevision: revision } : {}) } });
+  if (revision !== undefined) rememberAssistantRevision(threadId, revision + 1);
+}
 
 // Knowledge attachments are per chat, like the model and the search toggle. The server stores them on
 // the thread (`threads.knowledge_ids`); this store mirrors that for the composer and binds a choice made
@@ -70,7 +78,7 @@ export const useChatKnowledgeStore = create<ChatKnowledgeState>((set, get) => ({
  */
 export async function persistKnowledgeAttachments(threadId: string, ids: string[]): Promise<void> {
   try {
-    await api(`/threads/${threadId}`, { method: "PATCH", json: { knowledgeIds: ids } });
+    await patchKnowledge(threadId, ids);
   } catch (error) {
     useChatKnowledgeStore.getState().hydrate(threadId, []);
     throw error;
@@ -121,7 +129,7 @@ export function useChatKnowledge(): {
         const byId = useChatKnowledgeStore.getState().byId;
         const before = byId[remoteId ?? ""] ?? byId[id] ?? [];
         const next = before.includes(collectionId) ? before.filter((value) => value !== collectionId) : [...before, collectionId];
-        if (remoteId && !isTemporaryChat(remoteId)) await api(`/threads/${remoteId}`, { method: "PATCH", json: { knowledgeIds: next } });
+        if (remoteId && !isTemporaryChat(remoteId)) await patchKnowledge(remoteId, next);
         set(key, next);
       };
       const result = toggleQueue.then(run, run);

@@ -9,6 +9,8 @@ import { db, tx } from "./db.js";
 import { copyDraftsForBranch } from "./email/drafts.js";
 import { AppError } from "./errors.js";
 import { newId } from "./crypto.js";
+import { assistantSummary } from "./assistant-presets.js";
+import { overlayGenerationMetadata, projectGenerationsForThread } from "./generation-runs.js";
 
 /** Temporary conversations exist only in browser memory; their ids must never become stored threads. */
 export const isTemporaryThread = (id: string): boolean => id.startsWith("tmp_");
@@ -28,6 +30,9 @@ interface ThreadRow {
   branched_exists: number | null;
   created_at: number;
   updated_at: number;
+  assistant_json?: string | null;
+  assistant_revision?: number;
+  preferred_head?: string | null;
 }
 
 // The sidebar reads every chat, so its rows must not carry compaction JSON: a long chat can hold a large
@@ -37,7 +42,7 @@ const THREAD_COLUMNS = `t.id, t.title, t.status, t.model_ref, t.project_id, t.me
 const BRANCH_JOIN = `LEFT JOIN threads o ON o.id = t.branched_from AND o.user_id = t.user_id`;
 const BRANCH_COLUMNS = "o.title AS branched_title, o.id IS NOT NULL AS branched_exists";
 const SELECT_THREADS = `SELECT ${THREAD_COLUMNS}, ${BRANCH_COLUMNS} FROM threads t ${BRANCH_JOIN}`;
-const SELECT_THREAD = `SELECT ${THREAD_COLUMNS}, t.compaction_json, ${BRANCH_COLUMNS} FROM threads t ${BRANCH_JOIN}`;
+const SELECT_THREAD = `SELECT ${THREAD_COLUMNS}, t.compaction_json, t.assistant_json, t.assistant_revision, t.preferred_head, ${BRANCH_COLUMNS} FROM threads t ${BRANCH_JOIN}`;
 
 const parseIds = (value: string | null): string[] => {
   if (!value) return [];
@@ -79,7 +84,14 @@ export function getThread(userId: string, id: string): (ThreadSummary & { compac
     | (ThreadRow & { compaction_json: string | null })
     | undefined;
   if (!row) return null;
-  return { ...toSummary(row), compaction: row.compaction_json ? (JSON.parse(row.compaction_json) as CompactionState) : null };
+  const snapshot = assistantSummary(row.assistant_json ?? null);
+  return {
+    ...toSummary(row),
+    compaction: row.compaction_json ? (JSON.parse(row.compaction_json) as CompactionState) : null,
+    assistant: snapshot,
+    assistantRevision: row.assistant_revision ?? 0,
+    preferredHead: row.preferred_head ?? null,
+  };
 }
 
 /** Ownership only. History routes do not need the summary, compaction JSON, or the fork join. */
@@ -182,15 +194,39 @@ export function branchThread(userId: string, sourceId: string, messageId: string
   const boundaries = [source.compaction?.boundaryMessageId, source.compaction?.trim?.throughMessageId];
   const compaction = source.compaction && chain.some((m) => boundaries.includes(m.id)) ? source.compaction : null;
   const now = Date.now();
+  const sourceRow = db.prepare("SELECT assistant_json, imported_assistant_json FROM threads WHERE id = ? AND user_id = ?").get(sourceId, userId) as
+    | { assistant_json: string | null; imported_assistant_json: string | null }
+    | undefined;
   tx(() => {
     db.prepare(
-      `INSERT INTO threads (id, user_id, title, model_ref, project_id, compaction_json, memory_disabled, branched_from, memory_cursor, knowledge_ids, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO threads (id, user_id, title, model_ref, project_id, compaction_json, memory_disabled, branched_from, memory_cursor, knowledge_ids, assistant_json, assistant_revision, imported_assistant_json, preferred_head, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       // The copied messages belong to the source chat's memory review; the fork only reviews what follows.
-    ).run(id, userId, source.title, modelRef ?? source.modelRef, source.projectId, compaction ? JSON.stringify(compaction) : null, Number(source.memoryDisabled), sourceId, messageId, JSON.stringify(source.knowledgeIds), now, now);
-    const insert = db.prepare("INSERT INTO messages (id, thread_id, parent_id, format, content, bytes, created_at, edited_at, original_enc) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      // A copied assistant snapshot starts at revision 1: the fork owns it and later edits never follow the source.
+    ).run(
+      id,
+      userId,
+      source.title,
+      modelRef ?? source.modelRef,
+      source.projectId,
+      compaction ? JSON.stringify(compaction) : null,
+      Number(source.memoryDisabled),
+      sourceId,
+      messageId,
+      JSON.stringify(source.knowledgeIds),
+      sourceRow?.assistant_json ?? null,
+      sourceRow?.assistant_json ? 1 : 0,
+      sourceRow?.imported_assistant_json ?? null,
+      messageId,
+      now,
+      now,
+    );
+    const insert = db.prepare("INSERT INTO messages (id, thread_id, parent_id, format, content, bytes, created_at, edited_at, original_enc, imported) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     // An edited reply keeps its current text, its Edited state, and the encrypted first original, so the fork
     // shows the same text and can still Undo. Both the message and the original are charged to the fork.
+    const imported = new Map(
+      (db.prepare("SELECT id, imported FROM messages WHERE thread_id = ?").all(sourceId) as Array<{ id: string; imported: number }>).map((row) => [row.id, row.imported]),
+    );
     const copies = chain.map((m) => {
       const edit = edits.get(m.id);
       return { m, json: JSON.stringify(m.content), editedAt: edit?.edited_at ?? null, original: edit?.original_enc ?? null };
@@ -198,7 +234,7 @@ export function branchThread(userId: string, sourceId: string, messageId: string
     assertStorage(userId, copies.reduce((sum, { json, original }) => sum + messageBytes(json) + (original ? Buffer.byteLength(original) : 0), 0));
     // Distinct timestamps keep the copied order, which defines the current branch.
     copies.forEach(({ m, json, editedAt, original }, i) =>
-      insert.run(m.id, id, m.parent_id, m.format, json, messageBytes(json), now - chain.length + i, editedAt, original));
+      insert.run(m.id, id, m.parent_id, m.format, json, messageBytes(json), now - chain.length + i, editedAt, original, imported.get(m.id) ?? 0));
     // Draft cards in the copied messages keep working in the fork.
     copyDraftsForBranch(userId, sourceId, id, copies.map(({ json }) => json));
     copyArtifactsForBranch(userId, sourceId, id, chain.map((m) => m.content));
@@ -296,11 +332,32 @@ export function listMessages(userId: string, threadId: string): MessageRow[] {
 export function listMessagesJson(userId: string, threadId: string): string {
   if (!ownsThread(userId, threadId)) return "[]";
   const rows = db
-    .prepare("SELECT id, parent_id, format, content, edited_at FROM messages WHERE thread_id = ? ORDER BY created_at, rowid")
-    .all(threadId) as Array<{ id: string; parent_id: string | null; format: string; content: string; edited_at: number | null }>;
-  // `edited_at` appears only on edited replies; the client shows their Edited badge from it.
-  const items = rows.map((r) => `{"id":${JSON.stringify(r.id)},"parent_id":${JSON.stringify(r.parent_id)},"format":${JSON.stringify(r.format)},"content":${r.content}${r.edited_at === null ? "" : `,"edited_at":${r.edited_at}`}}`);
+    .prepare("SELECT id, parent_id, format, content, edited_at, imported, original_enc FROM messages WHERE thread_id = ? ORDER BY created_at, rowid")
+    .all(threadId) as Array<{ id: string; parent_id: string | null; format: string; content: string; edited_at: number | null; imported: number; original_enc: string | null }>;
+  const generations = projectGenerationsForThread(threadId);
+  // A receipt projection, the imported flag, and the ever-edited flag (needed to refuse Continue after
+  // Undo) are the only server-owned additions; an untouched row keeps its stored JSON spliced as is.
+  const items = rows.map((r) => {
+    const generation = generations.get(r.id);
+    const extra = `${r.edited_at === null ? "" : `,"edited_at":${r.edited_at}`}${r.imported ? ',"imported":true' : ""}`;
+    const everEdited = r.original_enc !== null;
+    if (!generation && !everEdited) return `{"id":${JSON.stringify(r.id)},"parent_id":${JSON.stringify(r.parent_id)},"format":${JSON.stringify(r.format)},"content":${r.content}${extra}}`;
+    const content = r.content as unknown;
+    const parsed = overlayGenerationMetadata(threadId, { id: r.id, content: JSON.parse(content as string) as unknown });
+    const withEdit = everEdited ? markEverEdited(parsed) : parsed;
+    return `{"id":${JSON.stringify(r.id)},"parent_id":${JSON.stringify(r.parent_id)},"format":${JSON.stringify(r.format)},"content":${JSON.stringify(withEdit)}${extra}}`;
+  });
   return `[${items.join(",")}]`;
+}
+
+/** Marks a reply that was ever edited, even after Undo removed its Edited badge. */
+function markEverEdited(content: unknown): unknown {
+  const message = content as { metadata?: unknown; custom?: unknown };
+  const metadata = typeof message.metadata === "object" && message.metadata !== null ? { ...(message.metadata as Record<string, unknown>) } : {};
+  const custom = typeof metadata.custom === "object" && metadata.custom !== null ? { ...(metadata.custom as Record<string, unknown>) } : {};
+  custom.everEdited = true;
+  metadata.custom = custom;
+  return { ...(message as Record<string, unknown>), metadata };
 }
 
 export function appendMessage(userId: string, threadId: string, row: MessageRow) {
@@ -318,7 +375,8 @@ export function appendMessage(userId: string, threadId: string, row: MessageRow)
     // compared or charged, so history and later requests never carry the original bytes again. An edited reply
     // only maps resent bytes back to its own references: new bytes there are a stale tab's, refused below.
     const edited = !!previous && (previous.edited_at !== null || previous.original_enc !== null);
-    const content = normalizeImages(userId, threadId, row.content, {
+    const storedContent = stripGeneration(row.content);
+    const content = normalizeImages(userId, threadId, storedContent, {
       charge: (size) => { assertStorage(userId, size); },
       previous: previous ? JSON.parse(previous.content) : undefined,
       store: !edited,
@@ -356,9 +414,28 @@ export function appendMessage(userId: string, threadId: string, row: MessageRow)
       `INSERT INTO messages (id, thread_id, parent_id, format, content, bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (thread_id, id) DO UPDATE SET parent_id = excluded.parent_id, format = excluded.format, content = excluded.content, bytes = excluded.bytes`,
     ).run(row.id, threadId, row.parent_id, row.format, json, bytes, Date.now());
-    db.prepare("UPDATE threads SET updated_at = ? WHERE id = ?").run(Date.now(), threadId);
+    // A new native message means the imported initial selection hint no longer applies.
+    db.prepare("UPDATE threads SET updated_at = ?, preferred_head = NULL WHERE id = ?").run(Date.now(), threadId);
     return { ...row, content };
   });
+}
+
+/**
+ * A client's reply metadata is never proof of a provider finish reason. Drop any generation object; the
+ * history read overlays the stored receipt, so a fabricated `finished`/`length` cannot enable Continue.
+ */
+function stripGeneration(content: unknown): unknown {
+  const message = content as { role?: unknown; metadata?: unknown; custom?: unknown };
+  if (!message || message.role !== "assistant") return content;
+  const metadata = typeof message.metadata === "object" && message.metadata !== null ? { ...(message.metadata as Record<string, unknown>) } : null;
+  const custom = typeof message.custom === "object" && message.custom !== null ? { ...(message.custom as Record<string, unknown>) } : null;
+  if (metadata && typeof metadata.custom === "object" && metadata.custom !== null) {
+    metadata.custom = { ...(metadata.custom as Record<string, unknown>) };
+    delete (metadata.custom as Record<string, unknown>).generation;
+  }
+  if (metadata) delete metadata.generation;
+  if (custom) delete custom.generation;
+  return { ...(content as Record<string, unknown>), ...(metadata ? { metadata } : {}), ...(custom ? { custom } : {}) };
 }
 
 function createsCycle(threadId: string, id: string, parentId: string): boolean {
@@ -384,7 +461,17 @@ function createsCycle(threadId: string, id: string, parentId: string): boolean {
 export function currentBranch(userId: string, threadId: string): UIMessage[] {
   const rows = listMessages(userId, threadId);
   const byId = new Map(rows.map((r) => [r.id, r]));
-  return ancestry(byId, rows.at(-1)).map((row) => ({ id: row.id, ...(row.content as Omit<UIMessage, "id">) }));
+  // An imported archive starts on the leaf it was exported from, until the first new native message.
+  const preferred = preferredHead(userId, threadId);
+  const head = (preferred ? byId.get(preferred) : undefined) ?? rows.at(-1);
+  return ancestry(byId, head).map((row) => ({ id: row.id, ...(row.content as Omit<UIMessage, "id">) }));
+}
+
+/** The stored import selection hint, only while that message still exists on this chat. */
+export function preferredHead(userId: string, threadId: string): string | null {
+  const row = db.prepare("SELECT preferred_head FROM threads WHERE user_id = ? AND id = ?").get(userId, threadId) as { preferred_head: string | null } | undefined;
+  if (!row?.preferred_head) return null;
+  return db.prepare("SELECT 1 FROM messages WHERE thread_id = ? AND id = ?").get(threadId, row.preferred_head) ? row.preferred_head : null;
 }
 
 /** `messageId` and its ancestors, oldest first: the branch the client is showing. */

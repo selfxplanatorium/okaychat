@@ -54,6 +54,9 @@ export function messageBytes(contentJson: string): number {
 }
 
 /** SQL for one user's stored bytes. The argument is either `@user` or a users alias like `u.id`. */
+/** The fixed reservation per generation receipt, covering usage, status, and bounded segments. */
+export const RUN_RECEIPT_BYTES = 64 * 1024;
+
 export function storageUsedSql(user: string): string {
   // `length(CAST(x AS BLOB))` counts UTF-8 bytes; `length` on TEXT would count characters. The named
   // parameter repeats once per counted table.
@@ -88,8 +91,16 @@ export function storageUsedSql(user: string): string {
     UNION ALL SELECT COALESCE(SUM(length(CAST(custom_instructions AS BLOB))), 0) FROM threads WHERE user_id = ${user}
     UNION ALL SELECT COALESCE(SUM(length(CAST(name AS BLOB)) + length(CAST(shortcut AS BLOB)) + length(CAST(body AS BLOB))), 0)
       FROM saved_prompts WHERE user_id = ${user}
-    UNION ALL SELECT COALESCE(SUM(length(CAST(f.comment_enc AS BLOB))), 0)
-      FROM message_feedback f JOIN threads t ON t.id = f.thread_id WHERE t.user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(length(CAST(name AS BLOB)) + length(CAST(description AS BLOB)) + length(CAST(config_json AS BLOB))), 0)
+      FROM assistant_presets WHERE user_id = ${user}
+    UNION ALL SELECT COALESCE(SUM(COALESCE(length(CAST(assistant_json AS BLOB)), 0) + COALESCE(length(CAST(imported_assistant_json AS BLOB)), 0)), 0)
+      FROM threads WHERE user_id = ${user}
+    -- A run receipt reserves a fixed 64 KiB for its status, usage, and bounded segments, so the final
+    -- numeric write cannot fail after the provider has already been paid. Config bytes are charged on top.
+    UNION ALL SELECT COALESCE(SUM(${RUN_RECEIPT_BYTES} + length(CAST(config_json AS BLOB))), 0)
+      FROM generation_runs WHERE thread_id IN (SELECT id FROM threads WHERE user_id = ${user})
+    UNION ALL SELECT COALESCE(SUM(length(CAST(comment_enc AS BLOB))), 0)
+      FROM message_feedback WHERE thread_id IN (SELECT id FROM threads WHERE user_id = ${user})
   )), 0)`;
 }
 

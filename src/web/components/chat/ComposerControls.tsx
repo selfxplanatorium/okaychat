@@ -19,6 +19,7 @@ import { EffortIcon } from "./EffortIcon";
 import { effortLabel, useEffortChoices } from "./ModelPicker";
 import { Popover, PopoverContent } from "@/components/ui/popover";
 import { openPromptPicker } from "@/state/prompt-picker";
+import { AssistantMenuItem } from "./AssistantPicker";
 
 const triggerClass =
   "hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 shrink-0 pointer-coarse:h-9 items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart";
@@ -253,6 +254,7 @@ export function MobileComposerMenu() {
           <PlusIcon className="size-4" />
         </MenuTrigger>
         <MenuContent side="top" align="start" className="min-w-52">
+          <AssistantMenuItem />
           {active?.reasoning && (
             <MenuSubmenuRoot>
               <MenuSubmenuTrigger>

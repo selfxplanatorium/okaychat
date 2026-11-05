@@ -36,6 +36,8 @@ import { dropThreadAnnotations } from "@/state/message-annotations";
 import { forgetStoredThread, reportStoredMessage, reportStoredRows } from "./message-persistence";
 import { setThreadSync, useThreadSyncStore } from "@/state/thread-sync";
 import { applyRetryNotice, clearRetryNotice, retryChunkData, retryOwnerId } from "@/state/retry-status";
+import { useAssistantPresets, temporaryAssistantOf } from "@/state/assistant-presets";
+import { continuationIntentOf } from "@/components/chat/continue-run";
 
 /** Thread metadata the sidebar reads from `threadListItem.custom`. */
 export type ThreadCustom = { pinned: boolean; projectId: string | null; branchedFrom: ThreadSummary["branchedFrom"] };
@@ -52,6 +54,8 @@ const swapping = new Set<string>();
 const writes = new Map<string, Promise<unknown>>();
 // The server's rows per chat as far as this page knows, so acknowledged writes refresh the cache entry.
 const serverRows = new ServerRows<MessageRow>();
+// Imported chats start on the archived visible leaf until the first newly appended native message.
+const initialHeads = new Map<string, string>();
 
 type Aui = ReturnType<typeof useAui>;
 
@@ -202,6 +206,17 @@ const threadListAdapter: RemoteThreadListAdapter = {
     if (knowledgeIds?.length) await persistKnowledgeAttachments(thread.id, knowledgeIds);
     useChatKnowledgeStore.getState().bind(localId, thread.id);
     bindModel(thread.id);
+    // A preset chosen before the chat existed becomes its copied snapshot now, through the same validated API.
+    const draft = useAssistantPresets.getState().takeDraft(localId);
+    if (draft) {
+      try {
+        const applied = await useAssistantPresets.getState().apply(thread.id, draft, 0);
+        if (applied.snapshot?.modelRef) useData.setState((s) => ({ threadModels: { ...s.threadModels, [thread.id]: applied.snapshot!.modelRef! } }));
+      } catch {
+        // A deleted or now-unavailable preset must not block the chat from being created; the composer
+        // falls back to the default assistant and the user can pick another.
+      }
+    }
     return { remoteId: thread.id, externalId: undefined };
   },
   async rename(remoteId, title) {
@@ -234,6 +249,8 @@ const threadListAdapter: RemoteThreadListAdapter = {
     const thread = await loadThreadDetail(remoteId, { reuse: true });
     if (thread.modelRef) useData.getState().rememberThreadModels({ [thread.id]: thread.modelRef });
     useChatKnowledgeStore.getState().hydrate(thread.id, thread.knowledgeIds);
+    useAssistantPresets.getState().rememberThread(thread);
+    if (thread.preferredHead) initialHeads.set(thread.id, thread.preferredHead);
     return { remoteId: thread.id, status: thread.status, title: thread.title ?? undefined, lastMessageAt: new Date(thread.updatedAt), custom: threadCustom(thread) };
   },
   async generateTitle(remoteId, messages) {
@@ -265,7 +282,13 @@ const threadListAdapter: RemoteThreadListAdapter = {
           async load() {
             const { remoteId } = aui.threadListItem.getState();
             if (!remoteId || isTemporaryChat(remoteId)) return { messages: [] };
-            const decode = (rows: MessageRow[]) => ({ messages: rows.map((row) => fmt.decode(row as Parameters<typeof fmt.decode>[0])) });
+            const decode = (rows: MessageRow[]) => {
+              const headId = initialHeads.get(remoteId);
+              return {
+                messages: rows.map((row) => fmt.decode(row as Parameters<typeof fmt.decode>[0])),
+                ...(headId && rows.some((row) => row.id === headId) ? { headId } : {}),
+              };
+            };
             const path = `/threads/${remoteId}/messages`;
             const fetchRows = (request: () => Promise<MessageRow[]>) => {
               const token = serverRows.beginLoad(remoteId);
@@ -333,6 +356,8 @@ const threadListAdapter: RemoteThreadListAdapter = {
           async append(item) {
             const { remoteId } = await aui.threadListItem.initialize();
             if (isTemporaryChat(remoteId) || serverIds.get(remoteId)?.has(fmt.getId(item.message))) return;
+            // The server clears an import hint when a new native message lands; the page must agree.
+            initialHeads.delete(remoteId);
             await saveRow(remoteId, { id: fmt.getId(item.message), parent_id: item.parentId, format: fmt.format, content: fmt.encode(item) });
           },
           async update(item, localMessageId) {
@@ -374,7 +399,24 @@ function ModelContextBridge() {
           const active = getActiveModel(item.remoteId);
           const ref = active?.ref;
           const agent = !!active && isAgentTarget(active);
-          return { config: { modelName: ref, reasoningEffort: active && !agent ? resolveReasoningEffort(active, useData.getState().settings) : undefined, webSearch: agent ? false : chatSearchFor(item), deepResearch: agent ? false : chatResearchFor(item), temporaryPersonalization: chatPrivacyFor(item).personalized } };
+          const remoteId = item.remoteId;
+          const messages = aui.thread.getState().messages;
+          const last = messages.at(-1);
+          // A Continue intent rides on the visible user message it belongs to, so a retry or a reconnect
+          // keeps it; the server still verifies the target and its receipt.
+          const intent = last?.role === "user" ? continuationIntentOf(last.metadata) : undefined;
+          return {
+            config: {
+              modelName: ref,
+              reasoningEffort: active && !agent ? resolveReasoningEffort(active, useData.getState().settings) : undefined,
+              webSearch: agent ? false : chatSearchFor(item),
+              deepResearch: agent ? false : chatResearchFor(item),
+              temporaryPersonalization: chatPrivacyFor(item).personalized,
+              ...(remoteId ? { assistantRevision: useAssistantPresets.getState().revisionOf(remoteId) } : {}),
+              ...(temporaryAssistantOf(remoteId) ? { temporaryAssistant: temporaryAssistantOf(remoteId) } : {}),
+              ...(intent && last ? { continuation: { targetMessageId: intent.targetMessageId, requestMessageId: last.id } } : {}),
+            },
+          };
         },
       }),
     [aui, model?.ref, effort, webSearch, privacy.personalized, privacy.temporary],

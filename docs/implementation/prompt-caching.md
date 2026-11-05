@@ -64,3 +64,16 @@ Saving temporary chats and materializing legacy attachments preserve their origi
 ### ChatGPT plan SIWC
 
 SIWC sends no explicit breakpoint, retention or prompt cache key until a live compatibility profile verifies them. Stable local prompt/tool order and reported cache-read usage remain; no cache guarantee is exposed. See `codex-chat.md`.
+
+## Named assistants and continuation
+
+A selected assistant's instructions belong in system message 2, not system 1: the account-wide base,
+safety, and account instructions stay byte-identical. Applying an assistant can change system 2 and the
+tool block, so it may re-prime the cached prefix once; the run receipt freezes the effective configuration
+for the rest of that logical reply. A tool-result continuation reuses the receipt, so its tool/system bytes
+do not drift.
+
+An explicit continuation is an ordinary new user message after the target reply. It adds only that message
+and the new answer; the original answer's bytes stay unchanged. The target is protected from summarization
+for the turn. Imported archive text is inert and deterministically enveloped, so it never impersonates a
+provider cache prefix.

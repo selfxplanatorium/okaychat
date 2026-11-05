@@ -93,6 +93,8 @@ import { parseAttachmentText, splitUserMessage, typedText } from "@/runtime/mess
 import { mcpAppOf } from "@/components/chat/McpApp";
 import { ReplyFiles } from "@/components/chat/reply-files";
 import { TurnServiceNote } from "@/components/chat/ServiceNotice";
+import { ContinueGeneration } from "@/components/chat/ContinueGeneration";
+import { ImportedToolRecord } from "@/components/chat/ImportedToolRecord";
 import { ChatErrorMessage } from "@/components/chat/message-error";
 import { EditableReplyTexts, EditedReplyBadge, ReplyEditAction, ReplyEditorFooter, ReplyEditorShell } from "@/components/chat/AssistantMessageEditor";
 import { editKey, useMessageEdits } from "@/state/message-edits";
@@ -1504,7 +1506,8 @@ const AssistantMessage: FC = () => {
                   <ToolFallbackComponent {...part} />
                 );
               case "data":
-                return part.dataRendererUI;
+                // Restored archives are inert records, never a registered interactive data renderer.
+                return part.name === "imported-tool" ? <ImportedToolRecord data={part.data} /> : part.dataRendererUI;
               case "file":
                 return (
                   <div data-slot="aui_assistant-message-file" className="py-1">
@@ -1525,6 +1528,7 @@ const AssistantMessage: FC = () => {
         {editing && <EditableReplyTexts />}
         {finished && <ReplyFiles parts={parts} verify={!entering} />}
         {finished && <TurnServiceNote />}
+        {finished && !editing && <ContinueGeneration />}
         <StreamingIndicator waiting={waitingForFirstToken} />
         <MessageError />
         {editing ? <ReplyEditorFooter /> : <EditedReplyBadge />}

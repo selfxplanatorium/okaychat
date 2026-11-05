@@ -2,6 +2,7 @@ import {
   convertToModelMessages,
   createUIMessageStream,
   createUIMessageStreamResponse,
+  generateId,
   generateText,
   stepCountIs,
   streamText,
@@ -62,6 +63,26 @@ import { branchMessages, currentBranch, ensureThread, getThread, isTemporaryThre
 import { markBusy, threadBusy } from "./thread-runs.js";
 import { withStoredEdits } from "./message-edits.js";
 import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "./usage.js";
+import { assistantAllowsDelegation, assistantAllowsFamily, assistantAllowsResearch, filterAssistantTools } from "./assistant-policy.js";
+import { resolveAssistantForTurn } from "./assistant-presets.js";
+import { assertContinuation, isContinueConflict, type ContinuationRequest } from "./continuation.js";
+import {
+  attachRunAbort,
+  beginRun,
+  detachRunAbort,
+  endRun,
+  normalizeFinishReason,
+  projectGenerationMetadata,
+  recordSegmentOnce,
+  resolveRunConfig,
+  resolveRunForToolResult,
+  resumeRun,
+  cancelWaitingRun,
+  type RunRow,
+} from "./generation-runs.js";
+import { validateSampling, type ResolvedRunConfig, type SamplingSettings } from "../shared/assistant-presets.js";
+import type { GenerationSummary } from "../shared/generation.js";
+import type { FinishReason } from "../shared/generation.js";
 
 // AssistantChatTransport sends the thread's remote id as `id` and model context as `config`, `system`, and `tools`.
 // After an automatic trim the context must fall below this share of the threshold, or it is summarized too.
@@ -119,6 +140,13 @@ const chatBody = z.object({
       webSearch: z.boolean().optional(),
       /** Per-chat Deep research toggle from the composer. Runs research before each new user message's reply. */
       deepResearch: z.boolean().optional(),
+      /** A temporary chat's locally held assistant; validated here and always treated as untrusted. */
+      temporaryAssistant: z.unknown().optional(),
+      /** Stale-snapshot check for stored chats. Never carries instructions or allowlists. */
+      assistantRevision: z.number().int().min(0).optional(),
+      /** Explicit continuation of a length-limited reply. Verified server-side, never trusted alone. */
+      continuation: z.object({ targetMessageId: z.string().min(1).max(200), requestMessageId: z.string().min(1).max(200) }).optional(),
+      requestKind: z.enum(["send", "retry", "tool-result", "continue"]).optional(),
     })
     .loose(),
   // Browser-executed tools (generative UI) and the instructions that go with them.
@@ -147,8 +175,15 @@ function systemPrompt(userId: string, model: ModelInfo, userPrompt: string, mcpI
 }
 
 /** Per-chat system context, sent as a second system message after the tools. Changes rarely within a chat. */
-function chatContext(project: string, memorySummary?: string): string {
-  return [project, memorySummary].filter(Boolean).join("\n\n");
+function chatContext(project: string, memorySummary?: string, assistant?: string): string {
+  return [assistant, project, memorySummary].filter(Boolean).join("\n\n");
+}
+
+/** The selected assistant's instructions as data. They never replace the base or safety prompts. */
+function assistantSection(userId: string, modelRef: string, snapshot: { name: string; instructions: string } | null): string {
+  if (!snapshot?.instructions.trim()) return "";
+  const text = resolvePrompt("assistantInstructions", { userId, modelRef }, { name: snapshot.name, instructions: snapshot.instructions });
+  return wrapUntrusted(text, { kind: "assistant", name: snapshot.name }).text;
 }
 
 export interface TurnOptions {
@@ -167,6 +202,14 @@ export interface TurnOptions {
   webSearch?: boolean;
   /** Research before replying to a new user message. Continuations of a researched reply never research again. */
   deepResearch?: boolean;
+  /** A temporary chat's locally held assistant configuration. */
+  temporaryAssistant?: unknown;
+  /** Explicit continuation of a length-limited reply. */
+  continuation?: ContinuationRequest;
+  /** The live client intent; the server still validates the branch and receipt for every mode. */
+  requestKind?: ResolvedRunConfig["requestKind"];
+  /** Stale-snapshot check for a stored chat; never used as configuration. */
+  assistantRevision?: number;
   /** Someone watches the stream and can answer MCP elicitation forms. Absent for scheduled runs. */
   interactive?: boolean;
   /** No human can answer an approval (schedules): a gated call is denied instead of parked. */
@@ -174,6 +217,8 @@ export interface TurnOptions {
   /** Leave the thread's model as it is (a schedule running in a chat the user picked). */
   keepThreadModel?: boolean;
   signal?: AbortSignal;
+  /** Stops the upstream controller for an explicit waiting-receipt cancel. Never set by a client. */
+  abortRun?: () => void;
 }
 
 /** One assistant turn as a UI message stream. Used by /api/chat and by scheduled runs. */
@@ -199,7 +244,6 @@ export async function turnStream(opts: TurnOptions) {
   const allowed = (feature: Parameters<typeof assertFeature>[1]) => featureAllowed(actor, feature);
   const { model: rawModel, conn } = target;
   const model = { ...rawModel, context: Math.min(rawModel.context, policy.limits.contextTokens ?? Infinity) };
-  const effort = resolveReasoningEffort(model, settings, opts.effort);
   const describeError = (error: unknown) => {
     const wire = describeProviderError(error, { log: !temporary, model: model.ref, provider: model.providerId });
     // A rejected key or an exhausted quota is the only evidence this account's providers are unhealthy.
@@ -211,16 +255,47 @@ export async function turnStream(opts: TurnOptions) {
     if (!opts.keepThreadModel) updateThread(user.id, threadId, { modelRef });
   }
   const thread = temporary ? { projectId: null, compaction: null } : getThread(user.id, threadId)!;
+  // The copied snapshot is immutable for the run. It can narrow permissions but never widen them.
+  const assistant = resolveAssistantForTurn(userId, threadId, temporary ? opts.temporaryAssistant : undefined);
+  if (!temporary && opts.assistantRevision !== undefined && opts.assistantRevision !== assistant.revision) {
+    throw new AppError({ code: "conflict", message: "This chat's assistant changed. Reload the chat before sending." });
+  }
+  const snapshot = assistant.snapshot;
+  const toolPolicy = snapshot?.tools ?? { mode: "inherit" as const, builtins: [], mcpTools: [] };
+  const allows = (family: Parameters<typeof assistantAllowsFamily>[1]) => assistantAllowsFamily(toolPolicy, family);
+  const effort = resolveReasoningEffort(model, settings, opts.effort ?? snapshot?.reasoningEffort);
+  // Sampling is validated against the live catalog and effort before any upstream request. A published
+  // preset from a different model fails with an actionable message instead of silently losing a field.
+  const samplingValidation = validateSampling(snapshot?.sampling ?? {}, model, effort);
+  if (!samplingValidation.ok) throw new AppError({ code: "validation", message: samplingValidation.message ?? "These settings are not supported by this model." });
+  const sampling: SamplingSettings = samplingValidation.sampling;
+  if (opts.continuation) {
+    const last = uiMessages.at(-1);
+    if (!last || last.role !== "user") throw new AppError({ code: "validation", message: "The continuation request has no user message." });
+    assertContinuation(userId, threadId, opts.continuation, uiMessages);
+  }
   // A retry or edit ends with a user message and researches again; a tool continuation does not.
-  const research = opts.deepResearch === true && uiMessages.at(-1)?.role === "user" && !researchedThisTurn(uiMessages);
+  const research = opts.deepResearch === true && uiMessages.at(-1)?.role === "user" && !researchedThisTurn(uiMessages) && assistantAllowsResearch(toolPolicy);
   if (research) {
     if (!model.toolCall) throw new AppError({ code: "validation", message: `Deep research needs a model that can use tools. ${model.name} cannot.` });
     if (!settings.webTools) throw new AppError({ code: "validation", message: "Deep research needs web tools. Turn them on in Settings → General." });
     if (settings.maxSearches === 0) throw new AppError({ code: "validation", message: "Deep research needs web searches, and your search limit is 0. Raise it in Settings → General." });
   }
+  // The assistant message id is server-chosen through the UI stream's id generator: a tool-result
+  // continuation appends to the same reply, every other request starts a new one.
+  const lastUi = uiMessages.at(-1);
+  const assistantMessageId = lastUi?.role === "assistant" && lastUi.id ? lastUi.id : generateId();
+  const requestKind: ResolvedRunConfig["requestKind"] = opts.continuation
+    ? "continue"
+    : lastUi?.role === "user"
+      ? opts.requestKind === "retry"
+        ? "retry"
+        : "send"
+      : "tool-result";
 
   const stream = createUIMessageStream({
     originalMessages: uiMessages,
+    generateId: () => assistantMessageId,
     onError: describeError,
     execute: async ({ writer }) => {
       let compaction = thread.compaction;
@@ -230,7 +305,11 @@ export async function turnStream(opts: TurnOptions) {
       const history = uiMessages.slice(0, -1);
       const limit = model.context * threshold;
       if (!temporary && threshold > 0 && history.length > 2 && contextTokens(uiMessages, compaction) > limit) {
-        const trimmed = settings.trimBeforeCompact ? trimCompaction(uiMessages, compaction) : null;
+        // An explicit continuation must keep its target answer byte-identical: summarize only the
+        // ancestors before it, and never trim inside the target.
+        const targetAt = opts.continuation ? history.findIndex((message) => message.id === opts.continuation!.targetMessageId) : -1;
+        const compactable = targetAt >= 0 ? history.slice(0, targetAt) : history;
+        const trimmed = !opts.continuation && settings.trimBeforeCompact ? trimCompaction(uiMessages, compaction) : null;
         if (trimmed) {
           compaction = trimmed;
           setCompaction(user.id, threadId, compaction);
@@ -238,11 +317,16 @@ export async function turnStream(opts: TurnOptions) {
         }
         // Trimming alone must leave real headroom. Otherwise each following turn would cross the threshold
         // again and rewrite the history, losing the prompt cache every time.
-        if (!trimmed || trimmed.trim!.tokensAfter > limit * TRIM_HEADROOM) {
+        if ((!trimmed || trimmed.trim!.tokensAfter > limit * TRIM_HEADROOM) && compactable.length >= 2) {
           writer.write({ type: "data-compaction", data: { status: "running" }, transient: true });
-          compaction = await compact({ userId: user.id, threadId, messages: history, previous: compaction, model, conn, signal });
+          compaction = await compact({ userId: user.id, threadId, messages: compactable, previous: compaction, model, conn, signal });
           setCompaction(user.id, threadId, compaction);
           writer.write({ type: "data-compaction", data: { status: "done", boundaryMessageId: compaction.boundaryMessageId, tokensBefore: compaction.tokensBefore }, transient: true });
+        }
+        // The target cannot be shortened, so if the chat still does not fit, fail with guidance rather
+        // than truncating it or silently summarizing it away.
+        if (opts.continuation && contextTokens(uiMessages, compaction) > limit) {
+          throw new AppError({ code: "validation", message: "This answer no longer fits the context window. Switch to a model with a larger window, or write a new message instead of continuing it." });
         }
       }
 
@@ -264,8 +348,14 @@ export async function turnStream(opts: TurnOptions) {
         ? Promise.resolve(new Map<FixedServiceId, ServiceStatus | undefined>())
         : turnServiceStates(sidecarIds);
       const mcp = model.toolCall && !temporary && allowed("mcp")
-        ? await toolsForUser(user.id, { threadId, images: canViewImages ? toolImages : undefined, interactive: opts.interactive === true })
-        : { tools: {}, subTools: {}, instructions: [], servers: [] };
+        ? await toolsForUser(user.id, {
+            threadId,
+            images: canViewImages ? toolImages : undefined,
+            interactive: opts.interactive === true,
+            // A restrictive assistant connects only servers that own a selected tool; identity is exact.
+            ...(toolPolicy.mode === "selected" ? { select: toolPolicy.mcpTools } : {}),
+          })
+        : { tools: {}, subTools: {}, instructions: [], servers: [], identities: new Map() };
       const sidecarStates = await sidecars;
       const omitted = new Set<TurnUnavailable["service"]>(priorUnavailable.map((entry) => entry.service));
       // Only an enabled tool whose configured service is down is withheld and noted. An unconfigured optional
@@ -292,49 +382,51 @@ export async function turnStream(opts: TurnOptions) {
       const searchBudget = new SearchBudget(settings.maxSearches, searchesInCurrentTurn(uiMessages));
       // Research workers spend from this too; the reply's own loop gets what is left.
       const stepBudget = new StepBudget(settings.maxSteps, agentStepsInCurrentTurn(uiMessages));
-      const builtInWeb = model.toolCall && settings.webTools ? webTools({ searchBudget, search: opts.deepResearch !== true && (opts.webSearch ?? true) }) : {};
+      const builtInWeb = model.toolCall && settings.webTools && allows("web") ? webTools({ searchBudget, search: opts.deepResearch !== true && (opts.webSearch ?? true) }) : {};
       const lastUser = uiMessages.findLast((message) => message.role === "user");
       const query = lastUser?.parts.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n") ?? "";
-      const memory: ReturnType<typeof conversationMemory> = !allowed("memory") ? { context: "", instructions: undefined, tools: {} } : temporary
+      const memory: ReturnType<typeof conversationMemory> = !allowed("memory") || !allows("memory") ? { context: "", instructions: undefined, tools: {} } : temporary
         ? personalized ? temporaryMemory(userId, query) : { context: "", instructions: undefined, tools: {} }
         : conversationMemory(userId, threadId, query);
       // Sub-agents get the read-only pair (load/read) but never source search, install, or create.
-      const skills = turnSkills(user.id, { temporary, canCallTools: model.toolCall && allowed("skills") });
+      const skills = turnSkills(user.id, { temporary, canCallTools: model.toolCall && allowed("skills") && allows("skills") });
       // Email tools exist only for stored chats with at least one account. Read/send toggles are
       // re-checked inside each call, so a switch flipped mid-turn takes effect immediately.
-      const email = model.toolCall && !temporary && allowed("email") && hasAccounts(user.id)
+      const email = model.toolCall && !temporary && allowed("email") && (allows("email-read") || allows("email-write")) && hasAccounts(user.id)
         ? emailTools({ userId: user.id, signal })
         : { tools: {}, subTools: {} };
       // Drafts need no mailbox (the card can copy, download, or open them in a mail app), so the tool
       // is offered in every stored chat and the tool block stays the same when an account is added.
-      const drafts = model.toolCall && !temporary && allowed("email") ? draftTools({ userId: user.id, threadId }) : {};
+      const drafts = model.toolCall && !temporary && allowed("email") && allows("drafts") ? draftTools({ userId: user.id, threadId }) : {};
       // Attached knowledge is read from the thread, never from the request body, so a forged list cannot
-      // widen scope. Retrieval runs only for a new user message; continuations replay the stored block.
+      // widen scope. A restrictive assistant further intersects it with its selected collections.
+      const knowledgeRestrict = snapshot?.knowledge.mode === "selected" ? snapshot.knowledge.ids : undefined;
       const memoryRevision = temporary ? null : memory.instructions !== undefined ? memoryPreferences(userId).revision : null;
-      const knowledgeScope = temporary || !allowed("knowledge") ? [] : attachedCollectionIds(userId, threadId);
+      const knowledgeScope = temporary || !allowed("knowledge") || !allows("knowledge") ? [] : attachedCollectionIds(userId, threadId, knowledgeRestrict);
       const stored = temporary
         ? new Map()
         : storedTurnContexts(userId, threadId, { memoryRevision, skills: !!skills.context, knowledge: new Set(knowledgeScope) });
       const knowledge: KnowledgeTurn = temporary || !knowledgeScope.length
         ? { collections: [], context: "", names: "", passages: "", tools: {} }
-        : await conversationKnowledge(user.id, threadId, query, { retrieve: !!lastUser && !stored.has(lastUser.id) });
+        : await conversationKnowledge(user.id, threadId, query, { retrieve: !!lastUser && !stored.has(lastUser.id), restrictIds: knowledgeRestrict });
       // Retrieval can await a provider while attachments change. Revoke earlier replay blocks too,
       // not just the freshly retrieved passages checked by conversationKnowledge.
-      const currentKnowledgeScope = new Set(temporary || !allowed("knowledge") ? [] : attachedCollectionIds(userId, threadId));
+      const currentKnowledgeScope = new Set(temporary || !allowed("knowledge") || !allows("knowledge") ? [] : attachedCollectionIds(userId, threadId, knowledgeRestrict));
       for (const [id, block] of stored) {
         if (block.knowledgeIds.some((collectionId: string) => !currentKnowledgeScope.has(collectionId))) {
           stored.set(id, { ...block, knowledge: "", knowledgeIds: [] });
         }
       }
       // Built-in tools first, then MCP tools in sorted order, so the tool block is identical across turns.
-      const readOnlyTools = {
+      const filteredReadOnly = filterAssistantTools(toolPolicy, {
         ...builtInWeb,
         ...skills.subTools,
         ...email.subTools,
         // Sub-agents run unattended, so they get no tool that waits for approval.
         ...mcp.subTools,
-      };
-      const subagentModels = model.toolCall && settings.subagents && !temporary && allowed("delegation") ? await allowedSubagentModels(user.id, settings, model.ref) : [];
+      }, { mcpIdentities: mcp.identities });
+      const readOnlyTools = filteredReadOnly;
+      const subagentModels = model.toolCall && settings.subagents && !temporary && allowed("delegation") && assistantAllowsDelegation(toolPolicy) ? await allowedSubagentModels(user.id, settings, model.ref) : [];
       const useGenerativeUI = false;
       const subagents = subagentModels.length
         ? subagentTools({ userId: user.id, threadId, allowed: subagentModels, subTools: readOnlyTools, maxSteps: settings.maxSteps, searchBudget, signal: signal })
@@ -343,26 +435,29 @@ export async function turnStream(opts: TurnOptions) {
       const shots = new Map<string, VisualShot>();
       const injectedShots = new Set<string>();
       const sandboxTurn = new SandboxTurn();
-      const imageServices = model.toolCall && !temporary && allowed("images") ? enabledImageServices(user.id, settings) : [];
-      const tools: ToolSet = guardTools(actor, {
+      const imageServices = model.toolCall && !temporary && allowed("images") && allows("images") ? enabledImageServices(user.id, settings) : [];
+      const offeredTools: ToolSet = guardTools(actor, {
         ...builtInWeb,
         ...(model.toolCall ? memory.tools : {}),
         ...(model.toolCall ? knowledge.tools : {}),
-        ...(skills.tools),
+        ...(allows("skills") ? skills.tools : {}),
         ...email.tools,
         ...drafts,
-        ...(model.toolCall && !temporary ? textDraftTools({ userId: user.id, threadId }) : {}),
-        ...subagents,
+        ...(model.toolCall && !temporary && allows("drafts") ? textDraftTools({ userId: user.id, threadId }) : {}),
+        ...(assistantAllowsDelegation(toolPolicy) ? subagents : {}),
         ...(useArtifacts ? artifactTools(threadId, user.id, { shots, canViewImages: model.inputModalities.includes("image"), savedThisTurn: artifactsInCurrentTurn(uiMessages), shotsThisTurn: screenshotsInCurrentTurn(uiMessages), browserDown }) : {}),
         ...(imageServices.length ? imageTools(user.id, threadId, imageServices, signal) : {}),
-        ...(model.toolCall && !temporary && allowed("code") && settings.codeExecution && sandboxConfigured() && !sandboxDown ? sandboxTools(user.id, threadId, signal, sandboxTurn) : {}),
-        ...(useGenerativeUI ? frontendTools(opts.clientTools!) : {}),
+        ...(model.toolCall && !temporary && allowed("code") && settings.codeExecution && allows("code") && sandboxConfigured() && !sandboxDown ? sandboxTools(user.id, threadId, signal, sandboxTurn) : {}),
+        ...(useGenerativeUI && allows("widgets") ? frontendTools(opts.clientTools!) : {}),
         ...mcp.tools,
         // Only trimmed chats point the model at removed attachments, so others keep their tool list (and cache).
-        ...(compaction?.trim ? attachmentTools(user.id, canViewImages ? toolImages : undefined) : {}),
+        ...(compaction?.trim && allows("attachments") ? attachmentTools(user.id, canViewImages ? toolImages : undefined) : {}),
         // From a chat's first research on, so its tool block changes once, not with every toggle.
-        ...(model.toolCall && (research || hasResearch(uiMessages)) ? researchTool() : {}),
+        ...(model.toolCall && assistantAllowsResearch(toolPolicy) && (research || hasResearch(uiMessages)) ? researchTool() : {}),
       }, new Set(Object.keys(mcp.tools)));
+      // Exact intersection at the last moment: a family that was not selected cannot leak through any
+      // assembly branch, and an unknown tool key is denied. Delegates and research use this same set.
+      const tools = filterAssistantTools(toolPolicy, offeredTools, { mcpIdentities: mcp.identities });
       const applied = applyCompaction(uiMessages, compaction);
       const { messages: live, summary } = applied;
       const handle = createModel(model, conn, {
@@ -382,6 +477,8 @@ export async function turnStream(opts: TurnOptions) {
         || mcp.instructions.length > 0
         || !!memory.summary
         || !!summary
+        // Assistant instructions, private or published, are conversation data like a pasted brief.
+        || !!snapshot?.instructions.trim()
         // Replayed passages and this turn's new retrieval are third-party text even though they are not in
         // the converted messages yet, so the approval gate must already see them as untrusted content.
         || !!knowledge.passages
@@ -438,7 +535,7 @@ export async function turnStream(opts: TurnOptions) {
       const startedAt = Date.now();
       if (research) {
         // The research part opens the reply, so the message start (and its metadata) is written here.
-        writer.write({ type: "start", messageMetadata: { modelRef, contextWindow: model.context, ...unavailableMetadata } satisfies AssistantMetadata });
+        writer.write({ type: "start", messageId: assistantMessageId, messageMetadata: { modelRef, contextWindow: model.context, ...unavailableMetadata } satisfies AssistantMetadata });
         const toolCallId = newId("research");
         const input = { request: researchInput(uiMessages).request.slice(0, 2000) };
         writer.write({ type: "tool-input-available", toolCallId, toolName: RESEARCH_TOOL, input });
@@ -478,7 +575,11 @@ export async function turnStream(opts: TurnOptions) {
       const memoryInstructions = [temporary ? resolvePrompt("temporary", actor) : "", memory.instructions].filter(Boolean).join("\n\n");
       const messages = handle.markCache([
         systemPrompt(userId, model, personalized ? personalInstructions(userId, modelRef) : "", mcp.instructions, useArtifacts, useGenerativeUI ? opts.clientSystem : undefined, memoryInstructions),
-        chatContext(temporary ? "" : projectContext(userId, thread.projectId), memory.summary ? wrapUntrusted(memory.summary, { kind: "past_chat", name: "saved memory summary" }).text : undefined),
+        chatContext(
+          temporary ? "" : projectContext(userId, thread.projectId),
+          memory.summary ? wrapUntrusted(memory.summary, { kind: "past_chat", name: "saved memory summary" }).text : undefined,
+          assistantSection(userId, model.ref, snapshot),
+        ),
       ], [
         ...(summary ? summaryMessages(summary) : []),
         ...converted,
@@ -493,6 +594,68 @@ export async function turnStream(opts: TurnOptions) {
         usageSaved = true;
         recordUsage({ userId: user.id, threadId, providerId: model.providerId, modelId: model.id, kind: "chat", usage: total, cost });
       };
+
+      // Allocate the receipt before any provider request. Its 64 KiB reservation means the final numeric
+      // usage write cannot fail after the provider has already been paid. A waiting tool result reuses the
+      // receipt of the assistant message it continues.
+      let run: RunRow | null = null;
+      const segmentId = newId("seg");
+      if (!temporary) {
+        if (requestKind === "tool-result") run = resolveRunForToolResult(threadId, assistantMessageId) ?? null;
+        if (run) resumeRun(run);
+        else {
+          const config = resolveRunConfig({
+            userId: user.id,
+            threadId,
+            requestKind,
+            modelRef,
+            effort,
+            sampling,
+            assistant,
+            knowledgeIds: knowledge.collections.map((collection) => collection.id),
+            webSearch: opts.webSearch ?? true,
+            deepResearch: opts.deepResearch === true,
+            ...(opts.continuation ? { continuationOf: opts.continuation.targetMessageId } : {}),
+          });
+          try {
+            run = beginRun({ userId: user.id, threadId, userMessageId: lastUser?.id ?? assistantMessageId, assistantMessageId, config });
+          } catch (error) {
+            if (isContinueConflict(error)) throw new AppError({ code: "conflict", message: "This answer is already being continued. Reload the chat." });
+            throw error;
+          }
+        }
+        if (run) attachRunAbort(run.id, opts.abortRun ?? (() => {}));
+      }
+      let segmentDone = false;
+      let finalized = false;
+      const finishReceipt = (state: "finished" | "aborted" | "error" | "waiting", reason: FinishReason | null): GenerationSummary | undefined => {
+        if (!run || finalized) return run ? projectGenerationMetadata(threadId, assistantMessageId) : undefined;
+        finalized = true;
+        if (!segmentDone) {
+          segmentDone = true;
+          try {
+            recordSegmentOnce(run.id, segmentId, {
+              usage: total,
+              cost,
+              contextTokens: lastStep ? (lastStep.inputTokens ?? 0) + (lastStep.outputTokens ?? 0) : undefined,
+            });
+          } catch {
+            // The per-run segment cap keeps the receipt bounded; the reply itself still ends cleanly.
+          }
+        }
+        endRun(run.id, { state, finishReason: reason, durationMs: Date.now() - startedAt });
+        return projectGenerationMetadata(threadId, assistantMessageId);
+      };
+      const temporaryGeneration = (reason: FinishReason | null, state: GenerationSummary["state"]): GenerationSummary => ({
+        runId: `temporary_${assistantMessageId}`,
+        state,
+        finishReason: reason,
+        ...(total.input || total.output ? { usage: total, cost } : {}),
+        durationMs: Date.now() - startedAt,
+        assistantName: snapshot?.name ?? null,
+        assistantIcon: snapshot?.icon ?? null,
+      });
+
       const result = streamText({
         model: handle.model,
         messages,
@@ -552,7 +715,10 @@ export async function turnStream(opts: TurnOptions) {
         providerOptions: handle.providerOptions,
         // llm.ts retries at the fetch boundary with jitter and a visible notice; the SDK must not add its own.
         maxRetries: 0,
-        maxOutputTokens: model.maxOutput,
+        // Only fields the preset actually set; an unset field stays absent rather than becoming 0/1.
+        ...(sampling.temperature !== undefined ? { temperature: sampling.temperature } : {}),
+        ...(sampling.topP !== undefined ? { topP: sampling.topP } : {}),
+        maxOutputTokens: sampling.maxOutputTokens ?? model.maxOutput,
         abortSignal: signal,
         onStepEnd: (step) => {
           // Each step is its own request, so tier pricing applies per step.
@@ -561,15 +727,25 @@ export async function turnStream(opts: TurnOptions) {
           cost += costOf(model.cost, usage);
           lastStep = step.usage;
         },
-        onEnd: () => {
+        onError: () => {
+          // A failure before the provider emitted a finish still records an honest error receipt.
+          finishReceipt("error", "error");
+        },
+        onEnd: (event) => {
           // A completed reply is evidence this account's provider works again; the registry's coarse
           // provider status clears without contacting the vendor.
           noteProviderOutcome(user.id, "ok");
           saveUsage();
+          const reason = normalizeFinishReason(event.finishReason);
+          // `tool-calls` here means the turn stopped for a client tool or approval: the logical reply is
+          // still waiting, not finished. Everything else is terminal.
+          finishReceipt(reason === "tool-calls" ? "waiting" : reason === "error" ? "error" : "finished", reason);
         },
         // The SDK skips onEnd for a stopped stream; steps that already finished were still billed.
         onAbort: () => {
           if (total.input || total.output) saveUsage();
+          // An abort always wins over an earlier length step: it is never a Continue target.
+          finishReceipt("aborted", null);
         },
       });
 
@@ -582,6 +758,13 @@ export async function turnStream(opts: TurnOptions) {
           messageMetadata: ({ part }): AssistantMetadata | undefined => {
             if (part.type === "start") return { modelRef, contextWindow: model.context, ...unavailableMetadata };
             if (part.type === "finish") {
+              const reason = normalizeFinishReason(part.finishReason);
+              // The receipt is written before this terminal metadata leaves the server, so a client cannot
+              // present a finish state the server has not recorded.
+              const state = reason === "tool-calls" ? "waiting" : reason === "error" ? "error" : "finished";
+              const generation = temporary
+                ? temporaryGeneration(reason, state)
+                : finishReceipt(state, reason);
               return {
                 modelRef,
                 usage: total,
@@ -591,12 +774,14 @@ export async function turnStream(opts: TurnOptions) {
                 durationMs: Date.now() - startedAt,
                 compacted: compaction !== thread.compaction,
                 ...unavailableMetadata,
+                ...(generation ? { generation } : {}),
               };
             }
             return undefined;
           },
         }).pipeThrough(storedImageChunks(userId, threadId, describeError))),
       );
+      detachRunAbort(run?.id ?? "");
     },
   });
   return stream;
@@ -658,6 +843,7 @@ export const chatRoutes = new Hono<AppEnv>()
           modelRef: parsed.data.config.modelName,
           effort: parsed.data.config.reasoningEffort as ReasoningEffort | undefined,
           temporaryPersonalization: parsed.data.config.temporaryPersonalization ?? false,
+          temporaryAssistant: parsed.data.config.temporaryAssistant,
           webSearch: parsed.data.config.webSearch,
           deepResearch: parsed.data.config.deepResearch,
           uiMessages: parsed.data.messages as UIMessage[],
@@ -682,11 +868,15 @@ export const chatRoutes = new Hono<AppEnv>()
         effort: parsed.data.config.reasoningEffort as ReasoningEffort | undefined,
         webSearch: parsed.data.config.webSearch,
         deepResearch: parsed.data.config.deepResearch,
+        assistantRevision: parsed.data.config.assistantRevision,
+        continuation: parsed.data.config.continuation,
+        requestKind: parsed.data.config.requestKind,
         uiMessages: parsed.data.messages as UIMessage[],
         clientTools: parsed.data.tools as FrontendTools | undefined,
         clientSystem: parsed.data.system,
         interactive: true,
         signal: controller.signal,
+        abortRun: () => controller.abort(),
       });
       runs.set(streamId, { userId: user.id, controller });
       const response = createUIMessageStreamResponse({ stream: releasing(stream, release, controller.signal) });
@@ -713,6 +903,15 @@ export const chatRoutes = new Hono<AppEnv>()
     const run = runs.get(c.req.param("streamId"));
     if (run?.userId === c.get("user").id) run.controller.abort();
     return c.json({ ok: true });
+  })
+  // A logical reply waiting for a tool result or approval has no HTTP stream. This owned endpoint aborts
+  // its active controller when present and marks the receipt aborted, releasing config and schedule locks.
+  .post("/threads/:id/generations/:runId/cancel", (c) => {
+    const userId = c.get("user").id;
+    const threadId = c.req.param("id");
+    if (!getThread(userId, threadId)) return c.json({ error: "Thread not found" }, 404);
+    const result = cancelWaitingRun(userId, threadId, c.req.param("runId"));
+    return c.json({ ok: true, state: result.state });
   })
   .post("/threads/:id/compact", async (c) => {
     const user = c.get("user");

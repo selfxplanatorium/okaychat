@@ -59,6 +59,10 @@ export default {
   cmdSettingsChatgptForget: "Forget a saved ChatGPT account",
   cmdSettingsPermissions: "Open the permissions workspace",
   cmdComposerModel: "Choose model",
+  cmdComposerAssistant: "Choose assistant",
+  cmdComposerManageAssistants: "Manage assistants",
+  cmdMessageContinue: "Continue this answer",
+  cmdChatContinue: "Continue the latest answer",
   cmdComposerEffort: "Reasoning effort",
   cmdComposerSearch: "Turn web search on or off",
   cmdComposerResearch: "Turn deep research on or off",
@@ -246,4 +250,5 @@ export default {
   cmdAgentsTest: "Send a test message to the agent",
   cmdAgentsStopTest: "Stop the agent test",
   cmdChatResetAgentSession: "Reset this chat's remote agent memory",
+  cmdChatExportArchive: "Export this chat as a portable archive",
 } as const;
