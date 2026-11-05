@@ -55,6 +55,7 @@ export const FEATURE_LABEL: Record<FeatureKey, PlainMessageKey> = {
   calendar: "permissions.featureCalendarLabel",
   apiAccess: "permissions.featureApiAccess",
   translation: "permissions.featureTranslation",
+  outgoingWebhooks: "permissions.featureOutgoingWebhooksLabel",
 };
 
 export const FEATURE_HELP: Record<FeatureKey, PlainMessageKey> = {
@@ -82,6 +83,7 @@ export const FEATURE_HELP: Record<FeatureKey, PlainMessageKey> = {
   calendar: "permissions.featureCalendarHelp",
   apiAccess: "permissions.featureApiAccessHelp",
   translation: "permissions.featureTranslationHelp",
+  outgoingWebhooks: "permissions.featureOutgoingWebhooksHelp",
 };
 
 export const LIMIT_LABEL: Record<LimitKey, PlainMessageKey> = {

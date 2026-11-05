@@ -180,3 +180,12 @@ changes, group edits, publication changes, provider changes, and demotion. Citat
 generic 404 for unknown, deleted, revoked, and forged ids. Administrators get metadata-only cleanup with a
 reason and audit row, not passage access. Residual risk: bytes already delivered to a browser, copied
 manually, or retained by a provider cannot be recalled.
+
+Outgoing webhooks are an outbound data path with its own controls (see
+`docs/implementation/outgoing-webhooks.md`): private per-account endpoints only, HTTPS/443 with pinned
+public DNS and refused redirects on every attempt, encrypted URL/headers/secret/body, a one-time signing
+secret, no secret or header-value readback, and no response body ever read. The all-model `outgoingWebhooks`
+feature is rechecked at admission and dispatch; channel events additionally require currently owned rooms
+(never DMs or joined rooms), and shared-knowledge restrictions are rechecked before decrypting a body.
+Receivers must validate the HMAC timestamp and deduplicate delivery ids; delivery is bounded at-least-once,
+so a timeout or restart can duplicate an action, and already-sent data cannot be recalled.

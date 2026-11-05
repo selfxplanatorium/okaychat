@@ -1,6 +1,7 @@
 import { CUSTOM_LIMITS } from "../shared/custom-tools.js";
 import { EVAL_RESULT_RESERVATION } from "../shared/evaluations.js";
 import { ROOM_ARCHIVE_LIMITS } from "../shared/room-archive.js";
+import { WEBHOOK_LIMITS } from "../shared/outgoing-webhooks.js";
 import { db } from "./db.js";
 import { env } from "./env.js";
 import { AppError } from "./errors.js";
@@ -172,6 +173,16 @@ export function storageUsedSql(user: string): string {
     -- Room archive staging is reserved before the first byte and released only after its files are gone,
     -- so a cleanup-pending receipt still blocks the same account's next reservation.
     UNION ALL SELECT COALESCE(SUM(reservation_bytes), 0) FROM room_archive_jobs WHERE user_id = ${user}
+    -- Outgoing webhook endpoints charge their encrypted URL/custom headers, signing key, and name, plus a
+    -- fixed 2 KiB for bounded stats. Delivery and unconsumed test rows reserve a fixed 32 KiB each, so an
+    -- encrypted body and its attempt log can never grow past the quota after a remote side effect.
+    UNION ALL SELECT COALESCE(SUM(length(CAST(name AS BLOB)) + length(CAST(config_enc AS BLOB))
+      + length(CAST(signing_secret_enc AS BLOB)) + 2048), 0)
+      FROM outgoing_webhook_endpoints WHERE user_id = ${user}
+    UNION ALL SELECT COUNT(*) * ${WEBHOOK_LIMITS.deliveryReservationBytes}
+      FROM outgoing_webhook_deliveries WHERE user_id = ${user}
+    UNION ALL SELECT COUNT(*) * ${WEBHOOK_LIMITS.testReservationBytes}
+      FROM outgoing_webhook_test_preparations WHERE user_id = ${user} AND consumed_at IS NULL
   )), 0)`;
 }
 

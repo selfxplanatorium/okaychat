@@ -28,6 +28,9 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       db.exec("DROP TABLE channel_messages_fts; DROP TABLE channel_search_keys; DROP TABLE channel_events; DROP TABLE channel_event_state; DROP TABLE channel_rate_windows; DROP TABLE channel_moderation_audit; DROP TABLE channel_create_keys; DROP TABLE channel_ai_runs; DROP TABLE channel_reactions; DROP TABLE channel_mentions; DROP TABLE channel_messages; DROP TABLE channel_exclusions; DROP TABLE channel_invites; DROP TABLE channel_members; DROP TABLE channel_groups; DROP TABLE channel_attachments; DROP TABLE channel_thread_reads; DROP TABLE channel_thread_state; DROP TABLE channel_dm_blocks; DROP TABLE channels");
       for (const table of ["notes_fts", "note_tags", "notes", "calendar_events_fts", "calendar_reminders", "calendar_events"]) db.exec("DROP TABLE " + table);
       db.exec("DROP TABLE api_requests; DROP TABLE api_rate_windows; DROP TABLE api_key_audit; DROP TABLE api_telemetry_floors; DROP TABLE api_keys");
+      db.exec("DROP TABLE IF EXISTS outgoing_webhook_deliveries; DROP TABLE IF EXISTS outgoing_webhook_test_preparations; DROP TABLE IF EXISTS outgoing_webhook_rate_windows; DROP TABLE IF EXISTS outgoing_webhook_endpoints");
+      db.exec("ALTER TABLE schedules DROP COLUMN webhook_invocation_id");
+      db.exec("ALTER TABLE schedules DROP COLUMN webhook_started_at");
       db.exec("DROP INDEX IF EXISTS usage_api_request; DROP INDEX IF EXISTS usage_api_key_time");
       db.exec("ALTER TABLE usage DROP COLUMN api_key_id");
       db.exec("ALTER TABLE usage DROP COLUMN api_request_id");
@@ -75,7 +78,7 @@ test("integrated migrations are repeatable and backfill legacy generated image s
           original: JSON.parse(db.prepare("SELECT content FROM messages WHERE id='m1'").get().content).parts[0].url,
           users: db.prepare("SELECT count(*) AS n FROM users").get().n,
           customTables: ["custom_tools", "custom_tool_runs", "custom_tool_rate_windows", "custom_tool_counters"].map(table => db.prepare("SELECT count(*) AS n FROM " + table).get().n),
-          integratedTables: ["provider_model_policies", "provider_model_grants", "email_accounts", "knowledge_collections", "knowledge_sources", "knowledge_chunks", "knowledge_chunks_fts", "email_drafts", "media", "image_threads", "saved_prompts", "message_bookmarks", "message_feedback", "shares", "thread_tags", "tag_filter_presets", "notifications", "comparison_groups", "comparison_panes", "message_search_keys", "evaluation_datasets", "evaluation_cases", "evaluation_runs", "evaluation_results", "evaluation_scores", "notes", "note_tags", "calendar_events", "calendar_reminders", "api_keys", "api_requests", "api_key_audit", "api_rate_windows", "api_telemetry_floors", "message_translations"].map(table => db.prepare("SELECT count(*) AS n FROM " + table).get().n),
+          integratedTables: ["provider_model_policies", "provider_model_grants", "email_accounts", "knowledge_collections", "knowledge_sources", "knowledge_chunks", "knowledge_chunks_fts", "email_drafts", "media", "image_threads", "saved_prompts", "message_bookmarks", "message_feedback", "shares", "thread_tags", "tag_filter_presets", "notifications", "comparison_groups", "comparison_panes", "message_search_keys", "evaluation_datasets", "evaluation_cases", "evaluation_runs", "evaluation_results", "evaluation_scores", "notes", "note_tags", "calendar_events", "calendar_reminders", "api_keys", "api_requests", "api_key_audit", "api_rate_windows", "api_telemetry_floors", "message_translations", "outgoing_webhook_endpoints", "outgoing_webhook_deliveries", "outgoing_webhook_test_preparations", "outgoing_webhook_rate_windows"].map(table => db.prepare("SELECT count(*) AS n FROM " + table).get().n),
           evaluationActiveIndex: db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='evaluation_runs_active'").get()?.sql ?? null,
           evaluationScoreForeignKeys: db.prepare("PRAGMA foreign_key_list(evaluation_scores)").all(),
           edits: db.prepare("SELECT edited_at, original_enc FROM messages WHERE id = 'm1'").get(),
@@ -91,7 +94,7 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       delete (state as Record<string, unknown>).evaluationScoreForeignKeys;
       assert.deepEqual((state as { customTables: number[] }).customTables, [0, 0, 0, 0]);
       delete (state as Record<string, unknown>).customTables;
-      assert.deepEqual(state, { image: 42, skills: 0, sandbox: 0, users: 1, uploads: i === 0 ? 1 : 0, temporaryPrompt: "Keep this temporary chat out of history.", oldPromptCount: 0, original: "data:image/png;base64,bGVnYWN5LWZpbGU=", integratedTables: [...Array(19).fill(0), 1, ...Array(5).fill(0), ...Array(4).fill(0), ...Array(5).fill(0), 0], edits: { edited_at: null, original_enc: null }, foreignKeys: [] });
+      assert.deepEqual(state, { image: 42, skills: 0, sandbox: 0, users: 1, uploads: i === 0 ? 1 : 0, temporaryPrompt: "Keep this temporary chat out of history.", oldPromptCount: 0, original: "data:image/png;base64,bGVnYWN5LWZpbGU=", integratedTables: [...Array(19).fill(0), 1, ...Array(5).fill(0), ...Array(4).fill(0), ...Array(5).fill(0), 0, ...Array(4).fill(0)], edits: { edited_at: null, original_enc: null }, foreignKeys: [] });
     }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
@@ -166,6 +169,9 @@ test('n8n migration preserves selected audiences and rolls back schema and versi
     for (const column of ['visibility', 'access_revision', 'embedding_connection_scope', 'embedding_connection_created_at', 'embedding_endpoint_hash']) db.exec('ALTER TABLE knowledge_collections DROP COLUMN ' + column);
     // Migration 39 is n8n agents and 40 is granular permissions. Versions are append-only, so
     // replaying from 38 exercises the n8n migration and everything appended after it.
+    db.exec('DROP TABLE IF EXISTS outgoing_webhook_deliveries; DROP TABLE IF EXISTS outgoing_webhook_test_preparations; DROP TABLE IF EXISTS outgoing_webhook_rate_windows; DROP TABLE IF EXISTS outgoing_webhook_endpoints');
+    db.exec('ALTER TABLE schedules DROP COLUMN webhook_invocation_id');
+    db.exec('ALTER TABLE schedules DROP COLUMN webhook_started_at');
     db.exec('PRAGMA user_version = 38');
     console.log(version); db.close();`;
   try {
@@ -331,6 +337,9 @@ test("channels v2 migration rolls back cleanly and keeps the event high-water", 
       // The room archive migration follows too: remove its tables and columns before replaying.
       db.exec("DROP TABLE IF EXISTS channel_import_identities; DROP TABLE IF EXISTS room_archive_jobs");
       db.exec("ALTER TABLE channels DROP COLUMN imported_meta_json; ALTER TABLE channel_messages DROP COLUMN imported_json");
+      db.exec("DROP TABLE IF EXISTS outgoing_webhook_deliveries; DROP TABLE IF EXISTS outgoing_webhook_test_preparations; DROP TABLE IF EXISTS outgoing_webhook_rate_windows; DROP TABLE IF EXISTS outgoing_webhook_endpoints");
+      db.exec("ALTER TABLE schedules DROP COLUMN webhook_invocation_id");
+      db.exec("ALTER TABLE schedules DROP COLUMN webhook_started_at");
       db.exec("PRAGMA user_version = 48");
       console.log(JSON.stringify({ high, tail })); db.close();`));
     for (let i = 0; i < 2; i++) {
@@ -466,6 +475,9 @@ test("shared knowledge migration rolls back cleanly, keeps private rows private,
       for (const column of ["visibility", "access_revision", "embedding_connection_scope", "embedding_connection_created_at", "embedding_endpoint_hash"]) db.exec("ALTER TABLE knowledge_collections DROP COLUMN " + column);
       db.exec("DROP TABLE IF EXISTS channel_import_identities; DROP TABLE IF EXISTS room_archive_jobs");
       db.exec("ALTER TABLE channels DROP COLUMN imported_meta_json; ALTER TABLE channel_messages DROP COLUMN imported_json");
+      db.exec("DROP TABLE IF EXISTS outgoing_webhook_deliveries; DROP TABLE IF EXISTS outgoing_webhook_test_preparations; DROP TABLE IF EXISTS outgoing_webhook_rate_windows; DROP TABLE IF EXISTS outgoing_webhook_endpoints");
+      db.exec("ALTER TABLE schedules DROP COLUMN webhook_invocation_id");
+      db.exec("ALTER TABLE schedules DROP COLUMN webhook_started_at");
       db.exec("PRAGMA user_version = 50");
       console.log(JSON.stringify({ tail })); db.close();`, {}));
     assert.ok(before.tail >= 51);
@@ -519,6 +531,49 @@ test("shared knowledge migration rolls back cleanly, keeps private rows private,
       assert.deepEqual(state.triggers, ["knowledge_audience_cleanup", "knowledge_shared_project_insert", "knowledge_shared_project_update", "n8n_agent_audience_cleanup"]);
       assert.deepEqual(state.fks, []);
     }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("outgoing webhooks migration rolls back at its seam and creates its own bounded schema", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "okaychat-webhooks-migration-"));
+  const base = { ...process.env, OKAYCHAT_DATA_DIR: directory, OKAYCHAT_SECRET: "migration-tests-secret-not-for-production" };
+  const dbUrl = new URL("./db.ts", import.meta.url).href;
+  const run = (code: string, env: Record<string, string | undefined> = {}) =>
+    execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", code], { env: { ...base, ...env }, encoding: "utf8" });
+  try {
+    assert.throws(() => run(`await import(${JSON.stringify(dbUrl)});`, { OKAYCHAT_TEST_FAIL_MIGRATION: "outgoing-webhooks" }));
+    const failed = JSON.parse(run(`import path from "node:path"; import { DatabaseSync } from "node:sqlite";
+      const db = new DatabaseSync(path.join(process.env.OKAYCHAT_DATA_DIR, "okaychat.db"));
+      console.log(JSON.stringify({
+        version: db.prepare("PRAGMA user_version").get().user_version,
+        tables: db.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'outgoing_webhook%'").all(),
+        columns: db.prepare("PRAGMA table_info(schedules)").all().map((column) => column.name).filter((name) => name.startsWith("webhook_")),
+      })); db.close();`));
+    assert.equal(failed.tables.length, 0);
+    assert.deepEqual(failed.columns, []);
+
+    const applied = JSON.parse(run(`const { db } = await import(${JSON.stringify(dbUrl)});
+      db.prepare("INSERT INTO users (id,email,name,password_hash,role,created_at) VALUES ('u','u@example.test','U','x','user',1)").run();
+      db.prepare("INSERT INTO outgoing_webhook_endpoints (id,user_id,name,config_enc,signing_secret_enc,key_id,subscriptions_json,channel_ids_json,created_at,updated_at) VALUES ('wh_1','u','n','c','s','k','[]','[]',1,1)").run();
+      db.prepare("INSERT INTO outgoing_webhook_deliveries (id,endpoint_id,user_id,endpoint_revision,event_id,event_type,sequence,occurred_at,created_at,status,next_attempt_at) VALUES ('whd_1','wh_1','u',1,'whe_1','webhook.test',1,1,1,'queued',1)").run();
+      let cascade = 0;
+      try { db.prepare("DELETE FROM users WHERE id = 'u'").run(); cascade = db.prepare("SELECT COUNT(*) AS n FROM outgoing_webhook_deliveries").get().n; } catch { cascade = 1; }
+      console.log(JSON.stringify({
+        version: db.prepare("PRAGMA user_version").get().user_version,
+        tables: ["outgoing_webhook_endpoints","outgoing_webhook_deliveries","outgoing_webhook_test_preparations","outgoing_webhook_rate_windows"].map((name) => db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name=?").get(name).n),
+        indexes: ["outgoing_deliveries_due","outgoing_deliveries_active","outgoing_test_unconsumed","outgoing_endpoints_owner"].map((name) => db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='index' AND name=?").get(name).n),
+        columns: db.prepare("PRAGMA table_info(schedules)").all().map((column) => column.name).filter((name) => name.startsWith("webhook_")),
+        cascade,
+        foreignKeys: db.prepare("PRAGMA foreign_key_check").all(),
+      })); db.close();`));
+    assert.ok(applied.version >= failed.version + 1);
+    assert.deepEqual(applied.tables, [1, 1, 1, 1]);
+    assert.deepEqual(applied.indexes, [1, 1, 1, 1]);
+    assert.deepEqual(applied.columns, ["webhook_invocation_id", "webhook_started_at"]);
+    assert.equal(applied.cascade, 0);
+    assert.deepEqual(applied.foreignKeys, []);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

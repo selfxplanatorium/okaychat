@@ -21,6 +21,7 @@ import { AccountSettings } from "./AccountSettings";
 import { MemorySettings } from "./MemorySettings";
 import { KeyboardSettings } from "./KeyboardSettings";
 import { VoiceSettings } from "./VoiceSettings";
+import { WebhookSettings } from "./WebhookSettings";
 import { useSettingsSections } from "./SettingsNav";
 
 const PAGES: Record<string, ComponentType> = {
@@ -34,6 +35,7 @@ const PAGES: Record<string, ComponentType> = {
   agents: N8nAgentsSettings,
   projects: ProjectSettings,
   schedules: ScheduleSettings,
+  webhooks: WebhookSettings,
   usage: UsageSettings,
   voice: VoiceSettings,
   appearance: AppearanceSettings,

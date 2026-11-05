@@ -218,6 +218,8 @@ export interface TurnOptions {
   assistantRevision?: number;
   /** Someone watches the stream and can answer MCP elicitation forms. Absent for scheduled runs. */
   interactive?: boolean;
+  /** Trusted server context for outgoing events; never inferred from client metadata. */
+  turnOrigin?: "interactive" | "schedule" | "comparison";
   /** No human can answer an approval (schedules): a gated call is denied instead of parked. */
   unattended?: boolean;
   /** Leave the thread's model as it is (a schedule running in a chat the user picked). */
@@ -661,6 +663,29 @@ export async function turnStream(opts: TurnOptions) {
         recordUsage({ userId: user.id, threadId, providerId: model.providerId, modelId: model.id, kind: "chat", usage: total, cost });
       };
 
+      // Visible answer text for an opted-in webhook. For a resumed reply, seed from the already-stored
+      // text parts (the request carries them) and append each following step; reasoning/tool parts never
+      // contribute. The cap is generous here because `textProjection` truncates at the exact byte bound.
+      let answerText = "";
+      const lastUiMessage = uiMessages.at(-1);
+      if (lastUiMessage?.role === "assistant") {
+        answerText = lastUiMessage.parts
+          .filter((part): part is { type: "text"; text: string } => part.type === "text" && typeof part.text === "string")
+          .map((part) => part.text)
+          .join("\n");
+      }
+      let answerBytes = Buffer.byteLength(answerText, "utf8");
+      const appendAnswer = (piece: string | undefined) => {
+        if (!piece) return;
+        answerText = answerText ? `${answerText}${answerText.endsWith("\n") ? "" : "\n"}${piece}` : piece;
+        answerBytes += Buffer.byteLength(piece, "utf8");
+        // Bound memory; the stored string still exceeds the wire cap so truncation stays honest.
+        if (answerBytes > 65_536) {
+          answerText = [...answerText].slice(0, 16_384).join("");
+          answerBytes = Buffer.byteLength(answerText, "utf8");
+        }
+      };
+
       // Allocate the receipt before any provider request. Its 64 KiB reservation means the final numeric
       // usage write cannot fail after the provider has already been paid. A waiting tool result reuses the
       // receipt of the assistant message it continues.
@@ -682,6 +707,7 @@ export async function turnStream(opts: TurnOptions) {
             webSearch: opts.webSearch ?? true,
             deepResearch: opts.deepResearch === true,
             ...(opts.continuation ? { continuationOf: opts.continuation.targetMessageId } : {}),
+            ...(opts.turnOrigin ? { turnOrigin: opts.turnOrigin } : {}),
           });
           try {
             run = beginRun({ userId: user.id, threadId, userMessageId: lastUser?.id ?? assistantMessageId, assistantMessageId, config });
@@ -709,7 +735,7 @@ export async function turnStream(opts: TurnOptions) {
             // The per-run segment cap keeps the receipt bounded; the reply itself still ends cleanly.
           }
         }
-        endRun(run.id, { state, finishReason: reason, durationMs: Date.now() - startedAt });
+        endRun(run.id, { state, finishReason: reason, durationMs: Date.now() - startedAt }, { answerText });
         return projectGenerationMetadata(threadId, assistantMessageId);
       };
       const temporaryGeneration = (reason: FinishReason | null, state: GenerationSummary["state"]): GenerationSummary => ({
@@ -801,6 +827,7 @@ export async function turnStream(opts: TurnOptions) {
         abortSignal: signal,
         onStepEnd: (step) => {
           // Each step is its own request, so tier pricing applies per step.
+          appendAnswer((step as { text?: string }).text);
           const usage = normalizeUsage(step.usage);
           total = addUsage(total, usage);
           cost += costOf(model.cost, usage);
@@ -941,6 +968,7 @@ export const chatRoutes = new Hono<AppEnv>()
           // Panes have no approval UI and nobody watching for an elicitation.
           interactive: false,
           unattended: true,
+          turnOrigin: "comparison",
           // No resumable copy: leaving the page stops the pane.
           signal: c.req.raw.signal,
         });
@@ -971,6 +999,7 @@ export const chatRoutes = new Hono<AppEnv>()
         clientTools: parsed.data.tools as FrontendTools | undefined,
         clientSystem: parsed.data.system,
         interactive: true,
+        turnOrigin: "interactive",
         sessionHash: customSessionHash(user.id, c.get("session")),
         signal: controller.signal,
         abortRun: () => controller.abort(),

@@ -1,5 +1,7 @@
 import { deleteChatGPTUser } from "./chatgpt-oauth-store.js";
 import { n8nRoutes } from "./n8n/routes.js";
+import { adminWebhookRoutes } from "./outgoing-webhooks/admin-routes.js";
+import { abortUserEndpointSends } from "./outgoing-webhooks/store.js";
 import { clearOwnedAgentAudiences, abortRevokedAgentRuns } from "./n8n/store.js";
 import { rm } from "node:fs/promises";
 import path from "node:path";
@@ -68,6 +70,7 @@ const modelAccessInput = z.object({ policies: z.array(modelAccessPolicyInput).ma
 export const adminRoutes = new Hono<AppEnv>()
   .use("/admin/*", requireAdmin)
   .route("/admin/agents/n8n", n8nRoutes(true))
+  .route("/admin/webhooks", adminWebhookRoutes)
   .get("/admin/users", (c) => {
     const rows = db
       .prepare(
@@ -141,6 +144,8 @@ export const adminRoutes = new Hono<AppEnv>()
     abortChannelRunsForUser(id);
     // Live external API calls of the account stop before the key rows cascade away.
     abortApiCalls(id);
+    // Active webhook attempts stop before their endpoint rows cascade away.
+    abortUserEndpointSends(id);
     db.prepare("DELETE FROM users WHERE id = ?").run(id);
     abortRevokedAgentRuns();
     requestChannelRevocation();

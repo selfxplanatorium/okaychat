@@ -2,11 +2,12 @@ import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import type { ArchiveJob, ArchiveJobKind, ArchiveJobState, ArchiveSummary } from "../shared/chat-archive.js";
 import { ARCHIVE_LIMITS } from "../shared/chat-archive.js";
-import { db } from "./db.js";
+import { db, tx } from "./db.js";
 import { env } from "./env.js";
 import { AppError } from "./errors.js";
 import { newId } from "./crypto.js";
 import { assertStagingCapacity, personalStagingBytes } from "./archive-staging-budget.js";
+import { emitArchiveFinished } from "./outgoing-webhooks/events.js";
 
 /**
  * Archive jobs and staging. Only server-generated ids name a staging directory; a client never supplies a
@@ -120,15 +121,50 @@ export function setSummary(userId: string, jobId: string, summary: ArchiveSummar
 }
 
 export function setReady(userId: string, jobId: string): void {
-  db.prepare("UPDATE archive_jobs SET state = 'ready' WHERE id = ? AND user_id = ? AND state = 'preparing'").run(jobId, userId);
+  tx(() => {
+    const row = db.prepare("SELECT kind, state, summary_json FROM archive_jobs WHERE id = ? AND user_id = ?").get(jobId, userId) as
+      | { kind: ArchiveJobKind; state: ArchiveJobState; summary_json: string | null }
+      | undefined;
+    const changed = db.prepare("UPDATE archive_jobs SET state = 'ready' WHERE id = ? AND user_id = ? AND state = 'preparing'").run(jobId, userId);
+    if (!changed.changes || !row || row.kind !== "export") return;
+    const summary = parse<ArchiveSummary>(row.summary_json);
+    // Export success is readiness, not a download. Only this transition publishes a terminal event;
+    // preview-ready imports and later expiry/downloads stay silent.
+    emitArchiveFinished({ userId, kind: "export", jobId, outcome: "completed", chatCount: summary?.chats.length ?? 0, failureCode: null });
+  });
 }
 
 export function setFailed(userId: string, jobId: string, code = "import_failed"): void {
-  db.prepare("UPDATE archive_jobs SET state = 'failed', error_code = ? WHERE id = ? AND user_id = ? AND state IN ('preparing', 'ready', 'committing')").run(code, jobId, userId);
+  tx(() => {
+    const row = db.prepare("SELECT kind, state FROM archive_jobs WHERE id = ? AND user_id = ?").get(jobId, userId) as
+      | { kind: ArchiveJobKind; state: ArchiveJobState }
+      | undefined;
+    const changed = db.prepare(
+      "UPDATE archive_jobs SET state = 'failed', error_code = ? WHERE id = ? AND user_id = ? AND state IN ('preparing', 'ready', 'committing')",
+    ).run(code, jobId, userId);
+    if (!changed.changes || !row) return;
+    const failureCode = row.kind === "import" && (code === "invalid_archive" || code === "unsupported_version" || code === "too_large")
+      ? "invalid_archive"
+      : "archive_error";
+    emitArchiveFinished({ userId, kind: row.kind, jobId, outcome: "failed", chatCount: 0, failureCode });
+  });
 }
 
 export function setDone(userId: string, jobId: string, result: NonNullable<ArchiveJob["result"]>): void {
-  db.prepare("UPDATE archive_jobs SET state = 'done', result_json = ? WHERE id = ? AND user_id = ?").run(JSON.stringify(result), jobId, userId);
+  tx(() => {
+    const changed = db.prepare("UPDATE archive_jobs SET state = 'done', result_json = ? WHERE id = ? AND user_id = ?").run(JSON.stringify(result), jobId, userId);
+    if (!changed.changes) return;
+    // Import completion is this commit: chats and the job result are already written in the caller's
+    // transaction (the route wraps commitArchive and setDone together).
+    emitArchiveFinished({
+      userId,
+      kind: "import",
+      jobId,
+      outcome: "completed",
+      chatCount: result.threads.length,
+      failureCode: null,
+    });
+  });
 }
 
 export function beginCommit(userId: string, jobId: string): boolean {
@@ -165,13 +201,23 @@ function purgeStaging(userId: string, jobId: string): void {
  * account can start a new job immediately instead of waiting for the TTL.
  */
 export function resetArchiveJobsAtStartup(): void {
-  const rows = db.prepare("SELECT id, user_id, state FROM archive_jobs").all() as Array<{ id: string; user_id: string; state: ArchiveJobState }>;
+  const rows = db.prepare("SELECT id, user_id, state, kind FROM archive_jobs").all() as Array<{ id: string; user_id: string; state: ArchiveJobState; kind: ArchiveJobKind }>;
   for (const row of rows) {
-    if (row.state === "preparing" || row.state === "committing") {
-      db.prepare("UPDATE archive_jobs SET state = 'failed', error_code = 'export_failed' WHERE id = ?").run(row.id);
-    } else if (row.state === "ready") {
-      db.prepare("UPDATE archive_jobs SET state = 'cancelled' WHERE id = ?").run(row.id);
-    }
+    tx(() => {
+      if (row.state === "preparing" || row.state === "committing") {
+        const errorCode = row.kind === "export" ? "export_failed" : "import_failed";
+        const changed = db
+          .prepare("UPDATE archive_jobs SET state = 'failed', error_code = ? WHERE id = ? AND state IN ('preparing','committing')")
+          .run(errorCode, row.id);
+        if (changed.changes) {
+          // A success that already reached `ready` is never rewritten into a failure: its staging file
+          // expiring later is not a new outcome. Only genuinely unfinished work publishes interrupted.
+          emitArchiveFinished({ userId: row.user_id, kind: row.kind, jobId: row.id, outcome: "failed", chatCount: 0, failureCode: "interrupted" });
+        }
+      } else if (row.state === "ready") {
+        db.prepare("UPDATE archive_jobs SET state = 'cancelled' WHERE id = ?").run(row.id);
+      }
+    });
     if (row.state !== "done") purgeStaging(row.user_id, row.id);
   }
   // Any directory left without a live job is stale bytes.

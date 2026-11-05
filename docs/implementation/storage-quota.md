@@ -149,3 +149,11 @@ stored messages, generation, and bounded retrieved `turn_context`/tool-result co
 non-owner writes nothing and makes no embedding request. Audience, dependency, and audit rows are
 operational metadata and are not charged. A reader quota failure leaves the owner's index and jobs
 untouched; an owner quota failure never reserves a reader slot.
+
+Outgoing webhooks reserve storage before a receiver is ever contacted. Each delivery row counts a fixed
+32 KiB (a ≤12 KiB encrypted wire body plus up to ten bounded attempt records), each unconsumed test
+preparation another 32 KiB, and endpoints charge their encrypted name/URL/header/secret bytes plus 2 KiB
+for bounded statistics. Bodies cleared at 24 hours keep their reservation until the row is deleted at
+seven days, so a sent request never needs a post-network quota check. A drop rolls back only that
+endpoint's nested admission savepoint and advances its drop counter; it never fails the chat, room, or
+archive action that produced the event.

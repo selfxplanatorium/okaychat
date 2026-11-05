@@ -166,6 +166,8 @@ export interface ResolvedRunConfig {
   version: 1;
   requestKind: "send" | "retry" | "tool-result" | "continue";
   continuationOf?: string;
+  /** Server context for outgoing events. Absent on legacy receipts, which emit nothing at startup. */
+  turnOrigin?: "interactive" | "schedule" | "comparison";
   modelRef: string;
   reasoningEffort?: ReasoningEffort;
   sampling: SamplingSettings;

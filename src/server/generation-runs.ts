@@ -8,6 +8,7 @@ import { AppError } from "./errors.js";
 import { assertStorage, RUN_RECEIPT_BYTES } from "./quota.js";
 import { addUsage, normalizeUsage, ZERO_USAGE } from "./usage.js";
 import type { ResolvedRunConfig } from "../shared/assistant-presets.js";
+import { emitChatTurnCompleted, emitChatTurnFailed } from "./outgoing-webhooks/events.js";
 
 /**
  * Generation receipts: one row per assistant message a provider produced, recorded before upstream and
@@ -142,19 +143,49 @@ export interface EndRunInput {
 }
 
 /** Terminal transition. A receipt that already ended is never rewritten by a late abort or error. */
-export function endRun(runId: string, end: EndRunInput): GenerationState {
-  const row = db.prepare("SELECT state FROM generation_runs WHERE id = ?").get(runId) as { state: GenerationState } | undefined;
-  if (!row) return end.state;
-  const terminal: GenerationState[] = ["finished", "aborted", "error", "interrupted"];
-  if (terminal.includes(row.state) && row.state !== end.state) return row.state;
-  db.prepare("UPDATE generation_runs SET state = ?, finish_reason = ?, duration_ms = ?, updated_at = ? WHERE id = ?").run(
-    end.state,
-    end.finishReason,
-    Math.max(0, Math.round(end.durationMs)),
-    Date.now(),
-    runId,
-  );
-  return end.state;
+export function endRun(runId: string, end: EndRunInput, options: { answerText?: string } = {}): GenerationState {
+  return tx(() => {
+    const row = db
+      .prepare("SELECT r.*, t.user_id FROM generation_runs r JOIN threads t ON t.id = r.thread_id WHERE r.id = ?")
+      .get(runId) as (RunRow & { user_id: string }) | undefined;
+    if (!row) return end.state;
+    const terminal: GenerationState[] = ["finished", "aborted", "error", "interrupted"];
+    const wasTerminal = terminal.includes(row.state);
+    if (wasTerminal && row.state !== end.state) return row.state;
+    db.prepare("UPDATE generation_runs SET state = ?, finish_reason = ?, duration_ms = ?, updated_at = ? WHERE id = ?").run(
+      end.state,
+      end.finishReason,
+      Math.max(0, Math.round(end.durationMs)),
+      Date.now(),
+      runId,
+    );
+    // Only the first transition out of a running/waiting receipt is a source event. A repeated terminal
+    // write (a late abort, a retried request) must not duplicate the delivery.
+    if (!wasTerminal) {
+      const config = parseConfig(row.config_json);
+      if (config?.turnOrigin === "interactive") {
+        if (end.state === "finished") {
+          emitChatTurnCompleted({
+            userId: row.user_id,
+            threadId: row.thread_id,
+            runId: row.id,
+            assistantMessageId: row.assistant_message_id,
+            finishReason: end.finishReason,
+            text: options.answerText,
+          });
+        } else if (end.state === "error" || end.state === "interrupted") {
+          emitChatTurnFailed({
+            userId: row.user_id,
+            threadId: row.thread_id,
+            runId: row.id,
+            assistantMessageId: row.assistant_message_id,
+            failureCode: end.state === "interrupted" ? "interrupted" : "generation_error",
+          });
+        }
+      }
+    }
+    return end.state;
+  });
 }
 
 /** The SDK's final reason, normalized. `onStepEnd` is not a logical completion and must not be used. */
@@ -227,7 +258,17 @@ export function generationBusy(threadId: string): boolean {
 
 /** Startup: a previous process's open receipts are interrupted, never resumed or rebilled. */
 export function interruptOpenRuns(): void {
-  db.prepare("UPDATE generation_runs SET state = 'interrupted', updated_at = ? WHERE state IN ('running', 'waiting')").run(Date.now());
+  for (let batch = 0; batch < 20; batch++) {
+    const rows = db
+      .prepare("SELECT id, created_at FROM generation_runs WHERE state IN ('running', 'waiting') ORDER BY created_at LIMIT 500")
+      .all() as Array<{ id: string; created_at: number }>;
+    if (!rows.length) return;
+    for (const row of rows) {
+      // One guarded terminal transaction per receipt: only an interactive origin publishes the failure,
+      // and a receipt whose source transaction already committed is never rewritten into a second outcome.
+      endRun(row.id, { state: "interrupted", finishReason: null, durationMs: Math.max(0, Date.now() - row.created_at) });
+    }
+  }
 }
 
 const aborters = new Map<string, () => void>();
@@ -333,6 +374,7 @@ export function resolveRunConfig(input: {
   webSearch: boolean;
   deepResearch: boolean;
   continuationOf?: string;
+  turnOrigin?: ResolvedRunConfig["turnOrigin"];
   temporaryConfig?: unknown;
 }): ResolvedRunConfig {
   const snapshot = input.assistant.snapshot;
@@ -340,6 +382,7 @@ export function resolveRunConfig(input: {
     version: 1,
     requestKind: input.requestKind,
     ...(input.continuationOf ? { continuationOf: input.continuationOf } : {}),
+    ...(input.turnOrigin ? { turnOrigin: input.turnOrigin } : {}),
     modelRef: input.modelRef,
     ...(input.effort ? { reasoningEffort: input.effort } : {}),
     sampling: input.sampling,

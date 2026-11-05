@@ -13,6 +13,11 @@ const RTL_CHECKED_FILES = [
   "components/channels/ChannelTypingIndicator.tsx",
   "components/channels/RoomArchiveDialog.tsx",
   "components/channels/RoomArchiveRoster.tsx",
+  "components/webhooks/WebhookEditor.tsx",
+  "components/webhooks/WebhookTestPreview.tsx",
+  "components/webhooks/WebhookDeliveryLog.tsx",
+  "components/settings/WebhookSettings.tsx",
+  "components/settings/AdminWebhooks.tsx",
 ];
 
 const FORBIDDEN = [

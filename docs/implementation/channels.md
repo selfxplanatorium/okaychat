@@ -307,3 +307,9 @@ thresholds, coalescing, stale generations, and the poll-loop/cooldown regression
 
 A thread jump may name the reply to land on (`?focus=`). Without a cursor the server bounds the page at
 that reply, so an old reply opens on its own page instead of the newest page where it does not appear.
+
+Outgoing webhooks hook authoritative room transactions, not SSE invalidations. Human create/edit/delete
+and a structured mention of the room owner, plus a successful assistant settlement, can emit a curated
+event (see `docs/implementation/outgoing-webhooks.md`). The endpoint owner must currently own the selected
+room and pass its live group eligibility (a group removal stops the export as it closes the room); DMs, joined-only rooms, presence, typing, reactions, reads, and records invalidations never export.
+Edit and delete cancel and scrub older unsent text copies for that message.

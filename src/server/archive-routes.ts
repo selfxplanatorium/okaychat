@@ -9,6 +9,7 @@ import { archiveFileName, ArchiveFormatError, readArchive, writeArchive } from "
 import { buildArchive, archiveSummary } from "./archive-export.js";
 import { commitArchive, previewArchive } from "./archive-import.js";
 import { beginCommit, cancelJob, createJob, getJobRow, jobDir, removeJobDir, resetToReady, setDone, setFailed, setReady, setSummary } from "./archive-jobs.js";
+import { tx } from "./db.js";
 import { listModels } from "./catalog/providers.js";
 import { AppError } from "./errors.js";
 import { threadBusy } from "./thread-runs.js";
@@ -206,8 +207,12 @@ export const archiveRoutes = new Hono<AppEnv>()
     try {
       const read = readArchive(new Uint8Array(readFileSync(path.join(jobDir(userId, jobId), "archive.okaychat.zip"))));
       const models = new Set((await listModels(userId)).map((model) => model.ref));
-      const result = commitArchive({ userId, manifest: read.manifest, assets: read.assets, keys: parsed.data.chatKeys, availableModels: models });
-      setDone(userId, jobId, result);
+      const result = tx(() => {
+        const committed = commitArchive({ userId, manifest: read.manifest, assets: read.assets, keys: parsed.data.chatKeys, availableModels: models });
+        // Chats, the job result, and the outgoing import event commit in one transaction.
+        setDone(userId, jobId, committed);
+        return committed;
+      });
       try {
         notify({
           userId,
