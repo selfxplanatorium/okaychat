@@ -11,6 +11,7 @@ const { db } = await import("../db.js");
 const { storageUsed } = await import("../quota.js");
 const store = await import("./store.js");
 const { approvedInvocation, executePrepared, prepareExecution, setExecutionDeps } = await import("./execute.js");
+const { CUSTOM_LIMITS } = await import("../../shared/custom-tools.js");
 
 for (const id of ["alice", "bob"]) {
   db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES (?, ?, ?, ?, 'user', ?)").run(id, `${id}@example.test`, id, "unused", Date.now());
@@ -235,4 +236,52 @@ test("HTTP credential payloads are redacted before persistence and delivery", as
     assert.deepEqual(store.runView(store.runRow("alice", prepared.row.id)!).result, { echo: "[redacted]" });
     store.deleteTool("alice", created.id, 1);
   }
+});
+
+test("a reply admits at most its custom tool budget across preparing and running", () => {
+  const created = store.createTool("alice", pythonWrite, undefined);
+  const row = store.toolRow("alice", created.id)!;
+  const logical = "reply-budget";
+  let claimed: string | null = null;
+  try {
+    for (let i = 0; i < CUSTOM_LIMITS.attemptsPerReply; i++) {
+      const executionKey = `chat:${logical}:call-${i}`;
+      const prepared = prepareExecution({ userId: "alice", row, input: { values: [i] }, source: "chat", executionKey, sessionHash: "session", threadId: "thread-a" });
+      // Claim the first one so the budget must include running and prepared rows together.
+      if (i === 0) {
+        store.claimRun({ userId: "alice", runId: prepared.row.id, requestHash: prepared.requestHash, sessionHash: "session" }, () => {}, () => ({ release: () => {} }));
+        claimed = prepared.row.id;
+      }
+    }
+    assert.throws(
+      () => prepareExecution({ userId: "alice", row, input: { values: [99] }, source: "chat", executionKey: `chat:${logical}:call-over`, sessionHash: "session", threadId: "thread-a" }),
+      /reached its custom tool limit/,
+    );
+  } finally {
+    // A running row blocks deletion; settle it before removing the fixture.
+    if (claimed) store.finishRun({ userId: "alice", runId: claimed, state: "cancelled", result: null, errorCode: null, outputBytes: 0, httpStatus: null, dispatched: false, durationMs: 0 });
+    for (const run of store.listRuns("alice", created.id, 100)) {
+      if (run.state === "prepared") store.denyRun("alice", run.id);
+    }
+    store.deleteTool("alice", created.id, row.revision);
+  }
+});
+
+test("retention prunes expired results and keeps the latest", () => {
+  const created = store.createTool("alice", pythonWrite, undefined);
+  const row = store.toolRow("alice", created.id)!;
+  const ids: string[] = [];
+  for (let i = 0; i < 3; i++) {
+    const prepared = prepareExecution({ userId: "alice", row, input: { values: [i] }, source: "test", executionKey: `test:retention:${i}`, sessionHash: "session" });
+    store.claimRun({ userId: "alice", runId: prepared.row.id, requestHash: prepared.requestHash, sessionHash: "session" }, () => {}, () => ({ release: () => {} }));
+    store.finishRun({ userId: "alice", runId: prepared.row.id, state: "succeeded", result: { total: i }, errorCode: null, outputBytes: 2, httpStatus: null, dispatched: true, durationMs: 1 });
+    ids.push(prepared.row.id);
+  }
+  const now = Date.now();
+  const ages = [9, 8, 1 / 24].map((days) => days * 24 * 60 * 60_000);
+  ids.forEach((id, i) => db.prepare("UPDATE custom_tool_runs SET created_at = ? WHERE id = ?").run(now - ages[i]!, id));
+  store.prune("alice", now);
+  const left = store.listRuns("alice", created.id, 100);
+  assert.deepEqual(left.map((run) => run.id), [ids[2]]);
+  store.deleteTool("alice", created.id, row.revision);
 });

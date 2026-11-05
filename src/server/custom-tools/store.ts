@@ -438,8 +438,10 @@ export interface PreparedRun {
 function assertAttemptsLeft(userId: string, executionKey: string): void {
   if (executionKey.startsWith("chat:")) {
     const logical = executionKey.split(":")[1] ?? "";
+    // Prepared runs count too: they are already admitted attempts and can still execute, so a burst of
+    // preparations followed by claims must not admit more than the reply budget.
     const { n } = db.prepare(
-      "SELECT COUNT(*) AS n FROM custom_tool_runs WHERE user_id = ? AND execution_key LIKE ? AND state IN ('running','succeeded','failed','cancelled','unknown')",
+      "SELECT COUNT(*) AS n FROM custom_tool_runs WHERE user_id = ? AND execution_key LIKE ? AND state IN ('prepared','running','succeeded','failed','cancelled','unknown')",
     ).get(userId, `chat:${logical}:%`) as { n: number };
     if (n >= CUSTOM_LIMITS.attemptsPerReply) throw rateLimited("This reply reached its custom tool limit.");
   }
@@ -657,7 +659,9 @@ export function prune(userId: string, now = Date.now()): void {
       if (keep) return;
       const terminal = row.state !== "denied" && row.state !== "expired";
       const expired = row.created_at < now - CUSTOM_LIMITS.runTtlMs;
-      if (!terminal || !expired || index >= CUSTOM_LIMITS.visibleRuns) {
+      // Prune an expired run wherever it sits, and anything past the visible window regardless of age.
+      // The newest terminal run is the tool's last result, so it is never pruned.
+      if (terminal && (expired || index >= CUSTOM_LIMITS.visibleRuns)) {
         if (terminal && (index >= CUSTOM_LIMITS.visibleRuns || expired)) {
           const tombstoneLimit = db.prepare("SELECT COUNT(*) AS n FROM custom_tool_runs WHERE user_id = ? AND payload_pruned = 1").get(userId) as { n: number };
           if (row.created_at >= now - CUSTOM_LIMITS.dedupeTtlMs && tombstoneLimit.n < CUSTOM_LIMITS.tombstones) {
