@@ -653,3 +653,82 @@ test("review changes and imported edit guards are enforced at confirm and edit t
   assert.equal(edit.status, 409);
   assert.match(((await edit.json()) as { error: string }).error, /read-only/i);
 });
+
+
+test("raster attachment references keep their promoted ids and survive re-export", async () => {
+  const sharp = (await import("sharp")).default;
+  const bytes = new Uint8Array(await sharp({ create: { width: 2, height: 2, channels: 3, background: "red" } }).png().toBuffer());
+  const hash = sha256Hex(bytes);
+  const { manifest } = manifestFixture();
+  manifest.assets = [{ key: hash, size: bytes.byteLength }];
+  manifest.messages[0]!.attachments = ["image1", "image2"].map((key) => ({ key, asset: hash, name: `${key}.png`, declaredMime: "image/png", createdAt: 2050 }));
+  const jobId = await startImport(zipOf(manifest, new Map([[hash, bytes]])));
+  assert.equal((await waitJob(jobId, ready)).state, "ready");
+  const review = await inspect(jobId);
+  const result = await confirm(jobId, review.summary.name, review.reviewDigest);
+  assert.equal(result.state, "done");
+  const channelId = result.result!.channelId;
+  const attachments = db.prepare("SELECT id FROM channel_attachments WHERE channel_id = ?").all(channelId) as Array<{ id: string }>;
+  assert.equal(attachments.length, 2);
+  assert.notEqual(attachments[0]!.id, attachments[1]!.id);
+  for (const attachment of attachments) {
+    const response = await call(`/channels/${channelId}/attachments/${attachment.id}?download=1`, { user: "bob" });
+    assert.equal(response.status, 200);
+    assert.deepEqual(new Uint8Array(await response.arrayBuffer()), bytes);
+  }
+  const exported = await exportRoom(channelId, "bob");
+  assert.ok((await download(exported.jobId, "bob")).byteLength > bytes.byteLength);
+});
+
+test("cancelling a stalled upload wakes its reader and releases the upload slot", async () => {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const created = await call("/room-archives/imports", { method: "POST", user: "bob", json: {} });
+    assert.equal(created.status, 201);
+    const { jobId } = await json<{ jobId: string }>(created);
+    let pulled!: () => void;
+    const waiting = new Promise<void>((resolve) => { pulled = resolve; });
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({ pull() { pulled(); }, cancel() { cancelled = true; } });
+    const response = app.request(new Request(`http://app/api/room-archives/${jobId}/upload`, {
+      method: "PUT", headers: { cookie: "okaychat_session=bob", "content-type": "application/zip" }, body, duplex: "half",
+    } as RequestInit));
+    await waiting;
+    // Yield once so the route is waiting on reader.read().
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal((await call(`/room-archives/${jobId}`, { method: "DELETE", user: "bob" })).status, 200);
+    const completed = await Promise.race([response, new Promise<never>((_, reject) => { const timer = setTimeout(() => reject(new Error("upload did not stop")), 1000); timer.unref(); })]);
+    assert.equal(completed.status, 400);
+    assert.equal(cancelled, true);
+  }
+});
+
+
+test("JSON request limits stop reading before an unbounded body completes", async () => {
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) { controller.enqueue(new Uint8Array(ROOM_ARCHIVE_LIMITS.requestBytes + 1)); },
+    cancel() { cancelled = true; },
+  });
+  const response = await app.request(new Request("http://app/api/room-archives/imports", {
+    method: "POST", headers: { cookie: "okaychat_session=bob", "content-type": "application/json" }, body, duplex: "half",
+  } as RequestInit));
+  assert.equal(response.status, 413);
+  assert.equal(cancelled, true);
+  assert.equal(db.prepare("SELECT 1 FROM room_archive_jobs WHERE user_id = 'bob'").get(), undefined);
+});
+
+
+test("job recovery rechecks a revoked administrator before returning private export previews", async () => {
+  const roomId = await createRoom();
+  await post(roomId, "alice", "Private archive preview");
+  const { jobId } = await exportRoom(roomId, "root", { mode: "all" }, false, true);
+  db.prepare("UPDATE users SET role = 'user' WHERE id = 'root'").run();
+  try {
+    const response = await call("/room-archives", { user: "root" });
+    assert.equal(response.status, 404);
+    assert.doesNotMatch(await response.text(), /Private archive preview/);
+    assert.equal(getRoomJobById(jobId)!.state, "cancelled");
+  } finally {
+    db.prepare("UPDATE users SET role = 'admin' WHERE id = 'root'").run();
+  }
+});

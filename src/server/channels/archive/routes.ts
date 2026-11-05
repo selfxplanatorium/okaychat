@@ -46,8 +46,26 @@ const archiveError = (c: Context<AppEnv>, status: number, code: RoomArchiveError
   c.json({ error: message, code } as never, status as never, NO_STORE);
 
 async function readJson(c: Context<AppEnv>, maxBytes: number): Promise<unknown> {
-  const text = await c.req.text();
-  if (Buffer.byteLength(text, "utf8") > maxBytes) throw new AppError({ code: "validation", status: 413, message: "That request is too large." });
+  const reader = c.req.raw.body?.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  if (reader) {
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > maxBytes) {
+          await reader.cancel().catch(() => {});
+          throw new AppError({ code: "validation", status: 413, message: "That request is too large." });
+        }
+        chunks.push(value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+  const text = Buffer.concat(chunks, total).toString("utf8");
   try {
     return JSON.parse(text) as unknown;
   } catch {
@@ -142,6 +160,12 @@ export const roomArchiveRoutes = new Hono<AppEnv>()
       endUpload(row.id);
       return archiveError(c, 400, "invalid_archive", "The upload was empty.");
     }
+    // Cancelling the job must wake a pending read, including a client that stops sending bytes.
+    const stopReading = () => { void reader.cancel().catch(() => {}); };
+    controller.signal.addEventListener("abort", stopReading, { once: true });
+    const deadline = setTimeout(() => controller.abort(), ROOM_ARCHIVE_LIMITS.uploadDeadlineMs);
+    if (controller.signal.aborted || c.req.raw.signal.aborted) controller.abort();
+    if (controller.signal.aborted) stopReading();
     const chunks: Uint8Array[] = [];
     let total = 0;
     let lastTick = 0;
@@ -185,6 +209,8 @@ export const roomArchiveRoutes = new Hono<AppEnv>()
       requestCancel(userId, row.id);
       return archiveError(c, 400, "invalid_archive", "The upload did not complete.");
     } finally {
+      clearTimeout(deadline);
+      controller.signal.removeEventListener("abort", stopReading);
       c.req.raw.signal.removeEventListener("abort", abort);
       endUpload(row.id);
     }
@@ -197,7 +223,7 @@ export const roomArchiveRoutes = new Hono<AppEnv>()
       requestCancel(userId, row.id, "expired");
       return archiveError(c, 410, "expired", "This archive job expired.");
     }
-    return json(c, { job: jobProjection(row) });
+    return json(c, { job: jobProjection(recheckExport(row)) });
   })
   .get("/room-archives/:jobId", requireFeature("channels"), (c) => {
     const userId = c.get("user").id;

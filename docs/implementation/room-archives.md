@@ -54,14 +54,16 @@ receipts. Nothing resumes.
 
 ## Import
 
-Upload is a raw `PUT` spooled to `upload.zip` with a 64 MiB actual-byte cap. Validation reads the
+Upload is a raw `PUT` buffered under a 64 MiB actual-byte cap, then written to `upload.zip`.
+A 60-second deadline and job cancellation cancel the body reader, releasing stalled upload slots. Validation reads the
 container once, hashes each asset, sniffs magic bytes, decodes rasters under the existing pixel limits,
 refuses SVG, and writes a server-normalized plan (`snapshot.json`) plus stripped manifest. Emails are
 counted for review and discarded; they are never stored or matched. The review computes a digest over the
 normalized plan, identity resolution and final name. Confirm requires that exact digest and
 `acceptWarnings: true`; a changed digest is `409 review_changed`.
 
-Promotion allocates every destination id, writes a `promotion.json` journal and raster originals into a
+Promotion journals each raster attachment reference before writing its original, and reuses that same
+attachment id in the database (even when several references share one asset hash). It writes into a
 fresh `channel-media/<newRoom>/` directory, then commits in one synchronous transaction: new private
 room, importer as sole owner/member, identity rows, messages in dense sequence order, imported provenance
 JSON, attachments bound to the new message ids, derived thread state/cursors, one invalidation event,
@@ -93,7 +95,8 @@ reservation before adding final bytes and retained stage, so another account's h
 
 ## Web
 
-`state/room-archives.ts` holds one account-bound job and recovers it with `GET /room-archives`; nothing is
+`state/room-archives.ts` discards late replies using a monotonic account generation, including when
+switching away and back to the same account. It holds one account-bound job and recovers it with `GET /room-archives`; nothing is
 stored in browser storage. `RoomArchiveDialog.tsx` covers whole-room or selected-root export, optional
 emails, upload, review with warnings/roster/quota, progress, explicit cancel and the imported-room link.
 `RoomArchiveRoster.tsx` pages the historical roster. The room list has the import entry, room settings has
