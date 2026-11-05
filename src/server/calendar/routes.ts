@@ -12,6 +12,7 @@ import { canonicalZone, parseLocalDateTime, resolveLocalCandidates } from "../..
 import { checkNoteSearch, isSafeId } from "../../shared/notes.js";
 import type { AppEnv } from "../auth.js";
 import { AppError, errorJson } from "../errors.js";
+import { admitPersonalSearch } from "../personal-search-rate.js";
 import { requireFeature } from "../permissions/guard.js";
 import { getProject } from "../projects.js";
 import { getThread } from "../threads.js";
@@ -131,7 +132,14 @@ export const calendarRoutes = new Hono<AppEnv>()
     await next();
   })
   .use("*", requireFeature("calendar"))
-  .get("/events", (c) => c.json(listEvents(c.get("user").id, parseListQuery(c, c.get("user").id)), 200, privateHeaders))
+  .get("/events", (c) => {
+    const userId = c.get("user").id;
+    if (c.req.query("q")) {
+      const admission = admitPersonalSearch(userId);
+      if (!admission.ok) throw new AppError({ code: "rate_limited", message: "Too many searches. Wait a moment.", retryAfterMs: admission.retryAfterMs });
+    }
+    return c.json(listEvents(userId, parseListQuery(c, userId)), 200, privateHeaders);
+  })
   .post("/events", bodyLimit({ maxSize: CALENDAR_WRITE_LIMIT, onError: tooLarge }), async (c) => {
     const parsed = eventCreate.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) throw invalid(firstIssue(parsed.error));

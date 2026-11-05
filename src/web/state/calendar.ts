@@ -101,7 +101,7 @@ export const useCalendar = create<CalendarState>((set, get) => {
     const token = generation;
     const request = ++rangeToken;
     const bounds = viewBounds(state.view, state.anchor, state.zone);
-    set({ loading: true, error: null, partial: false, dense: false, nextCursor: null, events: [], from: bounds.from, to: bounds.to });
+    set({ loading: true, loadingMore: false, error: null, partial: false, dense: false, nextCursor: null, events: [], from: bounds.from, to: bounds.to });
     try {
       let cursor: string | null = null;
       let pages = 0;
@@ -249,16 +249,18 @@ export const useCalendar = create<CalendarState>((set, get) => {
       if (!cursor || state.loadingMore) return;
       set({ loadingMore: true });
       const token = generation;
+      // A filter or range change starts a new list; its cursor no longer belongs to this page request.
+      const request = rangeToken;
       try {
         const page = await api<CalendarPage>(eventsQuery(state, state.from, state.to, cursor));
-        if (token !== generation) return;
+        if (token !== generation || request !== rangeToken) return;
         set((current) => {
           const seen = new Set(current.events.map((item) => item.id));
           const events = [...current.events, ...page.items.filter((item) => !seen.has(item.id))];
           return { events, nextCursor: page.nextCursor, loadingMore: false, dense: events.length >= DENSE_RANGE_LIMIT };
         });
       } catch (error) {
-        if (token === generation) set({ loadingMore: false, partial: true, error: errorText(error) });
+        if (token === generation && request === rangeToken) set({ loadingMore: false, partial: true, error: errorText(error) });
       }
     },
     async openEvent(id) {

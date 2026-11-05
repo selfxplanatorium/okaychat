@@ -18,6 +18,7 @@ import {
 } from "../../shared/notes.js";
 import type { AppEnv } from "../auth.js";
 import { AppError, errorJson } from "../errors.js";
+import { admitPersonalSearch } from "../personal-search-rate.js";
 import { requireFeature } from "../permissions/guard.js";
 import { getProject } from "../projects.js";
 import {
@@ -124,7 +125,14 @@ export const notesRoutes = new Hono<AppEnv>()
     await next();
   })
   .use("*", requireFeature("notes"))
-  .get("/", (c) => c.json(listNotes(c.get("user").id, parseListQuery(c, c.get("user").id)), 200, privateHeaders))
+  .get("/", (c) => {
+    const userId = c.get("user").id;
+    if (c.req.query("q")) {
+      const admission = admitPersonalSearch(userId);
+      if (!admission.ok) throw new AppError({ code: "rate_limited", message: "Too many searches. Wait a moment.", retryAfterMs: admission.retryAfterMs });
+    }
+    return c.json(listNotes(userId, parseListQuery(c, userId)), 200, privateHeaders);
+  })
   .get("/tags", (c) => c.json({ tags: noteTagCounts(c.get("user").id) }, 200, privateHeaders))
   .post("/", bodyLimit({ maxSize: NOTES_CREATE_LIMIT, onError: tooLarge }), async (c) => {
     const parsed = noteCreate.safeParse(await c.req.json().catch(() => null));
