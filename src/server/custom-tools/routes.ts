@@ -281,4 +281,3 @@ export const customToolRoutes = new Hono<AppEnv>()
     deleteTool(user.id, idParam(c.req.param("id")), revision(body.expectedRevision));
     return c.body(null, 204);
   });
-
