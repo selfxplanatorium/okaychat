@@ -1,3 +1,4 @@
+import { deletingThreadVideos } from "./video/maintenance.js";
 import { isDeepStrictEqual } from "node:util";
 import type { UIMessage } from "ai";
 import { HTTPException } from "hono/http-exception";
@@ -220,7 +221,10 @@ export function setCompaction(userId: string, id: string, state: CompactionState
 
 export function deleteThread(userId: string, id: string) {
   const row = db.prepare("SELECT compare_group_id FROM threads WHERE user_id = ? AND id = ?").get(userId, id) as { compare_group_id: string | null } | undefined;
-  db.prepare("DELETE FROM threads WHERE user_id = ? AND id = ?").run(userId, id);
+  tx(() => {
+    deletingThreadVideos(userId, id);
+    db.prepare("DELETE FROM threads WHERE user_id = ? AND id = ?").run(userId, id);
+  });
   // Pane rows cascade from the thread; the group survives while another pane remains.
   if (row?.compare_group_id) {
     db.prepare(

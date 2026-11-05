@@ -1,3 +1,4 @@
+import type { VideoSettings } from "./video.js";
 import type { ChannelActivitySettings } from "./channel-activity.js";
 import type { UserAppearance } from "./appearance.js";
 import type { AssistantIcon } from "./assistant-presets.js";
@@ -226,6 +227,7 @@ export interface UserSettings {
   subagentModel?: string | null;
   /** Image generation services switched off and image models chosen per service. */
   imageServices?: ImageServiceSettings;
+  videoServices?: VideoSettings;
   /** Speech to text and read aloud. */
   speech?: SpeechSettings;
   /** The user may rewrite the text of finished assistant replies. Off by default. */
@@ -455,6 +457,7 @@ export interface UsageRow {
   cacheWrite: number;
   cost: number;
   requests: number;
+  unknownCostRequests?: number;
 }
 
 export interface GoWindow {

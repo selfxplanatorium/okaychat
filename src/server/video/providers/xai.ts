@@ -22,7 +22,8 @@ export function xaiVideo(transport: VideoFetch = fetch): VideoProvider {
       const video = object(result.video);
       if (video.respect_moderation === false) throw new VideoError('provider_moderation',422);
       if (typeof video.duration !== 'number' || !Number.isFinite(video.duration) || video.duration <= 0 || video.duration > 15) throw new VideoError('provider_protocol');
-      return {state:'succeeded',output:downloadDescriptor('xai',video.url),billedSeconds:video.duration};
+      try { return {state:'succeeded',output:downloadDescriptor('xai',video.url),billedSeconds:video.duration}; }
+      catch(error) {throw new VideoError(error instanceof VideoError ? error.code:'provider_protocol',502,'none',null,{billedSeconds:video.duration});}
     },
     async cancel() { return 'unsupported'; },
   };

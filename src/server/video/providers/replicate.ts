@@ -10,7 +10,9 @@ function status(value: unknown, model: string): VideoProviderStatus {
     case 'processing': return {state:'running'};
     case 'failed': return {state:'failed'};
     case 'canceled': return {state:'cancelled'};
-    case 'succeeded': return {state:'succeeded',output:downloadDescriptor('replicate',r.output),billedSeconds:null};
+    case 'succeeded':
+      try {if(typeof r.output !== 'string')throw new VideoError('provider_protocol');return {state:'succeeded',output:downloadDescriptor('replicate',r.output),billedSeconds:null};}
+      catch(error){throw new VideoError(error instanceof VideoError?error.code:'provider_protocol',502,'none',null,{billedSeconds:null});}
     default: throw new VideoError('provider_protocol');
   }
 }

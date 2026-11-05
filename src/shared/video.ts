@@ -84,7 +84,7 @@ export function videoService(id: VideoServiceId): VideoServiceDefinition {
 export function supportsVideo(model: VideoModelDefinition, p: VideoParameters): boolean {
   return model.durations.includes(p.durationSeconds) && (!p.hasReference || model.referenceDurations.includes(p.durationSeconds)) && model.sizes.includes(p.size) && model.aspects.includes(p.aspectRatio) && p.audio === true;
 }
-export function videoEstimateMicrousd(price: VideoPrice, p: VideoParameters, billedSeconds = p.durationSeconds): number {
+export function videoEstimateMicrousd(price: VideoPrice, p: VideoParameters, billedSeconds: number = p.durationSeconds): number {
   if (!Number.isFinite(billedSeconds) || billedSeconds <= 0 || billedSeconds > 15) throw new Error('Invalid billed duration');
   return Math.round((billedSeconds * price.ratesByResolution[p.size] + (p.hasReference ? price.referenceImageUsd : 0)) * 1_000_000);
 }

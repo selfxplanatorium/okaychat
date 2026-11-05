@@ -1,9 +1,9 @@
 # Video generation foundation
 
-Only the persistence and transport foundation is implemented. There is **no video tool, worker,
-route, setting, player, or Library integration yet**. Importing these modules performs no provider work.
-Do not expose paid video settings until admission, quota reservations, recovery, settlement,
-cancellation, authorization and the fake-worker failure matrix are implemented together.
+The durable worker and authenticated status/file routes are implemented. There is still **no video
+tool, settings toggle, player or Library integration**. Importing modules performs no provider work;
+`index.ts` explicitly recovers leases, starts the worker/maintenance, and stops timers on shutdown.
+Paid admission is internal only until the separately guarded interactive tool is integrated.
 
 ## Contracts and credentials
 
@@ -18,15 +18,13 @@ Private credentials reuse `xai` and `image-replicate` through `getOwnConnection`
 historical and must not be renamed. Disabled or missing private keys never fall back to shared keys.
 Custom base endpoints are refused, including a trailing-slash variant of the canonical URL.
 The fingerprint hashes connection ID, canonical endpoint, and a key digest; it contains no key.
-A future worker must resolve and compare it before every request and check live account permissions.
+The worker resolves and compares it before each request and checks live account permissions and service settings.
 
 ## Persistence
 
 One append-only migration after outgoing webhooks creates `video_jobs`, `videos`, `video_threads`,
 and the usage linkage/cost-state columns and indexes. Its failure seam is
-`OKAYCHAT_TEST_FAIL_MIGRATION=video-generation`. The schema is dormant: nothing currently inserts jobs
-or videos. Existing usage defaults to estimated. Future job settlement must be transactional and
-idempotent through `usage_video_job`; a video receipt is separate from an LLM generation receipt.
+`OKAYCHAT_TEST_FAIL_MIGRATION=video-generation`. Admission reserves 64 MiB output, 256 KiB reference and 32 KiB receipt atomically, with one active job/account, two global open jobs and 20 admissions/day. Tool-call identity and retry-parent uniqueness dedupe admission before live reauthorization. Settlement and terminal outcomes commit together through `usage_video_job`, with five zero token fields and explicit unknown cost. A video receipt is separate from an LLM generation receipt.
 
 ## HTTP boundaries
 
@@ -42,8 +40,7 @@ latter, without userinfo, fragment, or nonstandard port. Downloads use `pinnedRe
 `public-fetch.ts`: DNS is checked at connection time, private addresses refused, redirects never
 followed, no credentials forwarded. Downloads have a 60-second deadline, a 64 MiB decompressed-byte
 cap, exclusive 0600 output creation, incremental hashing, fsync, and cleanup on failure. The caller
-must create a private staging directory and perform atomic final persistence later. No output is
-served by this increment.
+must create a private staging directory and perform atomic final persistence later. Owner-qualified local GET/HEAD supports one byte range and private cache validators; no vendor URL is served.
 
 ## MP4 inspection
 
@@ -56,7 +53,7 @@ non-unit/negative or unsupported edit lists fail closed. This deliberately narro
 otherwise valid provider files. Broaden it only with reviewed local fixtures and documentation.
 
 This is container validation, **not full frame decoding**. It cannot establish that every compressed
-packet decodes or remove concealed payloads. Future playback must remain an authenticated local native
+packet decodes or remove concealed payloads. Playback must remain an authenticated local native
 player with a safe download fallback and no automatic paid regeneration on decoding failure.
 Hand-authored tests establish structural acceptance, not successful browser playback.
 
@@ -73,3 +70,27 @@ streams. `storage-migrations.test.ts` checks rollback/reopen and rewinds older s
 video tables/columns removed. No test calls a vendor. Worker crash/cancel/unknown-billing recovery,
 reference normalization, ownership routes, quota/accounting and UI tests remain required in later phases.
 No dependencies, binaries, container services or raster/image execution behavior were changed.
+
+## Worker and recovery
+
+`VideoWorker` has explicit start/stop, a two-task ceiling, 45-second leases renewed every 10 seconds,
+and epoch/state/revision guards on writes. Tests inject the clock, provider, file and failure boundaries.
+Submitting is durable before POST, provider IDs encrypted before polling; there is no POST retry.
+On restart a submitting row without an ID becomes `submission_unknown` with unknown billing. Polling
+resumes the same ID; partial downloads are removed and fetched again. A final renamed file can be
+reinspected/adopted without a provider call. Successful provider billing evidence is saved before
+local download/inspection, including host rejection; local failure still settles that cost.
+
+Cancellation persists first and aborts local active I/O. xAI reports unsupported remote stopping;
+Replicate uses its explicit cancel API, never interpreting remote stop as a refund. Cancellation wins
+against late success unless the success transaction already committed. Browser disconnection and text
+turn completion have no connection to media cancellation. Threads clear retained requests and cancel
+open jobs before deletion. Account deletion removes video rows before parent jobs, then file trees.
+Hourly maintenance retries staging/unreferenced cleanup; reservations remain until bytes are gone.
+
+SSE emits current snapshots, not an event replay log: five streams/account, a 60-second lifetime,
+2-second database checks and 15-second heartbeats, bounded slow-consumer buffering, live session and
+feature checks. Terminal snapshots close streams. Foreign/missing IDs match. No public submit route.
+The worker tests cover pre/post-submit crashes, unknown billing, ID/download/final-file recovery,
+lease replacement, local validation charges, five transient polls, deadlines and cancellation races.
+Retry authorization/UI and full fork/share/archive lifetime integration are still upcoming.

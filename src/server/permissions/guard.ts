@@ -13,6 +13,7 @@ export const FEATURE_NAMES: Record<FeatureKey, string> = {
   research: "deep research",
   code: "code execution",
   images: "image generation",
+  videos: "video generation",
   mcp: "MCP servers",
   knowledge: "knowledge",
   memory: "memory",

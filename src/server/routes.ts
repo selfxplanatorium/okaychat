@@ -1,3 +1,4 @@
+import { videoRoutes } from "./video/routes.js";
 import { chatgptRoutes } from "./chatgpt-oauth-routes.js";
 import { n8nRoutes, agentSessionRoutes } from "./n8n/routes.js";
 import { listChatTargets } from "./catalog/chat-targets.js";
@@ -480,6 +481,7 @@ const api = new Hono<AppEnv>()
   .route("/", libraryRoutes)
   .route("/", artifactRoutes)
   .route("/", imageRoutes)
+  .route("/", videoRoutes)
   .route("/", speechRoutes)
   .route("/", sandboxRoutes)
   .route("/", scheduleRoutes)

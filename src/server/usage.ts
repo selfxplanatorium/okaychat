@@ -53,7 +53,8 @@ export type UsageKind =
   | "evaluation_judge"
   | "channel"
   | "api"
-  | "translation";
+  | "translation"
+  | "video";
 
 export function recordUsage(entry: {
   userId: string;
@@ -69,16 +70,27 @@ export function recordUsage(entry: {
   /** External API requests carry both ids; the unique request id dedupes settlement retries. */
   apiKeyId?: string;
   apiRequestId?: string;
+  videoJobId?: string;
+  costState?: "unknown" | "estimated" | "reported";
 }) {
   // An API ledger row is never ambiguous: it names both its key and its request. Other kinds carry
   // neither, so a bearer request cannot be disguised as a chat.
   if (entry.kind === "api" ? !entry.apiKeyId || !entry.apiRequestId : !!entry.apiKeyId || !!entry.apiRequestId) {
     throw new Error("API usage ids do not match the usage kind.");
   }
+  if ((entry.kind === "video") !== !!entry.videoJobId) throw new Error("Video usage id does not match kind.");
+  if (entry.kind === "video" && Object.values(entry.usage).some(n => n !== 0)) throw new Error("Video usage must have zero tokens.");
+  if (entry.videoJobId) {
+    const previous = db.prepare("SELECT user_id, thread_id, provider_id, model_id, kind, cost, cost_state FROM usage WHERE video_job_id = ?").get(entry.videoJobId);
+    if (previous) {
+      if (previous.user_id !== entry.userId || previous.thread_id !== (entry.threadId ?? null) || previous.provider_id !== entry.providerId || previous.model_id !== entry.modelId || previous.kind !== "video" || previous.cost !== entry.cost || previous.cost_state !== (entry.costState ?? "estimated")) throw new Error("Conflicting video settlement.");
+      return;
+    }
+  }
   db.prepare(
     `INSERT INTO usage (user_id, thread_id, provider_id, model_id, kind, input_tokens, output_tokens, reasoning_tokens,
-       cache_read_tokens, cache_write_tokens, cost, created_at, channel_id, channel_run_id, api_key_id, api_request_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       cache_read_tokens, cache_write_tokens, cost, created_at, channel_id, channel_run_id, api_key_id, api_request_id, video_job_id, cost_state)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     entry.userId,
     entry.threadId ?? null,
@@ -96,6 +108,8 @@ export function recordUsage(entry: {
     entry.channelRunId ?? null,
     entry.apiKeyId ?? null,
     entry.apiRequestId ?? null,
+    entry.videoJobId ?? null,
+    entry.costState ?? "estimated",
   );
 }
 
@@ -111,7 +125,7 @@ export function usageSummary(userId: string, groupBy: keyof typeof GROUPS, since
     .prepare(
       `SELECT ${GROUPS[groupBy]} AS key, SUM(input_tokens) AS input, SUM(output_tokens) AS output,
          SUM(reasoning_tokens) AS reasoning, SUM(cache_read_tokens) AS cacheRead, SUM(cache_write_tokens) AS cacheWrite,
-         SUM(cost) AS cost, COUNT(*) AS requests
+         SUM(cost) AS cost, COUNT(*) AS requests, COALESCE(SUM(CASE WHEN cost_state = 'unknown' THEN 1 ELSE 0 END),0) AS unknownCostRequests
        FROM usage WHERE user_id = ? AND created_at >= ? GROUP BY key ORDER BY ${groupBy === "day" ? "key" : "cost DESC"}`,
     )
     .all(userId, sinceMs) as unknown as UsageRow[];
@@ -138,7 +152,7 @@ export function threadUsage(userId: string, threadId: string): UsageRow {
     .prepare(
       `SELECT 'thread' AS key, COALESCE(SUM(input_tokens),0) AS input, COALESCE(SUM(output_tokens),0) AS output,
          COALESCE(SUM(reasoning_tokens),0) AS reasoning, COALESCE(SUM(cache_read_tokens),0) AS cacheRead,
-         COALESCE(SUM(cache_write_tokens),0) AS cacheWrite, COALESCE(SUM(cost),0) AS cost, COUNT(*) AS requests
+         COALESCE(SUM(cache_write_tokens),0) AS cacheWrite, COALESCE(SUM(cost),0) AS cost, COUNT(*) AS requests, COALESCE(SUM(CASE WHEN cost_state = 'unknown' THEN 1 ELSE 0 END),0) AS unknownCostRequests
        FROM usage WHERE user_id = ? AND thread_id = ?`,
     )
     .get(userId, threadId) as unknown as UsageRow;
