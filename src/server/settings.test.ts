@@ -112,3 +112,15 @@ test("invalid legacy sidebar visibility falls back to all shortcuts", () => {
   db.prepare("INSERT INTO user_settings VALUES (?, ?)").run("alice", JSON.stringify({ sidebarItems: ["unknown"] }));
   assert.equal(getSettings("alice").sidebarItems, undefined);
 });
+
+test("notification preferences round-trip and a malformed stored object is dropped", () => {
+  assert.deepEqual(getSettings("alice").notifications, { browser: false, scheduleSuccess: false });
+  const saved = updateSettings("alice", { notifications: { browser: true, scheduleSuccess: false } });
+  assert.deepEqual(saved.notifications, { browser: true, scheduleSuccess: false });
+  assert.deepEqual(getSettings("alice").notifications, { browser: true, scheduleSuccess: false });
+  assert.throws(() => updateSettings("alice", { notifications: { browser: true } as never }));
+  assert.throws(() => updateSettings("alice", { notifications: { browser: true, scheduleSuccess: false, extra: true } as never }));
+  db.prepare("UPDATE user_settings SET json = ? WHERE user_id = ?").run(JSON.stringify({ notifications: { browser: "yes", scheduleSuccess: 1 } }), "alice");
+  // Dropped, so clients fall back to DEFAULT_USER_SETTINGS.notifications.
+  assert.equal(getSettings("alice").notifications, undefined);
+});

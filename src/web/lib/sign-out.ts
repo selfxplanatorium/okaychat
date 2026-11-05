@@ -1,5 +1,6 @@
 import { api } from "@/lib/api";
 import { resetServices } from "@/state/services";
+import { resetNotifications } from "@/state/notifications";
 import { clearThreadCache } from "@/runtime/threadCache";
 import { clearMessageEdits } from "@/state/message-edits";
 import { useN8nAgents } from "@/state/n8n-agents";
@@ -24,6 +25,7 @@ export async function signOut() {
   closeBookmarks();
   useMessageJump.getState().clear();
   resetServices();
+  resetNotifications();
   // Drops the previous account's agent summaries and drops any response still in flight.
   useN8nAgents.getState().stop();
   window.location.href = "/";

@@ -95,7 +95,7 @@ const failures = new Map<string, { count: number; resetAt: number }>();
  * client, so one attacker cannot lock out everyone sharing the proxy address. Without a proxy the
  * header is forgeable, which only weakens this limit; the per-email limit still applies.
  */
-function clientKey(c: Context) {
+export function clientKey(c: Context) {
   let socket = "unknown";
   try {
     socket = getConnInfo(c).remote.address ?? socket;

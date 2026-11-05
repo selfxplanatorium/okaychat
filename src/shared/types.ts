@@ -165,8 +165,16 @@ export interface OllamaPullProgress {
 
 export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
-export const SIDEBAR_ITEMS = ["newChat", "scheduled", "library", "knowledge", "plugins", "projects"] as const;
+export const SIDEBAR_ITEMS = ["newChat", "scheduled", "library", "knowledge", "plugins", "projects", "compare"] as const;
 export type SidebarItem = (typeof SIDEBAR_ITEMS)[number];
+
+/** Account intent for durable notices. The in-app center always works; browser popups are opt-in. */
+export interface NotificationSettings {
+  /** System notifications for new notices (permission is requested when this is turned on). */
+  browser: boolean;
+  /** Also show a system notification when a scheduled run succeeds; failures always notify. */
+  scheduleSuccess: boolean;
+}
 
 /** Per-account keyboard preferences. Absent fields fall back to the defaults in `src/web/keyboard/commands.ts`. */
 export interface KeyboardSettings {
@@ -219,6 +227,8 @@ export interface UserSettings {
   speech?: SpeechSettings;
   /** The user may rewrite the text of finished assistant replies. Off by default. */
   editAssistantMessages?: boolean;
+  /** Durable notices: the bell in the app, and optional system notifications. */
+  notifications?: NotificationSettings;
   /**
    * Server-maintained revision of the account's personal instructions (systemPrompt and per-model rules),
    * for compare-and-set. Never accepted from a settings patch.
@@ -240,6 +250,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   subagents: true,
   codeExecution: true,
   editAssistantMessages: false,
+  notifications: { browser: false, scheduleSuccess: false },
 };
 
 export interface TokenUsage {
@@ -314,6 +325,8 @@ export interface ThreadSummary {
   pinned: boolean;
   /** Knowledge collections attached in the composer; ids are re-validated on every use. */
   knowledgeIds: string[];
+  /** Flat private labels, lowercase, at most 10 per chat. Always present. */
+  tags: string[];
   /** The chat this one was forked from, while that chat still exists. */
   branchedFrom: { id: string; title: string | null } | null;
   /** Selected assistant snapshot label. Only `GET /threads/:id` fills it; sidebar rows leave it out. */
@@ -556,6 +569,11 @@ export interface SharedThread {
   title: string | null;
   createdAt: number;
   messages: Array<{ id: string; role: "user" | "assistant"; parts: SharedPart[] }>;
+  /** Live links follow the chat's current branch; frozen ones replay the captured snapshot. */
+  mode: "live" | "frozen";
+  /** When the frozen payload was captured; null for a live link. */
+  frozenAt: number | null;
+  expiresAt: number | null;
 }
 
 /** Library entries grouped by what the browser can do with them. */

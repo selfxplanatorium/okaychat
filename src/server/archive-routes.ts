@@ -12,6 +12,7 @@ import { beginCommit, cancelJob, createJob, getJobRow, jobDir, removeJobDir, res
 import { listModels } from "./catalog/providers.js";
 import { AppError } from "./errors.js";
 import { threadBusy } from "./thread-runs.js";
+import { notify } from "./notifications.js";
 
 /**
  * Portable archive API. Every response is private and uncached; every job is owned by the caller, and a
@@ -53,6 +54,23 @@ const jobJson = (row: NonNullable<ReturnType<typeof getJobRow>>): ArchiveJob => 
   };
 };
 
+/** One durable notice per failed import job; retries of the same job keep the single row. */
+function notifyImportFailed(userId: string, jobId: string): void {
+  try {
+    notify({
+      userId,
+      kind: "import",
+      level: "error",
+      titleKey: "import.failed",
+      bodyKey: "import.failedBody",
+      actionPath: "/library",
+      sourceKey: `archive:import:${jobId}`,
+    });
+  } catch {
+    // A notice must never fail the job.
+  }
+}
+
 export const archiveRoutes = new Hono<AppEnv>()
   .post("/chat-archives/exports", async (c) => {
     const userId = c.get("user").id;
@@ -66,11 +84,39 @@ export const archiveRoutes = new Hono<AppEnv>()
       const zip = writeArchive(built.manifest, built.assets);
       const file = path.join(jobDir(userId, job.id), "archive.okaychat.zip");
       writeFileSync(file, zip, { mode: 0o600 });
-      setSummary(userId, job.id, archiveSummary(built));
+      const summary = archiveSummary(built);
+      setSummary(userId, job.id, summary);
       setReady(userId, job.id);
+      try {
+        notify({
+          userId,
+          kind: "export",
+          level: "success",
+          titleKey: "export.ready",
+          bodyKey: "export.readyBody",
+          params: { chats: summary.chats.length },
+          actionPath: "/library",
+          sourceKey: `archive:export:${job.id}`,
+        });
+      } catch {
+        // A notice must never fail the job.
+      }
       return c.json({ jobId: job.id, expiresAt: job.expires_at }, 202, privateHeaders);
     } catch (error) {
       setFailed(userId, job.id, error instanceof AppError ? "export_failed" : "export_failed");
+      try {
+        notify({
+          userId,
+          kind: "export",
+          level: "error",
+          titleKey: "export.failed",
+          bodyKey: "export.failedBody",
+          actionPath: "/library",
+          sourceKey: `archive:export:${job.id}`,
+        });
+      } catch {
+        // A notice must never fail the job.
+      }
       return c.json({ error: error instanceof AppError ? error.message : "The export could not be prepared." }, error instanceof AppError ? (error.status as 400) : 500, privateHeaders);
     }
   })
@@ -84,6 +130,7 @@ export const archiveRoutes = new Hono<AppEnv>()
     if (!bytes.byteLength || bytes.byteLength > ARCHIVE_LIMITS.uploadBytes) {
       setFailed(userId, job.id, "too_large");
       removeJobDir(userId, job.id);
+      notifyImportFailed(userId, job.id);
       return c.json({ error: "This archive is too large or empty." }, 413, privateHeaders);
     }
     const file = path.join(jobDir(userId, job.id), "archive.okaychat.zip");
@@ -98,6 +145,7 @@ export const archiveRoutes = new Hono<AppEnv>()
     } catch (error) {
       setFailed(userId, job.id, error instanceof ArchiveFormatError ? "invalid_archive" : "import_failed");
       removeJobDir(userId, job.id);
+      notifyImportFailed(userId, job.id);
       return c.json({ jobId: job.id, expiresAt: job.expires_at }, 202, privateHeaders);
     }
   })
@@ -156,6 +204,20 @@ export const archiveRoutes = new Hono<AppEnv>()
       const models = new Set((await listModels(userId)).map((model) => model.ref));
       const result = commitArchive({ userId, manifest: read.manifest, assets: read.assets, keys: parsed.data.chatKeys, availableModels: models });
       setDone(userId, jobId, result);
+      try {
+        notify({
+          userId,
+          kind: "import",
+          level: "success",
+          titleKey: "import.done",
+          bodyKey: "import.doneBody",
+          params: { chats: result.threads.length },
+          actionPath: "/library",
+          sourceKey: `archive:import:${jobId}`,
+        });
+      } catch {
+        // A notice must never fail the job.
+      }
       // The bytes are no longer needed; the done row keeps the id map for an idempotent confirmation.
       removeJobDir(userId, jobId);
       return c.json(result, 200, privateHeaders);
@@ -166,6 +228,7 @@ export const archiveRoutes = new Hono<AppEnv>()
         return c.json({ error: error.message }, 413, privateHeaders);
       }
       setFailed(userId, jobId, "import_failed");
+      notifyImportFailed(userId, jobId);
       return c.json({ error: "The import could not be completed." }, 409, privateHeaders);
     }
   })

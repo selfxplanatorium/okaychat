@@ -14,6 +14,9 @@ import { useBackClose } from "@/hooks/use-back-close";
 import { Onboarding } from "@/components/Onboarding";
 import { ChatPrivacyMenu } from "@/components/chat/ChatPrivacyMenu";
 import { ServiceHealthWatcher, ServiceNotice, ServiceUsageWatcher } from "@/components/chat/ServiceNotice";
+import { NotificationCenter } from "@/components/notifications/NotificationCenter";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
+import { ShareManagerDialog } from "@/components/share/ShareManagerDialog";
 import { StorageNotice } from "@/components/StorageNotice";
 import { ThemeEditorHost } from "@/components/settings/theme/ThemeEditorHost";
 import { RuntimeProvider } from "@/runtime/RuntimeProvider";
@@ -46,6 +49,7 @@ function ChatHeader({ sidebarOpen, onToggle }: { sidebarOpen: boolean; onToggle:
       >
         <PanelLeftIcon className="size-4" />
       </button>
+      <NotificationBell variant="header" />
       <button
         type="button"
         aria-label={t("common.newChat")}
@@ -150,7 +154,7 @@ export function Shell({ userId }: { userId: string }) {
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768);
   const [location] = useLocation();
   const inSettings = location.startsWith("/settings");
-  const inNavigation = ["/scheduled", "/library", "/knowledge", "/plugins", "/projects"].includes(location);
+  const inNavigation = ["/scheduled", "/library", "/knowledge", "/plugins", "/projects", "/compare"].includes(location);
   const route = inSettings ? "settings" : inNavigation ? location : "chat";
   // The settings layer stays mounted in the sidebar, so it keeps its last section while the chat is shown.
   const lastSection = useRef<string | undefined>(undefined);
@@ -224,6 +228,8 @@ export function Shell({ userId }: { userId: string }) {
       <KeyboardShortcuts />
       <ServiceHealthWatcher />
       <ServiceUsageWatcher />
+      <NotificationCenter />
+      <ShareManagerDialog />
       {/* No fill mode: a held opacity animation makes this a backdrop root, which leaves the sticky
           composer's blur misplaced while the thread scrolls on mobile Chrome. */}
       <div className="animate-[fade-in_var(--motion-base)_var(--ease-out-quart)] bg-background safe-top safe-x flex h-full">
@@ -257,6 +263,13 @@ export function Shell({ userId }: { userId: string }) {
                     <SettingsLayout />
                   </Suspense>
                 )}
+              </Route>
+              <Route path="/compare">
+                <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                  <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">{t("common.loading")}</p>}>
+                    <NavigationPage page="compare" />
+                  </Suspense>
+                </main>
               </Route>
               {["scheduled", "library", "knowledge", "plugins", "projects"].map((page) => (
                 <Route key={page} path={`/${page}`}>

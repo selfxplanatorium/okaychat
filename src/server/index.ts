@@ -22,6 +22,7 @@ import { setUnresolvedRunReader } from "./thread-runs.js";
 import { resetArchiveJobsAtStartup, startArchiveMaintenance } from "./archive-jobs.js";
 import { publicShareRoutes } from "./shares.js";
 import { startRecordingPurge } from "./speech/config.js";
+import { startCompareMaintenance } from "./compare.js";
 import { speechToken, speechWorkerConfigured } from "./speech/worker.js";
 import { voiceWebSocketServer } from "./voice/routes.js";
 
@@ -93,6 +94,7 @@ serve({ fetch: app.fetch, port: env.port, hostname: env.host, websocket: { serve
   startArchiveMaintenance();
   startMemoryWorker();
   startRecordingPurge();
+  startCompareMaintenance();
   // Moves legacy image BLOBs/inline chat images to files in small steps, then collects orphaned media.
   startMediaMaintenance();
   // Rows keep queued/extracting/embedding state across a restart; resuming spends no idle timer.

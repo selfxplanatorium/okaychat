@@ -11,6 +11,7 @@ import auth from "./auth";
 import common from "./common";
 import chatArchives from "./chatArchives";
 import composer from "./composer";
+import compare from "./compare";
 import entitlements from "./entitlements";
 import errors from "./errors";
 import email from "./email";
@@ -22,6 +23,7 @@ import keyboard from "./keyboard";
 import knowledge from "./knowledge";
 import library from "./library";
 import mcp from "./mcp";
+import notifications from "./notifications";
 import memory from "./memory";
 import messageDetails from "./messageDetails";
 import permissions from "./permissions";
@@ -35,6 +37,7 @@ import share from "./share";
 import shell from "./shell";
 import sidebar from "./sidebar";
 import skills from "./skills";
+import tags from "./tags";
 import speech from "./speech";
 import thread from "./thread";
 import tools from "./tools";
@@ -56,6 +59,7 @@ export const en = {
   common,
   chatArchives,
   composer,
+  compare,
   entitlements,
   errors,
   email,
@@ -67,6 +71,7 @@ export const en = {
   knowledge,
   library,
   mcp,
+  notifications,
   memory,
   messageDetails,
   permissions,
@@ -80,6 +85,7 @@ export const en = {
   shell,
   sidebar,
   skills,
+  tags,
   speech,
   thread,
   tools,

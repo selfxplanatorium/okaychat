@@ -11,6 +11,7 @@ import { AppError } from "./errors.js";
 import { newId } from "./crypto.js";
 import { assistantSummary } from "./assistant-presets.js";
 import { overlayGenerationMetadata, projectGenerationsForThread } from "./generation-runs.js";
+import { normalizeTags } from "../shared/tags.js";
 
 /** Temporary conversations exist only in browser memory; their ids must never become stored threads. */
 export const isTemporaryThread = (id: string): boolean => id.startsWith("tmp_");
@@ -25,6 +26,7 @@ interface ThreadRow {
   pinned: number;
   knowledge_ids: string | null;
   branched_from: string | null;
+  compare_group_id: string | null;
   /** Joined from the source thread; null once it is deleted. */
   branched_title: string | null;
   branched_exists: number | null;
@@ -38,7 +40,7 @@ interface ThreadRow {
 // The sidebar reads every chat, so its rows must not carry compaction JSON: a long chat can hold a large
 // trim summary that only getThread needs. `t.*` also breaks when a column is added for another feature.
 const THREAD_COLUMNS = `t.id, t.title, t.status, t.model_ref, t.project_id, t.memory_disabled, t.pinned,
-  t.knowledge_ids, t.branched_from, t.created_at, t.updated_at`;
+  t.knowledge_ids, t.branched_from, t.compare_group_id, t.created_at, t.updated_at`;
 const BRANCH_JOIN = `LEFT JOIN threads o ON o.id = t.branched_from AND o.user_id = t.user_id`;
 const BRANCH_COLUMNS = "o.title AS branched_title, o.id IS NOT NULL AS branched_exists";
 const SELECT_THREADS = `SELECT ${THREAD_COLUMNS}, ${BRANCH_COLUMNS} FROM threads t ${BRANCH_JOIN}`;
@@ -54,7 +56,7 @@ const parseIds = (value: string | null): string[] => {
   }
 };
 
-const toSummary = (r: ThreadRow): ThreadSummary => ({
+const toSummary = (r: ThreadRow, tags: string[] = []): ThreadSummary => ({
   id: r.id,
   title: r.title,
   status: r.status,
@@ -63,34 +65,67 @@ const toSummary = (r: ThreadRow): ThreadSummary => ({
   memoryDisabled: !!r.memory_disabled,
   pinned: !!r.pinned,
   knowledgeIds: parseIds(r.knowledge_ids),
+  tags,
   branchedFrom: r.branched_from && r.branched_exists ? { id: r.branched_from, title: r.branched_title } : null,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
 
-/** `projectId` undefined lists every thread; null lists threads outside any project. `status` undefined lists both. */
-export function listThreads(userId: string, projectId?: string | null, status?: "regular" | "archived"): ThreadSummary[] {
+const TAG_CHUNK = 400;
+
+/** Tags for a page of chats, in bounded chunks so a long sidebar stays one query per block. */
+export function tagsFor(threadIds: readonly string[]): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (let i = 0; i < threadIds.length; i += TAG_CHUNK) {
+    const chunk = threadIds.slice(i, i + TAG_CHUNK);
+    if (!chunk.length) continue;
+    const rows = db
+      .prepare(`SELECT thread_id, tag FROM thread_tags WHERE thread_id IN (${chunk.map(() => "?").join(", ")}) ORDER BY tag`)
+      .all(...chunk) as Array<{ thread_id: string; tag: string }>;
+    for (const row of rows) {
+      const list = out.get(row.thread_id);
+      if (list) list.push(row.tag);
+      else out.set(row.thread_id, [row.tag]);
+    }
+  }
+  return out;
+}
+
+/**
+ * `projectId` undefined lists every thread; null lists threads outside any project. `status` undefined lists
+ * both. Comparison panes are hidden unless `options.comparisonGroupId` asks for that group.
+ */
+export function listThreads(
+  userId: string,
+  projectId?: string | null,
+  status?: "regular" | "archived",
+  options?: { comparisonGroupId?: string },
+): ThreadSummary[] {
   const where = ["t.user_id = ?"];
   const values: string[] = [userId];
+  if (options?.comparisonGroupId) where.push("t.compare_group_id = ?"), values.push(options.comparisonGroupId);
+  else where.push("t.compare_group_id IS NULL");
   if (projectId === null) where.push("t.project_id IS NULL");
   else if (projectId !== undefined) where.push("t.project_id = ?"), values.push(projectId);
   if (status !== undefined) where.push("t.status = ?"), values.push(status);
   const rows = db.prepare(`${SELECT_THREADS} WHERE ${where.join(" AND ")} ORDER BY t.updated_at DESC`).all(...values) as unknown as ThreadRow[];
-  return rows.map(toSummary);
+  const tags = tagsFor(rows.map((row) => row.id));
+  return rows.map((row) => toSummary(row, tags.get(row.id) ?? []));
 }
 
-export function getThread(userId: string, id: string): (ThreadSummary & { compaction: CompactionState | null }) | null {
+export function getThread(userId: string, id: string): (ThreadSummary & { compaction: CompactionState | null; compareGroupId: string | null }) | null {
   const row = db.prepare(`${SELECT_THREAD} WHERE t.user_id = ? AND t.id = ?`).get(userId, id) as unknown as
     | (ThreadRow & { compaction_json: string | null })
     | undefined;
   if (!row) return null;
   const snapshot = assistantSummary(row.assistant_json ?? null);
   return {
-    ...toSummary(row),
+    ...toSummary(row, tagsFor([row.id]).get(row.id) ?? []),
     compaction: row.compaction_json ? (JSON.parse(row.compaction_json) as CompactionState) : null,
     assistant: snapshot,
     assistantRevision: row.assistant_revision ?? 0,
     preferredHead: row.preferred_head ?? null,
+    compareGroupId: row.compare_group_id ?? null,
   };
 }
 
@@ -111,12 +146,23 @@ export function ensureThread(userId: string, id: string, projectId: string | nul
 
 /**
  * Metadata only. `updated_at` means last message activity (the sidebar groups by it), so renaming,
- * pinning, archiving, or moving a chat must not bump it. `appendMessage` does.
+ * pinning, archiving, tagging, or moving a chat must not bump it. `appendMessage` does.
+ * `compareGroupId` is internal: only compare.ts sets it.
  */
 export function updateThread(
   userId: string,
   id: string,
-  patch: { title?: string; status?: "regular" | "archived"; modelRef?: string; memoryDisabled?: boolean; pinned?: boolean; projectId?: string | null; knowledgeIds?: string[] },
+  patch: {
+    title?: string;
+    status?: "regular" | "archived";
+    modelRef?: string;
+    memoryDisabled?: boolean;
+    pinned?: boolean;
+    projectId?: string | null;
+    knowledgeIds?: string[];
+    tags?: string[];
+    compareGroupId?: string | null;
+  },
 ) {
   const sets: string[] = [];
   const values: Array<string | number | null> = [];
@@ -127,7 +173,8 @@ export function updateThread(
   if (patch.pinned !== undefined) sets.push("pinned = ?"), values.push(Number(patch.pinned));
   if (patch.projectId !== undefined) sets.push("project_id = ?"), values.push(patch.projectId);
   if (patch.knowledgeIds !== undefined) sets.push("knowledge_ids = ?"), values.push(JSON.stringify(patch.knowledgeIds.slice(0, 20)));
-  if (!sets.length) return;
+  if (patch.compareGroupId !== undefined) sets.push("compare_group_id = ?"), values.push(patch.compareGroupId);
+  if (!sets.length && patch.tags === undefined) return;
   tx(() => {
     if (patch.projectId !== undefined) {
       const before = db.prepare("SELECT project_id FROM threads WHERE user_id = ? AND id = ?").get(userId, id) as { project_id: string | null } | undefined;
@@ -136,7 +183,17 @@ export function updateThread(
         db.prepare("UPDATE turn_context SET memory_enc = NULL WHERE user_id = ? AND thread_id = ?").run(userId, id);
       }
     }
-    db.prepare(`UPDATE threads SET ${sets.join(", ")} WHERE user_id = ? AND id = ?`).run(...values, userId, id);
+    if (patch.tags !== undefined) {
+      const row = db.prepare("SELECT compare_group_id FROM threads WHERE user_id = ? AND id = ?").get(userId, id) as { compare_group_id: string | null } | undefined;
+      // A comparison pane is a private working copy; tags belong to real, sidebar-visible chats.
+      if (row?.compare_group_id) throw new AppError({ code: "validation", status: 400, message: "A comparison pane cannot be tagged." });
+      const tags = normalizeTags(patch.tags);
+      db.prepare("DELETE FROM thread_tags WHERE thread_id = ?").run(id);
+      const insert = db.prepare("INSERT OR IGNORE INTO thread_tags (thread_id, tag, created_at) VALUES (?, ?, ?)");
+      const now = Date.now();
+      for (const tag of tags) insert.run(id, tag, now);
+    }
+    if (sets.length) db.prepare(`UPDATE threads SET ${sets.join(", ")} WHERE user_id = ? AND id = ?`).run(...values, userId, id);
   });
 }
 
@@ -149,7 +206,15 @@ export function setCompaction(userId: string, id: string, state: CompactionState
 }
 
 export function deleteThread(userId: string, id: string) {
+  const row = db.prepare("SELECT compare_group_id FROM threads WHERE user_id = ? AND id = ?").get(userId, id) as { compare_group_id: string | null } | undefined;
   db.prepare("DELETE FROM threads WHERE user_id = ? AND id = ?").run(userId, id);
+  // Pane rows cascade from the thread; the group survives while another pane remains.
+  if (row?.compare_group_id) {
+    db.prepare(
+      `DELETE FROM comparison_groups WHERE id = ? AND user_id = ?
+        AND NOT EXISTS (SELECT 1 FROM comparison_panes WHERE group_id = ?)`,
+    ).run(row.compare_group_id, userId, row.compare_group_id);
+  }
 }
 
 interface EditState {
@@ -239,6 +304,9 @@ export function branchThread(userId: string, sourceId: string, messageId: string
     copyDraftsForBranch(userId, sourceId, id, copies.map(({ json }) => json));
     copyArtifactsForBranch(userId, sourceId, id, chain.map((m) => m.content));
     copyImagesForBranch(userId, sourceId, id, chain.map((m) => m.content));
+    // Tags describe what the conversation is about, so the fork starts with them. Editing them in the
+    // fork never reaches the source.
+    db.prepare("INSERT INTO thread_tags (thread_id, tag, created_at) SELECT ?, tag, ? FROM thread_tags WHERE thread_id = ?").run(id, now, sourceId);
   });
   return getThread(userId, id)!;
 }

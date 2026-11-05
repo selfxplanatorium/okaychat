@@ -40,8 +40,8 @@ import { useAssistantPresets, temporaryAssistantOf } from "@/state/assistant-pre
 import { continuationIntentOf } from "@/components/chat/continue-run";
 
 /** Thread metadata the sidebar reads from `threadListItem.custom`. */
-export type ThreadCustom = { pinned: boolean; projectId: string | null; branchedFrom: ThreadSummary["branchedFrom"] };
-const threadCustom = (t: ThreadSummary): ThreadCustom => ({ pinned: t.pinned, projectId: t.projectId, branchedFrom: t.branchedFrom });
+export type ThreadCustom = { pinned: boolean; projectId: string | null; branchedFrom: ThreadSummary["branchedFrom"]; tags: string[] };
+const threadCustom = (t: ThreadSummary): ThreadCustom => ({ pinned: t.pinned, projectId: t.projectId, branchedFrom: t.branchedFrom, tags: t.tags });
 
 type MessageRow = { id: string; parent_id: string | null; format: string; content: unknown; edited_at?: number };
 
@@ -225,9 +225,9 @@ const threadListAdapter: RemoteThreadListAdapter = {
   },
   async updateCustom(remoteId, custom) {
     if (isTemporaryChat(remoteId)) return;
-    const { pinned, projectId } = (custom ?? {}) as Partial<ThreadCustom>;
+    const { pinned, projectId, tags } = (custom ?? {}) as Partial<ThreadCustom>;
     // Undefined fields drop out of the JSON body, so an unknown project is left alone.
-    await api(`/threads/${remoteId}`, { method: "PATCH", json: { pinned, projectId } });
+    await api(`/threads/${remoteId}`, { method: "PATCH", json: { pinned, projectId, tags } });
   },
   async archive(remoteId) {
     if (isTemporaryChat(remoteId)) return;

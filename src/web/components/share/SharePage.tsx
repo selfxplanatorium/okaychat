@@ -14,7 +14,7 @@ import { Brand } from "@/components/layout/Brand";
 import { SimpleMarkdown } from "@/components/ui/simple-markdown";
 import { t } from "@/i18n";
 import { formatDate } from "@/i18n/format";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 
 function SharedArtifact({ token, part }: { token: string; part: Extract<SharedPart, { type: "artifact" }> }) {
   const [artifact, setArtifact] = useState<ArtifactVersion | null>(null);
@@ -78,14 +78,43 @@ const readOnlyHandlers = {
 export function SharePage({ token }: { token: string }) {
   const [thread, setThread] = useState<SharedThread | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
+  const [locked, setLocked] = useState(false);
+  const [password, setPassword] = useState("");
+  const [unlocking, setUnlocking] = useState(false);
+  const [unlockError, setUnlockError] = useState<string | null>(null);
+
+  const load = () =>
     api<SharedThread>(`/public/shares/${token}`)
       .then((shared) => {
         setThread(shared);
+        setLocked(false);
         document.title = t("shell.tabTitle", { title: shared.title ?? t("share.sharedChat") });
       })
-      .catch((e: Error) => setError(e.message));
+      .catch((cause: unknown) => {
+        // 423 is the only status that asks for a password; everything else is the shared 404 sentence.
+        if (cause instanceof ApiError && cause.status === 423) setLocked(true);
+        else setError(cause instanceof Error ? cause.message : t("share.loadFailed"));
+      });
+
+  useEffect(() => {
+    void load();
+    // The link is the only input; the fetch itself owns the state.
   }, [token]);
+
+  const unlock = async () => {
+    setUnlocking(true);
+    setUnlockError(null);
+    try {
+      await api(`/public/shares/${token}/unlock`, { method: "POST", json: { password } });
+      setPassword("");
+      await load();
+    } catch (cause) {
+      const status = cause instanceof ApiError ? cause.status : 0;
+      setUnlockError(status === 401 ? t("share.wrongPassword") : status === 429 ? t("share.tooManyAttempts") : t("share.unlockFailed"));
+    } finally {
+      setUnlocking(false);
+    }
+  };
 
   return (
     <div className="h-full overflow-y-auto">
@@ -94,16 +123,48 @@ export function SharePage({ token }: { token: string }) {
           <a href="/" className="transition-opacity duration-(--motion-fast) ease-out-quart hover:opacity-80">
             <Brand />
           </a>
-          <span className="text-muted-foreground text-xs">{t("share.sharedReadOnly")}</span>
+          <span className="text-muted-foreground text-xs">
+            {thread?.mode === "frozen" ? t("share.frozenSnapshot") : t("share.sharedReadOnly")}
+          </span>
         </div>
       </header>
       <main className="mx-auto max-w-3xl px-4 py-6">
         {error && <p className="text-muted-foreground animate-fade-in py-20 text-center">{error}</p>}
+        {locked && !thread && (
+          <form
+            className="mx-auto flex max-w-sm flex-col gap-3 py-16"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void unlock();
+            }}
+          >
+            <h1 className="text-lg font-semibold tracking-tight">{t("share.unlockTitle")}</h1>
+            <p className="text-muted-foreground text-sm">{t("share.unlockBody")}</p>
+            <label className="flex flex-col gap-1 text-sm">
+              {t("share.unlockPassword")}
+              <input
+                autoFocus
+                type="password"
+                value={password}
+                autoComplete="current-password"
+                onChange={(event) => setPassword(event.target.value)}
+                className="bg-muted h-10 rounded-lg border px-3"
+              />
+            </label>
+            {unlockError && <p role="alert" className="text-destructive text-sm">{unlockError}</p>}
+            <button type="submit" disabled={unlocking || !password} className="bg-primary text-primary-foreground h-10 rounded-lg text-sm font-medium disabled:opacity-50">
+              {t("share.unlock")}
+            </button>
+          </form>
+        )}
         {thread && (
           <>
             <h1 className="animate-rise-in mb-1 text-2xl font-semibold tracking-tight">{thread.title ?? t("share.sharedChat")}</h1>
             <p className="text-muted-foreground animate-fade-in mb-6 text-sm">
               {formatDate(thread.createdAt, { dateStyle: "long" })}
+              {thread.mode === "frozen" && thread.frozenAt !== null && <> · {t("share.snapshotAt", { date: formatDate(thread.frozenAt) })}</>}
+              {thread.expiresAt !== null && <> · {t("share.linkExpires", { date: formatDate(thread.expiresAt) })}</>}
+              {thread.mode === "live" && <> · {t("share.liveLink")}</>}
             </p>
             <div className="flex flex-col gap-6">
               {thread.messages.map((m, index) =>

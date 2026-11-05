@@ -7,13 +7,15 @@ import { SIDEBAR_ITEMS } from "@shared/types";
 import { useChatPrivacyStore } from "@/state/chat-privacy";
 import { KnowledgeControl } from "@/components/knowledge/KnowledgeSelector";
 import { ChatSearch } from "./ChatSearch";
-import { CalendarClockIcon, BookOpenIcon, FolderIcon, LibraryIcon, LogOutIcon, PanelLeftIcon, PlusIcon, PuzzleIcon, SearchIcon, SettingsIcon, SquarePenIcon, UserRoundIcon } from "lucide-react";
+import { CalendarClockIcon, BookOpenIcon, FolderIcon, GitCompareArrowsIcon, LibraryIcon, LogOutIcon, PanelLeftIcon, PlusIcon, PuzzleIcon, SearchIcon, SettingsIcon, SquarePenIcon, UserRoundIcon } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { ThreadList, ThreadSelectionBar } from "@/components/assistant-ui/elements/thread-list.aui";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
 import { AccountAvatar } from "@/components/ui/account-avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ProjectSwitcher } from "./ProjectSwitcher";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
+import { TagFilterBar } from "@/components/tags/TagFilterBar";
 import { settingsHref } from "@/lib/settings-link";
 import { signOut } from "@/lib/sign-out";
 import { cn } from "@/lib/utils";
@@ -73,6 +75,7 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
               <button type="button" onClick={() => setSearchOpen(true)} aria-label={t("sidebar.searchChats")} {...searchHint} className="text-sidebar-muted-foreground hover:bg-sidebar-row-hover focus-visible:outline-ring rounded-lg p-1.5 pointer-coarse:p-2.5">
                 <SearchIcon className="size-4" />
               </button>
+              <NotificationBell />
               <button
                 type="button"
                 onClick={onToggle}
@@ -96,6 +99,7 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
                 { id: "knowledge", label: "sidebar.knowledge", href: "/knowledge", icon: BookOpenIcon },
                 { id: "plugins", label: "sidebar.plugins", href: "/plugins", icon: PuzzleIcon },
                 { id: "projects", label: "sidebar.projects", href: "/projects", icon: FolderIcon, create: { command: "nav.createProject", label: "ux.newProjectQuick", href: "/projects?new=1" } },
+                { id: "compare", label: "sidebar.compare", href: "/compare", icon: GitCompareArrowsIcon },
               ] as const).filter((item) => visibleItems.includes(item.id)).map((item) => (
                 <div key={item.id} className="flex items-center gap-0.5">
                   <Link
@@ -125,6 +129,7 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
               ))}
             </nav>
             <ProjectSwitcher />
+            <TagFilterBar />
             <ScrollArea
               className="min-h-0 flex-1"
               viewportProps={{

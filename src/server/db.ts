@@ -1044,6 +1044,100 @@ const migrations: Array<string | (() => void)> = [
     `);
     if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "parity-wave2") throw new Error("Injected migration failure");
   },
+  // Parity wave 3 (docs/implementation/share-links.md, thread-tags.md, notifications.md,
+  // model-comparison.md): several share links per chat with live/frozen modes, expiry and passwords;
+  // flat tags and their saved sidebar filters; durable notices; and hidden comparison pane threads.
+  () => {
+    db.exec(`
+    -- One row per link. Existing links survive as live links with no expiry and no password.
+    ALTER TABLE shares RENAME TO shares_legacy;
+    CREATE TABLE shares (
+      token TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+      label TEXT NOT NULL DEFAULT '',
+      mode TEXT NOT NULL DEFAULT 'live' CHECK (mode IN ('live', 'frozen')),
+      expires_at INTEGER,
+      password_hash TEXT,
+      snapshot_json TEXT,
+      snapshot_assets_json TEXT,
+      snapshot_at INTEGER,
+      view_count INTEGER NOT NULL DEFAULT 0,
+      last_viewed_at INTEGER,
+      created_at INTEGER NOT NULL
+    );
+    INSERT INTO shares (token, user_id, thread_id, created_at)
+      SELECT token, user_id, thread_id, created_at FROM shares_legacy;
+    DROP TABLE shares_legacy;
+    CREATE INDEX shares_user_time ON shares(user_id, created_at DESC, token);
+    CREATE INDEX shares_thread ON shares(thread_id);
+    CREATE INDEX shares_expiry ON shares(expires_at) WHERE expires_at IS NOT NULL;
+
+    CREATE TABLE thread_tags (
+      thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+      tag TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (thread_id, tag)
+    );
+    CREATE INDEX thread_tags_thread ON thread_tags(thread_id);
+    CREATE INDEX thread_tags_tag ON thread_tags(tag, thread_id);
+    CREATE TABLE tag_filter_presets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name TEXT NOT NULL COLLATE NOCASE,
+      filter_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE (user_id, name)
+    );
+    CREATE INDEX tag_filter_presets_user ON tag_filter_presets(user_id, updated_at DESC, id);
+
+    -- thread_id is deliberately not a foreign key: deleting a chat must not erase the record that
+    -- its scheduled run or import finished.
+    CREATE TABLE notifications (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK (kind IN ('schedule', 'import', 'export')),
+      level TEXT NOT NULL CHECK (level IN ('info', 'success', 'error')),
+      title_key TEXT NOT NULL,
+      body_key TEXT,
+      params_json TEXT NOT NULL DEFAULT '{}',
+      thread_id TEXT,
+      action_path TEXT,
+      source_key TEXT,
+      read_at INTEGER,
+      created_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX notifications_source ON notifications(user_id, source_key) WHERE source_key IS NOT NULL;
+    CREATE INDEX notifications_user_time ON notifications(user_id, created_at DESC, id);
+    CREATE INDEX notifications_unread ON notifications(user_id, created_at DESC) WHERE read_at IS NULL;
+
+    -- compare_group_id has no foreign key: SQLite cannot drop a column that carries one, and group
+    -- deletion is handled explicitly by compare.ts. Pane rows cascade from both sides.
+    CREATE TABLE comparison_groups (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      project_id TEXT,
+      source_thread_id TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX comparison_groups_user_time ON comparison_groups(user_id, updated_at DESC, id);
+    ALTER TABLE threads ADD COLUMN compare_group_id TEXT;
+    CREATE INDEX threads_compare ON threads(user_id, compare_group_id) WHERE compare_group_id IS NOT NULL;
+    CREATE TABLE comparison_panes (
+      group_id TEXT NOT NULL REFERENCES comparison_groups(id) ON DELETE CASCADE,
+      thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+      position INTEGER NOT NULL,
+      model_ref TEXT NOT NULL,
+      PRIMARY KEY (group_id, position),
+      UNIQUE (thread_id)
+    );
+    `);
+    if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "parity-wave3") throw new Error("Injected migration failure");
+  },
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

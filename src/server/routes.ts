@@ -40,6 +40,9 @@ import { scheduleRoutes } from "./schedules.js";
 import { searchRoutes } from "./search.js";
 import { serviceRoutes } from "./services.js";
 import { shareRoutes } from "./shares.js";
+import { tagRoutes } from "./tags.js";
+import { notificationRoutes } from "./notifications.js";
+import { compareRoutes } from "./compare.js";
 import { skillRoutes } from "./skills.js";
 import { settingsPatch } from "./settings-schema.js";
 import { speechRoutes } from "./speech/routes.js";
@@ -69,7 +72,8 @@ import { StoredOAuthProvider, takePending } from "./mcp/oauth.js";
 import * as mcpStore from "./mcp/store.js";
 import { storageUsed, userStorageLimit } from "./quota.js";
 import { getSettings, updateSettings } from "./settings.js";
-import { appendMessage, branchThread, deleteThread, ensureThread, getThread, listMessagesJson, listThreads, updateThread } from "./threads.js";
+import { appendMessage, branchThread, deleteThread, ensureThread, getThread, isTemporaryThread, listMessagesJson, listThreads, updateThread } from "./threads.js";
+import { normalizeTag } from "../shared/tags.js";
 import { goWindows, threadUsage, usageSummary } from "./usage.js";
 
 const providerInput = z.object({
@@ -187,6 +191,8 @@ const api = new Hono<AppEnv>()
       projectId: z.string().nullable().optional(),
       modelRef: z.string().min(1).max(300).optional(),
       knowledgeIds: z.array(z.string().min(1).max(200)).max(20).optional(),
+      /** Flat private labels; refused on temporary and comparison chats. */
+      tags: z.array(z.string()).max(10).optional(),
       /** Required when this chat has a copied assistant and the request changes model or knowledge. */
       assistantRevision: z.number().int().min(0).optional(),
     }).safeParse(await c.req.json());
@@ -194,6 +200,11 @@ const api = new Hono<AppEnv>()
     const userId = c.get("user").id;
     const thread = getThread(userId, c.req.param("id"));
     if (!thread) return c.json({ error: "Thread not found" }, 404);
+    if (parsed.data.tags !== undefined && (thread.compareGroupId || isTemporaryThread(thread.id))) {
+      return c.json({ error: "This chat cannot be tagged" }, 400);
+    }
+    // A tag the UI could never produce is a rejected request, not silently dropped text.
+    if (parsed.data.tags?.some((tag) => normalizeTag(tag) === null)) return c.json({ error: "Invalid tag" }, 400);
     // A foreign project would expose its files and memories to this chat. Memory tools already offered
     // re-check the thread's project on every call, so a move needs no extra revocation here.
     if (parsed.data.projectId && !getProject(userId, parsed.data.projectId)) return c.json({ error: "Project not found" }, 404);
@@ -417,6 +428,9 @@ const api = new Hono<AppEnv>()
   .route("/email", emailRoutes)
   .route("/email", draftRoutes)
   .route("/", searchRoutes)
+  .route("/", tagRoutes)
+  .route("/", notificationRoutes)
+  .route("/", compareRoutes)
   .route("/", shareRoutes)
   .route("/", adminRoutes)
   .route("/", permissionRoutes)
