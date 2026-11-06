@@ -15,18 +15,23 @@ const { requireUser } = await import("../auth.js");
 const { saveConnection } = await import("../catalog/providers.js");
 const { arenaRoutes, publicArenaRoutes, resetArenaRouteLimits } = await import("./routes.js");
 const { getCreditBalance, admitCreditRoot, closeCreditRoot, ensureCreditAccount } = await import("../credits/store.js");
+const { setArenaTestDeadlines } = await import("./worker.js");
 const { activeTurnCount, reserveTurn } = await import("../turn-slots.js");
 const { writePolicy } = await import("../permissions/store.js");
 const { usageSummary, goWindows, hiddenArenaRequests } = await import("../usage.js");
 const { setModelAccessPolicies } = await import("../entitlements.js");
+let caseScope = 0;
 let calls = 0, active = 0, maxActive = 0, failure = false, missingUsage = false, delay = 100;
 const provider = createServer(async (req, res) => {
   if (req.url === "/v1/models") return res.setHeader("content-type", "application/json").end(JSON.stringify({ data: [{ id: "fixture-one" }, { id: "fixture-two" }] }));
   if (req.url !== "/v1/chat/completions") return res.writeHead(404).end();
   let body = ""; for await (const chunk of req) body += String(chunk);
   const input = JSON.parse(body) as { model: string };
-  calls++; active++; maxActive = Math.max(active, maxActive);
-  res.on("close", () => { active--; });
+  // An aborted fetch can reach this fixture after the next test starts under full-suite load.
+  // Attribute network observations to the prompt scope, while the real ledger remains authoritative.
+  const tracked = body.includes(`[arena-case-${caseScope}]`);
+  if (tracked) { calls++; active++; maxActive = Math.max(active, maxActive); }
+  res.on("close", () => { if (tracked) active--; });
   if (failure && input.model === "fixture-two") return res.writeHead(422).end("PRIVATE-provider-failure");
   res.writeHead(200, { "content-type": "text/event-stream" });
   const send = (delta: object, finish_reason: string | null = null, usage?: object) => res.write(`data: ${JSON.stringify({ id: "PRIVATE-receipt", model: input.model, object: "chat.completion.chunk", created: 1, choices: [{ index: 0, delta, finish_reason }], ...(usage ? { usage } : {}) })}\n\n`);
@@ -44,9 +49,13 @@ for (const id of ["alice", "bob"]) {
 }
 saveConnection(null, "openai", { baseURL: `http://127.0.0.1:${port}/v1`, apiKey: "fixture" });
 process.env.OKAYCHAT_ARENA_PUBLIC_MODELS = JSON.stringify(["fixture-one", "fixture-two"].map(id => ({ ref: `openai/${id}`, label: `Published ${id}`, epoch: "test-v1" })));
+const publicConfig = process.env.OKAYCHAT_ARENA_PUBLIC_MODELS;
 const app = new Hono().use("*", csrf()).use(requireUser).route("/api/arena", arenaRoutes);
 const pub = new Hono().route("/api/public/arena", publicArenaRoutes);
-const request = (url: string, method = "GET", body?: object, user = "alice") => app.request(`http://localhost/api/arena${url}`, { method, headers: { cookie: `okaychat_session=${user}`, origin: "http://localhost", ...(body ? { "content-type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+const request = (url: string, method = "GET", body?: object, user = "alice") => {
+  const payload = body && "prompt" in body && typeof body.prompt === "string" ? { ...body, prompt: `[arena-case-${caseScope}] ${body.prompt}` } : body;
+  return app.request(`http://localhost/api/arena${url}`, { method, headers: { cookie: `okaychat_session=${user}`, origin: "http://localhost", ...(payload ? { "content-type": "application/json" } : {}) }, ...(payload ? { body: JSON.stringify(payload) } : {}) });
+};
 // Use the real auth cookie name from auth.ts rather than a provider bearer credential.
 
 let nextMutation = 0;
@@ -54,8 +63,11 @@ async function start(mode = "personal") { const response = await request("/battl
 async function drain(id: string) { const response = await request(`/battles/${id}/events`); assert.equal(response.status, 200); return response.text(); }
 after(async () => { provider.closeAllConnections(); await new Promise<void>(resolve => provider.close(() => resolve())); db.close(); rmSync(dir, { recursive: true, force: true }); });
 beforeEach(() => {
+  caseScope++;
+  setArenaTestDeadlines();
+  process.env.OKAYCHAT_ARENA_PUBLIC_MODELS = publicConfig;
   resetArenaRouteLimits(); calls = 0; maxActive = 0; failure = false; missingUsage = false; delay = 100;
-  db.exec("DELETE FROM arena_battles; DELETE FROM usage; DELETE FROM token_credit_requests; DELETE FROM token_credit_roots; DELETE FROM permission_policies; DELETE FROM permission_leases; DELETE FROM provider_model_grants; DELETE FROM provider_model_policies; DELETE FROM provider_connections; UPDATE token_credit_accounts SET credit_tokens=10000,consumed_tokens=0,unknown_requests=0; UPDATE arena_rating_meta SET revision=0");
+  db.exec("DELETE FROM arena_battles; DELETE FROM usage; DELETE FROM token_credit_requests; DELETE FROM token_credit_roots; DELETE FROM permission_policies; DELETE FROM permission_leases; DELETE FROM provider_model_grants; DELETE FROM provider_model_policies; DELETE FROM provider_connections; UPDATE token_credit_accounts SET credit_tokens=10000,consumed_tokens=0,unknown_requests=0; UPDATE arena_rating_meta SET revision=revision+1");
 });
 test("two concurrent calls share one finite root, remain blind through usage, and reveal after one vote", async () => {
   const { response, data } = await start("public"); assert.equal(response.status, 201, JSON.stringify(data));
@@ -125,6 +137,8 @@ test("duplicate starts and duplicate votes preserve one paid pair and one ballot
   assert.equal((await request("/battles", "POST", { ...input, prompt: "changed" })).status, 409);
   const votes = await Promise.all([request(`/battles/${id}/vote`, "POST", { choice: "both_bad" }), request(`/battles/${id}/vote`, "POST", { choice: "both_bad" })]);
   assert.ok(votes.every(v => v.status === 200)); assert.equal(calls, 2);
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM token_credit_requests").get() as { n: number }).n, 2);
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM usage").get() as { n: number }).n, 2);
   assert.equal((db.prepare("SELECT count(*) AS n FROM arena_votes").get() as { n: number }).n, 1);
 });
 test("public pairing rejects an own override, and public reads reject write/scope/invalid filters", async () => {
@@ -133,6 +147,60 @@ test("public pairing rejects an own override, and public reads reject write/scop
   assert.equal((await pub.request("http://localhost/api/public/arena/leaderboard?scope=mine")).status, 400);
   assert.equal((await pub.request("http://localhost/api/public/arena/leaderboard?limit=101")).status, 400);
   assert.equal((await pub.request("http://localhost/api/public/arena/leaderboard", { method: "POST" })).status, 404);
+});
+test("publication removal excludes the whole ballot, restores it, and invalid config disables only public mode", async () => {
+  const config = process.env.OKAYCHAT_ARENA_PUBLIC_MODELS!;
+  const { data } = await start("public"); await drain(data.battle.id);
+  await request(`/battles/${data.battle.id}/vote`, "POST", { choice: "A" });
+  const board = async () => pub.request("http://localhost/api/public/arena/leaderboard");
+  assert.equal(((await (await board()).json()) as { total: number }).total, 2);
+  process.env.OKAYCHAT_ARENA_PUBLIC_MODELS = JSON.stringify((JSON.parse(config) as unknown[]).slice(0, 1));
+  assert.equal(((await (await board()).json()) as { total: number }).total, 0);
+  process.env.OKAYCHAT_ARENA_PUBLIC_MODELS = config;
+  assert.equal(((await (await board()).json()) as { total: number }).total, 2);
+  process.env.OKAYCHAT_ARENA_PUBLIC_MODELS = "invalid-json";
+  assert.equal((await board()).status, 404);
+  assert.equal((await start("public")).response.status, 409);
+  assert.equal((await request("/options")).status, 200);
+  process.env.OKAYCHAT_ARENA_PUBLIC_MODELS = config;
+});
+test("stream permits one attachment; disconnect aborts both and preserves the paid tombstone", async () => {
+  delay = 400; const { data } = await start();
+  const stream = await request(`/battles/${data.battle.id}/events`);
+  assert.equal((await request(`/battles/${data.battle.id}/events`)).status, 409);
+  await stream.body!.cancel();
+  for (let i = 0; i < 100; i++) {
+    const state = (await (await request(`/battles/${data.battle.id}`)).json()) as { battle: { state: string } };
+    if (state.battle.state !== "running") { assert.equal(state.battle.state, "cancelled"); break; }
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.equal(activeTurnCount("alice"), 0);
+  const count = calls; await request(`/battles/${data.battle.id}`); assert.equal(calls, count);
+});
+test("bounded strict input rejects invalid body and oversized request before paid admission", async () => {
+  const initial = { mutationId: "strict", prompt: "x", mode: "personal" };
+  assert.equal((await request("/battles", "POST", { ...initial, unexpected: true })).status, 400);
+  assert.equal((await request("/battles", "POST", { ...initial, prompt: "x".repeat(20001) })).status, 400);
+  assert.equal((await request("/battles", "POST", { ...initial, prompt: "x".repeat(129 * 1024) })).status, 413);
+  assert.equal(calls, 0);
+});
+test("deadline and missing attachment abort both calls, release leases and never redispatch", async () => {
+  for (const attach of [true, false]) {
+    resetArenaRouteLimits();
+    db.exec("UPDATE token_credit_accounts SET unknown_requests=0");
+    setArenaTestDeadlines({ run: attach ? 30 : 500, attach: attach ? 500 : 30 });
+    delay = 400;
+    const { response, data } = await start(); assert.equal(response.status, 201);
+    if (attach) await drain(data.battle.id);
+    else {
+      for (let i = 0; i < 100 && activeTurnCount("alice") > 0; i++) await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    const view = (await (await request(`/battles/${data.battle.id}`)).json()) as { battle: { state: string; canVote: boolean } };
+    assert.equal(view.battle.state, "failed"); assert.equal(view.battle.canVote, false);
+    assert.equal(activeTurnCount("alice"), 0); assert.equal(getCreditBalance("alice").activeOperations, 0);
+    const before = calls; await drain(data.battle.id); assert.equal(calls, before);
+  }
+  setArenaTestDeadlines();
 });
 test("leaderboard filters do not renumber, mine isolates voters, 30-day replay resets and deletion invalidates", async () => {
   delay = 1;
