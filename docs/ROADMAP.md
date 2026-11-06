@@ -1,6 +1,6 @@
 # Roadmap
 
-Status as of 2026-11-05. Update this file when a feature ships or a plan changes.
+Status as of 2026-11-06. Update this file when a feature ships or a plan changes.
 
 ## Pass 1: core (built)
 
@@ -17,6 +17,7 @@ Status as of 2026-11-05. Update this file when a feature ships or a plan changes
 | Providers | OpenCode Go first (onboarding), the user's own ChatGPT plan through the Codex login, OpenCode Zen, native Ollama, and every models.dev provider that speaks OpenAI, OpenAI-compatible, Anthropic, or Google APIs. Custom OpenAI-compatible endpoints (LM Studio, vLLM, older proxies) remain separate | Keys AES-256-GCM encrypted. Go model list is live from `/v1/models`, enriched by models.dev. ChatGPT models are live from the Codex backend (`docs/implementation/codex-chat.md`). Ollama uses `/api/tags`, `/api/show`, and `/api/ps` for installed models, capabilities, context, and loaded state, with pull progress and delete (`docs/implementation/ollama.md`) |
 | Chat | assistant-ui Thread: streaming, Markdown, reasoning, tool calls, branches, edit, regenerate, copy, export; streams resume after reload | Threads and branching history persisted in SQLite. Selected chat and pending stream stored per tab; replay held in server memory for 15 minutes after the last update |
 | Reply editing | Settings → General → Edit assistant messages (off by default, with a confirmation naming every consequence): a pencil on finished replies opens an inline editor, saved text gets an "Edited" badge and Undo | Per account. Only text parts change; id, branch, children, tools, reasoning, and files stay. The first original is kept encrypted for auditing and Undo. Refused while a turn writes, off the latest branch, covered by a summary, or for user messages. Edited text feeds later turns, retries, search, exports, and shares. See `docs/implementation/message-editing.md` |
+| Arena | Blind single-turn Battles, shared-root concurrent metering, immutable vote/reveal, Personal/Public modes and aggregate Elo leaderboards | Separate owner-only transport; explicit operator publication epochs; anonymous read-only board. See `docs/implementation/arena.md` |
 | Model picker | Search, favorites, capability icons, context size, price, per-model reasoning effort | |
 | Files | Images (vision, also pasted from the clipboard), PDFs as native file input up to 10 MB, DOCX (server text extraction), 60+ text/code formats | Models without PDF input get the extracted text, swapped in per request on the server (`pdf-parts.ts`), so switching models keeps working. PDFs without a text layer get a clear note |
 | MCP | Streamable HTTP, SSE, stdio (admin only), OAuth with PKCE + dynamic registration, per-tool toggles, status, reconnect, timeouts, idle close. Image results (saved, shown, injected for vision models), resources (`mcp_list_resources`/`mcp_read_resource`), prompts (composer Prompts menu), form elicitation, MCP Apps (`ui://` cards), admin-shared servers | See `docs/implementation/mcp.md` |

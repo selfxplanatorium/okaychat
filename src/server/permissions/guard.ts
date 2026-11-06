@@ -27,6 +27,7 @@ export const FEATURE_NAMES: Record<FeatureKey, string> = {
   delegation: "delegation",
   skills: "skills",
   evaluations: "evaluations",
+  arena: "Arena",
   channels: "team channels",
   customTools: "custom tools",
   notes: "notes",

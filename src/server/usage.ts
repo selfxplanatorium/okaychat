@@ -54,7 +54,8 @@ export type UsageKind =
   | "channel"
   | "api"
   | "translation"
-  | "video";
+  | "video"
+  | "arena";
 
 export function recordUsage(entry: {
   userId: string;
@@ -72,6 +73,8 @@ export function recordUsage(entry: {
   apiKeyId?: string;
   apiRequestId?: string;
   videoJobId?: string;
+  arenaBattleId?: string;
+  arenaSide?: "A" | "B";
   costState?: "unknown" | "estimated" | "reported";
 }) {
   // An API ledger row is never ambiguous: it names both its key and its request. Other kinds carry
@@ -79,6 +82,7 @@ export function recordUsage(entry: {
   if (entry.kind === "api" ? !entry.apiKeyId || !entry.apiRequestId : !!entry.apiKeyId || !!entry.apiRequestId) {
     throw new Error("API usage ids do not match the usage kind.");
   }
+  if (entry.kind === "arena" ? !entry.arenaBattleId || !entry.arenaSide || !!entry.threadId : !!entry.arenaBattleId || !!entry.arenaSide) throw new Error("Invalid Arena usage linkage");
   if (entry.kind === "video" ? !entry.videoJobId : entry.videoJobId !== undefined) throw new Error("Video usage id does not match kind.");
   if (entry.kind === "video" && Object.values(entry.usage).some(n => n !== 0)) throw new Error("Video usage must have zero tokens.");
   if (entry.videoJobId) {
@@ -90,8 +94,8 @@ export function recordUsage(entry: {
   }
   db.prepare(
     `INSERT INTO usage (user_id, thread_id, provider_id, model_id, kind, input_tokens, output_tokens, reasoning_tokens,
-       cache_read_tokens, cache_write_tokens, cost, created_at, channel_id, channel_run_id, api_key_id, api_request_id, video_job_id, cost_state, credit_request_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       cache_read_tokens, cache_write_tokens, cost, created_at, channel_id, channel_run_id, api_key_id, api_request_id, video_job_id, cost_state, credit_request_id, arena_battle_id, arena_side)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     entry.userId,
     entry.threadId ?? null,
@@ -112,9 +116,17 @@ export function recordUsage(entry: {
     entry.videoJobId ?? null,
     entry.costState ?? "estimated",
     entry.creditRequestId ?? null,
+    entry.arenaBattleId ?? null,
+    entry.arenaSide ?? null,
   );
 }
 
+// A missing battle/vote fails closed, including content purge and account lifecycle races.
+const VISIBLE = "(arena_battle_id IS NULL OR EXISTS (SELECT 1 FROM arena_votes v JOIN arena_battles b ON b.id=v.battle_id WHERE v.battle_id=usage.arena_battle_id AND b.user_id=usage.user_id AND v.voter_id=usage.user_id))";
+export function hiddenArenaRequests(userId: string, sinceMs: number): number {
+  return (db.prepare(`SELECT COUNT(*) AS n FROM token_credit_requests r WHERE r.user_id=? AND r.created_at>=? AND r.kind='arena' AND r.dispatched_at IS NOT NULL AND r.state IN ('open','reported','unknown')
+    AND NOT EXISTS (SELECT 1 FROM arena_votes v JOIN arena_battles b ON b.id=v.battle_id WHERE v.battle_id=json_extract(r.context_json,'$.arenaBattleId') AND b.user_id=r.user_id AND v.voter_id=r.user_id)`).get(userId, sinceMs) as { n: number }).n;
+}
 const GROUPS = {
   day: "strftime('%Y-%m-%d', created_at / 1000, 'unixepoch', 'localtime')",
   model: "provider_id || '/' || model_id",
@@ -128,7 +140,7 @@ export function usageSummary(userId: string, groupBy: keyof typeof GROUPS, since
       `SELECT ${GROUPS[groupBy]} AS key, SUM(input_tokens) AS input, SUM(output_tokens) AS output,
          SUM(reasoning_tokens) AS reasoning, SUM(cache_read_tokens) AS cacheRead, SUM(cache_write_tokens) AS cacheWrite,
          SUM(cost) AS cost, COUNT(*) AS requests, COALESCE(SUM(CASE WHEN cost_state = 'unknown' THEN 1 ELSE 0 END),0) AS unknownCostRequests
-       FROM usage WHERE user_id = ? AND created_at >= ? GROUP BY key ORDER BY ${groupBy === "day" ? "key" : "cost DESC"}`,
+       FROM usage WHERE user_id = ? AND created_at >= ? AND ${VISIBLE} GROUP BY key ORDER BY ${groupBy === "day" ? "key" : "cost DESC"}`,
     )
     .all(userId, sinceMs) as unknown as UsageRow[];
 }
@@ -138,7 +150,7 @@ export function goWindows(userId: string): GoWindow[] {
   const spent = (ms: number) =>
     (
       db
-        .prepare("SELECT COALESCE(SUM(cost), 0) AS c FROM usage WHERE user_id = ? AND provider_id = 'opencode-go' AND created_at >= ?")
+        .prepare(`SELECT COALESCE(SUM(cost), 0) AS c FROM usage WHERE user_id = ? AND provider_id = 'opencode-go' AND created_at >= ? AND ${VISIBLE}`)
         .get(userId, Date.now() - ms) as { c: number }
     ).c;
   const hour = 3_600_000;

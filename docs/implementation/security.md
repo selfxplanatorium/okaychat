@@ -192,3 +192,7 @@ feature is rechecked at admission and dispatch; channel events additionally requ
 (never DMs or joined rooms), and shared-knowledge restrictions are rechecked before decrypting a body.
 Receivers must validate the HMAC timestamp and deduplicate delivery ids; delivery is bounded at-least-once,
 so a timeout or restart can duplicate an action, and already-sent data cannot be recalled.
+
+## Arena
+
+Arena allowlists side-only final text/state before a committed owned vote. It strips reasoning/provider error metadata, drops Markdown images, masks unrevealed usage projections and never publishes content or individual ballots. This is application metadata blindness: self-identification, style/timing guesses, modified clients and server operators are outside its guarantee. See [Arena](arena.md).

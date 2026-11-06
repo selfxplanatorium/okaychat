@@ -1,3 +1,5 @@
+import { abortArenaUser } from "./arena/worker.js";
+import { bumpRatingRevision } from "./arena/store.js";
 import { creditBalances, ensureCreditAccount, getCreditBalance } from "./credits/store.js";
 import { removeUserImports } from "./conversation-import/jobs.js";
 import { deletingUserVideos, removeUserVideoFiles } from "./video/maintenance.js";
@@ -154,11 +156,15 @@ export const adminRoutes = new Hono<AppEnv>()
     abortChannelRunsForUser(id);
     // Live external API calls of the account stop before the key rows cascade away.
     abortApiCalls(id);
+    abortArenaUser(id);
     // Active webhook attempts stop before their endpoint rows cascade away.
     abortUserEndpointSends(id);
     deletingUserVideos(id);
     removeUserImports(id);
-    db.prepare("DELETE FROM users WHERE id = ?").run(id);
+    tx(() => {
+      bumpRatingRevision();
+      db.prepare("DELETE FROM users WHERE id = ?").run(id);
+    });
     await removeUserVideoFiles(id);
     abortRevokedAgentRuns();
     requestChannelRevocation();

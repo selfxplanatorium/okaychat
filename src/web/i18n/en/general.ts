@@ -1,4 +1,5 @@
 export default {
+  sidebarArena: "Arena",
   title: "General",
   languageTitle: "Language",
   languageDescription: "Applies to this app on every device you sign in to.",

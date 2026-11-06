@@ -1,4 +1,6 @@
 export default {
+  arenaPurpose: "Arena",
+  arenaHidden: "{count} unrevealed Arena requests are excluded from these totals and Go windows. Your token balance includes reported activity and may change before reveal.",
   title: "Usage",
   description: "Tokens and estimated cost from your own requests, priced with models.dev rates.",
   range: "Range",

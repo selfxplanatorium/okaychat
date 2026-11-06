@@ -35,6 +35,6 @@ export interface TokenCreditAuditEntry {
   reason: string;
   createdAt: number;
 }
-export const CREDIT_ORIGINS = ["chat", "temporary", "schedule", "api", "evaluation", "evaluation_judge", "channel", "translation", "compaction", "title", "memory", "voice", "unmetered"] as const;
+export const CREDIT_ORIGINS = ["chat", "temporary", "schedule", "api", "evaluation", "evaluation_judge", "channel", "translation", "compaction", "title", "memory", "voice", "unmetered", "arena"] as const;
 export type CreditOrigin = typeof CREDIT_ORIGINS[number];
 export const MAX_TOKEN_CREDIT = 1_000_000_000_000;

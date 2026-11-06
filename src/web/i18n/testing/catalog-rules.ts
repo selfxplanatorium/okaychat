@@ -15,7 +15,7 @@ export const SOURCE = en as Source;
 
 /** Namespaces every non-English shipped locale translates completely. */
 export const CORE_NAMESPACES = [
-  "video", "common", "shell", "auth", "sidebar", "composer", "thread", "messageDetails", "generation", "annotations",
+  "arena", "video", "common", "shell", "auth", "sidebar", "composer", "thread", "messageDetails", "generation", "annotations",
   "translation", "settings", "general", "account", "usage", "format", "errors", "services", "tags", "ui", "webhooks",
 ] as const;
 
@@ -38,7 +38,7 @@ const namespaceKeys = (namespaces: readonly string[]) =>
  */
 export function requiredKeys(coverage: UiLocaleRow["coverage"]): string[] {
   if (coverage === "source") return [];
-  if (coverage === "legacy") return [...new Set([...namespaceKeys(CORE_NAMESPACES), "permissions.featureVideosLabel", "permissions.featureVideosHelp", "assistants.familyVideos", ...LEGACY_SUPPLEMENT])];
+  if (coverage === "legacy") return [...new Set([...namespaceKeys(CORE_NAMESPACES), "permissions.featureVideosLabel", "permissions.featureVideosHelp", "permissions.featureArenaLabel", "permissions.featureArenaHelp", "assistants.familyVideos", ...LEGACY_SUPPLEMENT])];
   return Object.entries(SOURCE).flatMap(([ns, entries]) => Object.keys(entries).map((key) => `${ns}.${key}`));
 }
 

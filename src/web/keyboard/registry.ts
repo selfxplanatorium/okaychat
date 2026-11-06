@@ -142,6 +142,7 @@ function handle(event: KeyboardEvent, chords: boolean) {
     // Message commands first: inside a focused message they take precedence over the same key elsewhere.
     const candidates = [...(byCombo.get(combo) ?? [])].sort((a, b) => Number(b.scope === "message") - Number(a.scope === "message"));
     for (const command of candidates) {
+      if (typing && command.id.startsWith("arena.")) continue;
       if (command.scope === "message") {
         if (!message || (modal && !modal.contains(message))) continue;
       } else {

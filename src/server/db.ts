@@ -2300,6 +2300,61 @@ CREATE UNIQUE INDEX usage_credit_request ON usage(credit_request_id)
     db.prepare("INSERT INTO token_credit_accounts(user_id,credit_tokens,period_started_at) SELECT id,NULL,? FROM users").run(migrationNow);
     if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "token-credits") throw new Error("Injected token-credits migration failure");
   },
+  () => {
+    db.exec(`
+CREATE TABLE arena_models (
+  id TEXT PRIMARY KEY, user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+  scope TEXT NOT NULL CHECK(scope IN ('personal','public')),
+  model_ref TEXT NOT NULL, label TEXT NOT NULL, epoch TEXT, fingerprint TEXT NOT NULL, created_at INTEGER NOT NULL,
+  CHECK((scope='personal' AND user_id IS NOT NULL AND epoch IS NULL) OR (scope='public' AND user_id IS NULL AND epoch IS NOT NULL))
+);
+CREATE UNIQUE INDEX arena_models_personal ON arena_models(user_id,model_ref,fingerprint) WHERE scope='personal';
+CREATE UNIQUE INDEX arena_models_public ON arena_models(model_ref,epoch) WHERE scope='public';
+CREATE TABLE arena_battles (
+  id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  mutation_id TEXT NOT NULL, request_hash TEXT NOT NULL,
+  mode TEXT NOT NULL CHECK(mode IN ('personal','public')),
+  state TEXT NOT NULL CHECK(state IN ('running','ready','voted','failed','cancelled','interrupted','expired')),
+  created_at INTEGER NOT NULL, ended_at INTEGER, content_expires_at INTEGER NOT NULL, voted_at INTEGER,
+  UNIQUE(user_id,mutation_id)
+);
+CREATE INDEX arena_battles_owner ON arena_battles(user_id,created_at DESC,id);
+CREATE UNIQUE INDEX arena_battles_running ON arena_battles(user_id) WHERE state='running';
+CREATE INDEX arena_battles_expiry ON arena_battles(content_expires_at,id);
+CREATE TABLE arena_panes (
+  battle_id TEXT NOT NULL REFERENCES arena_battles(id) ON DELETE CASCADE,
+  side TEXT NOT NULL CHECK(side IN ('A','B')),
+  personal_model_id TEXT NOT NULL REFERENCES arena_models(id) ON DELETE CASCADE,
+  public_model_id TEXT REFERENCES arena_models(id), launch_snapshot_enc TEXT,
+  state TEXT NOT NULL CHECK(state IN ('running','done','failed','cancelled','interrupted')),
+  finish_reason TEXT, error_code TEXT, receipt_id TEXT, usage_json TEXT CHECK(usage_json IS NULL OR json_valid(usage_json)),
+  cost REAL CHECK(cost IS NULL OR cost>=0), cost_state TEXT NOT NULL DEFAULT 'unknown' CHECK(cost_state IN ('unknown','estimated','reported')),
+  PRIMARY KEY(battle_id,side), UNIQUE(battle_id,personal_model_id)
+);
+CREATE TABLE arena_contents (
+  battle_id TEXT PRIMARY KEY REFERENCES arena_battles(id) ON DELETE CASCADE,
+  prompt_enc TEXT NOT NULL, answer_a_enc TEXT NOT NULL, answer_b_enc TEXT NOT NULL,
+  reserved_bytes INTEGER NOT NULL CHECK(reserved_bytes>=0), updated_at INTEGER NOT NULL
+);
+CREATE TABLE arena_votes (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  battle_id TEXT NOT NULL UNIQUE REFERENCES arena_battles(id) ON DELETE CASCADE,
+  voter_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  choice TEXT NOT NULL CHECK(choice IN ('A','B','tie','both_bad')), created_at INTEGER NOT NULL
+);
+CREATE INDEX arena_votes_owner ON arena_votes(voter_id,created_at,seq);
+CREATE INDEX arena_votes_time ON arena_votes(created_at,seq);
+CREATE TABLE arena_rating_meta (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL);
+INSERT INTO arena_rating_meta VALUES (1,0);
+ALTER TABLE usage ADD COLUMN arena_battle_id TEXT;
+ALTER TABLE usage ADD COLUMN arena_side TEXT CHECK(
+  (arena_battle_id IS NULL AND arena_side IS NULL) OR
+  (arena_battle_id IS NOT NULL AND arena_side IS NOT NULL AND arena_side IN ('A','B'))
+);
+CREATE INDEX usage_arena ON usage(arena_battle_id,arena_side) WHERE arena_battle_id IS NOT NULL;
+    `);
+    if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "arena") throw new Error("Injected Arena migration failure");
+  },
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

@@ -89,6 +89,7 @@ export function KeyboardShortcuts() {
   for (const page of ["library", "knowledge", "projects", "scheduled", "plugins", "compare", "evaluations"] as const) {
     useCommand(`nav.${page}`, () => navigate(`/${page}`));
   }
+  useCommand("navigation.arena", () => navigate("/arena"));
   useCommand("nav.settings", () => navigate("/settings"));
   useCommand("app.openAgents", () => navigate(settingsHref("agents")));
   useCommand("nav.createProject", () => navigate("/projects?new=1"));
@@ -107,7 +108,7 @@ export function KeyboardShortcuts() {
     });
   }
 
-  const inChat = !location.startsWith("/settings") && !["/scheduled", "/library", "/plugins", "/projects", "/compare", "/evaluations"].includes(location);
+  const inChat = !location.startsWith("/settings") && !["/scheduled", "/library", "/plugins", "/projects", "/compare", "/evaluations", "/arena", "/arena/leaderboard"].includes(location);
   useCommand("chat.focusComposer", () => {
     if (inChat) return focusComposer();
     showChat(navigate);

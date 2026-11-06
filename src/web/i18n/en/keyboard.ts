@@ -1,4 +1,5 @@
 export default {
+  cmdNavArena: "Arena",
   cmdAppCommands: "Show commands and shortcuts",
   cmdAppSearch: "Search chats",
   cmdAppToggleSidebar: "Show or hide the sidebar",

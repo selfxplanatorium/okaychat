@@ -1,3 +1,4 @@
+import { arenaRoutes } from "./arena/routes.js";
 import { conversationImportRoutes } from "./conversation-import/routes.js";
 import { videoRoutes } from "./video/routes.js";
 import { chatgptRoutes } from "./chatgpt-oauth-routes.js";
@@ -89,7 +90,7 @@ import { storageUsed, userStorageLimit } from "./quota.js";
 import { getSettings, updateSettings } from "./settings.js";
 import { appendMessage, branchThread, deleteThread, ensureThread, getThread, isTemporaryThread, listMessagesJson, listThreads, updateThread } from "./threads.js";
 import { normalizeTag } from "../shared/tags.js";
-import { goWindows, threadUsage, usageSummary } from "./usage.js";
+import { hiddenArenaRequests, goWindows, threadUsage, usageSummary } from "./usage.js";
 
 const providerInput = z.object({
   apiKey: z.string().optional(),
@@ -318,6 +319,7 @@ const api = new Hono<AppEnv>()
   .route("/saved-prompts", savedPromptRoutes)
   .route("/notes", notesRoutes)
   .route("/calendar", calendarRoutes)
+  .route("/arena", arenaRoutes)
   .route("/webhooks", webhookRoutes)
 
   // Usage
@@ -325,7 +327,7 @@ const api = new Hono<AppEnv>()
     const days = Number(c.req.query("days") ?? 30);
     const groupBy = (c.req.query("groupBy") ?? "day") as "day" | "model" | "provider" | "kind";
     const since = Date.now() - days * 86_400_000;
-    return c.json({ agents: agentUsage(c.get("user").id, since), rows: usageSummary(c.get("user").id, groupBy, since), go: goWindows(c.get("user").id) });
+    return c.json({ hiddenArenaRequests: hiddenArenaRequests(c.get("user").id, since), incompleteDueToArena: hiddenArenaRequests(c.get("user").id, since) > 0, agents: agentUsage(c.get("user").id, since), rows: usageSummary(c.get("user").id, groupBy, since), go: goWindows(c.get("user").id) });
   })
 
   // Storage

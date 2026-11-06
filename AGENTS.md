@@ -55,6 +55,7 @@ src/server/
   appearance.ts       Validated per-user appearance API (preferences + custom themes inside user_settings)
   account.ts          Account display name and private profile pictures (re-encoded WebP in the media store)
   memory.ts           Encrypted account/project memories, BM25 retrieval, summaries in the prompt, past-chat search, model tools, import/export
+  arena/              Blind Battles: concurrent shared-root execution, owner-only vote/reveal and aggregate Elo leaderboards (docs/implementation/arena.md)
   evaluations/        Private datasets, immutable runs, the in-process worker, rubric judging, comparison and export (no chat reuse)
   memory-learn.ts     Background memory worker: reviews idle chats into fact operations, rewrites scope summaries
   knowledge/          Knowledge base: deterministic chunker, embeddings, hybrid retrieval, ingestion queue, routes, read-only chat tools
@@ -111,6 +112,7 @@ src/web/
   components/webhooks Webhook editor, one-time secret review, request preview, delivery log and retry
   components/custom-tools  Plugins → Custom tools workspace: list, editor, schema builder, secret headers, test/review/result cards
   components/notes    Notes workspace, autosaving editor, safe preview, conflict/outbox recovery, source actions, composer handoff
+  components/arena    Blind Battle setup/stream/vote/reveal, Mine/Global board and standalone public Leaderboard
   components/calendar Calendar workspace, agenda/month/week, explicit-save event dialog, zone and fold/gap fields, reminder offsets
   components/share    Public share page and share button
   theme/              T3Code theme engine port (see its README); bundled-fonts.ts lists the shipped font families; depth.css holds the depth utilities
@@ -163,6 +165,7 @@ docs/                 Reusable documentation (see below)
 - `docs/implementation/library.md`: the Library page and API: what is catalogued, upload thread recovery, pagination, previews.
 - `docs/implementation/media.md`: image storage (files + `media` rows), sharp and its Docker tradeoff, variants, caching/validators, chat references and the model boundary, lifetime/forks, quota, migration/GC, VACUUM and backups.
 - `docs/implementation/memory.md`: the summary/review/retrieval design, controls, and transfer formats.
+- `docs/implementation/arena.md`: Arena execution, credit/usage blindness, publication epochs and rating/query contracts.
 - `docs/implementation/evaluations.md`: datasets, immutable runs, the non-resuming worker, prompts, judge contract, limits, quota, and comparison/export.
 - `docs/implementation/channels.md`: team room authority, storage/FTS, REST and cursors, bounded SSE, read state/notices, the reduced AI binding and worker, quota, and the web workspace.
 - `docs/implementation/room-archives.md`: the room archive ZIP/manifest, strict container checks, authority and snapshot, job lifecycle/recovery, atomic import, historical identity/provenance, quota, and the web flow.
@@ -216,6 +219,9 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 - Commits: no co-author lines.
 
 ## Non-obvious facts
+
+- Arena (`server/arena/`, `shared/arena.ts`) creates no threads or comparison rows. Two concurrent calls reserve two hard slots/two policy leases and share one admitted `arena` credit root until both settle. Only an owned committed vote permits reveal and unmasks ordinary session usage; failed/expired/discarded unvoted requests stay masked, while real credit counters remain authoritative. Public boards contain only explicitly published shared-connection epoch identities and aggregates. Startup interrupts battles after credit recovery; account deletion increments rating revision inside the cascade transaction. See `docs/implementation/arena.md`.
+
 
 - Token allowances (`src/server/credits/`, `docs/implementation/token-credits.md`): every model call needs a `CreditPermit` from an admitted credit root; `createModel` has no optional fallback and its innermost middleware writes one receipt and one `usage` row per provider invocation, so never add an aggregate `recordUsage` for model calls. A new paid entry point admits its own root (`withCreditRoot`, or `turnStream`/`creditOwnedStream` for streams) before any history write or dispatch and ends it only after every child settles. A finite account allows one active root; unlimited roots are non-exclusive. A new unpriced remote service (no token telemetry) must call `assertMeteredService` at its executor and run under `withUnmeteredRoot`. Finite accounts get one provider attempt (no transport retry). `recoverCreditOperations()` runs before every other recovery in `index.ts`.
 

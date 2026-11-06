@@ -47,12 +47,14 @@ function InertAppImage({ src, alt }: React.ComponentProps<"img">) {
   return <ProtectedMarkdownImage src={src} alt={alt} />;
 }
 
+const imageFreeComponents = { ...components, img: () => null };
+
 const noteComponents = { ...components, img: InertAppImage };
 
-export function SimpleMarkdown({ children, className, imagePolicy = "all" }: { children: string; className?: string; imagePolicy?: "all" | "remote" }) {
+export function SimpleMarkdown({ children, className, imagePolicy = "all" }: { children: string; className?: string; imagePolicy?: "all" | "remote" | "none" }) {
   return (
     <div className={cn(MARKDOWN_CLASSES, className)}>
-      <Markdown remarkPlugins={remarkPlugins} components={imagePolicy === "remote" ? noteComponents : components}>
+      <Markdown remarkPlugins={remarkPlugins} components={imagePolicy === "none" ? imageFreeComponents : imagePolicy === "remote" ? noteComponents : components}>
         {preprocessMarkdown(children)}
       </Markdown>
     </div>

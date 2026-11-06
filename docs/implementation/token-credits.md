@@ -120,3 +120,7 @@ no server default allowance, and no multi-process writer support.
 Deferred: exposing the effective evaluation concurrency in the run view, hiding custom HTTP tools (they
 are refused at execution), titles as children of a still-open turn root, and API/channel terminal
 receipts sharing the settlement transaction.
+
+## Arena
+
+Arena admits one `arena` root after two hard turn slots and two policy leases are reserved. Both raw invocations use that permit; it remains active until both drains/receipts settle. Each invocation writes its own usage/debit. Unrevealed display rows are masked separately; balance/debit enforcement is unchanged. Both dispatched calls may overshoot a finite allowance. See [Arena](arena.md).

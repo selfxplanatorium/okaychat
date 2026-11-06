@@ -105,3 +105,7 @@ Images: `chat.loadImage` clicks the newest Load image placeholder of a remote Ma
 `channels.askAi`, and `channels.stopAi` join the one command catalog without default global bindings.
 The room workspace handles Mod+F, J/K row movement, and R reply itself while it has focus, so private
 chat handlers never fire for a channel composer. Every action is also available without a shortcut.
+
+## Arena
+
+Arena commands are in the central catalog. `navigation.arena` opens the workspace; `arena.voteA/B/Tie/BothBad` default to Alt+Shift+1/2/3/4. Run/Stop/Next/Leaderboard/copy/discard are configurable commands. Availability comes from visible enabled controls; Arena shortcuts ignore editable fields, IME/repeats and modals.

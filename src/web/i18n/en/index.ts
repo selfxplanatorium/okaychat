@@ -4,6 +4,7 @@ import account from "./account";
 import agents from "./agents";
 import admin from "./admin";
 import annotations from "./annotations";
+import arena from "./arena";
 import apiAccess from "./apiAccess";
 import assistants from "./assistants";
 import appearance from "./appearance";
@@ -64,6 +65,7 @@ export const en = {
   admin,
   agents,
   annotations,
+  arena,
   apiAccess,
   assistants,
   appearance,
