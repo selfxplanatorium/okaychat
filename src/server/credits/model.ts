@@ -6,7 +6,15 @@ import { costOf, type UsageKind } from "../usage.js";
 import { assertCreditPermit, beginCreditRequest, markCreditDispatched, settleCreditRequest, validCreditUsage, type CreditContext, type CreditPermit } from "./store.js";
 
 /** Raw adapter totals are optional. Never turn absent telemetry into a reported zero. */
-export function rawCreditUsage(raw: LanguageModelV4Usage | undefined): TokenUsage | undefined {
+export function rawCreditUsage(raw: LanguageModelV4Usage | undefined, format?: ModelInfo["format"]): TokenUsage | undefined {
+  // These adapters default absent wire counters to zero. Check their retained telemetry before
+  // trusting the normalized totals, or an incomplete response silently forgives paid work.
+  if (format === "openai-chat" || format === "google") {
+    const wire = raw?.raw;
+    if (!wire || typeof wire !== "object" || Array.isArray(wire)) return;
+    const keys = format === "openai-chat" ? ["prompt_tokens", "completion_tokens"] : ["promptTokenCount", "candidatesTokenCount"];
+    if (keys.some(key => typeof wire[key] !== "number" || !Number.isSafeInteger(wire[key]) || Number(wire[key]) < 0)) return;
+  }
   const input = raw?.inputTokens?.total;
   const output = raw?.outputTokens?.total;
   if (input === undefined || output === undefined) return;
@@ -25,7 +33,7 @@ export function creditModelMiddleware(options: {
     return beginCreditRequest(options.permit, { providerId: options.model.providerId, modelId: options.model.id, kind: options.kind, context: options.context });
   };
   const finish = (id: string, raw?: LanguageModelV4Usage) => {
-    const usage = rawCreditUsage(raw);
+    const usage = rawCreditUsage(raw, options.model.format);
     // The price is a display estimate from external catalog data; a malformed one must not block the debit.
     const cost = usage ? costOf(options.model.cost, usage) : 0;
     if (usage) settleCreditRequest(id, { state: "reported", usage, cost: Number.isFinite(cost) && cost >= 0 ? cost : 0 });

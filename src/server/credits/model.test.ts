@@ -128,3 +128,13 @@ test("error frames without final usage stay unknown, but errors after finish pre
   assert.equal(getCreditBalance("meter").unknownRequests, 1);
   assert.equal(getCreditBalance("meter").consumedTokens, 12);
 });
+
+test("wire counters cannot become reported zero through adapter defaults", () => {
+  for (const format of ["openai-chat", "google"] as const) {
+    const keys = format === "openai-chat" ? ["prompt_tokens", "completion_tokens"] : ["promptTokenCount", "candidatesTokenCount"];
+    for (const wire of [{}, { [keys[0]!]: 10 }, { [keys[1]!]: 2 }, { [keys[0]!]: null, [keys[1]!]: 2 }]) {
+      assert.equal(rawCreditUsage({ ...raw(10, 0), raw: wire }, format), undefined);
+    }
+    assert.equal(rawCreditUsage({ ...raw(0, 0), raw: { [keys[0]!]: 0, [keys[1]!]: 0 } }, format)?.input, 0);
+  }
+});
