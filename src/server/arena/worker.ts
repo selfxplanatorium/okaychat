@@ -11,10 +11,13 @@ import { reserveTurn } from "../turn-slots.js";
 import { admitCreditRoot, type CreditPermit } from "../credits/store.js";
 import { creditSignal, endCreditRoot } from "../credits/admission.js";
 import { arenaUnavailable, eligibleTargets, guardTarget, registerPersonalModel, samplePair, type ArenaTarget } from "./models.js";
-import { createBattle, expireContents, finishBattle, finishPane, getBattle, normalizeStart, startHash } from "./store.js";
+import { assertBattleCapacity, createBattle, expireContents, finishBattle, finishPane, getBattle, normalizeStart, startHash } from "./store.js";
 
 interface Job { userId: string; controller: AbortController; cancelled: boolean; attached: boolean; wake?: () => void; pending: Uint8Array[]; bytes: number; timer?: ReturnType<typeof setTimeout>; closed: boolean }
 const jobs = new Map<string, Job>();
+let deadlines = { run: ARENA_LIMITS.deadlineMs as number, attach: 15_000 };
+/** In-process test seam, never read from a request or environment configuration. */
+export function setArenaTestDeadlines(value?: { run: number; attach: number }): void { deadlines = value ?? { run: ARENA_LIMITS.deadlineMs, attach: 15_000 }; }
 const encoder = new TextEncoder();
 function frame(type: string, data: unknown): Uint8Array { return encoder.encode(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`); }
 function emit(job: Job, type: string, data: unknown): void {
@@ -45,6 +48,8 @@ export async function startBattle(userId: string, input: unknown): Promise<{ bat
   const replay = db.prepare("SELECT id,request_hash FROM arena_battles WHERE user_id=? AND mutation_id=?").get(userId, start.mutationId) as { id: string; request_hash: string } | undefined;
   if (replay) { if (replay.request_hash !== startHash(start)) throw arenaUnavailable("arena_start_conflict"); return { battle: getBattle(userId, replay.id), created: false }; }
   expireContents();
+  const snapshots = targets.map(t => ({ ref: t.model.ref, label: t.model.name, fingerprint: t.fingerprint, effort: t.model.reasoning ? resolveReasoningEffort(t.model, null, "none") : "none", system, priceKnown: !!t.model.cost }));
+  assertBattleCapacity(userId, start.prompt, snapshots);
   const releases: Array<() => void> = [];
   let permit: CreditPermit | undefined;
   try {
@@ -53,12 +58,12 @@ export async function startBattle(userId: string, input: unknown): Promise<{ bat
     const controller = new AbortController();
     for (const lease of leases) releases.push(holdLease(lease, () => controller.abort()));
     permit = admitCreditRoot(userId, "arena");
-    const assignments = targets.map(t => ({ personalModelId: registerPersonalModel(userId, t.model.ref, t.model.name, t.fingerprint), ...(t.publicId ? { publicModelId: t.publicId } : {}), snapshot: { ref: t.model.ref, label: t.model.name, fingerprint: t.fingerprint, effort: t.model.reasoning ? resolveReasoningEffort(t.model, null, "none") : "none", system, priceKnown: !!t.model.cost } }));
+    const assignments = targets.map((t, index) => ({ personalModelId: registerPersonalModel(userId, t.model.ref, t.model.name, t.fingerprint), ...(t.publicId ? { publicModelId: t.publicId } : {}), snapshot: snapshots[index]! }));
     const result = createBattle(userId, start, [assignments[0]!, assignments[1]!], permit);
     if (!result.created) { await endCreditRoot(permit); releases.forEach(release => release()); return result; }
     const id = result.battle.id;
     const job: Job = { userId, controller, cancelled: false, attached: false, pending: [], bytes: 0, closed: false };
-    job.timer = setTimeout(() => controller.abort(), 15_000); job.timer.unref?.();
+    job.timer = setTimeout(() => controller.abort(), deadlines.attach); job.timer.unref?.();
     jobs.set(id, job);
     const ownedPermit = permit;
     void execute(id, job, targets, system, start.prompt, start.mode, ownedPermit, releases).catch(() => {});
@@ -69,7 +74,7 @@ export async function startBattle(userId: string, input: unknown): Promise<{ bat
   }
 }
 async function execute(id: string, job: Job, targets: readonly [ArenaTarget, ArenaTarget], system: string, prompt: string, mode: "personal" | "public", permit: CreditPermit, releases: Array<() => void>): Promise<void> {
-  const deadline = AbortSignal.timeout(ARENA_LIMITS.deadlineMs);
+  const deadline = AbortSignal.timeout(deadlines.run);
   const signal = creditSignal(permit, AbortSignal.any([job.controller.signal, deadline]));
   const heartbeat = setInterval(() => emit(job, "heartbeat", {}), 5000); heartbeat.unref?.();
   try {

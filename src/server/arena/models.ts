@@ -1,3 +1,4 @@
+import { getCreditBalance } from "../credits/store.js";
 import { randomInt } from "node:crypto";
 import { z } from "zod";
 import { db, tx } from "../db.js";
@@ -141,5 +142,11 @@ export function guardTarget(userId: string, target: ArenaTarget, mode: "personal
 export async function arenaOptions(userId: string) {
   let targets: ArenaTarget[] = [], disabledReason: string | undefined;
   try { targets = await eligibleTargets(userId, "personal"); } catch { disabledReason = featureAllowed(userId, "arena") ? "arena_concurrency" : "arena_disabled"; }
+  const balance = getCreditBalance(userId);
+  if (!disabledReason && balance.creditTokens !== null) {
+    if (balance.status === "exhausted") disabledReason = "token_credit_exhausted";
+    else if (balance.status === "usage_unknown") disabledReason = "token_credit_usage_unknown";
+    else if (balance.activeOperations > 0) disabledReason = "token_credit_busy";
+  }
   return { modes: { personal: targets.length >= 2, public: publicEnabled() && targets.filter(t => t.publicId).length >= 2 }, models: targets.map(t => ({ ref: t.model.ref, name: t.model.name, publicEligible: !!t.publicId })), limits: { maxPrompt: 20000, maxContents: 20, concurrentPanes: 2 }, ...(disabledReason ? { disabledReason } : targets.length < 2 ? { disabledReason: "arena_pool_small" } : {}) };
 }

@@ -1,4 +1,5 @@
 export default {
+  arena: "Arena",
   branchedChat: "Branched chat",
   searchChats: "Search chats",
   searchDescription: "Search chat titles and messages across all projects, or run an app command. Use arrow keys to choose and Enter to select.",

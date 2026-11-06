@@ -114,3 +114,7 @@ precedence, empty and stale-only grants being invisible, list filtering and prov
 no bypass, audience pruning, group deletion, connection delete/re-add, factory rejection of revoked and
 fabricated shared connections, and the admin routes (401/403, 404, audience and catalog validation, stale
 retention, duplicate targets, mode all).
+
+## Arena
+
+Arena intersects the live catalog with account and exact-model `arena` permission. Every supplied pool ref must pass; no silent narrowing. Public battles additionally require an explicitly published shared-connection epoch and reject own overrides. Viewing an aggregate leaderboard grants no execution permission. See [Arena](arena.md).

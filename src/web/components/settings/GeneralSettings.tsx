@@ -38,6 +38,7 @@ const SIDEBAR_LABELS = {
   channels: "settings.sidebarChannels",
   compare: "general.sidebarCompare",
   evaluations: "general.sidebarEvaluations",
+  arena: "general.sidebarArena",
 } as const;
 
 export function GeneralSettings() {

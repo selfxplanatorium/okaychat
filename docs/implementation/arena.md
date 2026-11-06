@@ -52,7 +52,7 @@ Disconnect aborts both calls. Reads never redispatch. Provider error prose is no
 Credit origins/kinds/context allowlists include Arena. Middleware settlement alone writes usage with
 battle/side linkage. Every session usage grouping and Go window excludes rows without an owned
 committed vote; the response separately reports hidden dispatched request count/incomplete totals.
-The actual credit counters stay unchanged. Failed, expired and discarded unvoted rows remain hidden.
+Options also report finite-credit refusal states without allocating work. The actual credit counters stay unchanged. Failed, expired and discarded unvoted rows remain hidden.
 Admin usage is outside the blindness boundary.
 
 `OKAYCHAT_ARENA_PUBLIC_MODELS` is a JSON array of `{ref,label,epoch}` entries (at most 100).
@@ -74,7 +74,43 @@ committed votes remain readable after expiry/revocation. Board viewing consumes 
 
 ## Web and verification status
 
-The web surface is integrated in the following phase, with browser acceptance recorded separately.
+The lazy `/arena` workspace has Personal/Public setup, an eligible pool picker, final-text streaming
+panes, immutable voting/reveal, clear-content review, Next and Mine/Global board controls.
+`/arena/leaderboard` is a lazy standalone anonymous page and loads no session models/settings.
+The sidebar entry is configurable with the existing sidebar settings. Commands live in the central
+catalog; Alt+Shift+1/2/3/4 vote only when the enabled Arena controls are visible and never while
+editing text, composing IME, repeating keys or in a modal. Next focuses setup without dispatch.
+
+The client keeps only an account-scoped device mode and an opaque pending mutation id in localStorage.
+It recovers uncertain starts by mutation lookup and retains the same choice while a vote is uncertain.
+Leaving/unmounting aborts its stream. Failed loads are separate from empty boards; stale rows stay
+labelled after a failed refresh. Safe Markdown uses an image-free renderer, including reference and
+nested image syntax. Desktop panes scroll independently; mobile content/reveal scroll as one document,
+with both panes mounted and the vote bar in flow/sticky at the bottom. Reduced-motion controls suppress
+spinner movement. The Arena namespace is complete in all six shipped locales and in the RTL ratchet.
+
+`test/acceptance/arena-fixture.mjs` runs an isolated compiled app with two local streaming models and
+real SQLite/session/CSRF/catalog/credit paths. It prints a private temp directory; it does not expose a
+production bypass. After building, run it on an unused loopback port, configure Tailscale Serve for that
+port, then run `ARENA_FIXTURE_MANIFEST=<dir>/fixture.json ARENA_BASE_URL=<https URL with port>
+node test/acceptance/arena.mjs`. The Playwright runner writes screenshots and its JSON result outside the
+repository in the fixture directory. It checks concurrent finite-root dispatch, masking/reveal, immutable
+votes/reload, Next, mobile/reduced-motion, public API isolation/ranks using authorized ballots, controlled
+failure/Stop and all locales. Stop fixture processes and remove only their Serve ports after use.
 Storage, rating, metered local-provider integration, credit/policy rejection, cancellation, duplicate
 start/vote, public privacy and leaderboard filter/replay tests live under `server/arena/`.
 No external service or runtime dependency is added.
+
+## Limits
+
+This is single-process, text-only preference data. Prompts/answers/individual ballots are never public.
+Model self-identification, recognizable writing style and timing may suggest an identity; server/database
+operators and deliberately modified clients are outside the metadata-blindness guarantee. Ratings are
+self-selected and not calibrated intelligence, confidence intervals or certified opponent connectivity.
+Known model upgrades require a new public epoch; mutable upstream aliases cannot be detected reliably.
+No per-pane retry, vote editing, cross-instance registry, tools, attachments or chat promotion is added.
+
+The anonymous limiter uses the transport socket address (60 reads/minute), never forwarded IP headers;
+a reverse proxy may therefore share one bucket across its clients. Private reads are 120/minute and
+mutations 20/minute per account. Deadline tests shorten only an in-process test seam, never an HTTP
+parameter. The mock-model fixture and Playwright runner are test-only modules, not production routes.

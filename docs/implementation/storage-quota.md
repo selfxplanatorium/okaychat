@@ -165,3 +165,7 @@ the held reservation before asserting the incoming charge; rollback restores the
 identity titles are updated with the thread title transaction. Existing native titles stay uncharged
 unless a portable export identity is allocated. Admission reserves 80 MiB before body reading. Physical staging keeps the whole 80 MiB until cleanup
 succeeds, separately from transferred account bytes, and is included in the common archive budget.
+
+## Arena
+
+Arena charges encrypted prompt/snapshot bytes, two 48 KiB answer reservations and 4 KiB metadata before dispatch. The floor remains until content discard/30-day expiry; votes, immutable assignments and mutation tombstones remain for account lifetime. It stores no chat/comparison rows. See [Arena](arena.md).

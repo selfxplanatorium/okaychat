@@ -9,6 +9,15 @@ import { textDirection } from "./index.js";
 // RTL readiness ratchet. Logical properties (`ms-*`, `ps-*`, `start-*`, `text-start`) flip with `dir`,
 // physical ones (`ml-*`, `left-*`, `text-left`) do not. Every new UI file joins this list.
 const RTL_CHECKED_FILES = [
+  "components/arena/ArenaPage.tsx",
+  "components/arena/ArenaSetup.tsx",
+  "components/arena/ArenaBattle.tsx",
+  "components/arena/ArenaPane.tsx",
+  "components/arena/ArenaVoteBar.tsx",
+  "components/arena/ArenaReveal.tsx",
+  "components/arena/ArenaLeaderboard.tsx",
+  "components/arena/PublicArenaLeaderboard.tsx",
+
   "components/chat/VideoPlayer.tsx",
   "components/chat/VideoToolCard.tsx",
   "components/chat/VideoMessageDetails.tsx",

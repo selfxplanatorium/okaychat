@@ -14,6 +14,7 @@ import { preloadData } from "@/state/data";
 import type { Me } from "@shared/types";
 
 const Shell = preloadable(() => import("./ChatShell").then((m) => m.Shell));
+const PublicArenaLeaderboard = preloadable(() => import("@/components/arena/PublicArenaLeaderboard").then(m => m.PublicArenaLeaderboard));
 const SharePage = preloadable(() => import("@/components/share/SharePage").then((m) => m.SharePage));
 
 type AuthStatus = { user: Me | null; needsSetup: boolean; signupOpen: boolean };
@@ -25,7 +26,7 @@ export function App() {
   const share = location.match(/^\/share\/([\w-]+)$/);
   return (
     <>
-      {share ? <Suspense fallback={<AppLoading />}><SharePage token={share[1]!} /></Suspense> : <AuthedApp />}
+      {location === "/arena/leaderboard" ? <Suspense fallback={<AppLoading />}><PublicArenaLeaderboard /></Suspense> : share ? <Suspense fallback={<AppLoading />}><SharePage token={share[1]!} /></Suspense> : <AuthedApp />}
       <SharedTooltipHost />
     </>
   );

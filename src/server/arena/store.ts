@@ -63,6 +63,15 @@ export function getBattle(userId: string, id: string, now = Date.now()): BattleV
   return { ...common, visibility: "revealed", canVote: false, panes: [reveal(pair[0]), reveal(pair[1])], vote: { choice: storedVote.choice, createdAt: storedVote.created_at } };
 }
 
+/** Read-only preflight before turn/credit admission; creation repeats these checks transactionally. */
+export function assertBattleCapacity(userId: string, prompt: string, snapshots: readonly LaunchSnapshot[]): void {
+  const count = db.prepare("SELECT COUNT(*) AS n FROM arena_contents c JOIN arena_battles b ON b.id=c.battle_id WHERE b.user_id=?").get(userId) as { n: number };
+  if (count.n >= ARENA_LIMITS.maxContents || db.prepare("SELECT 1 FROM arena_battles WHERE user_id=? AND state='running'").get(userId)) fail("arena_capacity");
+  const bytes = Buffer.byteLength(encrypt(prompt)) + snapshots.reduce((n, snapshot) => n + Buffer.byteLength(encrypt(JSON.stringify(snapshot))), 0)
+    + 2 * ARENA_LIMITS.paneReservation + ARENA_LIMITS.metadataReservation;
+  assertStorage(userId, bytes);
+}
+
 /** Caller preflights eligibility and reserves both turn leases, then admits one credit root. No dispatch here. */
 export function createBattle(userId: string, input: unknown, assignments: readonly [ArenaAssignment, ArenaAssignment], permit: CreditPermit, now = Date.now()): { battle: BattleView; created: boolean } {
   const start = normalizeStart(input), hash = startHash(start);

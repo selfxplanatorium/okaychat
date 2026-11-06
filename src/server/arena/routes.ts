@@ -32,11 +32,11 @@ function reasonOf(error: unknown): string | undefined {
 }
 function boundary(error: Error, c: Context) {
   const status = error instanceof AppError ? error.status : error instanceof HTTPException ? error.status : error instanceof z.ZodError ? 400 : 500;
-  const allowed = error instanceof AppError && error.code.startsWith("token_credit_") ? error.code : error instanceof AppError && error.code === "storage_quota" ? "storage_quota" : "arena_unavailable";
+  const allowed = error instanceof AppError && error.code.startsWith("token_credit_") ? error.code : error instanceof AppError && error.code === "storage_quota" ? "storage_quota" : status === 429 ? "rate_limited" : status === 503 ? "service_unavailable" : error instanceof AppError ? error.code : status === 400 ? "validation" : "unknown";
   // Never forward identifying errors, model/provider fields, or upstream prose on this transport.
   const reason = reasonOf(error) && /^arena_[a-z_]+$/.test(reasonOf(error)!) ? reasonOf(error)! : allowed;
   if (status === 503 || status === 429) c.header("Retry-After", "1");
-  return c.json({ error: "Arena request unavailable.", code: allowed, reason }, status as 400 | 403 | 404 | 409 | 413 | 429 | 503 | 500);
+  return c.json({ error: "Arena request unavailable.", message: "Arena request unavailable.", code: allowed, reason }, status as 400 | 403 | 404 | 409 | 413 | 429 | 503 | 500);
 }
 async function ownerView(userId: string, view: BattleView): Promise<BattleView> {
   if (view.visibility === "blind") return view;

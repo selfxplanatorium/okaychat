@@ -161,7 +161,7 @@ export function Shell({ userId }: { userId: string }) {
   const inChannels = location === "/channels" || location.startsWith("/channels/");
   const inNotes = location === "/notes" || location.startsWith("/notes/");
   const inCalendar = location === "/calendar" || location.startsWith("/calendar?");
-  const inNavigation = inChannels || inNotes || inCalendar || ["/scheduled", "/library", "/knowledge", "/plugins", "/projects", "/compare", "/evaluations"].includes(location);
+  const inNavigation = inChannels || inNotes || inCalendar || ["/scheduled", "/library", "/knowledge", "/plugins", "/projects", "/compare", "/evaluations", "/arena"].includes(location);
   const route = inSettings ? "settings" : inChannels ? "channels" : inNotes ? "notes" : inCalendar ? "calendar" : inNavigation ? location : "chat";
   // The settings layer stays mounted in the sidebar, so it keeps its last section while the chat is shown.
   const lastSection = useRef<string | undefined>(undefined);
@@ -321,6 +321,13 @@ export function Shell({ userId }: { userId: string }) {
                     <CalendarPage />
                   </Suspense>
                 )}
+              </Route>
+              <Route path="/arena">
+                <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                  <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">{t("common.loading")}</p>}>
+                    <NavigationPage page="arena" />
+                  </Suspense>
+                </main>
               </Route>
               <Route path="/compare">
                 <main className="flex min-h-0 flex-1 flex-col overflow-hidden">

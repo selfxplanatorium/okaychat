@@ -14,6 +14,7 @@ import { SettingsPage } from "@/components/settings/SettingsUI";
 import { cn } from "@/lib/utils";
 import { t } from "@/i18n";
 
+const ArenaPage = lazy(() => import("@/components/arena/ArenaPage").then(m => ({ default: m.ArenaPage })));
 const CustomToolsWorkspace = lazy(() => import("@/components/custom-tools/CustomToolsWorkspace").then((m) => ({ default: m.CustomToolsWorkspace })));
 
 const PLUGIN_TABS = [
@@ -78,6 +79,7 @@ export function NavigationPage({ page }: { page: string }) {
   if (page === "plugins") return <PluginsPage />;
   if (page === "library") return <LibraryPage />;
   if (page === "knowledge") return <KnowledgePage />;
+  if (page === "arena") return <ArenaPage />;
   if (page === "compare") return <ComparePage />;
   if (page === "evaluations") return <EvaluationsPage />;
   return (

@@ -82,3 +82,7 @@ panels, and attachments are not rendered in a pane: Open as chat covers them.
 No more than three panes, no per-pane follow-up composer, no merging, judging, comparison sharing,
 schedules targeting panes, resumable streams, or non-text modalities. Pane messages count against the
 storage quota like any chat; deleting the comparison frees them.
+
+## Arena
+
+Arena uses its own battle/receipt/SSE protocol and never creates hidden comparison threads or comparison rows. Its two paid calls share one credit root; comparison behavior is unchanged. See [Arena](arena.md).

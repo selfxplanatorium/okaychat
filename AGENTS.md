@@ -112,6 +112,7 @@ src/web/
   components/webhooks Webhook editor, one-time secret review, request preview, delivery log and retry
   components/custom-tools  Plugins → Custom tools workspace: list, editor, schema builder, secret headers, test/review/result cards
   components/notes    Notes workspace, autosaving editor, safe preview, conflict/outbox recovery, source actions, composer handoff
+  components/arena    Blind Battle setup/stream/vote/reveal, Mine/Global board and standalone public Leaderboard
   components/calendar Calendar workspace, agenda/month/week, explicit-save event dialog, zone and fold/gap fields, reminder offsets
   components/share    Public share page and share button
   theme/              T3Code theme engine port (see its README); bundled-fonts.ts lists the shipped font families; depth.css holds the depth utilities

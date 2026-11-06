@@ -7,7 +7,7 @@ import { SIDEBAR_ITEMS } from "@shared/types";
 import { useChatPrivacyStore } from "@/state/chat-privacy";
 import { KnowledgeControl } from "@/components/knowledge/KnowledgeSelector";
 import { ChatSearch } from "./ChatSearch";
-import { CalendarClockIcon, CalendarDaysIcon, BookOpenIcon, FlaskConicalIcon, FolderIcon, GitCompareArrowsIcon, LibraryIcon, LogOutIcon, MessagesSquareIcon, NotebookPenIcon, PanelLeftIcon, PlusIcon, PuzzleIcon, SearchIcon, SettingsIcon, SquarePenIcon, UserRoundIcon } from "lucide-react";
+import { SwordsIcon, CalendarClockIcon, CalendarDaysIcon, BookOpenIcon, FlaskConicalIcon, FolderIcon, GitCompareArrowsIcon, LibraryIcon, LogOutIcon, MessagesSquareIcon, NotebookPenIcon, PanelLeftIcon, PlusIcon, PuzzleIcon, SearchIcon, SettingsIcon, SquarePenIcon, UserRoundIcon } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { ThreadList, ThreadSelectionBar } from "@/components/assistant-ui/elements/thread-list.aui";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@/components/ui/menu";
@@ -102,7 +102,7 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
                 showChat(navigate);
               }}><SquarePenIcon className="size-4 shrink-0" /> {t("common.newChat")}</button>}
               {([
-                { id: "scheduled", label: "sidebar.scheduled", href: "/scheduled", icon: CalendarClockIcon, create: { command: "nav.createSchedule", label: "ux.newScheduleQuick", href: "/scheduled?new=1" } },
+                { id: "scheduled", label: "sidebar.scheduled", href: "/scheduled", icon: SwordsIcon, CalendarClockIcon, create: { command: "nav.createSchedule", label: "ux.newScheduleQuick", href: "/scheduled?new=1" } },
                 { id: "notes", label: "sidebar.notes", href: "/notes", icon: NotebookPenIcon, create: { command: "notes.create", label: "notes.new", href: "/notes?new=1" } },
                 { id: "calendar", label: "sidebar.calendar", href: "/calendar", icon: CalendarDaysIcon, create: { command: "calendar.create", label: "calendar.new", href: "/calendar?new=1" } },
                 { id: "library", label: "sidebar.library", href: "/library", icon: LibraryIcon },
@@ -110,6 +110,7 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
                 { id: "plugins", label: "sidebar.plugins", href: "/plugins", icon: PuzzleIcon },
                 { id: "projects", label: "sidebar.projects", href: "/projects", icon: FolderIcon, create: { command: "nav.createProject", label: "ux.newProjectQuick", href: "/projects?new=1" } },
                 { id: "channels", label: "sidebar.channels", href: "/channels", icon: MessagesSquareIcon },
+                { id: "arena", label: "sidebar.arena", href: "/arena", icon: SwordsIcon },
                 { id: "compare", label: "sidebar.compare", href: "/compare", icon: GitCompareArrowsIcon },
                 { id: "evaluations", label: "sidebar.evaluations", href: "/evaluations", icon: FlaskConicalIcon },
               ] as const).filter((item) => visibleItems.includes(item.id)).map((item) => (
