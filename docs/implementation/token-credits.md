@@ -38,7 +38,8 @@ database atomically with `usage`; never rebuild counters from the retained usage
   captures raw `LanguageModelV4Usage` from the result or the stream's `finish` part before forwarding
   it, and settles exactly once: `reported` (debit = input + output), `rejected` (explicit HTTP
   400/401/403/404/413/422/429), `not_dispatched`, or `unknown` (timeout, disconnect, missing or
-  invalid totals, partial stream). Settlement writes the receipt, the counter and the one usage row
+  invalid totals, partial stream). For compatible chat and Google, it also checks the retained wire
+  counters: those adapters normalize missing counters to zero, which is not evidence of reported usage. Settlement writes the receipt, the counter and the one usage row
   in one transaction. Aggregate `recordUsage` calls in chat, compaction, research, delegates, memory,
   translations, channels, API and evaluations were removed; their totals are display only.
 - For finite accounts the provider fetch makes one attempt (no transport retry), because a retried
@@ -115,7 +116,11 @@ administrator resets it.
 This is a soft allowance: one admitted operation (research, delegates, tool loops) can exceed the
 remaining balance substantially, provider telemetry can be missing or wrong, and token totals do not
 track dollars, images, audio, or third-party tool costs. There is no reconciliation of unknown usage,
-no server default allowance, and no multi-process writer support.
+no server default allowance, and no multi-process writer support. Unlimited accounts retain transport
+retries inside one adapter invocation: if an earlier attempt charged before a network failure, only
+the final attempt's telemetry reaches its receipt. Those earlier tokens and unknown attempts are not
+recoverable from this ledger, including when an allowance is subsequently set. Finite accounts disable
+these retries.
 
 Deferred: exposing the effective evaluation concurrency in the run view, hiding custom HTTP tools (they
 are refused at execution), titles as children of a still-open turn root, and API/channel terminal

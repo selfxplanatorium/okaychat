@@ -97,7 +97,7 @@ function grant(userId: string, creditTokens: number | null) {
 }
 
 let providerCalls = 0;
-function provider(t: TestContext) {
+function provider(t: TestContext, usage: Record<string, number> = { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 }) {
   providerCalls = 0;
   t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -107,7 +107,7 @@ function provider(t: TestContext) {
     const stream = JSON.parse(String(init?.body ?? "{}")).stream === true;
     const chunks = [
       { id: "r", object: "chat.completion.chunk", created: 1, model: "mock", choices: [{ index: 0, delta: { role: "assistant", content: "Done." }, finish_reason: null }] },
-      { id: "r", object: "chat.completion.chunk", created: 1, model: "mock", choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } },
+      { id: "r", object: "chat.completion.chunk", created: 1, model: "mock", choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage },
     ];
     if (!stream) {
       return Response.json({
@@ -116,7 +116,7 @@ function provider(t: TestContext) {
         created: 1,
         model: "mock",
         choices: [{ index: 0, message: { role: "assistant", content: "Done." }, finish_reason: "stop" }],
-        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        usage,
       });
     }
     return new Response(chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("") + "data: [DONE]\n\n", {
@@ -389,3 +389,26 @@ test("finite accounts are refused unpriced services before any network or CLI ca
   });
   assert.equal(getCreditBalance(ALICE).activeOperations, 0);
 });
+
+for (const streaming of [false, true]) {
+  test(`incomplete wire usage holds a finite API account (stream=${streaming})`, async (t) => {
+    provider(t, { prompt_tokens: 10 });
+    grant(ALICE, 1_000);
+    const { secret } = createApiKey(ALICE, { label: "Missing telemetry", scopes: ["chat:write"], expiresAt: null });
+    const request = () => inference.request("http://app/v1/chat/completions", {
+      method: "POST",
+      headers: { authorization: `Bearer ${secret}`, "content-type": "application/json" },
+      body: JSON.stringify({ model: "custom-test/mock", messages: [{ role: "user", content: "Hello" }], stream: streaming }),
+    });
+    const response = await request();
+    assert.equal(response.status, 200);
+    await response.text();
+    // API completion releases asynchronously, after the underlying stream has settled.
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(getCreditBalance(ALICE).unknownRequests, 1);
+    assert.equal(getCreditBalance(ALICE).consumedTokens, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM usage WHERE user_id=?").get(ALICE)?.n, 0);
+    assert.equal((await request()).status, 403);
+    assert.equal(providerCalls, 1);
+  });
+}
