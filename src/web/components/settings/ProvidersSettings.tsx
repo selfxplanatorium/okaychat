@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { useData } from "@/state/data";
 import { AudienceButton } from "./Audience";
 import { ChatGPTConnect } from "./ChatGPTConnect";
+import { CustomConnectionForm } from "./CustomProviderFields";
 import { ModelEntitlementsDialog } from "./ModelEntitlements";
 import { OllamaSettings } from "./OllamaSettings";
 import { SettingsPage, SettingsSection } from "./SettingsUI";
@@ -157,6 +158,17 @@ function ProviderRow({ provider, index, expanded, onToggle, onModels }: { provid
             <OllamaSettings provider={provider} base={base} onChanged={refresh} />
           ) : chatgpt ? (
             <ChatGPTConnect />
+          ) : provider.custom ? (
+            <CustomConnectionForm
+              provider={provider}
+              base={base}
+              autoFocus
+              onCancel={onToggle}
+              onSaved={async () => {
+                await refresh();
+                onToggle();
+              }}
+            />
           ) : (
             <div className="flex flex-col gap-2">
               <ProviderForm provider={provider} onSaved={onToggle} autoFocus />
@@ -180,37 +192,18 @@ function ProviderRow({ provider, index, expanded, onToggle, onModels }: { provid
 
 function CustomProviderForm({ onDone }: { onDone: () => void }) {
   const { base, refresh } = useScope();
-  const [name, setName] = useState("");
-  const [baseURL, setBaseURL] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [error, setError] = useState<string | null>(null);
   return (
-    <form
-      className="animate-rise-in grid gap-2 px-4 py-3 sm:grid-cols-[1fr_2fr]"
-      onSubmit={async (e) => {
-        e.preventDefault();
-        const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-        if (!slug) return setError(t("providers.nameRequired"));
-        try {
-          await api(`${base}/custom-${slug}`, { method: "PUT", json: { name, baseURL, apiKey: apiKey || undefined, enabled: true } });
+    <div className="animate-rise-in px-4 py-3">
+      <CustomConnectionForm
+        base={base}
+        autoFocus
+        onCancel={onDone}
+        onSaved={async () => {
           await refresh();
           onDone();
-        } catch (err) {
-          setError(errorText(err, "common.somethingWentWrong"));
-        }
-      }}
-    >
-      <Input placeholder={t("providers.customNamePlaceholder")} value={name} onChange={(e) => setName(e.target.value)} required />
-      <Input placeholder={t("providers.customBaseUrlPlaceholder")} value={baseURL} onChange={(e) => setBaseURL(e.target.value)} required />
-      <Input type="password" placeholder={t("providers.apiKeyOptional")} value={apiKey} onChange={(e) => setApiKey(e.target.value)} className="sm:col-span-2" />
-      {error && <p className="text-error settings-error text-xs sm:col-span-2">{error}</p>}
-      <div className="flex justify-end gap-2 sm:col-span-2">
-        <Button type="button" variant="ghost" onClick={onDone}>
-          {t("common.cancel")}
-        </Button>
-        <Button type="submit">{t("providers.addProvider")}</Button>
-      </div>
-    </form>
+        }}
+      />
+    </div>
   );
 }
 

@@ -19,7 +19,7 @@ import { sha256 } from "./crypto.js";
 import { USER_AGENT } from "./env.js";
 import { AppError } from "./errors.js";
 import { modelAccessMessage, sharedModelAccess } from "./entitlements.js";
-import { publicFetch } from "./public-fetch.js";
+import { providerFetch } from "./provider-transport.js";
 import { createRetryingFetch, type RetryingFetchOptions } from "./retry.js";
 import { withResponseBounds } from "./response-bounds.js";
 import { openaiToolSchemas } from "./openai-schema.js";
@@ -71,6 +71,8 @@ export interface CreateModelOptions {
   onRetry?: (notice: RetryNotice) => void;
   /** Test seam for the retry clock and fake provider; never set in production code. */
   retry?: Omit<RetryingFetchOptions, "onRetry" | "fetchImpl">;
+  /** Test seam: the leaf below the connection transport; never set in production code. */
+  leafFetch?: typeof fetch;
   /**
    * Optional caller guard, checked before the first attempt and before every retry. Channel AI uses it
    * to re-check room membership, the feature, the binding, and the run's live state without changing
@@ -123,12 +125,16 @@ function createRawModel(info: ModelInfo, conn: Connection, opts: CreateModelOpti
   };
   const affinity = cacheAffinity(opts.userId);
   const headers = affinityHeaders(info.providerId, affinity);
+  // Legacy custom rows keep the historical keyless placeholder; a v1 custom connection's auth is set
+  // only by its transport, so the SDK gets no key of its own.
   const apiKey = conn.apiKey ?? "not-needed";
-  const baseURL = info.baseURL;
+  if (conn.transport && info.baseURL !== conn.baseURL) throw new AppError({ code: "validation", message: "The model and connection do not match." });
+  const baseURL = conn.transport ? conn.baseURL : info.baseURL;
   // All provider retries happen here, before a response body is consumed. Every caller disables the
   // SDK's own retry (maxRetries: 0), so delays never compound. See docs/implementation/errors.md.
   const fetch = withResponseBounds(
-    createRetryingFetch({ ...(opts.retry ?? {}), ...(finiteCredits(opts.userId) ? { policy: { maxAttempts: 1 } } : {}), onRetry: opts.onRetry, beforeAttempt, fetchImpl: conn.guarded ? publicFetch : undefined }),
+    // The connection transport sits inside the retries, so auth, headers, and query are applied on every attempt.
+    createRetryingFetch({ ...(opts.retry ?? {}), ...(finiteCredits(opts.userId) ? { policy: { maxAttempts: 1 } } : {}), onRetry: opts.onRetry, beforeAttempt, fetchImpl: providerFetch(conn, opts.leafFetch) }),
     opts.responseBounds ?? { maxBytes: Infinity, maxRecordBytes: Infinity },
   );
   // OpenAI-style caches are partitioned by prompt_cache_key: a per-chat key made every new chat start cold.
@@ -212,7 +218,7 @@ function createRawModel(info: ModelInfo, conn: Connection, opts: CreateModelOpti
       const name = info.providerId.replace(/[^a-zA-Z0-9]/g, "");
       const provider = createOpenAICompatible({
         name,
-        apiKey,
+        apiKey: conn.transport ? undefined : apiKey,
         baseURL: baseURL ?? "",
         headers,
         fetch,

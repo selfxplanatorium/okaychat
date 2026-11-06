@@ -21,5 +21,6 @@ export default {
   missingHint: "Saved earlier but no longer offered. They grant nothing now. Keep them for when the model returns, or remove them.",
   missingModel: "Missing: {id}",
   removeMissing: "Remove {id}",
+  configuredModels: "Configured deployments or models. These ids are entered by hand, not discovered.",
   noAudiences: "This connection has no audience yet. Choose groups or users under Who can use first.",
 } as const;

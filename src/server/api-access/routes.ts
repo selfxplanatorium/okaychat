@@ -15,6 +15,7 @@ import {
 import type { ModelInfo, ReasoningEffort } from "../../shared/types.js";
 import type { AppEnv } from "../auth.js";
 import { getConnection, listModels, resolveModel, type Connection } from "../catalog/providers.js";
+import { connectionDigest } from "../catalog/provider-config.js";
 import { newId } from "../crypto.js";
 import { AppError, errorJson } from "../errors.js";
 import { createModel } from "../llm.js";
@@ -231,7 +232,7 @@ function supportedEffort(info: ModelInfo, effort: ReasoningEffort): boolean {
 }
 
 function connectionFingerprint(conn: Connection): string {
-  return [conn.providerId, conn.enabled ? "1" : "0", conn.shared ? "s" : "o", conn.baseURL ?? "", conn.apiKey ?? ""].join("\u0000");
+  return [conn.providerId, conn.enabled ? "1" : "0", conn.shared ? "s" : "o", conn.baseURL ?? "", conn.apiKey ?? "", connectionDigest(conn)].join("\u0000");
 }
 
 interface Resolved {

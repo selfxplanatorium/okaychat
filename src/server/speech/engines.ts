@@ -11,7 +11,8 @@ import {
 import { getConnection, type Connection } from "../catalog/providers.js";
 import { USER_AGENT } from "../env.js";
 import { promptText } from "../prompts.js";
-import { assertPublicHost, publicFetch } from "../public-fetch.js";
+import { assertPublicHost } from "../public-fetch.js";
+import { connectionFetch } from "../provider-transport.js";
 import { adminSpeech } from "./config.js";
 import { speechWorkerConfigured, workerSpeak, workerTranscribe } from "./worker.js";
 import { assertFeature } from "../permissions/guard.js";
@@ -69,7 +70,8 @@ export async function upstream(cred: ResolvedCredential, url: string, init: Requ
   const timeout = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
   let res: Response;
   try {
-    res = await (cred.conn?.guarded ? publicFetch : fetch)(url, {
+    // The whole connection reaches the transport factory, so a v1 custom configuration can never be dropped here.
+    res = await connectionFetch(cred.conn)(url, {
       ...init,
       headers: { "User-Agent": USER_AGENT, ...(init.headers as Record<string, string>) },
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
@@ -79,6 +81,8 @@ export async function upstream(cred: ResolvedCredential, url: string, init: Requ
     throw new HTTPException(502, { message: `${label} could not be reached${(error as Error).name === "TimeoutError" ? " in time" : ""}.` });
   }
   if (!res.ok) {
+    // A custom connection's failure text is never passed on: it can echo any configured header or query value.
+    if (cred.conn?.transport) throw new HTTPException(res.status === 401 || res.status === 403 ? 400 : 502, { message: `${label} answered ${res.status}.` });
     // The body may echo the request; only a provider's short error message is passed on.
     const body = (await res.json().catch(() => null)) as { error?: { message?: unknown } | string; message?: unknown; detail?: unknown } | null;
     const raw = typeof body?.error === "string" ? body.error : (body?.error?.message ?? body?.message ?? (typeof body?.detail === "string" ? body.detail : ""));
@@ -331,6 +335,8 @@ function audio(buf: Uint8Array, label: string): Speech {
 
 /** Opens one Realtime session, asks for audio only, and wraps the PCM16 24 kHz output in a WAV. */
 async function realtimeSpeech(cred: ResolvedCredential, text: string, model: string, voice: string, style: string | undefined, signal?: AbortSignal): Promise<Uint8Array> {
+  // WebSockets cannot carry a custom connection's auth, headers, or query; refuse instead of sending Bearer only.
+  if (cred.conn?.transport) throw new HTTPException(400, { message: "Realtime voices are not available for custom connections." });
   const url = new URL(`${cred.baseURL}/realtime`);
   url.protocol = url.protocol === "http:" ? "ws:" : "wss:";
   url.searchParams.set("model", model);

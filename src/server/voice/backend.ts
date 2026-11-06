@@ -178,6 +178,8 @@ export function realtimeTarget(userId: string): Availability<RealtimeTarget> {
   const def = ttsEngineDef("openai-realtime")!;
   const cred: ResolvedCredential | undefined = credentialFor(userId, def.credential);
   if (!cred?.apiKey || !cred.baseURL) return { ok: false, code: "unavailable", detail: "No OpenAI connection with a key." };
+  // Realtime signalling sends Bearer only; a custom connection's transport configuration cannot be honored.
+  if (cred.conn?.transport) return { ok: false, code: "unavailable", detail: "Realtime is not available for custom connections." };
   const prefs = getSettings(userId).speech;
   const chosenModel = prefs?.tts?.models?.["openai-realtime"];
   const model = chosenModel && /^[\w.-]{1,80}$/.test(chosenModel) ? chosenModel : def.models[0]!;

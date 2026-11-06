@@ -1,8 +1,8 @@
 import type { ImageModelList, ImageModelOption, ImageServiceDef } from "../../shared/image-services.js";
 import type { Connection } from "../catalog/providers.js";
-import { sha256 } from "../crypto.js";
+import { connectionDigest } from "../catalog/provider-config.js";
 import { USER_AGENT } from "../env.js";
-import { publicFetch } from "../public-fetch.js";
+import { connectionFetch } from "../provider-transport.js";
 
 // Image model lists come from each provider, so the picker shows what the user's key can call today.
 // Black Forest Labs has no list endpoint and uses the built-in list. See docs/implementation/image-generation.md.
@@ -13,7 +13,7 @@ const cache = new Map<string, { list: ImageModelList; at: number }>();
 const trimmed = (url: string | undefined, fallback: string) => (url ?? fallback).replace(/\/$/, "");
 
 async function getJson(url: string, headers: Record<string, string>, conn?: Connection): Promise<unknown> {
-  const res = await (conn?.guarded ? publicFetch : fetch)(url, { headers: { "User-Agent": USER_AGENT, ...headers }, signal: AbortSignal.timeout(10_000) });
+  const res = await connectionFetch(conn)(url, { headers: { "User-Agent": USER_AGENT, ...headers }, signal: AbortSignal.timeout(10_000) });
   if (!res.ok) throw new Error(`${new URL(url).host} answered ${res.status}`);
   return res.json();
 }
@@ -86,7 +86,8 @@ async function fetchModels(def: ImageServiceDef, conn: Connection | undefined): 
 /** Live list for the connected key, cached for an hour. Falls back to the built-in list when the provider fails. */
 export async function listImageModels(def: ImageServiceDef, conn: Connection | undefined): Promise<ImageModelList> {
   const fallback = (error?: string): ImageModelList => ({ models: def.models.map((id) => ({ id })), live: false, ...(error ? { error } : {}) });
-  const cacheKey = `${def.id}:${sha256(`${conn?.apiKey ?? ""}\n${conn?.baseURL ?? ""}`)}`;
+  // The digest covers key, address, and any transport configuration, so a changed connection never reads an old list.
+  const cacheKey = `${def.id}:${conn ? connectionDigest(conn) : "-"}`;
   const hit = cache.get(cacheKey);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.list;
   try {

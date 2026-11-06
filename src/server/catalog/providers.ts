@@ -13,6 +13,17 @@ import { CHATGPT, CHATGPT_BASE_URL, CHATGPT_NAME, chatgptConnected, chatgptModel
 import { getCatalog, isChatModelId, isSupportedProvider, resolveRoute, toModelInfo, unknownModel, type RawProvider } from "./models-dev.js";
 import { requestKnowledgeRevocation } from "../knowledge/revocation.js";
 import { forgetOllamaModels, OLLAMA, OLLAMA_DEFAULT_URL, OLLAMA_DOC, OLLAMA_NAME, ollamaModels } from "./ollama.js";
+import { discoverModelIds } from "../provider-transport.js";
+import {
+  buildCustomCandidate,
+  ConnectionInputError,
+  connectionDigest,
+  decodeConfig,
+  isCustomProvider,
+  pinQuerySuffix,
+  transportSummary,
+  type ConnectionTransport,
+} from "./provider-config.js";
 
 export const OPENCODE_GO = "opencode-go";
 const GO_MODELS_URL = "https://opencode.ai/inference/go/v1/models";
@@ -41,6 +52,11 @@ export interface Connection {
   shared?: boolean;
   /** A non-admin's own base URL: every request must reach a public address, never the server's network. */
   guarded?: boolean;
+  /**
+   * Decrypted v1 custom configuration (auth, headers, query, model source). Server-only: never put it in
+   * ModelInfo, settings, thread metadata, receipts, exports, or a list. Absent for built-ins and legacy rows.
+   */
+  transport?: ConnectionTransport;
 }
 
 /** Admins may point connections at local servers (Ollama, LM Studio). Other users may not. */
@@ -76,25 +92,24 @@ function readScope(scope: ConnectionScope, viewer?: string): Map<string, Connect
             .all(viewer, viewer)
       : db.prepare("SELECT provider_id, api_key_enc, base_url, config_json, enabled FROM provider_connections WHERE user_id = ?").all(scope)
   ) as unknown as ConnectionRow[];
-  return new Map(
-    rows.map((r) => {
-      const config = JSON.parse(r.config_json) as { name?: string };
-      return [
-        r.provider_id,
-        {
-          providerId: r.provider_id,
-          apiKey: r.api_key_enc ? decrypt(r.api_key_enc) : undefined,
-          baseURL: r.base_url ?? undefined,
-          name: config.name,
-          enabled: r.enabled === 1,
-          ...(scope === null ? { shared: true } : {}),
-          // Ollama falls back to loopback even without a stored URL, so a non-admin row is guarded
-          // even when it predates the default being written.
-          ...(guarded && (r.base_url || r.provider_id === OLLAMA) ? { guarded: true } : {}),
-        },
-      ];
-    }),
-  );
+  return new Map(rows.map((r) => [r.provider_id, connectionFromRow(r, scope === null, guarded)]));
+}
+
+/** The one hydration path for both tables and pinned resolution, so every reader decodes config the same way. */
+function connectionFromRow(r: ConnectionRow, shared: boolean, guarded: boolean): Connection {
+  const config = decodeConfig(r.provider_id, r.config_json);
+  return {
+    providerId: r.provider_id,
+    apiKey: r.api_key_enc ? decrypt(r.api_key_enc) : undefined,
+    baseURL: r.base_url ?? undefined,
+    name: config.name,
+    enabled: r.enabled === 1,
+    ...(shared ? { shared: true } : {}),
+    // Ollama falls back to loopback even without a stored URL, so a non-admin row is guarded
+    // even when it predates the default being written.
+    ...(guarded && (r.base_url || r.provider_id === OLLAMA) ? { guarded: true } : {}),
+    ...(config.transport ? { transport: config.transport } : {}),
+  };
 }
 
 /** What a user can use: server-wide connections, overridden by the user's own for the same provider. */
@@ -121,8 +136,10 @@ export interface PinnedConnection {
   connection: Connection;
   scope: "own" | "shared";
   createdAt: number;
-  /** SHA-256 of the effective embedding base endpoint; never sent to a reader. */
+  /** SHA-256 of the effective embedding base endpoint (plus a keyed digest of configured query); never sent to a reader. */
   endpointHash: string;
+  /** Digest of the whole transport (key, auth, headers, query); a change stops active operations without forcing a reindex. */
+  fingerprint: string;
 }
 
 const EMBEDDING_DEFAULT_ENDPOINT: Record<string, string> = {
@@ -167,22 +184,18 @@ export function resolvePinnedConnection(ownerId: string, providerId: string): Pi
         .get(providerId, ownerId, ownerId) as (ConnectionRow & { created_at: number }) | undefined);
   const row = own ?? shared;
   if (!row || row.enabled !== 1) return null;
-  const config = JSON.parse(row.config_json) as { name?: string };
   const guarded = !mayUsePrivateHosts(ownerId);
   const scope = own ? "own" : "shared";
+  const connection = connectionFromRow(row, scope === "shared", guarded);
   return {
-    connection: {
-      providerId: row.provider_id,
-      apiKey: row.api_key_enc ? decrypt(row.api_key_enc) : undefined,
-      baseURL: row.base_url ?? undefined,
-      name: config.name,
-      enabled: true,
-      ...(scope === "shared" ? { shared: true } : {}),
-      ...(guarded && (row.base_url || row.provider_id === OLLAMA) ? { guarded: true } : {}),
-    },
+    connection,
     scope,
     createdAt: row.created_at,
-    endpointHash: createHash("sha256").update(embeddingEndpoint(row.provider_id, row.base_url ?? undefined)).digest("hex").slice(0, 32),
+    endpointHash: createHash("sha256")
+      .update(embeddingEndpoint(row.provider_id, row.base_url ?? undefined) + pinQuerySuffix(connection.transport))
+      .digest("hex")
+      .slice(0, 32),
+    fingerprint: connectionDigest(connection),
   };
 }
 
@@ -191,13 +204,58 @@ export function getSharedConnection(providerId: string): Connection | undefined 
   return readScope(null).get(providerId);
 }
 
-export function saveConnection(scope: ConnectionScope, providerId: string, input: ProviderConnectionInput) {
+interface RawRow {
+  api_key_enc: string | null;
+  base_url: string | null;
+  config_json: string;
+  enabled: number;
+}
+
+function readRawRow(scope: ConnectionScope, providerId: string): RawRow | undefined {
+  return (scope === null
+    ? db.prepare("SELECT api_key_enc, base_url, config_json, enabled FROM shared_connections WHERE provider_id = ?").get(providerId)
+    : db.prepare("SELECT api_key_enc, base_url, config_json, enabled FROM provider_connections WHERE user_id = ? AND provider_id = ?").get(scope, providerId)) as RawRow | undefined;
+}
+
+const sameRaw = (a: RawRow | undefined, b: RawRow | undefined) =>
+  (!a && !b) || (!!a && !!b && a.api_key_enc === b.api_key_enc && a.base_url === b.base_url && a.config_json === b.config_json && a.enabled === b.enabled);
+
+/** A validated save waiting for its destination check. `snapshot` is the owned row it was built from. */
+export interface PreparedSave {
+  scope: ConnectionScope;
+  providerId: string;
+  snapshot: RawRow | undefined;
+  apiKey?: string;
+  baseURL?: string;
+  configJson: string;
+  enabled: boolean;
+}
+
+/**
+ * Validates a patch against the owned row only (never a shared row the user merely uses) and builds the
+ * complete candidate. Throws a field error and writes nothing on any failure.
+ */
+export function prepareConnectionSave(scope: ConnectionScope, providerId: string, input: ProviderConnectionInput): PreparedSave {
   if (providerId === CHATGPT) {
     // A ChatGPT plan belongs to one person. It is connected through the Codex login, never with a key.
     if (scope === null) throw new HTTPException(400, { message: "A ChatGPT plan cannot be shared with other users." });
     input = { enabled: input.enabled };
   }
-  const existing = readScope(scope).get(providerId);
+  if (!isCustomProvider(providerId) && (input.transport !== undefined || input.modelSource !== undefined)) {
+    throw new ConnectionInputError(input.transport !== undefined ? "transport" : "modelSource", "unsupported_field");
+  }
+  const snapshot = readRawRow(scope, providerId);
+  const existing = snapshot ? connectionFromRow({ provider_id: providerId, ...snapshot }, scope === null, false) : undefined;
+  if (isCustomProvider(providerId)) {
+    const candidate = buildCustomCandidate(providerId, existing && {
+      apiKey: existing.apiKey,
+      baseURL: existing.baseURL,
+      enabled: existing.enabled,
+      config: decodeConfig(providerId, snapshot!.config_json),
+      configJson: snapshot!.config_json,
+    }, input);
+    return { scope, providerId, snapshot, apiKey: candidate.apiKey, baseURL: candidate.baseURL, configJson: candidate.configJson, enabled: candidate.enabled };
+  }
   // Ollama has a real default address, so the row always carries it (and a non-admin's row is
   // unambiguously guarded). Other providers keep an absent or empty URL as before.
   const fallbackURL = providerId === OLLAMA ? (existing?.baseURL ?? OLLAMA_DEFAULT_URL) : undefined;
@@ -221,13 +279,25 @@ export function saveConnection(scope: ConnectionScope, providerId: string, input
     throw new HTTPException(400, { message: "Enter the API key again when changing the base URL." });
   }
   const apiKey = input.apiKey === undefined ? existing?.apiKey : input.apiKey || undefined;
-  const name = input.name ?? existing?.name;
+  // Unrelated config keys survive every save.
+  const rest = snapshot ? decodeConfig(providerId, snapshot.config_json).rest : {};
+  const configJson = JSON.stringify({ ...rest, name: input.name ?? existing?.name });
+  return { scope, providerId, snapshot, apiKey, baseURL, configJson, enabled: input.enabled ?? existing?.enabled ?? true };
+}
+
+/**
+ * Writes a prepared save. The owned row is read again first: when it changed during an awaited destination
+ * check, the save is refused instead of overwriting the newer row with a candidate built from the old one.
+ */
+export function commitConnectionSave(prepared: PreparedSave): void {
+  const { scope, providerId } = prepared;
+  if (!sameRaw(readRawRow(scope, providerId), prepared.snapshot)) throw new ConnectionInputError("body", "changed", 409);
   const values = [
     providerId,
-    apiKey ? encrypt(apiKey) : null,
-    baseURL ?? null,
-    JSON.stringify({ name }),
-    (input.enabled ?? existing?.enabled ?? true) ? 1 : 0,
+    prepared.apiKey ? encrypt(prepared.apiKey) : null,
+    prepared.baseURL ?? null,
+    prepared.configJson,
+    prepared.enabled ? 1 : 0,
     Date.now(),
   ];
   if (scope === null) {
@@ -246,6 +316,11 @@ export function saveConnection(scope: ConnectionScope, providerId: string, input
   liveCache.clear();
   afterCommit(requestKnowledgeRevocation);
   if (providerId === OLLAMA) forgetOllamaModels();
+}
+
+/** Validated synchronous save for internal callers; the routes add their destination check between the two steps. */
+export function saveConnection(scope: ConnectionScope, providerId: string, input: ProviderConnectionInput) {
+  commitConnectionSave(prepareConnectionSave(scope, providerId, input));
 }
 
 const originOf = (url: string | undefined) => {
@@ -268,7 +343,7 @@ export function deleteConnection(scope: ConnectionScope, providerId: string) {
   if (providerId === OLLAMA) forgetOllamaModels();
 }
 
-const isCustom = (id: string) => id.startsWith("custom-");
+const isCustom = isCustomProvider;
 const isLocal = (url?: string) => !!url && /\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|host\.docker\.internal)/.test(url);
 
 // Checking every model of every provider is the slow part of listing providers. It only changes with the catalog.
@@ -372,6 +447,8 @@ export async function listProviders(scope: ConnectionScope): Promise<ProviderInf
       baseURL: conn.baseURL,
       modelCount,
       ...(scope === null ? { audience: getAudience("provider", conn.providerId) } : {}),
+      // Only the owner (or the admin for a shared row) sees names and presence; an audience member sees none.
+      ...(scope === null || !conn.shared ? transportSummary(conn.transport, conn.apiKey) : {}),
     });
   }
   const rank = (p: ProviderInfo) => (p.primary ? PRIMARY.indexOf(p.id) : PRIMARY.length);
@@ -409,20 +486,25 @@ function rememberLive(key: string, value: { ids: string[]; at: number }): void {
   }
 }
 
-function fetchLive(url: string, apiKey?: string, guarded = false): Promise<string[] | null> {
-  const key = liveKey(url, apiKey, guarded);
+/** A Bearer `/models` list, as built-ins and legacy custom rows have always fetched it. */
+async function bearerList(url: string, apiKey: string | undefined, guarded: boolean): Promise<string[] | null> {
+  const res = await (guarded ? publicFetch : fetch)(url, {
+    headers: { "User-Agent": USER_AGENT, ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (!res.ok) return null;
+  const body = (await res.json()) as { data?: Array<{ id: string }> };
+  return (body.data ?? []).map((m) => m.id);
+}
+
+function fetchLive(key: string, load: () => Promise<string[] | null>): Promise<string[] | null> {
   let pending = liveInflight.get(key);
   if (!pending) {
     pending = (async () => {
       const hit = readLive(key);
       try {
-        const res = await (guarded ? publicFetch : fetch)(url, {
-          headers: { "User-Agent": USER_AGENT, ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
-          signal: AbortSignal.timeout(8_000),
-        });
-        if (!res.ok) return hit?.ids ?? null;
-        const body = (await res.json()) as { data?: Array<{ id: string }> };
-        const ids = (body.data ?? []).map((m) => m.id);
+        const ids = await load();
+        if (!ids) return hit?.ids ?? null;
         rememberLive(key, { ids, at: Date.now() });
         return ids;
       } catch {
@@ -436,12 +518,16 @@ function fetchLive(url: string, apiKey?: string, guarded = false): Promise<strin
   return pending;
 }
 
-async function fetchLiveIds(url: string, apiKey?: string, guarded = false): Promise<string[] | null> {
-  const hit = readLive(liveKey(url, apiKey, guarded));
-  if (!hit) return fetchLive(url, apiKey, guarded);
+async function cachedLive(key: string, load: () => Promise<string[] | null>): Promise<string[] | null> {
+  const hit = readLive(key);
+  if (!hit) return fetchLive(key, load);
   // A known list answers at once. An expired one is refreshed behind the request instead of delaying it.
-  if (Date.now() - hit.at >= LIVE_TTL_MS) void fetchLive(url, apiKey, guarded);
+  if (Date.now() - hit.at >= LIVE_TTL_MS) void fetchLive(key, load);
   return hit.ids;
+}
+
+function fetchLiveIds(url: string, apiKey?: string, guarded = false): Promise<string[] | null> {
+  return cachedLive(liveKey(url, apiKey, guarded), () => bearerList(url, apiKey, guarded));
 }
 
 /** Loads the catalog and the OpenCode Go list at boot, so the first page load after a restart does not fetch them. */
@@ -482,8 +568,19 @@ async function modelsForProvider(provider: RawProvider, conn: Connection): Promi
 
 async function modelsForCustom(conn: Connection): Promise<ModelInfo[]> {
   if (!conn.baseURL) return [];
+  const entry = (id: string) => ({ ...unknownModel(conn.providerId, id, "openai-chat", conn.baseURL), name: id });
+  if (conn.transport) {
+    // A corrupt configuration offers nothing; it never degrades to a Bearer list.
+    if (!conn.transport.ok) return [];
+    const source = conn.transport.config.modelSource;
+    // Configured ids are validated locally: no /models probe, and no capability is inferred from them.
+    if (source.mode === "manual") return source.ids.map(entry);
+    // Keyed by a digest of the whole transport and the connection identity, never by raw credentials.
+    const ids = (await cachedLive(`c:${connectionDigest(conn)}`, () => discoverModelIds(conn, AbortSignal.timeout(8_000)))) ?? [];
+    return ids.filter((id) => isChatModelId(id)).map(entry);
+  }
   const ids = (await fetchLiveIds(`${conn.baseURL.replace(/\/$/, "")}/models`, conn.apiKey, conn.guarded)) ?? [];
-  return ids.filter((id) => isChatModelId(id)).map((id) => ({ ...unknownModel(conn.providerId, id, "openai-chat", conn.baseURL), name: id }));
+  return ids.filter((id) => isChatModelId(id)).map(entry);
 }
 
 /** Every model one connection offers, independent of a viewer. Used by the admin policy dialog. */

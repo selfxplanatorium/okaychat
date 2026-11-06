@@ -7,6 +7,8 @@ import { USER_AGENT } from "../env.js";
 import { modelAccessMessage, sharedModelAccess } from "../entitlements.js";
 import { describeProviderError } from "../provider-errors.js";
 import { publicFetch, readCapped } from "../public-fetch.js";
+import { connectionFetch } from "../provider-transport.js";
+import { deploymentIdOf } from "../../shared/provider-transport.js";
 import { registerKnowledgeOperation } from "./revocation.js";
 import { assertFeature, featureAllowed } from "../permissions/guard.js";
 import { reserveOperation } from "../permissions/limits.js";
@@ -209,7 +211,10 @@ interface RequestOptions {
   timeoutMs?: number;
 }
 
-const request = (conn: Connection, opts: RequestOptions) => opts.fetchImpl ?? (conn.guarded ? publicFetch : fetch);
+// A v1 custom connection always goes through its transport (fetchImpl is only its leaf there), so the
+// Bearer header below is replaced by the configured auth on every attempt.
+const request = (conn: Connection, opts: RequestOptions) =>
+  conn.transport ? connectionFetch(conn, opts.fetchImpl) : opts.fetchImpl ?? (conn.guarded ? publicFetch : fetch);
 
 /** Caller cancellation plus a hard request deadline, so a stalled provider cannot hold a job forever. */
 function requestSignal(signal: AbortSignal | undefined, timeoutMs = REQUEST_TIMEOUT_MS): AbortSignal {
@@ -308,14 +313,20 @@ export function createEmbedder(
   const model = setting.model?.trim() || defaultEmbeddingModel(setting.provider);
   if (!model) throw new EmbeddingError("Enter the embedding model name for this collection.");
   if (!embeddingAllowed(userId, conn, model)) throw new EmbeddingError(modelAccessMessage(`${providerId}/${model}`));
+  if (conn.transport && !conn.transport.ok) throw new EmbeddingError("The embedding connection's configuration is invalid. Save it again in Settings → Providers.");
+  // A fixed deployment URL already selects the model; a different name would embed with the wrong deployment.
+  const deployment = conn.transport ? deploymentIdOf(conn.baseURL ?? "") : null;
+  if (deployment !== null && model !== deployment) throw new EmbeddingError("Use the deployment name from the connection's address as the embedding model.");
   const requestOpts: RequestOptions = { ...opts };
   const pin = pinned ? resolvePinnedConnection(userId, providerId) : null;
   const connectionAllowed = () => {
     if (!featureAllowed(userId, "knowledge") || !embeddingAllowed(userId, conn, model)) return false;
     if (!pinned) return true;
     const live = resolvePinnedConnection(userId, providerId);
+    // The fingerprint covers key, auth, headers, and query: any change stops the active operation. Only an
+    // endpoint/query change alters endpointHash and so forces a reindex.
     return !!pin && !!live && live.scope === pin.scope && live.createdAt === pin.createdAt
-      && live.endpointHash === pin.endpointHash && live.connection.guarded === conn.guarded;
+      && live.endpointHash === pin.endpointHash && live.fingerprint === pin.fingerprint && live.connection.guarded === conn.guarded;
   };
 
   const embed = async (texts: string[], callerSignal?: AbortSignal): Promise<Float32Array[]> => {
