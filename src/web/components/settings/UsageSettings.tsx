@@ -11,6 +11,7 @@ import { TokenCreditBalanceCard } from "./TokenCreditBalanceCard";
 type Range = "1" | "7" | "30" | "90";
 
 const PURPOSE_LABELS = {
+  arena: "usage.arenaPurpose",
   video: "video.purpose",
   chat: "usage.purposeChat",
   compaction: "usage.purposeCompaction",
@@ -21,9 +22,9 @@ const PURPOSE_LABELS = {
   channel: "usage.kindChannel",
   api: "usage.purposeApi",
   translation: "usage.purposeTranslation",
-} as const satisfies Record<"video" | "chat" | "compaction" | "title" | "research" | "evaluation" | "evaluation_judge" | "channel" | "api" | "translation", PlainMessageKey>;
+} as const satisfies Record<"arena" | "video" | "chat" | "compaction" | "title" | "research" | "evaluation" | "evaluation_judge" | "channel" | "api" | "translation", PlainMessageKey>;
 
-type UsageResponse = { rows: UsageRow[]; go: GoWindow[]; agents?: AgentUsageCounters };
+type UsageResponse = { hiddenArenaRequests?: number; incompleteDueToArena?: boolean; rows: UsageRow[]; go: GoWindow[]; agents?: AgentUsageCounters };
 
 function useUsage(days: Range, groupBy: "day" | "model" | "kind") {
   const [data, setData] = useState<UsageResponse | null>(null);
@@ -67,6 +68,7 @@ export function UsageSettings() {
   return (
     <SettingsPage title={t("usage.title")} description={t("usage.description")}>
       <TokenCreditBalanceCard showUsageLink={false} />
+      {byDay?.incompleteDueToArena && <p role="status" className="text-muted-foreground text-sm">{t("usage.arenaHidden", { count: byDay.hiddenArenaRequests ?? 0 })}</p>}
       <div className="flex justify-end">
         <Select
           className="w-40"

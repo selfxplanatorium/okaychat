@@ -1986,6 +1986,8 @@ const it: Translation = {
     originalGeneration: "I dati si riferiscono alla generazione originale.",
   },
   permissions: {
+    featureArenaLabel: "Arena",
+    featureArenaHelp: "Consente Battle anonime a pagamento e votazioni. Entrambe le risposte consumano la quota dell’account.",
     featureVideosLabel: "Generazione video",
     featureVideosHelp: "Consente la generazione video a pagamento con chiave privata e attivazione esplicita. L’annullamento può comunque comportare addebiti.",
     featureKnowledgeLabel: "Conoscenze",
@@ -2717,6 +2719,8 @@ const it: Translation = {
     itemsSelected: { one: "{count} elemento selezionato", many: "{count} elementi selezionati", other: "{count} elementi selezionati" },
   },
   usage: {
+    arenaPurpose: "Arena",
+    arenaHidden: "{count} richieste Arena non rivelate sono escluse da questi totali e dalle finestre Go. Il saldo dei token include l’attività segnalata e può cambiare prima della rivelazione.",
     title: "Utilizzo",
     description: "Token e costo stimato delle tue richieste, con i prezzi di models.dev.",
     range: "Intervallo",

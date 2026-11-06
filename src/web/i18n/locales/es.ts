@@ -103,6 +103,8 @@ const es: Translation = {
     "missing_unknown": "Adjunto omitido"
   },
   permissions: {
+    featureArenaLabel: "Arena",
+    featureArenaHelp: "Permite Battles a ciegas de pago y votaciones. Ambas respuestas consumen la cuota de la cuenta.",
     featureVideosLabel: "Generación de vídeo",
     featureVideosHelp: "Permite generar vídeos de pago con clave privada y activación explícita. Cancelar puede generar cargos.",
   },
@@ -850,6 +852,8 @@ const es: Translation = {
     emailAddress: "Dirección de correo",
   },
   usage: {
+    arenaPurpose: "Arena",
+    arenaHidden: "{count} solicitudes de Arena sin revelar se excluyen de estos totales y de las ventanas Go. Tu saldo de tokens incluye la actividad comunicada y puede cambiar antes de la revelación.",
     title: "Uso",
     description: "Tokens y coste estimado de tus propias solicitudes, con los precios de models.dev.",
     range: "Periodo",

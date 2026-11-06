@@ -659,6 +659,7 @@ export interface InjectionReport {
 }
 
 export type PromptKey =
+  | "arenaAnswer"
   | "chat"
   | "dataSafety"
   | "modelIdentity"

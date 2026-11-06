@@ -279,6 +279,10 @@ The user selected an assistant named "{name}" for this chat. Its instructions fo
 
 {instructions}`,
   },
+  arenaAnswer: {
+    label: "Arena answer", description: "The identical identity-neutral prompt used for both Battle answers.", placeholders: [],
+    defaultValue: "Answer the user’s request clearly and accurately. Do not identify your model, provider, or configuration. Return only the final answer, without hidden reasoning. No tools are available.",
+  },
   evaluationCase: {
     label: "Evaluation case",
     description: "Start of the system prompt for every evaluation case. Shared by every case of one account and model for prompt caching.",

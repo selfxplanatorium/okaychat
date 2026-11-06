@@ -26,6 +26,7 @@ export const FEATURE_KEYS = [
   "delegation",
   "skills",
   "evaluations",
+  "arena",
   "channels",
   "customTools",
   "notes",

@@ -101,6 +101,8 @@ const de: Translation = {
     "missing_unknown": "Anhang ausgelassen"
   },
   permissions: {
+    featureArenaLabel: "Arena",
+    featureArenaHelp: "Erlaubt kostenpflichtige blinde Battles und Abstimmungen. Beide Antworten verbrauchen das Kontingent des Kontos.",
     featureVideosLabel: "Videogenerierung",
     featureVideosHelp: "Erlaubt kostenpflichtige Videogenerierung mit privatem Schlüssel und ausdrücklicher Aktivierung. Ein Abbruch kann trotzdem Kosten verursachen.",
   },
@@ -848,6 +850,8 @@ const de: Translation = {
     emailAddress: "E-Mail-Adresse",
   },
   usage: {
+    arenaPurpose: "Arena",
+    arenaHidden: "{count} nicht offengelegte Arena-Anfragen sind aus diesen Summen und Go-Fenstern ausgeschlossen. Dein Token-Guthaben enthält gemeldete Aktivität und kann sich vor der Offenlegung ändern.",
     title: "Nutzung",
     description: "Tokens und geschätzte Kosten aus deinen eigenen Anfragen, berechnet mit models.dev-Preisen.",
     range: "Zeitraum",

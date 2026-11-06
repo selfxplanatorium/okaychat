@@ -85,10 +85,11 @@ export function closeCreditRoot(permit: CreditPermit): void {
 }
 export interface CreditContext {
   threadId?: string; channelId?: string; channelRunId?: string; apiKeyId?: string; apiRequestId?: string;
+  arenaBattleId?: string; arenaSide?: "A" | "B";
   runId?: string; segmentId?: string; evaluationRunId?: string; evaluationCaseId?: string;
 }
-const contextKeys = new Set(["threadId", "channelId", "channelRunId", "apiKeyId", "apiRequestId", "runId", "segmentId", "evaluationRunId", "evaluationCaseId"]);
-const kinds: readonly UsageKind[] = ["chat", "compaction", "title", "subagent", "memory", "research", "evaluation", "evaluation_judge", "channel", "api", "translation"];
+const contextKeys = new Set(["arenaBattleId", "arenaSide", "threadId", "channelId", "channelRunId", "apiKeyId", "apiRequestId", "runId", "segmentId", "evaluationRunId", "evaluationCaseId"]);
+const kinds: readonly UsageKind[] = ["chat", "compaction", "title", "subagent", "memory", "research", "evaluation", "evaluation_judge", "channel", "api", "translation", "arena"];
 export function beginCreditRequest(permit: CreditPermit, entry: { providerId: string; modelId: string; kind: UsageKind; context?: CreditContext }): string {
   return tx(() => {
     const root = liveRoot(permit);
@@ -99,6 +100,7 @@ export function beginCreditRequest(permit: CreditPermit, entry: { providerId: st
     const context = entry.context ?? {};
     if (root.origin === "temporary" && context.threadId !== undefined) throw new CreditError("validation", "Temporary operations cannot retain a thread identifier.");
     if (Object.entries(context).some(([k, v]) => !contextKeys.has(k) || typeof v !== "string" || !v.length || v.length > 500 || /[\u0000-\u001f]/u.test(v))) throw new CreditError("validation");
+    if (entry.kind === "arena" ? root.origin !== "arena" || !context.arenaBattleId || !["A", "B"].includes(context.arenaSide ?? "") || context.threadId !== undefined : context.arenaBattleId !== undefined || context.arenaSide !== undefined) throw new CreditError("validation");
     const json = JSON.stringify(context);
     if (Buffer.byteLength(json) > 2048) throw new CreditError("validation");
     const id = randomUUID();
@@ -140,7 +142,7 @@ export function settleCreditRequest(requestId: string, settlement: Settlement): 
     if (usage) {
       if (settlement.state !== "reported" || !Number.isFinite(settlement.cost) || settlement.cost < 0) throw new CreditError("validation");
       const c = JSON.parse(r.context_json) as CreditContext;
-      recordUsage({ userId: r.user_id, providerId: r.provider_id, modelId: r.model_id, kind: r.kind, usage, cost: settlement.state === "reported" ? settlement.cost : 0, creditRequestId: requestId, threadId: c.threadId, channelId: c.channelId, channelRunId: c.channelRunId, apiKeyId: c.apiKeyId, apiRequestId: c.apiRequestId });
+      recordUsage({ userId: r.user_id, providerId: r.provider_id, modelId: r.model_id, kind: r.kind, usage, cost: settlement.state === "reported" ? settlement.cost : 0, creditRequestId: requestId, threadId: c.threadId, channelId: c.channelId, channelRunId: c.channelRunId, apiKeyId: c.apiKeyId, apiRequestId: c.apiRequestId, arenaBattleId: c.arenaBattleId, arenaSide: c.arenaSide });
     }
   });
 }

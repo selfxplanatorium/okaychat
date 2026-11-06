@@ -1986,6 +1986,8 @@ const fr: Translation = {
     originalGeneration: "L’utilisation décrit la génération d’origine.",
   },
   permissions: {
+    featureArenaLabel: "Arena",
+    featureArenaHelp: "Autorise les Battles à l’aveugle payantes et le vote. Les deux réponses consomment le quota du compte.",
     featureVideosLabel: "Génération vidéo",
     featureVideosHelp: "Autorise la génération vidéo payante avec une clé privée et une activation explicite. Une annulation peut rester facturée.",
     featureKnowledgeLabel: "Connaissances",
@@ -2717,6 +2719,8 @@ const fr: Translation = {
     itemsSelected: { one: "{count} élément sélectionné", many: "{count} éléments sélectionnés", other: "{count} éléments sélectionnés" },
   },
   usage: {
+    arenaPurpose: "Arena",
+    arenaHidden: "{count} requêtes Arena non révélées sont exclues de ces totaux et des fenêtres Go. Ton solde de jetons inclut l’activité déclarée et peut changer avant la révélation.",
     title: "Utilisation",
     description: "Jetons et coût estimé de tes propres requêtes, calculés avec les tarifs de models.dev.",
     range: "Période",

@@ -1,3 +1,5 @@
+import { publicArenaRoutes } from "./arena/routes.js";
+import { expireContents } from "./arena/store.js";
 import { interruptBattles } from "./arena/store.js";
 import { recoverImports, startImports, stopImports } from "./conversation-import/jobs.js";
 import { videoWorker, recoverVideoJobs } from "./video/worker.js";
@@ -46,7 +48,7 @@ import { reconcileScheduleInvocations } from "./schedules.js";
 const app = new Hono();
 // Capability-bearing OAuth requests and query strings never enter the request logger.
 app.use("/api/*", async (c, next) => {
-  if (c.req.path.startsWith("/api/chatgpt")) return next();
+  if (c.req.path.startsWith("/api/chatgpt") || c.req.path.startsWith("/api/arena")) return next();
   return logger()(c, next);
 });
 // Cross-site form posts (which skip the CORS preflight) cannot reach the API, including login and logout.
@@ -82,6 +84,7 @@ app.get("/api/health", (c) => c.json({ ok: true, version: env.version }));
 app.route("/api/auth", authRoutes);
 app.route("/api/mcp/oauth/callback", mcpOAuthCallback);
 app.route("/api/public/shares", publicShareRoutes);
+app.route("/api/public/arena", publicArenaRoutes);
 app.route("/api/chatgpt/helper", chatgptHelperRoutes);
 app.route("/api", api);
 // The external API is deliberately outside both the `/api` body limit and its CSRF middleware: bearer
@@ -115,6 +118,7 @@ void warmCatalog().catch(() => {});
 // not_dispatched, and every open root closes, before any API, evaluation, or channel recovery runs.
 recoverCreditOperations();
 interruptBattles();
+const arenaMaintenance = setInterval(() => expireContents(), 6 * 3600_000); arenaMaintenance.unref();
 // Room archive recovery runs before the listener accepts a request; the interval starts with the server.
 recoverRoomArchiveJobs();
 recoverImports();

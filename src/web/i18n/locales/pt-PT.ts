@@ -1986,6 +1986,8 @@ const ptPT: Translation = {
     originalGeneration: "A utilização descreve a geração original.",
   },
   permissions: {
+    featureArenaLabel: "Arena",
+    featureArenaHelp: "Permite Battles às cegas pagas e votação. Ambas as respostas consomem o saldo da conta.",
     featureVideosLabel: "Geração de vídeo",
     featureVideosHelp: "Permite gerar vídeos pagos com uma chave privada e ativação explícita. O cancelamento pode ainda ser cobrado.",
     featureKnowledgeLabel: "Conhecimento",
@@ -2717,6 +2719,8 @@ const ptPT: Translation = {
     itemsSelected: { one: "{count} item selecionado", many: "{count} itens selecionados", other: "{count} itens selecionados" },
   },
   usage: {
+    arenaPurpose: "Arena",
+    arenaHidden: "{count} pedidos Arena não revelados são excluídos destes totais e das janelas Go. O saldo de tokens inclui a atividade comunicada e pode mudar antes da revelação.",
     title: "Utilização",
     description: "Tokens e custo estimado dos teus próprios pedidos, com as tarifas do models.dev.",
     range: "Intervalo",

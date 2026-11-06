@@ -1,3 +1,4 @@
+import { abortArenaUser } from "./arena/worker.js";
 import { bumpRatingRevision } from "./arena/store.js";
 import { creditBalances, ensureCreditAccount, getCreditBalance } from "./credits/store.js";
 import { removeUserImports } from "./conversation-import/jobs.js";
@@ -155,6 +156,7 @@ export const adminRoutes = new Hono<AppEnv>()
     abortChannelRunsForUser(id);
     // Live external API calls of the account stop before the key rows cascade away.
     abortApiCalls(id);
+    abortArenaUser(id);
     // Active webhook attempts stop before their endpoint rows cascade away.
     abortUserEndpointSends(id);
     deletingUserVideos(id);

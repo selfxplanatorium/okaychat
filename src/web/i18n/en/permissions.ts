@@ -1,4 +1,6 @@
 export default {
+  featureArenaLabel: "Arena",
+  featureArenaHelp: "Allows paid blind Battles and voting. Both answers consume the account’s allowance.",
   title: "Permissions",
   description: "Control access, limits, and instructions for accounts, groups, and models.",
   entryDescription: "Review and change feature access, limits, and system prompt overrides. Server account management stays below.",
