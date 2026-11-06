@@ -84,7 +84,7 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
     "@types/culori": "^4.0.1",
-    "@types/node": "^26.6.5",
+    "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/turndown": "^5.0.6",
