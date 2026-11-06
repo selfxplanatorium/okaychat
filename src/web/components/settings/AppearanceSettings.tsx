@@ -17,7 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { errorText } from "@/lib/error-text";
 import { cn } from "@/lib/utils";
 import { DEFAULT_APPEARANCE, useAppearance } from "@/state/appearance";
-import { MOTION_GROUPS, type AppearanceSettings, type MotionGroup } from "@shared/appearance";
+import { MOTION_GROUPS, type AppearanceSettings, type MessageLayout, type MotionGroup } from "@shared/appearance";
 import type { InstalledFont } from "@shared/types";
 import { installFont, removeFont, useInstalledFonts } from "@/state/fonts";
 import {
@@ -66,6 +66,11 @@ const CHAT_WIDTH_OPTIONS: Array<{ value: ChatWidth; label: PlainMessageKey }> = 
   { value: "comfortable", label: "appearance.chatWidthComfortable" },
   { value: "wide", label: "appearance.chatWidthWide" },
   { value: "full", label: "appearance.chatWidthFull" },
+];
+
+const MESSAGE_LAYOUT_OPTIONS: Array<{ value: MessageLayout; label: PlainMessageKey }> = [
+  { value: "timeline", label: "appearance.messageLayoutTimeline" },
+  { value: "bubbles", label: "appearance.messageLayoutBubbles" },
 ];
 
 /** Tracks the OS scheme so the library follows "System" live. */
@@ -660,6 +665,21 @@ export function AppearanceSettings() {
                 value={s.chatWidth}
                 options={CHAT_WIDTH_OPTIONS.map((option) => ({ ...option, label: t(option.label) }))}
                 onValueChange={(chatWidth) => update({ chatWidth })}
+              />
+            </div>
+          }
+        />
+        <SettingsRow
+          label={t("appearance.messageLayout")}
+          description={t("appearance.messageLayoutDescription")}
+          reset={s.messageLayout !== DEFAULT_APPEARANCE.messageLayout ? () => reset("messageLayout") : null}
+          control={
+            <div className="w-full sm:w-48">
+              <Select<MessageLayout>
+                aria-label={t("appearance.messageLayout")}
+                value={s.messageLayout}
+                options={MESSAGE_LAYOUT_OPTIONS.map((option) => ({ ...option, label: t(option.label) }))}
+                onValueChange={(messageLayout) => update({ messageLayout })}
               />
             </div>
           }

@@ -3,6 +3,8 @@
 // Appearance settings) and apps/web/src/routes/__root.tsx (glass and chat
 // width DOM writes). Effect Schema replaced with plain range checks.
 
+import { DEFAULT_MESSAGE_LAYOUT, isMessageLayout, type MessageLayout } from "@shared/appearance";
+
 // Glass (translucent surfaces: dialogs, dropdowns, alerts).
 export const MIN_GLASS_OPACITY = 40;
 export const MAX_GLASS_OPACITY = 100;
@@ -92,4 +94,9 @@ export function applyGlassOpacity(root: HTMLElement, opacity: number): void {
 /** Sets `data-chat-width`, which the stylesheet maps to `--chat-content-max-width`. */
 export function applyChatWidth(root: HTMLElement, width: ChatWidth): void {
   root.dataset.chatWidth = isChatWidth(width) ? width : DEFAULT_CHAT_WIDTH;
+}
+
+/** Sets data-message-layout; the stylesheet treats a missing attribute as timeline. */
+export function applyMessageLayout(root: HTMLElement, layout: MessageLayout): void {
+  root.dataset.messageLayout = isMessageLayout(layout) ? layout : DEFAULT_MESSAGE_LAYOUT;
 }

@@ -11,6 +11,13 @@ const customTheme = z.object({
   managed: z.boolean().optional(),
 });
 
+/** Message presentation. `timeline` is the existing transcript; `bubbles` adds a reply surface. */
+export const MESSAGE_LAYOUTS = ["timeline", "bubbles"] as const;
+export type MessageLayout = (typeof MESSAGE_LAYOUTS)[number];
+export const DEFAULT_MESSAGE_LAYOUT: MessageLayout = "timeline";
+export const isMessageLayout = (value: unknown): value is MessageLayout =>
+  typeof value === "string" && (MESSAGE_LAYOUTS as readonly string[]).includes(value);
+
 /** Animation groups the user can switch off. Turning all of them off disables every animation. */
 export const MOTION_GROUPS = ["icons", "interface", "transitions", "loading"] as const;
 export type MotionGroup = (typeof MOTION_GROUPS)[number];
@@ -88,6 +95,7 @@ export const appearanceSchema = z.object({
   squareCorners: z.boolean().default(false),
   sidebarStyle: z.enum(["floating", "docked"]).default("floating"),
   chatWidth: z.enum(["comfortable", "wide", "full"]),
+  messageLayout: z.enum(MESSAGE_LAYOUTS).default(DEFAULT_MESSAGE_LAYOUT),
   fontFamilySans: z.string().max(200),
   fontFamilyComposer: z.string().max(200),
   fontFamilyCode: z.string().max(200),

@@ -12,6 +12,15 @@ type Patch = Partial<UserAppearance>;
 type Cache = { value: UserAppearance; pending: Patch };
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
+/** The changed top-level fields, compared structurally. */
+export function appearancePatch(previous: UserAppearance, next: UserAppearance): Partial<UserAppearance> {
+  return Object.fromEntries(
+    (Object.keys(next) as Array<keyof UserAppearance>)
+      .filter((key) => !same(previous[key], next[key]))
+      .map((key) => [key, next[key]]),
+  );
+}
+
 export const useAppearanceSyncStatus = create<{ error: string | null }>(() => ({ error: null }));
 
 /** Local edits stay immediate. Only changed fields are sent, so another device's unrelated edits survive. */
@@ -108,9 +117,7 @@ export function useSyncAppearance(userId: string | undefined): boolean {
     const onEdit = () => {
       if (applying) return;
       const next = appearanceSnapshot();
-      const patch = Object.fromEntries(
-        (Object.keys(next) as Array<keyof UserAppearance>).filter((key) => !same(value[key], next[key])).map((key) => [key, next[key]]),
-      );
+      const patch = appearancePatch(value, next);
       if (!Object.keys(patch).length) return;
       pending = { ...pending, ...patch };
       value = next;
