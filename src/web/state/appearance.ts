@@ -74,8 +74,21 @@ interface AppearanceState extends AppearanceSettings {
   bump: () => void;
 }
 
+/** Blocked storage (private mode, an embedded frame) must never stop the appearance store from starting. */
+const readStored = (key: string): string | null => {
+  try { return localStorage.getItem(key); } catch { return null; }
+};
+const writeStored = (key: string, value: string | null): void => {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {
+    // Live preferences still work; the device just forgets them.
+  }
+};
+
 const readMode = (): ThemePreferenceMode => {
-  const raw = localStorage.getItem(THEME_APPEARANCE_MODE_STORAGE_KEY);
+  const raw = readStored(THEME_APPEARANCE_MODE_STORAGE_KEY);
   return raw === "light" || raw === "dark" || raw === "system" ? raw : "system";
 };
 
@@ -83,20 +96,20 @@ export const useAppearance = create<AppearanceState>()(
   persist(
     (set, get) => ({
       ...DEFAULT_APPEARANCE,
-      theme: localStorage.getItem(THEME_KEY) ?? "",
+      theme: readStored(THEME_KEY) ?? "",
       mode: readMode(),
-      halves: parseThemeHalves(localStorage.getItem(THEME_HALVES_STORAGE_KEY)),
+      halves: parseThemeHalves(readStored(THEME_HALVES_STORAGE_KEY)),
       revision: 0,
       update: (patch) => set(patch),
       reset: (key) => set({ [key]: DEFAULT_APPEARANCE[key] } as Partial<AppearanceSettings>),
       setTheme: (theme) => {
-        localStorage.setItem(THEME_KEY, theme);
+        writeStored(THEME_KEY, theme);
         // Picking a whole theme clears per-mode overrides, as in T3Code.
-        localStorage.removeItem(THEME_HALVES_STORAGE_KEY);
+        writeStored(THEME_HALVES_STORAGE_KEY, null);
         set({ theme, halves: null });
       },
       setMode: (mode) => {
-        localStorage.setItem(THEME_APPEARANCE_MODE_STORAGE_KEY, mode);
+        writeStored(THEME_APPEARANCE_MODE_STORAGE_KEY, mode);
         set({ mode });
       },
       setHalf: (appearance, themeId) => {
@@ -104,8 +117,7 @@ export const useAppearance = create<AppearanceState>()(
         if (themeId) next[appearance] = themeId;
         else delete next[appearance];
         const halves = next.light || next.dark ? next : null;
-        if (halves) localStorage.setItem(THEME_HALVES_STORAGE_KEY, JSON.stringify(halves));
-        else localStorage.removeItem(THEME_HALVES_STORAGE_KEY);
+        writeStored(THEME_HALVES_STORAGE_KEY, halves ? JSON.stringify(halves) : null);
         set({ halves });
       },
       bump: () => set({ revision: get().revision + 1 }),
@@ -143,10 +155,9 @@ export function appearanceSnapshot(): UserAppearance {
 }
 
 export function restoreAppearance(value: UserAppearance) {
-  localStorage.setItem(THEME_KEY, value.theme);
-  localStorage.setItem(THEME_APPEARANCE_MODE_STORAGE_KEY, value.mode);
-  if (value.halves) localStorage.setItem(THEME_HALVES_STORAGE_KEY, JSON.stringify(value.halves));
-  else localStorage.removeItem(THEME_HALVES_STORAGE_KEY);
+  writeStored(THEME_KEY, value.theme);
+  writeStored(THEME_APPEARANCE_MODE_STORAGE_KEY, value.mode);
+  writeStored(THEME_HALVES_STORAGE_KEY, value.halves ? JSON.stringify(value.halves) : null);
   if (JSON.stringify(getCustomThemes()) !== JSON.stringify(value.customThemes)) replaceCustomThemes(value.customThemes);
   const { customThemes: _themes, ...rest } = value;
   // Snapshots stored before the size became per-device still carry it.
