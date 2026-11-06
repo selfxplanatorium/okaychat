@@ -1,3 +1,4 @@
+import { ensureCreditAccount } from "./credits/store.js";
 import { removeUserImports } from "./conversation-import/jobs.js";
 import { deletingUserVideos, removeUserVideoFiles } from "./video/maintenance.js";
 import { deleteChatGPTUser } from "./chatgpt-oauth-store.js";
@@ -90,14 +91,20 @@ export const adminRoutes = new Hono<AppEnv>()
     const body = userInput.safeParse(await c.req.json());
     if (!body.success) return c.json({ error: body.error.issues[0]?.message }, 400);
     if (db.prepare("SELECT 1 FROM users WHERE lower(email) = ?").get(body.data.email)) return c.json({ error: "That email is already registered." }, 409);
-    db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(
-      newId("usr"),
-      body.data.email,
-      body.data.name,
-      await hashPassword(body.data.password),
-      body.data.role,
-      Date.now(),
-    );
+    const passwordHash = await hashPassword(body.data.password);
+    const id = newId("usr");
+    const createdAt = Date.now();
+    tx(() => {
+      db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(
+        id,
+        body.data.email,
+        body.data.name,
+        passwordHash,
+        body.data.role,
+        createdAt,
+      );
+      ensureCreditAccount(id, createdAt);
+    });
     return c.json({ ok: true });
   })
   .patch("/admin/users/:id", async (c) => {

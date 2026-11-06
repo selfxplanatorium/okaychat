@@ -2229,6 +2229,77 @@ CREATE UNIQUE INDEX usage_video_job ON usage(video_job_id) WHERE video_job_id IS
    ALTER TABLE conversation_import_jobs ADD COLUMN total_bytes INTEGER;
    ALTER TABLE conversation_import_jobs ADD COLUMN staging_present INTEGER NOT NULL DEFAULT 0 CHECK(staging_present IN (0,1));
    ALTER TABLE conversation_source_ids ADD COLUMN origin TEXT NOT NULL DEFAULT 'import' CHECK(origin IN ('import','export'));`,
+  () => {
+    const migrationNow = Date.now();
+    db.exec(`CREATE TABLE token_credit_accounts (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  credit_tokens INTEGER CHECK(credit_tokens IS NULL OR
+    (typeof(credit_tokens)='integer' AND credit_tokens BETWEEN 0 AND 1000000000000)),
+  consumed_tokens INTEGER NOT NULL DEFAULT 0 CHECK(typeof(consumed_tokens)='integer'
+    AND consumed_tokens BETWEEN 0 AND 9007199254740991),
+  unknown_requests INTEGER NOT NULL DEFAULT 0 CHECK(unknown_requests>=0),
+  period INTEGER NOT NULL DEFAULT 1 CHECK(period>0),
+  period_started_at INTEGER NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1 CHECK(version>0)
+);
+CREATE TABLE token_credit_roots (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  period INTEGER NOT NULL,
+  origin TEXT NOT NULL,
+  exclusive INTEGER NOT NULL CHECK(exclusive IN (0,1)),
+  state TEXT NOT NULL CHECK(state IN ('active','finished','interrupted')),
+  started_at INTEGER NOT NULL,
+  finished_at INTEGER
+);
+CREATE UNIQUE INDEX token_credit_one_active_limited
+  ON token_credit_roots(user_id) WHERE state='active' AND exclusive=1;
+CREATE INDEX token_credit_roots_user_state ON token_credit_roots(user_id,state);
+CREATE TABLE token_credit_requests (
+  id TEXT PRIMARY KEY,
+  root_id TEXT NOT NULL REFERENCES token_credit_roots(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  period INTEGER NOT NULL,
+  provider_id TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  state TEXT NOT NULL CHECK(state IN ('open','reported','unknown','not_dispatched','rejected')),
+  dispatched_at INTEGER,
+  settled_at INTEGER,
+  debit_tokens INTEGER NOT NULL DEFAULT 0 CHECK(typeof(debit_tokens)='integer'
+    AND debit_tokens BETWEEN 0 AND 9007199254740991),
+  usage_json TEXT CHECK(usage_json IS NULL OR json_valid(usage_json)),
+  context_json TEXT NOT NULL CHECK(json_valid(context_json)),
+  error_code TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX token_credit_requests_root ON token_credit_requests(root_id,state);
+CREATE INDEX token_credit_requests_user_period
+  ON token_credit_requests(user_id,period,created_at,id);
+CREATE INDEX token_credit_requests_open ON token_credit_requests(created_at) WHERE state='open';
+CREATE TABLE token_credit_audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  actor_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  mutation_id TEXT NOT NULL,
+  action TEXT NOT NULL CHECK(action IN ('set','clear','reset')),
+  before_json TEXT NOT NULL CHECK(json_valid(before_json)),
+  after_json TEXT NOT NULL CHECK(json_valid(after_json)),
+  reason TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE(user_id,mutation_id)
+);
+CREATE INDEX token_credit_audit_user_page ON token_credit_audit(user_id,id DESC);
+ALTER TABLE usage ADD COLUMN credit_request_id TEXT;
+CREATE UNIQUE INDEX usage_credit_request ON usage(credit_request_id)
+  WHERE credit_request_id IS NOT NULL;
+
+      DROP INDEX usage_channel_run;
+      CREATE INDEX usage_channel_run ON usage(channel_run_id) WHERE channel_run_id IS NOT NULL;
+    `);
+    db.prepare("INSERT INTO token_credit_accounts(user_id,credit_tokens,period_started_at) SELECT id,NULL,? FROM users").run(migrationNow);
+    if (process.env.OKAYCHAT_TEST_FAIL_MIGRATION === "token-credits") throw new Error("Injected token-credits migration failure");
+  },
 ];
 
 const current = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;

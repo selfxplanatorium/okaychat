@@ -69,6 +69,7 @@ src/server/
   search.ts           Full-text search over messages (FTS5, synced by triggers in db.ts)
   schedules.ts        Scheduled prompts: next-run math, 30 s ticker, server-side runs
   artifacts.ts        Artifact and document tools, versions table, panel/file API
+  credits/            Internal token accounting foundation (not enabled): counters, root capabilities, receipts, audited mutations, raw-model middleware and recovery; see docs/implementation/token-credits.md
   quota.ts            Per-user storage quota: used-byte SQL, limits, assertStorage for every write path
   errors.ts provider-errors.ts retry.ts  Safe error taxonomy, provider mapping, and abortable retries
   services.ts         On-demand sidecar probes, per-account availability, and fail-fast guards
@@ -188,6 +189,7 @@ docs/                 Reusable documentation (see below)
 - `docs/implementation/writing-drafts.md`: the simple reusable-text editor, `draft_text`, shared draft lifecycle, kind separation, and model guidance.
 - `docs/implementation/email.md`: IMAP/SMTP accounts, the discovery chain, TLS and host rules, the six mailbox tools, editable draft cards, attachments, limits, and the OAuth gap.
 - `docs/implementation/browser-worker.md`: the browser worker container, its job API, token, egress firewall, and rendering policies.
+- `docs/implementation/token-credits.md`: internal accounting foundation, unexposed finite configuration, and the remaining dispatch/UI release gate.
 - `docs/implementation/storage-quota.md`: what counts against the per-user storage quota and where it is enforced.
 - `docs/implementation/entitlements.md`: per-audience model allowlists on shared provider keys, the union and own-key rules, stale ids, and every enforcement point.
 - `docs/implementation/security.md`: threat model, the controls per area, and the known residual risks. Read before changing auth, outbound requests, rendering, or tool approval.
@@ -214,6 +216,8 @@ You can delegate to smaller-model subagents (for example Haiku) for specialized,
 - Commits: no co-author lines.
 
 ## Non-obvious facts
+
+- Token credits are an internal foundation only. Never expose finite configuration or claim enforcement until every model/unmetered executor and root lifecycle is integrated. The raw credit middleware and recovery are not installed in production; current usage remains aggregate. See `docs/implementation/token-credits.md`.
 
 - Custom tools (`src/server/custom-tools/`, `shared/custom-tools.ts`) are private per-account Python functions and fixed-destination HTTPS tools, assembled only for interactive stored chats. The exposed key is `custom_<24 hex>_r<revision>`; a revision change invalidates prepared approvals. Python runs only through the sandbox runner's one-use `/function` route (fresh uid/workspace, strict 32 KiB stdout, no files/network/secrets output) and also needs the `code` feature. HTTP uses `publicFetch` with `redirect:"error"`, exact reviewed method/path/query/body, encrypted write-only header secrets, and a server-owned prepared run: the replayed approval is accepted only against that row and the executor requires a module-branded capability. Results are redacted, enveloped as `custom_tool` data and taint later actions. See `docs/implementation/custom-tools.md`.
 
