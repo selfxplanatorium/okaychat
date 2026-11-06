@@ -405,6 +405,18 @@
         }
       })();
     </script>
+    <script>
+      // Message layout before the first paint: the persisted store is the only synchronous source.
+      (() => {
+        try {
+          const stored = JSON.parse(window.localStorage.getItem("okaychat:appearance") ?? "null");
+          const layout = stored && stored.state && stored.state.messageLayout;
+          document.documentElement.dataset.messageLayout = layout === "bubbles" ? "bubbles" : "timeline";
+        } catch {
+          document.documentElement.dataset.messageLayout = "timeline";
+        }
+      })();
+    </script>
     <style>
       html, body, #root { width: 100%; height: 100%; margin: 0; }
       /* Mobile Chrome promotes a full-screen scroller (the chat) to act as the page and hides its URL bar on scroll,

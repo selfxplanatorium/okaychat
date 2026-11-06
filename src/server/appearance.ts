@@ -20,6 +20,11 @@ const stored = (userId: string): UserAppearance | undefined => {
 };
 
 export const appearanceRoutes = new Hono<AppEnv>()
+  // A cross-tab focus refresh must never be served an older snapshot from the browser cache.
+  .use("/appearance", async (c, next) => {
+    await next();
+    c.header("Cache-Control", "private, no-store");
+  })
   .use("/appearance", bodyLimit({ maxSize: 1_000_000 }))
   .get("/appearance", (c) => c.json(stored(c.get("user").id) ?? null))
   .put("/appearance", async (c) => {

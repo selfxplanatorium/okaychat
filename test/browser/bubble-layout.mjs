@@ -138,7 +138,7 @@ function watch(page, label) {
   page.on("pageerror", (error) => problems.push(`pageerror: ${error.message}`));
   page.on("console", (msg) => {
     if (msg.type() !== "error" || /ResizeObserver loop/.test(msg.text())) return;
-    if (/status of 429/.test(msg.text()) && msg.location().url.includes("/api/channels/events")) return;
+    if (/status of 429/.test(msg.text()) && /\/api\/channels\/(events|activity)/.test(msg.location().url)) return;
     problems.push(`console: ${msg.text()}`);
   });
   page.on("requestfailed", (request) => {
@@ -146,7 +146,7 @@ function watch(page, label) {
     if (request.url().includes("/api/") && !/ERR_ABORTED/.test(request.failure()?.errorText ?? "")) problems.push(`requestfailed: ${request.url()}`);
   });
   // Channels allow two live streams per account; another tab falls back to polling after this 429.
-  const expected = (url, status) => status === 429 && url.includes("/api/channels/events");
+  const expected = (url, status) => status === 429 && /\/api\/channels\/(events|activity)/.test(url);
   page.on("response", (response) => {
     if (response.url().includes("/api/") && response.status() >= 400 && !expected(response.url(), response.status())) problems.push(`HTTP ${response.status()}: ${response.url()}`);
   });
@@ -174,8 +174,8 @@ async function measure(page) {
       lane: rect(group),
       rowGap: css(group, "row-gap"),
       runs: Object.fromEntries(Object.entries(ids).map(([k, id]) => [k, root(id)?.dataset.messageRun ?? null])),
-      a1: { ...rect(content(ids.a1)), alpha: alpha(css(content(ids.a1), "background-color")), maxWidth: css(content(ids.a1), "max-width"), wide: root(ids.a1).dataset.bubbleWide ?? null },
-      a2: { ...rect(content(ids.a2)), alpha: alpha(css(content(ids.a2), "background-color")), maxWidth: css(content(ids.a2), "max-width"), marginTop: css(root(ids.a2), "margin-block-start") },
+      a1: { ...rect(content(ids.a1)), alpha: alpha(css(content(ids.a1), "background-color")), bg: css(content(ids.a1), "background-color"), maxWidth: css(content(ids.a1), "max-width"), wide: root(ids.a1).dataset.bubbleWide ?? null },
+      a2: { ...rect(content(ids.a2)), alpha: alpha(css(content(ids.a2), "background-color")), bg: css(content(ids.a2), "background-color"), maxWidth: css(content(ids.a2), "max-width"), marginTop: css(root(ids.a2), "margin-block-start") },
       u1: rect(bubble(ids.u1)),
       u2: { ...rect(bubble(ids.u2)), maxWidth: css(bubble(ids.u2), "max-width"), marginTop: css(root(ids.u2), "margin-block-start") },
       u3: { ...rect(bubble(ids.u3)), marginTop: css(root(ids.u3), "margin-block-start") },
@@ -188,6 +188,8 @@ const near = (a, b) => Math.abs(a - b) <= 1;
 async function checkLayout(page, layout, vp) {
   const tag = `${layout}@${vp.name}`;
   await page.waitForFunction((l) => (document.documentElement.dataset.messageLayout ?? "timeline") === l, layout);
+  // Attribute changes can cross a short background/margin transition; measure after it settles.
+  await page.waitForTimeout(350);
   await page.locator(`[data-message-id="${ids.a2}"]`).waitFor();
   // Let content-visibility and lazy images settle before measuring.
   await page.locator(`[data-message-id="${ids.a1}"] img`).first().waitFor({ state: "attached", timeout: 10_000 }).catch(() => {});
@@ -200,7 +202,7 @@ async function checkLayout(page, layout, vp) {
   check(`${tag}: runs u1/u2/a1/u3/a2 = start/end/single/single/single`, m.runs.u1 === "start" && m.runs.u2 === "end" && m.runs.a1 === "single" && m.runs.u3 === "single" && m.runs.a2 === "single", JSON.stringify(m.runs));
   check(`${tag}: a1 is wide (image reply)`, m.a1.wide === "1");
   if (layout === "timeline") {
-    check(`${tag}: assistant content transparent`, m.a1.alpha === 0 && m.a2.alpha === 0);
+    check(`${tag}: assistant content transparent`, m.a1.alpha === 0 && m.a2.alpha === 0, `${m.a1.bg} / ${m.a2.bg}`);
     check(`${tag}: assistant max-width none`, m.a2.maxWidth === "none");
     check(`${tag}: group row-gap 24px`, m.rowGap === "24px", m.rowGap);
     check(`${tag}: assistant margin 0px`, m.a2.marginTop === "0px", m.a2.marginTop);
@@ -256,7 +258,9 @@ async function checkLayout(page, layout, vp) {
 
   // The last message's action menu opens fully inside the viewport.
   const a2 = page.locator(`[data-message-id="${ids.a2}"]`);
-  await a2.scrollIntoViewIfNeeded();
+  // Center the message so the action bar has room above and the popup's flip is measured fairly.
+  await a2.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await page.waitForTimeout(300);
   const more = a2.locator('[data-command="message.more"]').first();
   if (!(await more.isVisible())) await a2.hover();
   await more.click();

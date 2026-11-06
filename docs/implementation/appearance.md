@@ -22,6 +22,28 @@ The brand icon lives in `src/web/public/icon.webp` (302 × 297, lossless WebP, a
 - The existing plain localStorage boot keys and `okaychat:appearance` remain as the last-used visual cache, so first paint still uses the theme before React. Login restores the current account before mounting the chat; an account without saved preferences starts from defaults if the cache belongs to someone else.
 - Theme library changes use the existing parser and notification mechanism (`replaceCustomThemes`). UI changes remain immediate, saves debounce 400 ms, and page unload attempts a keepalive write. Failures leave the outbox cached and show an inline sync status in Appearance settings. This is refresh-on-focus sync, not a live subscription between devices.
 
+## Message layout
+
+`user_settings.appearance.messageLayout` is `timeline` (default) or `bubbles`. It is an account
+preference, validated by `appearanceSchema` and synced through the appearance endpoint. The runtime
+writes `data-message-layout` on `<html>`; every rule in `theme/messages.css` that changes presentation
+is scoped to `[data-message-layout="bubbles"]`, so timeline is the stylesheet default and a reload with
+bubbles never paints a timeline frame (an inline boot script reads the persisted store before the first
+paint).
+
+Bubbles keep the user message right-aligned on an accent surface and give the assistant reply a
+left-aligned reading surface capped at 40rem (34rem for the user), with wider cards, media and failures
+spanning the lane. The per-message flags (`data-message-run`, `data-bubble-wide`, `data-bubble-empty`,
+`data-bubble-waiting`) are rendered in both layouts, so switching is one style recalculation with no
+remount and no history reload. Menus, action bars and popovers stay portaled: the stylesheet forbids
+overflow, transforms, filters, paint containment and backdrop filters on these elements so they never
+become a clipping block.
+
+`test/browser/bubble-layout.mjs` is the live acceptance (not part of `npm test`): it builds a fixture
+chat, checks both layouts at 1440, 720, 390, dark and reduced-motion, switches live from a second tab,
+reloads and checks the first frame, opens the action menu, and fails on any console error, failed API
+request or horizontal overflow.
+
 ## Glass material
 
 Glass preferences are flat account appearance fields, with defaults and numeric

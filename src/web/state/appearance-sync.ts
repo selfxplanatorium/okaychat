@@ -96,7 +96,10 @@ export function useSyncAppearance(userId: string | undefined): boolean {
       if (busy || !alive) return;
       busy = true;
       try {
-        const remote = await (takePrefetched<UserAppearance | null>("/appearance") ?? api<UserAppearance | null>("/appearance"));
+        // The startup prefetch only serves the first load. A later focus/online refresh must read the
+        // account again: a second prefetch can still hold the snapshot from before another tab's edit.
+        const prefetchedRemote = initialized ? undefined : takePrefetched<UserAppearance | null>("/appearance");
+        const remote = await (prefetchedRemote ?? api<UserAppearance | null>("/appearance"));
         if (!alive) return;
         const initial = remote ?? await api<UserAppearance>("/appearance", { method: "PUT", json: value });
         if (!alive) return;
