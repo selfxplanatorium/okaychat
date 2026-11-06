@@ -10,7 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { t } from "@/i18n";
-import { formatBytes, formatCost } from "@/i18n/format";
+import { formatBytes, formatCost, formatTokens } from "@/i18n/format";
 import { permissionsHref } from "@/lib/settings-link";
 import { isPermissionsSearch } from "@/state/permissions-query";
 import { useData } from "@/state/data";
@@ -216,6 +216,11 @@ function Users({ defaultLimit }: { defaultLimit: number | null }) {
             <p className="text-muted-foreground truncate text-xs">
               {t("admin.userStats", { email: u.email, chats: u.threads, used: formatBytes(u.storageUsed), limit: limitLabel(u), cost: formatCost(u.cost30d) })}
             </p>
+            <p className="text-muted-foreground truncate text-xs tabular-nums">
+              {u.tokenCredits.creditTokens === null
+                ? t("credits.rowUnlimited")
+                : t("credits.rowSummary", { used: formatTokens(u.tokenCredits.consumedTokens), remaining: formatTokens(u.tokenCredits.remainingTokens ?? 0) })}
+            </p>
           </div>
           <Select
             aria-label={t("admin.roleOf", { name: u.name })}
@@ -257,7 +262,13 @@ function Users({ defaultLimit }: { defaultLimit: number | null }) {
         </div>
       ))}
       <UserEditDialog edit={edit} onClose={() => setEdit(null)} onSaved={() => void refresh()} />
-      <TokenCreditAdminDialog user={creditUser} onClose={() => setCreditUser(null)} />
+      <TokenCreditAdminDialog
+        user={creditUser}
+        onClose={() => {
+          setCreditUser(null);
+          void refresh();
+        }}
+      />
     </SettingsSection>
   );
 }

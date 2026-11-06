@@ -4938,6 +4938,8 @@ const ptPT: Translation = {
     unknownCount: "Pedidos sem utilização comunicada: {count}",
     overshoot: "Tokens acima da quota: {count}",
     allowanceOf: "Quota de tokens de {name}",
+    rowSummary: "Tokens: {used} utilizados, {remaining} restantes",
+    rowUnlimited: "Tokens: ilimitados",
   },
   projects: {
     title: "Projetos",

@@ -4954,6 +4954,8 @@ const fr: Translation = {
     unknownCount: "Requêtes sans utilisation communiquée : {count}",
     overshoot: "Tokens au-delà du quota : {count}",
     allowanceOf: "Quota de tokens de {name}",
+    rowSummary: "Tokens : {used} utilisés, {remaining} restants",
+    rowUnlimited: "Tokens : illimités",
   },
 };
 

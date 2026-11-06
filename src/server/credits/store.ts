@@ -39,6 +39,13 @@ function snapshot(a: Account): CreditSnapshot {
 export function getCreditBalance(userId: string): TokenCreditBalance {
   return { ...snapshot(account(userId)), activeOperations: activeCount(userId), asOf: Date.now() };
 }
+/** Every account's balance in one indexed pass, for the admin user list. */
+export function creditBalances(): Map<string, TokenCreditBalance> {
+  const now = Date.now();
+  const rows = db.prepare(`SELECT a.*, (SELECT COUNT(*) FROM token_credit_roots r WHERE r.user_id = a.user_id AND r.state = 'active') AS active
+    FROM token_credit_accounts a`).all() as unknown as Array<Account & { active: number }>;
+  return new Map(rows.map((row) => [row.user_id, { ...snapshot(row), activeOperations: Number(row.active), asOf: now }]));
+}
 function activeCount(userId: string): number {
   return (db.prepare("SELECT COUNT(*) AS n FROM token_credit_roots WHERE user_id=? AND state='active'").get(userId) as { n: number }).n;
 }

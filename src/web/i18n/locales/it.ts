@@ -4938,6 +4938,8 @@ const it: Translation = {
     unknownCount: "Richieste senza utilizzo comunicato: {count}",
     overshoot: "Token oltre la quota: {count}",
     allowanceOf: "Quota di token di {name}",
+    rowSummary: "Token: {used} utilizzati, {remaining} rimanenti",
+    rowUnlimited: "Token: illimitati",
   },
   projects: {
     title: "Progetti",

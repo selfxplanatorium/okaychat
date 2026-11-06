@@ -1276,6 +1276,8 @@ const de: Translation = {
     unknownCount: "Anfragen ohne gemeldete Nutzung: {count}",
     overshoot: "Tokens über dem Kontingent: {count}",
     allowanceOf: "Token-Kontingent für {name}",
+    rowSummary: "Tokens: {used} verbraucht, {remaining} verbleibend",
+    rowUnlimited: "Tokens: unbegrenzt",
   },
 };
 

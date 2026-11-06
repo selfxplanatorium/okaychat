@@ -38,8 +38,11 @@ The in-process worker keeps at most two executing runs (generation and judging s
 
 - calls `resolveModel()` → `createModel()` → `generateText()` with `maxRetries: 0`, so entitlements,
   per-model instructions, provider retries, rate windows, leases, and usage stay on the normal path;
-- aborts each case at 120 s, retries one `rate_limited`, records usage with kinds `evaluation` and
-  `evaluation_judge`, and truncates stored output to 32 KiB of UTF-8;
+- aborts each case at 120 s, retries one `rate_limited`, and truncates stored output to 32 KiB of UTF-8;
+- admits one token credit root per case attempt and per judge call; the credit middleware records usage
+  per provider request with kinds `evaluation` and `evaluation_judge`. A finite allowance runs cases at
+  concurrency 1 (the stored concurrency is unchanged) and a refusal stops the run, skipping the
+  remaining cases with the credit code;
 - re-checks `featureAllowed(…, "evaluations")` before each dispatch, skips the remaining cases when a
   budget or feature revocation stops the run, and recounts counters from result rows after each case;
 - never resumes. `initEvaluations()` runs once from `index.ts` after `interruptOpenRuns()` and marks

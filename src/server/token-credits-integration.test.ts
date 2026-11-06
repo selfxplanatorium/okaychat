@@ -26,11 +26,18 @@ const { inferenceRoutes } = await import("./api-access/routes.js");
 const { handleAppError } = await import("./errors.js");
 const { createApiKey } = await import("./api-access/keys.js");
 const { admitCreditRoot, closeCreditRoot, ensureCreditAccount, getCreditBalance, mutateCreditAccount } = await import("./credits/store.js");
+const { creditRoutes, resetCreditRouteLimits } = await import("./credits/routes.js");
+const { adminRoutes } = await import("./admin.js");
+const { createEmbedder } = await import("./knowledge/embeddings.js");
+const { generateImage } = await import("./tools/image.js");
+const { transcribe } = await import("./speech/engines.js");
+const { withUnmeteredRoot } = await import("./credits/admission.js");
 
 const ADMIN = "credit-admin";
 const ALICE = "alice";
+const BOB = "bob";
 
-for (const [id, role] of [[ADMIN, "admin"], [ALICE, "admin"]] as const) {
+for (const [id, role] of [[ADMIN, "admin"], [ALICE, "admin"], [BOB, "user"]] as const) {
   db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES (?, ?, ?, 'unused', ?, 1)").run(
     id,
     `${id}@example.test`,
@@ -43,10 +50,14 @@ db.prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?,
   ALICE,
   Date.now() + 600_000,
 );
+for (const [user, token] of [[ADMIN, "admin-session"], [BOB, "bob-session"]] as const) {
+  db.prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)").run(sha256(token), user, Date.now() + 600_000);
+}
 saveConnection(ALICE, "custom-test", { baseURL: "http://mock.test/v1" });
+saveConnection(ALICE, "openai", { apiKey: "test-key" });
 updateSettings(ALICE, { maxSteps: 1, maxSearches: 0, webTools: false, artifacts: false, generativeUI: false, subagents: false, autoCompactAt: 0 });
 
-const app = new Hono().use(requireUser).route("/", chatRoutes).route("/", scheduleRoutes).onError(handleAppError);
+const app = new Hono().use(requireUser).route("/", chatRoutes).route("/", scheduleRoutes).route("/", creditRoutes).route("/", adminRoutes).onError(handleAppError);
 const inference = new Hono().route("/v1", inferenceRoutes).onError(handleAppError);
 
 after(() => {
@@ -55,6 +66,7 @@ after(() => {
 });
 
 beforeEach(() => {
+  resetCreditRouteLimits();
   db.exec(
     `DELETE FROM token_credit_requests;
      DELETE FROM token_credit_roots;
@@ -239,4 +251,141 @@ test("unlimited accounts keep their old concurrency and are metered per invocati
   assert.equal(usage[0]!.kind, "chat");
   assert.equal(usage[0]!.input, 10);
   assert.equal(usage[0]!.output, 5);
+});
+
+test("a finite chat is debited its reported tokens and the next turn is refused", async (t) => {
+  provider(t);
+  grant(ALICE, 10);
+  ensureThread(ALICE, "thr_debit");
+  const first = await chatRequest("thr_debit");
+  assert.equal(first.status, 200);
+  await first.text();
+  const balance = getCreditBalance(ALICE);
+  assert.equal(balance.consumedTokens, 15, "input plus output, overshoot allowed for the admitted turn");
+  assert.equal(balance.remainingTokens, 0);
+  assert.equal(balance.status, "exhausted");
+  assert.equal(balance.activeOperations, 0);
+  const second = await chatRequest("thr_debit");
+  assert.equal(second.status, 403);
+  assert.equal(((await second.json()) as { code: string }).code, "token_credit_exhausted");
+  assert.equal(providerCalls, 1);
+});
+
+const session = (token: string) => ({ cookie: `okaychat_session=${token}`, "content-type": "application/json" });
+const uuid = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+
+test("credit routes: own balance, admin set/reset/audit, CAS conflicts and non-admin denial", async () => {
+  const own = await app.request("http://app/credits", { headers: session("bob-session") });
+  assert.equal(own.status, 200);
+  assert.equal(own.headers.get("cache-control"), "no-store");
+  const unlimited = (await own.json()) as { creditTokens: number | null; status: string };
+  assert.equal(unlimited.creditTokens, null);
+  assert.equal(unlimited.status, "unlimited");
+
+  const denied = await app.request(`http://app/admin/users/${ADMIN}/credits`, { headers: session("bob-session") });
+  assert.equal(denied.status, 403);
+  const deniedWrite = await app.request(`http://app/admin/users/${BOB}/credits`, {
+    method: "PATCH", headers: session("bob-session"),
+    body: JSON.stringify({ creditTokens: 0, expectedVersion: 1, mutationId: uuid(1), reason: "self" }),
+  });
+  assert.equal(deniedWrite.status, 403);
+
+  const before = (await (await app.request(`http://app/admin/users/${BOB}/credits`, { headers: session("admin-session") })).json()) as { version: number };
+  const extra = await app.request(`http://app/admin/users/${BOB}/credits`, {
+    method: "PATCH", headers: session("admin-session"),
+    body: JSON.stringify({ creditTokens: 100, expectedVersion: before.version, mutationId: uuid(2), reason: "grant", extra: 1 }),
+  });
+  assert.equal(extra.status, 400, "unknown keys are refused");
+  const omitted = await app.request(`http://app/admin/users/${BOB}/credits`, {
+    method: "PATCH", headers: session("admin-session"),
+    body: JSON.stringify({ expectedVersion: before.version, mutationId: uuid(3), reason: "grant" }),
+  });
+  assert.equal(omitted.status, 400, "omission never clears a limit");
+
+  const set = await app.request(`http://app/admin/users/${BOB}/credits`, {
+    method: "PATCH", headers: session("admin-session"),
+    body: JSON.stringify({ creditTokens: 100, expectedVersion: before.version, mutationId: uuid(4), reason: "grant" }),
+  });
+  assert.equal(set.status, 200);
+  const { balance } = (await set.json()) as { balance: { creditTokens: number; version: number; remainingTokens: number } };
+  assert.equal(balance.creditTokens, 100);
+  assert.equal(balance.remainingTokens, 100);
+
+  const stale = await app.request(`http://app/admin/users/${BOB}/credits`, {
+    method: "PATCH", headers: session("admin-session"),
+    body: JSON.stringify({ creditTokens: 50, expectedVersion: before.version, mutationId: uuid(5), reason: "stale" }),
+  });
+  assert.equal(stale.status, 409);
+  assert.equal(((await stale.json()) as { code: string }).code, "conflict");
+
+  const held = admitCreditRoot(BOB, "chat");
+  try {
+    const busy = await app.request(`http://app/admin/users/${BOB}/credits/reset`, {
+      method: "POST", headers: session("admin-session"),
+      body: JSON.stringify({ expectedVersion: balance.version, mutationId: uuid(6), reason: "reset", acknowledgeUnknown: false }),
+    });
+    assert.equal(busy.status, 409);
+    assert.equal(((await busy.json()) as { code: string }).code, "token_credit_busy");
+  } finally {
+    closeCreditRoot(held);
+  }
+  const reset = await app.request(`http://app/admin/users/${BOB}/credits/reset`, {
+    method: "POST", headers: session("admin-session"),
+    body: JSON.stringify({ expectedVersion: balance.version, mutationId: uuid(7), reason: "reset", acknowledgeUnknown: false }),
+  });
+  assert.equal(reset.status, 200);
+  const afterReset = ((await reset.json()) as { balance: { creditTokens: number; consumedTokens: number; period: number } }).balance;
+  assert.equal(afterReset.creditTokens, 100, "reset keeps the allowance");
+  assert.equal(afterReset.consumedTokens, 0);
+
+  const page = await app.request(`http://app/admin/users/${BOB}/credits/audit?limit=1`, { headers: session("admin-session") });
+  assert.equal(page.status, 200);
+  const first = (await page.json()) as { rows: Array<{ id: number; action: string; actorId: string }>; nextCursor: number | null };
+  assert.equal(first.rows.length, 1);
+  assert.equal(first.rows[0]!.action, "reset");
+  assert.equal(first.rows[0]!.actorId, ADMIN);
+  assert.notEqual(first.nextCursor, null);
+  const next = (await (await app.request(`http://app/admin/users/${BOB}/credits/audit?limit=1&before=${first.nextCursor}`, { headers: session("admin-session") })).json()) as { rows: Array<{ action: string }>; nextCursor: number | null };
+  assert.deepEqual(next.rows.map((row) => row.action), ["set"]);
+  assert.equal(next.nextCursor, null);
+  const badCursor = await app.request(`http://app/admin/users/${BOB}/credits/audit?before=-1`, { headers: session("admin-session") });
+  assert.equal(badCursor.status, 400);
+
+  const selfView = (await (await app.request("http://app/credits", { headers: session("bob-session") })).json()) as Record<string, unknown>;
+  assert.equal(selfView.creditTokens, 100);
+  assert.ok(!("reason" in selfView) && !JSON.stringify(selfView).includes("grant"), "the self view carries no audit reasons");
+
+  const list = (await (await app.request("http://app/admin/users", { headers: session("admin-session") })).json()) as Array<{ id: string; tokenCredits: { creditTokens: number | null } }>;
+  assert.equal(list.find((user) => user.id === BOB)?.tokenCredits.creditTokens, 100);
+  assert.equal(list.find((user) => user.id === ADMIN)?.tokenCredits.creditTokens, null);
+
+  const missing = await app.request("http://app/admin/users/nobody/credits", { headers: session("admin-session") });
+  assert.equal(missing.status, 404);
+});
+
+test("finite accounts are refused unpriced services before any network or CLI call", async (t) => {
+  provider(t);
+  grant(ALICE, 1_000);
+  const embedder = createEmbedder(ALICE, { provider: "openai", model: "text-embedding-3-small" })!;
+  await assert.rejects(embedder.embed(["hello"]), (error: { code?: string }) => error.code === "token_credit_unmetered");
+  await assert.rejects(
+    generateImage({ userId: ALICE, threadId: "thr_img", service: { def: { credential: "codex", name: "Codex" }, model: null } as never, prompt: "a cat", references: [] }),
+    (error: { code?: string }) => error.code === "token_credit_unmetered",
+  );
+  await assert.rejects(
+    transcribe(ALICE, { audio: new Uint8Array(8), mime: "audio/webm", filename: "a.webm" }, { engine: "openai" } as never),
+    (error: { code?: string }) => error.code === "token_credit_unmetered",
+  );
+  assert.equal(providerCalls, 0);
+  assert.equal(getCreditBalance(ALICE).activeOperations, 0);
+
+  // Unlimited unpriced work holds a nonexclusive root while it runs, so the allowance cannot change under it.
+  grant(ALICE, null);
+  await withUnmeteredRoot(ALICE, "mcp", async () => {
+    assert.equal(getCreditBalance(ALICE).activeOperations, 1);
+    const balance = getCreditBalance(ALICE);
+    assert.throws(() => mutateCreditAccount(ADMIN, ALICE, { action: "set", creditTokens: 5, expectedVersion: balance.version, mutationId: uuid(99), reason: "during work" }),
+      (error: { code?: string }) => error.code === "token_credit_busy");
+  });
+  assert.equal(getCreditBalance(ALICE).activeOperations, 0);
 });

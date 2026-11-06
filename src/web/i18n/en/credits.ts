@@ -48,4 +48,6 @@ export default {
   unknownCount: "Requests without reported usage: {count}",
   overshoot: "Tokens above the allowance: {count}",
   allowanceOf: "Token allowance for {name}",
+  rowSummary: "Tokens: {used} used, {remaining} remaining",
+  rowUnlimited: "Tokens: unlimited",
 } as const;

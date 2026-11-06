@@ -473,3 +473,92 @@ test("exact-model evaluation denial blocks both generation and judge dispatch", 
   assert.equal(calls.length, 0, "judge execution follows its own model-specific feature policy");
   assert.equal(store.runById(second.id)!.judge_state, "failed");
 });
+
+const credits = await import("../credits/store.js");
+let creditMutation = 0;
+function setAllowance(creditTokens: number | null) {
+  const balance = credits.getCreditBalance("alice");
+  creditMutation += 1;
+  credits.mutateCreditAccount("alice", "alice", {
+    action: creditTokens === null ? "clear" : "set",
+    ...(creditTokens === null ? {} : { creditTokens }),
+    expectedVersion: balance.version,
+    mutationId: `00000000-0000-4000-8000-${String(creditMutation).padStart(12, "0")}`,
+    reason: "evaluation fixture",
+  });
+}
+function resetAllowance() {
+  const balance = credits.getCreditBalance("alice");
+  creditMutation += 1;
+  credits.mutateCreditAccount("alice", "alice", {
+    action: "reset",
+    expectedVersion: balance.version,
+    mutationId: `00000000-0000-4000-8000-${String(creditMutation).padStart(12, "0")}`,
+    reason: "evaluation fixture",
+    acknowledgeUnknown: true,
+  });
+}
+
+test("a finite allowance runs cases one at a time, one credit root per case, and skips the rest once spent", async () => {
+  resetAllowance();
+  setAllowance(15);
+  try {
+    const created = dataset([fields("one"), fields("two"), fields("three")], "Finite");
+    const { run } = launch(created.id, { concurrency: 3 });
+    let activeCount = 0;
+    let peak = 0;
+    const calls: LanguageModelV4CallOptions[] = [];
+    worker.setEvaluationModelFactoryForTests(() => fakeModel("gpt-eval", calls, async () => {
+      activeCount += 1;
+      peak = Math.max(peak, activeCount);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      activeCount -= 1;
+      return answer("ok", 10, 2);
+    }));
+    worker.enqueueRun("alice", run.id);
+    await waitTerminal(run.id);
+    assert.equal(peak, 1, "a finite allowance admits one operation at a time");
+    // 12 tokens per case: the second case is admitted at 12 < 15 and overshoots; the third is refused.
+    assert.equal(calls.length, 2);
+    const detail = store.getRun("alice", run.id)!;
+    assert.equal(detail.state, "failed");
+    assert.equal(detail.errorCode, "token_credit_exhausted");
+    assert.equal(detail.concurrency, 3, "the requested concurrency stays in the run snapshot");
+    const roots = db.prepare("SELECT origin, state FROM token_credit_roots WHERE user_id = 'alice' AND origin = 'evaluation' AND period = ?").all(credits.getCreditBalance("alice").period) as Array<{ origin: string; state: string }>;
+    assert.equal(roots.length, 2);
+    assert.ok(roots.every((root) => root.state === "finished"));
+    const ledger = db.prepare("SELECT u.kind FROM usage u JOIN token_credit_requests r ON r.id = u.credit_request_id WHERE u.user_id = 'alice' AND u.kind = 'evaluation' AND r.period = ?").all(credits.getCreditBalance("alice").period);
+    assert.equal(ledger.length, 2, "one ledger row per provider request");
+    assert.equal(credits.getCreditBalance("alice").consumedTokens, 24);
+  } finally {
+    resetAllowance();
+    setAllowance(null);
+  }
+});
+
+test("each judge call is its own credit root and a spent allowance stops the pass", async () => {
+  resetAllowance();
+  setAllowance(30);
+  try {
+    const created = dataset([fields("one"), fields("two")], "Judge finite");
+    const { run } = launch(created.id);
+    finishRun(run.id, [
+      { caseId: created.cases[0]!.caseId, output: "first answer" },
+      { caseId: created.cases[1]!.caseId, output: "second answer" },
+    ]);
+    const calls: LanguageModelV4CallOptions[] = [];
+    // The first verdict costs 40 tokens, so the second judge call is refused before dispatch.
+    worker.setEvaluationModelFactoryForTests(() => fakeModel("gpt-judge", calls, () => answer('{"score":4,"reason":"solid"}', 30, 10)));
+    store.queueJudge("alice", run.id, judgeConfig());
+    worker.enqueueJudge("alice", run.id);
+    await waitFor(() => ["done", "failed"].includes(String(store.runById(run.id)?.judge_state)), "judge settled");
+    assert.equal(calls.length, 1);
+    assert.equal(store.runById(run.id)?.judge_state, "failed");
+    const roots = db.prepare("SELECT COUNT(*) AS n FROM token_credit_roots WHERE user_id = 'alice' AND origin = 'evaluation_judge' AND period = ?").get(credits.getCreditBalance("alice").period) as { n: number };
+    assert.equal(roots.n, 1);
+    assert.equal(credits.getCreditBalance("alice").consumedTokens, 40);
+  } finally {
+    resetAllowance();
+    setAllowance(null);
+  }
+});

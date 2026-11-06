@@ -1,7 +1,7 @@
 import { db, tx } from "../db.js";
 import { settleCreditRequest } from "./store.js";
 
-/** Run before listener/workers once dispatch integration is enabled. Never run on a live server. */
+/** Called once from index.ts before the listener and every worker. Never run on a live server. */
 export function recoverCreditOperations(): void {
   tx(() => {
     for (const row of db.prepare("SELECT id,dispatched_at FROM token_credit_requests WHERE state='open'").all()) {

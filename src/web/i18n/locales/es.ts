@@ -1278,6 +1278,8 @@ const es: Translation = {
     unknownCount: "Solicitudes sin uso comunicado: {count}",
     overshoot: "Tokens por encima de la asignación: {count}",
     allowanceOf: "Asignación de tokens de {name}",
+    rowSummary: "Tokens: {used} usados, {remaining} restantes",
+    rowUnlimited: "Tokens: ilimitados",
   },
 };
 

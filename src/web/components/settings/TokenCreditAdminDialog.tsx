@@ -93,8 +93,8 @@ function AuditRow({ entry, actor }: { entry: TokenCreditAuditEntry; actor: strin
         <dd className="tabular-nums">
           {formatNumber(entry.before.consumedTokens)} → {formatNumber(entry.after.consumedTokens)}
         </dd>
-        <dt className="text-muted-foreground">{t("credits.unknownCount", { count: entry.after.unknownRequests })}</dt>
-        <dd className="tabular-nums">{t("credits.period", { period: entry.after.period })}</dd>
+        <dd className="text-muted-foreground col-span-2 tabular-nums">{t("credits.period", { period: entry.after.period })}</dd>
+        <dd className="text-muted-foreground col-span-2 tabular-nums">{t("credits.unknownCount", { count: entry.after.unknownRequests })}</dd>
         <dt className="text-muted-foreground">{t("credits.actor")}</dt>
         <dd className="min-w-0 break-words">{actor}</dd>
         <dt className="text-muted-foreground">{t("credits.reason")}</dt>

@@ -19,6 +19,7 @@ import { deleteConnection, getOwnConnection, listModels, listProviders, privateU
 import { OLLAMA, OLLAMA_DEFAULT_URL } from "./catalog/ollama.js";
 import { ollamaManagementRoutes } from "./catalog/ollama-routes.js";
 import { adminRoutes, audienceInput } from "./admin.js";
+import { creditRoutes } from "./credits/routes.js";
 import { permissionRoutes } from "./permissions/routes.js";
 import { artifactRoutes } from "./artifacts.js";
 import { assistantPresetRoutes } from "./assistant-presets.js";
@@ -508,6 +509,7 @@ const api = new Hono<AppEnv>()
   .route("/custom-tools", customToolRoutes)
   .route("/", apiKeyRoutes)
   .route("/", shareRoutes)
+  .route("/", creditRoutes)
   .route("/", adminRoutes)
   .route("/", adminKnowledgeRoutes)
   .route("/", permissionRoutes)

@@ -50,9 +50,13 @@ indexes.
 - A receipt is opened after admission and before `streamText`; `markApiDispatched` sets `running` right
   before the provider call. Settlement and the ledger insert happen in one synchronous `tx`, so duplicate
   callbacks and abort races are no-ops and a terminal result is never replaced.
-- Usage kind is `api`; both ids are required and the unique `api_request_id` index dedupes. Provider usage
-  that never arrived is recorded honestly as `unknown`, not estimated. Cost uses `costOf` and may be zero
-  when the catalog has no price.
+- Usage kind is `api`; both ids are required and the unique `api_request_id` index dedupes. The usage row is
+  written by the token credit middleware when the provider request settles (one invocation per request),
+  not by the receipt settlement. Provider usage that never arrived is recorded honestly as `unknown`, not
+  estimated. Cost uses `costOf` and may be zero when the catalog has no price.
+- Each request admits a token credit root after validation and before the receipt and SSE headers; a
+  refusal is JSON `permission_error` (`token_credit_exhausted|usage_unknown|unmetered`, 403) or
+  `rate_limit_error` (`token_credit_busy`, 409). See `token-credits.md`.
 - Requests retain 30 days / 10,000 rows, audit 90 days / 1,000 rows, and minute windows the current and
   previous two minutes. Startup marks open receipts `interrupted`; nothing resumes. A 10-minute unref'd
   sweep prunes in bounded batches and raises `api_telemetry_floors` when a cap deletes detail rows.
