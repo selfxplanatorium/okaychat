@@ -197,6 +197,20 @@ test("secrets are encrypted in both tables and lists expose names and presence o
   for (const secret of [KEY, HEADER_SECRET, QUERY_VALUE]) assert.ok(!everything.includes(secret));
 });
 
+test("an enabled-only save still turns off a corrupt row and preserves it byte for byte", () => {
+  save("admin", "custom-gw", apiKeyGateway());
+  const broken = { ...JSON.parse(String(rawRow("admin", "custom-gw")!.config_json)), customTransportVersion: 2 };
+  db.prepare("UPDATE provider_connections SET config_json = ? WHERE provider_id = 'custom-gw'").run(JSON.stringify(broken));
+  const before = rawRow("admin", "custom-gw")!;
+  save("admin", "custom-gw", { enabled: false });
+  const after = rawRow("admin", "custom-gw")!;
+  assert.equal(after.enabled, 0);
+  assert.equal(after.config_json, before.config_json);
+  // The ciphertext is re-wrapped with a fresh IV on save; the secret itself is unchanged.
+  assert.equal(getConnection("admin", "custom-gw")!.apiKey, KEY);
+  assert.equal(getConnection("admin", "custom-gw")!.transport?.ok, false);
+});
+
 test("enabled-only and old-client name saves keep the v1 configuration", () => {
   save("admin", "custom-gw", apiKeyGateway());
   const before = getConnection("admin", "custom-gw")!;

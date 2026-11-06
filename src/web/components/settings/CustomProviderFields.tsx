@@ -53,6 +53,12 @@ const REASON_KEYS: Record<ConnectionFieldReason, PlainMessageKey> = {
 
 const reasonText = (reason: string) => t(REASON_KEYS[reason as ConnectionFieldReason] ?? "providers.reasonInvalidValue");
 
+/** Fields the form renders an inline error for; anything else needs the general alert. */
+const hasInlineSlot = (field: string) =>
+  field === "name" || field === "baseURL" || field === "apiKey" || field === "transport.auth.headerName" ||
+  field === "transport.headers" || field === "transport.query" || field === "modelSource" || field === "modelSource.ids" ||
+  /^transport\.(headers|query)\.\d+\.(name|value)$/.test(field) || /^modelSource\.ids\.\d+$/.test(field);
+
 const fieldId = (base: string, field: string) => `${base}-${field.replace(/\./g, "-")}`;
 
 /** Create (no provider) or edit a custom connection. */
@@ -164,6 +170,9 @@ export function CustomConnectionForm({ provider, base, onSaved, onCancel, autoFo
       if (e instanceof ApiError && e.field && e.reason) {
         const field = formFieldOf(e.field, state);
         setServerField({ field, reason: e.reason });
+        // Some server fields (a row conflict, the disclosure itself, an indexed id) have no inline slot.
+        // Without this the save would fail silently; still show the safe reason text.
+        if (!hasInlineSlot(field)) setError(reasonText(e.reason));
         focusField(field);
       } else setError(errorText(e, "common.somethingWentWrong"));
     } finally {
