@@ -3,7 +3,7 @@ import { createServer, request as httpRequest, type IncomingMessage, type Server
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, beforeEach, test } from "node:test";
+import { after, afterEach, beforeEach, test } from "node:test";
 import type { AddressInfo } from "node:net";
 
 import type { ModelInfo } from "../../shared/types.js";
@@ -14,11 +14,24 @@ process.env.OKAYCHAT_SECRET = "api-generate-test-secret-not-for-production";
 
 const { db } = await import("../db.js");
 const { createModel } = await import("../llm.js");
+const { admitCreditRoot, closeCreditRoot } = await import("../credits/store.js");
 const { generateCompletion, splitUtf8 } = await import("./generate.js");
 const { withResponseBounds, ResponseLimitError } = await import("../response-bounds.js");
 const store = await import("./store.js");
 
 db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES ('alice', 'alice@example.test', 'alice', 'unused', 'admin', ?)").run(Date.now());
+
+// The model boundary requires a live server-owned permit. Alice is unlimited, so the fixture admits
+// one root per test and releases it when the test ends.
+const permits: Array<ReturnType<typeof admitCreditRoot>> = [];
+const creditPermit = () => {
+  const permit = admitCreditRoot("alice", "api");
+  permits.push(permit);
+  return permit;
+};
+afterEach(() => {
+  for (const permit of permits.splice(0)) closeCreditRoot(permit);
+});
 
 after(() => {
   db.close();
@@ -96,6 +109,8 @@ const plan = (url: string, options: { stream: boolean; includeUsage?: boolean; m
   const model = { ...info, baseURL: url };
   const handle = createModel(model, conn, {
     userId: "alice",
+    creditPermit: creditPermit(),
+    usageContext: { kind: "api", apiKeyId: "key-a", apiRequestId: "apr_generated" },
     responseBounds: { maxBytes: 1024 * 1024, maxRecordBytes: 256 * 1024 },
   });
   return {

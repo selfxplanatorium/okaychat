@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, beforeEach, test } from "node:test";
+import { after, afterEach, beforeEach, test } from "node:test";
 import type { ModelInfo } from "../../shared/types.js";
 
 const dataDir = mkdtempSync(path.join(os.tmpdir(), "okaychat-chatgpt-test-"));
@@ -24,6 +24,7 @@ const {
 } = await import("./chatgpt.js");
 const { listModels, listProviders, saveConnection } = await import("./providers.js");
 const { AppError } = await import("../errors.js");
+const { admitCreditRoot, closeCreditRoot } = await import("../credits/store.js");
 
 const REGISTRATION = "cgr_test";
 const ACCESS = "access-token-1";
@@ -44,6 +45,18 @@ after(() => {
   oauthDeps.fetch = realOAuthFetch;
   db.close();
   rmSync(dataDir, { recursive: true, force: true });
+});
+
+// The model boundary requires a live server-owned permit. The account is unlimited, so the fixture
+// admits one normal root and releases it after the test.
+const permits: Array<ReturnType<typeof admitCreditRoot>> = [];
+const creditPermit = () => {
+  const permit = admitCreditRoot("alice", "chat");
+  permits.push(permit);
+  return permit;
+};
+afterEach(() => {
+  for (const permit of permits.splice(0)) closeCreditRoot(permit);
 });
 
 beforeEach(() => {
@@ -371,7 +384,7 @@ test("the model factory collects a non-streaming generate call from the upstream
     temperature: false,
     free: false,
   };
-  const handle = createModel(info, { providerId: "chatgpt", apiKey: "chatgpt-login", enabled: true }, { userId: "alice" });
+  const handle = createModel(info, { providerId: "chatgpt", apiKey: "chatgpt-login", enabled: true }, { userId: "alice", creditPermit: creditPermit(), usageContext: { kind: "chat" } });
   if (typeof handle.model === "string" || handle.model.specificationVersion !== "v4") throw new Error("Expected a v4 model");
   const result = await handle.model.doGenerate({
     prompt: [{ role: "user", content: [{ type: "text", text: "Hello" }] }],

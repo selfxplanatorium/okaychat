@@ -1,3 +1,4 @@
+import { withUnmeteredRoot } from "../credits/admission.js";
 import { HTTPException } from "hono/http-exception";
 import {
   speechConnectionId,
@@ -117,12 +118,17 @@ export function uploadName(rec: Recording): string {
   return `recording.${ext}`;
 }
 
+const cloudEngine = (def: { credential: { type: string } } | undefined) => !!def && def.credential.type !== "local" && def.credential.type !== "browser";
+
 export async function transcribe(userId: string, rec: Recording, options: SttOptions, signal?: AbortSignal): Promise<{ text: string; language?: string }> {
   // Voice covers both local and cloud paths. Nothing reaches a worker or provider when denied.
   assertFeature(userId, "voice");
   const lease = reserveOperation({ userId }, "speech.transcribe");
   try {
-    return await transcribeWork(userId, rec, options, signal);
+    // Cloud engines have no token price: refused for a finite allowance, rechecked on every call.
+    return await (cloudEngine(sttEngineDef(options.engine))
+      ? withUnmeteredRoot(userId, "speech", () => transcribeWork(userId, rec, options, signal))
+      : transcribeWork(userId, rec, options, signal));
   } finally {
     lease.release();
   }
@@ -218,7 +224,9 @@ export async function synthesize(userId: string, text: string, options: TtsOptio
   assertFeature(userId, "voice");
   const lease = reserveOperation({ userId }, "speech.synthesize");
   try {
-    return await synthesizeWork(userId, text, options, signal);
+    return await (cloudEngine(ttsEngineDef(options.engine))
+      ? withUnmeteredRoot(userId, "speech", () => synthesizeWork(userId, text, options, signal))
+      : synthesizeWork(userId, text, options, signal));
   } finally {
     lease.release();
   }

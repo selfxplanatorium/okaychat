@@ -1,3 +1,4 @@
+import { finiteCredits } from "../credits/admission.js";
 import type { UIMessage } from "ai";
 import { HTTPException } from "hono/http-exception";
 import { ttsEngineDef } from "../../shared/speech.js";
@@ -188,6 +189,8 @@ export function realtimeTarget(userId: string): Availability<RealtimeTarget> {
   // The Realtime model is not in the text catalog, but an exact-model policy row still governs it.
   const ref = `${cred.conn?.providerId ?? "openai"}/${model}`;
   if (!modelAllowed(userId, ref)) return { ok: false, code: "unavailable", detail: modelAccessMessage(ref) };
+  // Realtime audio has no token price; a finite allowance falls back to the local pipeline.
+  if (finiteCredits(userId)) return { ok: false, code: "unavailable", detail: "This service cannot be used with a token allowance. Contact your administrator." };
   const wanted = prefs?.call?.realtimeVoice ?? prefs?.tts?.voices?.["openai-realtime"];
   const voice = wanted && def.voices.includes(wanted) ? wanted : (def.voices.includes("marin") ? "marin" : def.voices[0]!);
   return { ok: true, value: { cred, model, voice, ...(prefs?.stt?.language ? { language: prefs.stt.language } : {}) } };

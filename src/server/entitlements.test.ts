@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, beforeEach, test } from "node:test";
+import { after, afterEach, beforeEach, test } from "node:test";
 import { Hono } from "hono";
 import type { ModelInfo } from "../shared/types.js";
 
@@ -39,6 +39,7 @@ writeFileSync(
 );
 const { db } = await import("./db.js");
 const { sha256 } = await import("./crypto.js");
+const { admitCreditRoot, closeCreditRoot } = await import("./credits/store.js");
 const {
   getModelAccessPolicy,
   listModelAccessPolicies,
@@ -76,6 +77,23 @@ for (const [id, role] of [["admin", "admin"], ["alice", "user"], ["bob", "user"]
 }
 const signIn = (userId: keyof typeof TOKENS) =>
   db.prepare("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)").run(sha256(TOKENS[userId]), userId, Date.now() + 60_000);
+
+// createModel() requires a live server-owned permit. These accounts stay unlimited, so one normal
+// root per user is enough for every fixture call in a test; it is released after the test.
+const permits = new Map<string, ReturnType<typeof admitCreditRoot>>();
+const creditPermit = (userId: string) => {
+  let permit = permits.get(userId);
+  if (!permit) {
+    permit = admitCreditRoot(userId, "chat");
+    permits.set(userId, permit);
+  }
+  return permit;
+};
+const usage = { kind: "chat" as const };
+afterEach(() => {
+  for (const permit of permits.values()) closeCreditRoot(permit);
+  permits.clear();
+});
 
 beforeEach(() => {
   db.exec(
@@ -228,19 +246,19 @@ test("the model factory rejects revoked and fabricated shared connections before
   const connection = getSharedConnection("openai")!;
   assert.equal(connection.shared, true);
 
-  createModel(model("gpt-a"), connection, { userId: "alice" });
-  assert.throws(() => createModel(model("gpt-b"), connection, { userId: "alice" }), /administrator/);
-  assert.throws(() => createModel(model("gpt-a"), connection, { userId: "carol" }), /administrator/);
-  assert.throws(() => createModel(model("gpt-a"), { ...connection, providerId: "anthropic" }, { userId: "alice" }), /do not match/);
+  createModel(model("gpt-a"), connection, { userId: "alice", creditPermit: creditPermit("alice"), usageContext: usage });
+  assert.throws(() => createModel(model("gpt-b"), connection, { userId: "alice", creditPermit: creditPermit("alice"), usageContext: usage }), /administrator/);
+  assert.throws(() => createModel(model("gpt-a"), connection, { userId: "carol", creditPermit: creditPermit("carol"), usageContext: usage }), /administrator/);
+  assert.throws(() => createModel(model("gpt-a"), { ...connection, providerId: "anthropic" }, { userId: "alice", creditPermit: creditPermit("alice"), usageContext: usage }), /do not match/);
 
   saveConnection("bob", "openai", { apiKey: "sk-own", enabled: true });
   const own = getConnection("bob", "openai")!;
   assert.equal(own.shared, undefined);
-  createModel(model("gpt-c"), own, { userId: "bob" });
+  createModel(model("gpt-c"), own, { userId: "bob", creditPermit: creditPermit("bob"), usageContext: usage });
   setModelAccessPolicies("openai", [{ target: { kind: "user", id: "alice" }, mode: "selected", modelIds: [] }]);
-  assert.throws(() => createModel(model("gpt-a"), connection, { userId: "alice" }), /administrator/, "an earlier connection cannot bypass a live revoke");
+  assert.throws(() => createModel(model("gpt-a"), connection, { userId: "alice", creditPermit: creditPermit("alice"), usageContext: usage }), /administrator/, "an earlier connection cannot bypass a live revoke");
   try {
-    createModel(model("gpt-a"), connection, { userId: "alice" });
+    createModel(model("gpt-a"), connection, { userId: "alice", creditPermit: creditPermit("alice"), usageContext: usage });
     assert.fail("the revoked model must be refused");
   } catch (error) {
     const wire = describeProviderError(error, { log: false });

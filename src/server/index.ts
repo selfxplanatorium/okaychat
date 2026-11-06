@@ -22,6 +22,7 @@ import { startMemoryWorker } from "./memory-learn.js";
 import { api, mcpOAuthCallback } from "./routes.js";
 import { generationBusy, interruptOpenRuns } from "./generation-runs.js";
 import { initEvaluations } from "./evaluations/worker.js";
+import { recoverCreditOperations } from "./credits/recovery.js";
 import { setUnresolvedRunReader } from "./thread-runs.js";
 import { resetArchiveJobsAtStartup, startArchiveMaintenance } from "./archive-jobs.js";
 import { recoverRoomArchiveJobs, startRoomArchiveMaintenance } from "./channels/archive/maintenance.js";
@@ -109,6 +110,9 @@ if (existsSync(webDir)) {
 
 // The first page load after a restart must not wait for the 6 MB catalog or the OpenCode Go model list.
 void warmCatalog().catch(() => {});
+// Credit receipts settle first: an open dispatched request becomes unknown, an undispatched one
+// not_dispatched, and every open root closes, before any API, evaluation, or channel recovery runs.
+recoverCreditOperations();
 // Room archive recovery runs before the listener accepts a request; the interval starts with the server.
 recoverRoomArchiveJobs();
 recoverImports();

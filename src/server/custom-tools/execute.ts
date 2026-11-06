@@ -1,3 +1,4 @@
+import { finiteCredits, withUnmeteredRoot } from "../credits/admission.js";
 import type { Json, Method, ReviewHeader, RunErrorCode, TestReview, ToolResult, ChatReview } from "../../shared/custom-tools.js";
 import {
   CUSTOM_LIMITS,
@@ -355,6 +356,12 @@ export async function executePrepared(opts: ExecutePreparedOptions): Promise<Too
       return errorResult(tool, "approval_required", run.id);
     }
   }
+  // An HTTP tool can start paid remote work with no token price. A finite allowance refuses it here,
+  // also for an approval prepared before the allowance was set. Local Python stays available.
+  if (bundle.config.kind === "http" && finiteCredits(opts.actor.userId)) {
+    if (run.state === "prepared") denyRun(opts.actor.userId, run.id);
+    return errorResult(tool, "permission_denied", run.id);
+  }
   let release: (() => void) | undefined;
   let activeId: string | undefined;
   try {
@@ -375,7 +382,7 @@ export async function executePrepared(opts: ExecutePreparedOptions): Promise<Too
     activeId = claim.row.id;
     activeExecutions.set(activeId, controller);
     const outcome = bundle.config.kind === "http"
-      ? await dispatchHttp(tool, opts.input, signal)
+      ? await withUnmeteredRoot(opts.actor.userId, "http_tool", () => dispatchHttp(tool, opts.input, signal))
       : await dispatchPython(tool, run.id, opts.input, signal);
     const finished = finishRun({
       userId: opts.actor.userId,

@@ -1,4 +1,4 @@
-import { HardDriveIcon, KeyRoundIcon, Loader2Icon, PencilIcon, PlusIcon, ShieldCheckIcon, TrashIcon } from "lucide-react";
+import { GaugeIcon, HardDriveIcon, KeyRoundIcon, Loader2Icon, PencilIcon, PlusIcon, ShieldCheckIcon, TrashIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { Link, useSearch } from "wouter";
 import type { AdminPrompt, AdminUser, ProviderInfo, StorageInfo, UserGroup } from "@shared/types";
@@ -10,7 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { t } from "@/i18n";
-import { formatBytes, formatCost } from "@/i18n/format";
+import { formatBytes, formatCost, formatTokens } from "@/i18n/format";
 import { permissionsHref } from "@/lib/settings-link";
 import { isPermissionsSearch } from "@/state/permissions-query";
 import { useData } from "@/state/data";
@@ -22,6 +22,7 @@ import { AdminWebhooks } from "./AdminWebhooks";
 import { AgentManagement } from "@/components/agents/AgentManagement";
 import { AdminChannels } from "@/components/channels/AdminChannels";
 import { SettingsPage, SettingsRow, SettingsSection } from "./SettingsUI";
+import { TokenCreditAdminDialog } from "./TokenCreditAdminDialog";
 
 function NewUserForm({ onDone }: { onDone: () => void }) {
   const [email, setEmail] = useState("");
@@ -165,6 +166,7 @@ function Users({ defaultLimit }: { defaultLimit: number | null }) {
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [edit, setEdit] = useState<UserEdit | null>(null);
+  const [creditUser, setCreditUser] = useState<AdminUser | null>(null);
   const refresh = useCallback(() => {
     invalidateDirectory();
     return api<AdminUser[]>("/admin/users").then(setUsers);
@@ -214,6 +216,11 @@ function Users({ defaultLimit }: { defaultLimit: number | null }) {
             <p className="text-muted-foreground truncate text-xs">
               {t("admin.userStats", { email: u.email, chats: u.threads, used: formatBytes(u.storageUsed), limit: limitLabel(u), cost: formatCost(u.cost30d) })}
             </p>
+            <p className="text-muted-foreground truncate text-xs tabular-nums">
+              {u.tokenCredits.creditTokens === null
+                ? t("credits.rowUnlimited")
+                : t("credits.rowSummary", { used: formatTokens(u.tokenCredits.consumedTokens), remaining: formatTokens(u.tokenCredits.remainingTokens ?? 0) })}
+            </p>
           </div>
           <Select
             aria-label={t("admin.roleOf", { name: u.name })}
@@ -226,6 +233,9 @@ function Users({ defaultLimit }: { defaultLimit: number | null }) {
               { value: "admin", label: t("admin.roleAdmin") },
             ]}
           />
+          <Button size="icon-sm" variant="ghost" aria-label={t("credits.allowanceOf", { name: u.name })} onClick={() => setCreditUser(u)}>
+            <GaugeIcon />
+          </Button>
           <Button size="icon-sm" variant="ghost" aria-label={t("admin.storageLimitOf", { name: u.name })} onClick={() => setEdit({ kind: "limit", user: u })}>
             <HardDriveIcon />
           </Button>
@@ -252,6 +262,13 @@ function Users({ defaultLimit }: { defaultLimit: number | null }) {
         </div>
       ))}
       <UserEditDialog edit={edit} onClose={() => setEdit(null)} onSaved={() => void refresh()} />
+      <TokenCreditAdminDialog
+        user={creditUser}
+        onClose={() => {
+          setCreditUser(null);
+          void refresh();
+        }}
+      />
     </SettingsSection>
   );
 }

@@ -1,3 +1,4 @@
+import type { TokenCreditBalance } from "./token-credits.js";
 import type { VideoSettings } from "./video.js";
 import type { ChannelActivitySettings } from "./channel-activity.js";
 import type { UserAppearance } from "./appearance.js";
@@ -714,6 +715,8 @@ export interface AdminUser {
   storageUsed: number;
   /** Per-user byte limit. null means the server default (see /api/storage). */
   storageLimit: number | null;
+  /** The account's token allowance snapshot; `creditTokens: null` is unlimited. */
+  tokenCredits: TokenCreditBalance;
 }
 
 /** The signed-in user's storage usage against their limit. */

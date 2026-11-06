@@ -1,3 +1,5 @@
+import { admitUnmeteredRoot, endCreditRoot } from "../credits/admission.js";
+import type { CreditPermit } from "../credits/store.js";
 import { z } from "zod";
 import { CALL_AUDIO_HEADER, CALL_INPUT_RATE, type CallEngine, type CallErrorCode, type ClientMessage, type ServerMessage } from "../../shared/voice.js";
 import { CallFailure, selectEngine, type CallBackends, type LocalSpeech, type RealtimeSignal } from "./backend.js";
@@ -101,6 +103,7 @@ export class CallSession {
   private local: LocalSpeech | null = null;
   private realtime: RealtimeSignal | null = null;
   private realtimeOffered = false;
+  private creditRoot: CreditPermit | undefined;
   private utterance: Utterance | null = null;
   private readonly queue: Array<{ id: number; text: string }> = [];
   private speaking: AbortController | null = null;
@@ -231,6 +234,8 @@ export class CallSession {
     this.phase = "ended";
     this.releaseOperation?.();
     this.releaseOperation = undefined;
+    if (this.creditRoot) void endCreditRoot(this.creditRoot).catch(() => { /* Recovery closes it at restart. */ });
+    this.creditRoot = undefined;
     this.lifetime.abort();
     this.speaking?.abort();
     this.speaking = null;
@@ -361,6 +366,9 @@ export class CallSession {
     this.realtimeOffered = true;
     this.lastActivity = this.now();
     try {
+      // The Realtime session is paid remote work for its whole length: it holds an unmetered credit
+      // root until the call ends, so the allowance cannot change underneath it.
+      this.creditRoot ??= admitUnmeteredRoot(this.userId, "realtime");
       const answer = await this.realtime.answer(sdp, this.lifetime.signal);
       if (this.phase === "active") this.send({ t: "rt.answer", sdp: answer });
     } catch (error) {

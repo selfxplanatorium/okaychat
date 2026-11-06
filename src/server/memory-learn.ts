@@ -1,3 +1,4 @@
+import { withCreditRoot, creditSignal } from "./credits/admission.js";
 import { importedHistoryText } from "./compaction.js";
 import { envelopeAgentHistory } from "./n8n/provenance.js";
 import { generateText } from "ai";
@@ -9,11 +10,11 @@ import { db, tx } from "./db.js";
 import { createModel } from "./llm.js";
 import { factLine, listMemories, memoryPreferences, rankMemories, saveMemory, scopeFingerprint, summaryRow, transcriptText } from "./memory.js";
 import { promptText } from "./prompts.js";
+import { AppError } from "./errors.js";
 import { describeProviderError } from "./provider-errors.js";
 import { assertStorage } from "./quota.js";
 import { getSettings } from "./settings.js";
 import { currentBranch, getThread } from "./threads.js";
-import { costOf, normalizeUsage, recordUsage } from "./usage.js";
 import { assertFeature, featureAllowed } from "./permissions/guard.js";
 import { isRestrictedKnowledgeThread } from "./knowledge/thread-policy.js";
 
@@ -54,12 +55,14 @@ async function complete(userId: string, prompt: string, opts: { threadId?: strin
   // Extraction and summarization are memory work: no provider call once the account loses it.
   assertFeature(userId, "memory");
   const { model, conn } = await backgroundModel(userId, opts.preferred);
-  const handle = createModel(model, conn, { userId });
-  // A deadline: the worker runs one job at a time for every account, so a stalled response must not hold it.
-  const result = await generateText({ model: handle.model, providerOptions: handle.providerOptions, maxRetries: 0, maxOutputTokens: opts.maxOutputTokens, prompt, abortSignal: AbortSignal.timeout(COMPLETION_TIMEOUT_MS) });
-  const usage = normalizeUsage(result.totalUsage);
-  recordUsage({ userId, threadId: opts.threadId, providerId: model.providerId, modelId: model.id, kind: "memory", usage, cost: costOf(model.cost, usage) });
-  return result.text;
+  // One credit root per memory job, admitted only once the job really needs the model. A denied
+  // admission throws before any provider call; the tick leaves the work for later.
+  return withCreditRoot(userId, "memory", async (creditPermit) => {
+    const handle = createModel(model, conn, { userId, creditPermit, usageContext: { kind: "memory", ...(opts.threadId ? { threadId: opts.threadId } : {}) } });
+    // A deadline: the worker runs one job at a time for every account, so a stalled response must not hold it.
+    const result = await generateText({ model: handle.model, providerOptions: handle.providerOptions, maxRetries: 0, maxOutputTokens: opts.maxOutputTokens, prompt, abortSignal: creditSignal(creditPermit, AbortSignal.timeout(COMPLETION_TIMEOUT_MS)) });
+    return result.text;
+  });
 }
 
 const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
@@ -186,9 +189,15 @@ export async function memoryTick(now = Date.now()): Promise<void> {
   const threads = db.prepare(`SELECT t.user_id, t.id FROM threads t JOIN memory_preferences p ON p.user_id = t.user_id
     WHERE p.enabled = 1 AND p.auto_save = 1 AND t.memory_disabled = 0 AND t.compare_group_id IS NULL AND t.updated_at > t.memory_scanned_at
       AND NOT EXISTS (SELECT 1 FROM knowledge_thread_dependencies d WHERE d.thread_id = t.id)
+      -- A spent or held allowance would refuse admission every tick; leaving it out keeps the
+      -- per-tick cap for accounts that can run.
+      AND NOT EXISTS (SELECT 1 FROM token_credit_accounts a WHERE a.user_id = t.user_id AND a.credit_tokens IS NOT NULL
+        AND (a.unknown_requests > 0 OR a.consumed_tokens >= a.credit_tokens))
       AND t.updated_at < ? AND t.updated_at > ? ORDER BY t.updated_at LIMIT ?`).all(now - IDLE_MS, now - LOOKBACK_MS, JOBS_PER_TICK) as Array<{ user_id: string; id: string }>;
   for (const t of threads) {
     try { await reviewThread(t.user_id, t.id); } catch (error) {
+      // A refused token allowance made no provider call: the chat stays unreviewed for a later tick.
+      if (error instanceof AppError && error.code.startsWith("token_credit_")) continue;
       // Mark it reviewed anyway: retrying a failing model every minute costs more than a missed fact.
       console.warn("[memory] chat review failed:", safeMessage(error));
       db.prepare("UPDATE threads SET memory_scanned_at = updated_at WHERE id = ?").run(t.id);

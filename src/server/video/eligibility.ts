@@ -1,3 +1,4 @@
+import { assertMeteredService } from '../credits/admission.js';
 import type { ToolPolicy, ResolvedRunConfig } from '../../shared/assistant-presets.js';
 import { db } from '../db.js';
 import { resolveAssistantForTurn } from '../assistant-presets.js';
@@ -42,6 +43,8 @@ export function assertVideoTurn(context:VideoTurnContext,service:VideoServiceId,
   if(!status?.enabled)throw notEligible();
 }
 export async function checkVideoTurn(c:VideoTurnContext,service:VideoServiceId,deps:VideoEligibilityDependencies=live):Promise<()=>void> {
+  // A new paid submission (tool call or retry) has no token price: never for a finite allowance.
+  assertMeteredService(c.userId,'video');
   assertVideoTurn(c,service,deps);
   const model=await deps.model(c.userId,c.modelRef);
   if(!model.toolCall)throw notEligible();

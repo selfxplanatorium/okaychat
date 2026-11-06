@@ -1,3 +1,5 @@
+import { admitCreditRoot, type CreditPermit } from "../credits/store.js";
+import { endCreditRoot } from "../credits/admission.js";
 import { streamText } from "ai";
 import { db, tx } from "../db.js";
 import { decrypt } from "../crypto.js";
@@ -11,7 +13,7 @@ import { onPermissionChange } from "../permissions/audit.js";
 import { sharedModelAccess } from "../entitlements.js";
 import { resolvePermissions } from "../permissions/resolve.js";
 import { assertModelAllowed, featureAllowed } from "../permissions/guard.js";
-import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "../usage.js";
+import { addUsage, costOf, normalizeUsage, ZERO_USAGE } from "../usage.js";
 import { CHANNEL_LIMITS, type ChannelRunProjection } from "../../shared/channels.js";
 import type { ReasoningEffort, TokenUsage } from "../../shared/types.js";
 import { channelAccess, channelRow, notFound, requireChannelsFeature } from "./access.js";
@@ -134,12 +136,15 @@ async function runOne(runId: string, controller: AbortController): Promise<void>
     settleAndBill(initial, { state: "failed", finishReason: null, errorCode: "rate_limited", body: "" });
     return;
   }
+  let creditPermit: CreditPermit;
+  try { creditPermit = admitCreditRoot(requesterId, "channel"); } catch (error) { releaseTurn(); settleAndBill(initial, { state: "failed", finishReason: null, errorCode: describeBoundaryError(error, { kind: "background" }).code, body: "" }); return; }
   let releaseLease: (() => void) | null = null;
   try {
     const lease = reserveOperation({ userId: requesterId, modelRef: initial.model_ref }, "llm.call", { kind: "turn" });
     releaseLease = holdLease(lease, () => controller.abort(new AppError({ code: "aborted", message: "The operation lease expired." })));
   } catch (error) {
     releaseTurn();
+    await endCreditRoot(creditPermit);
     settleAndBill(initial, { state: "failed", finishReason: null, errorCode: describeBoundaryError(error, { kind: "background" }).code, body: "" });
     return;
   }
@@ -189,7 +194,7 @@ async function runOne(runId: string, controller: AbortController): Promise<void>
         modelMaxOutput: resolved.model.maxOutput,
       });
       guard();
-      handle = createModel(resolved.model, resolved.conn, { userId: requesterId, effort: binding.reasoningEffort as ReasoningEffort | undefined, guard });
+      handle = createModel(resolved.model, resolved.conn, { userId: requesterId, creditPermit, usageContext: { kind: "channel", channelId: channel.id, channelRunId: runId }, effort: binding.reasoningEffort as ReasoningEffort | undefined, guard });
     } catch (error) {
       const wire = describeBoundaryError(error, { kind: "background", model: resolved.model.ref, provider: resolved.model.providerId });
       settleAndBill(running, { state: "failed", finishReason: null, errorCode: wire.code, body: "" });
@@ -288,6 +293,7 @@ async function runOne(runId: string, controller: AbortController): Promise<void>
       settleAndBill(current, { state: "failed", finishReason: null, errorCode: wire.code, body: text, ...(sawUsage ? { usage, cost } : {}) });
     }
   } finally {
+    await endCreditRoot(creditPermit);
     releaseLease?.();
     releaseTurn();
   }
@@ -303,7 +309,7 @@ function truncateUtf8(text: string, maxBytes: number): string {
   return out;
 }
 
-/** Settlement and its one usage ledger row happen in the same transaction. */
+/** Settles the run with its aggregate usage for display; the ledger rows were written per provider request. */
 function settleAndBill(
   run: ChannelRunRowFull,
   input: { state: "finished" | "cancelled" | "failed" | "interrupted"; finishReason: string | null; errorCode: string | null; body: string; usage?: TokenUsage; cost?: number },
@@ -318,19 +324,6 @@ function settleAndBill(
       body: input.body,
       ...(input.usage ? { usageJson: JSON.stringify(input.usage), cost: input.cost ?? 0, usageRecorded: true } : { usageRecorded: false }),
     });
-    if (outcome.settled && input.usage && run.requester_id) {
-      const slash = run.model_ref.indexOf("/");
-      recordUsage({
-        userId: run.requester_id,
-        providerId: slash > 0 ? run.model_ref.slice(0, slash) : run.model_ref,
-        modelId: slash > 0 ? run.model_ref.slice(slash + 1) : run.model_ref,
-        kind: "channel",
-        channelId: run.channel_id,
-        channelRunId: run.id,
-        usage: input.usage,
-        cost: input.cost ?? 0,
-      });
-    }
   });
   if (outcome.settled) {
     const channel = channelRow(run.channel_id);

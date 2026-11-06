@@ -27,6 +27,10 @@ interface CatalogEntry {
 }
 
 export const ERROR_CATALOG: Record<ErrorCode, CatalogEntry> = {
+  token_credit_exhausted: { status: 403, retryable: false, messageKey: "errors.tokenCreditExhaustedMessage", hintKey: "errors.tokenCreditHint", message: "Your token allowance is exhausted. Contact your administrator to increase or reset it.", hint: "Contact your administrator." },
+  token_credit_usage_unknown: { status: 403, retryable: false, messageKey: "errors.tokenCreditUnknownMessage", hintKey: "errors.tokenCreditHint", message: "Some provider usage was not reported. Contact your administrator before starting more work.", hint: "Contact your administrator." },
+  token_credit_busy: { status: 409, retryable: true, messageKey: "errors.tokenCreditBusyMessage", hintKey: "errors.tokenCreditBusyHint", message: "Another operation is using this account's allowance. Try again when it finishes.", hint: "Retry after the active operation finishes." },
+  token_credit_unmetered: { status: 403, retryable: false, messageKey: "errors.tokenCreditUnmeteredMessage", hintKey: "errors.tokenCreditHint", message: "This service cannot be used with a token allowance. Contact your administrator.", hint: "Contact your administrator." },
   video_invalid_reference: {status:400,retryable:false,messageKey:"errors.videoInvalidReferenceMessage",hintKey:"errors.videoHint",message:"The video starting image is invalid.",hint:"Check video settings. A new paid generation may be charged again."},
   video_reference_aspect_mismatch: {status:400,retryable:false,messageKey:"errors.videoReferenceAspectMismatchMessage",hintKey:"errors.videoHint",message:"The starting image does not match the requested video aspect ratio.",hint:"Check video settings. A new paid generation may be charged again."},
   video_unsupported_parameters: {status:400,retryable:false,messageKey:"errors.videoUnsupportedParametersMessage",hintKey:"errors.videoHint",message:"These video parameters are not supported.",hint:"Check video settings. A new paid generation may be charged again."},

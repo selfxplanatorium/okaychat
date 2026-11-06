@@ -28,6 +28,7 @@ export interface ErrorPresentation {
   code: ErrorCode;
 }
 
+/** Credit codes reuse the authored allowance sentences, with no provider or money wording. */
 const MESSAGES: Record<ErrorCode, PlainMessageKey> = {
   video_invalid_reference: "errors.videoInvalidReferenceMessage",
   video_reference_aspect_mismatch: "errors.videoReferenceAspectMismatchMessage",
@@ -64,6 +65,10 @@ const MESSAGES: Record<ErrorCode, PlainMessageKey> = {
   aborted: "errors.abortedMessage",
   tool_failed: "errors.toolFailedMessage",
   service_unavailable: "errors.serviceUnavailableMessage",
+  token_credit_exhausted: "errors.tokenCreditExhaustedMessage",
+  token_credit_usage_unknown: "errors.tokenCreditUnknownMessage",
+  token_credit_busy: "errors.tokenCreditBusyMessage",
+  token_credit_unmetered: "errors.tokenCreditUnmeteredMessage",
   storage_quota: "errors.storageQuotaMessage",
   validation: "errors.validationMessage",
   not_found: "errors.notFoundMessage",
@@ -112,6 +117,10 @@ const HINTS: Record<ErrorCode, PlainMessageKey> = {
   aborted: "errors.abortedHint",
   tool_failed: "errors.toolFailedHint",
   service_unavailable: "errors.serviceUnavailableHint",
+  token_credit_exhausted: "errors.tokenCreditHint",
+  token_credit_usage_unknown: "errors.tokenCreditHint",
+  token_credit_busy: "errors.tokenCreditBusyHint",
+  token_credit_unmetered: "errors.tokenCreditHint",
   storage_quota: "errors.storageQuotaHint",
   validation: "errors.validationHint",
   not_found: "errors.notFoundHint",
@@ -126,6 +135,8 @@ const HINTS: Record<ErrorCode, PlainMessageKey> = {
 
 /** The one setting a user can change to fix this class of failure. */
 export function settingsForError(code: ErrorCode): SettingsDestinationId | undefined {
+  const raw: string = code;
+  if (raw === "token_credit_exhausted" || raw === "token_credit_usage_unknown") return "usage";
   switch (code) {
     case "provider_auth":
     case "provider_quota":
@@ -180,12 +191,15 @@ export function presentError(error: ErrorWire, context: ErrorContext): ErrorPres
     };
   }
   if (context === "chat") {
+    const raw: string = error.code;
+    // An exhausted or held allowance has nothing to retry; a busy slot may be free next time.
+    const retryBlocked = raw === "token_credit_exhausted" || raw === "token_credit_usage_unknown" || raw === "token_credit_unmetered";
     return {
       surface: "inline",
       ...base,
       actions: {
         // Automatic retries are limited to transient codes; a manual Retry is always a valid next step.
-        retry: error.code !== "aborted",
+        retry: error.code !== "aborted" && !retryBlocked,
         switchModel: SWITCH_MODEL.has(error.code),
         ...(settings ? { settings } : {}),
         copyDetails: true,

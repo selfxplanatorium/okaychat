@@ -12,6 +12,7 @@ import { useData } from "@/state/data";
 import { SelfPermissionsSettings } from "./SelfPermissions";
 import { SettingsPage, SettingsRow, SettingsSection } from "./SettingsUI";
 import { ChatDataSection } from "@/components/chat/ChatArchiveDialog";
+import { TokenCreditBalanceCard } from "./TokenCreditBalanceCard";
 
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
@@ -227,6 +228,7 @@ export function AccountSettings() {
         </form>
         <SettingsRow label={t("account.emailAddress")} control={<span className="text-muted-foreground max-w-full break-all text-sm">{me.email}</span>} />
       </SettingsSection>
+      <TokenCreditBalanceCard />
       <SecuritySection />
       <SelfPermissionsSettings />
       <SettingsSection title={t("chatArchives.title")} description={t("chatArchives.chatData")}>

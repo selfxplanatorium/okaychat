@@ -14,7 +14,20 @@ const { generateText } = await import("ai");
 const { createModel } = await import("./llm.js");
 const { computeRetryDelay, createRetryingFetch, PROVIDER_RETRY_POLICY, sleep } = await import("./retry.js");
 const { db } = await import("./db.js");
+const { admitCreditRoot, closeCreditRoot } = await import("./credits/store.js");
 db.exec("INSERT INTO users (id,email,name,password_hash,role,created_at) VALUES ('user','user@test.invalid','User','unused','user',1)");
+
+// The model boundary requires a real, server-owned permit. This account is unlimited (the default),
+// so each fixture admits a normal root and releases it after the test.
+const permits: Array<ReturnType<typeof admitCreditRoot>> = [];
+const creditPermit = (userId = "user") => {
+  const permit = admitCreditRoot(userId, "chat");
+  permits.push(permit);
+  return permit;
+};
+afterEach(() => {
+  for (const permit of permits.splice(0)) closeCreditRoot(permit);
+});
 
 after(() => {
   db.close();
@@ -338,7 +351,7 @@ test("the model factory uses the retrying provider boundary", async () => {
       usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
     });
   }) as typeof fetch;
-  const handle = createModel(model, conn, { userId: "user", retry: { sleep: async () => {}, random: () => 0.5 } });
+  const handle = createModel(model, conn, { userId: "user", creditPermit: creditPermit(), usageContext: { kind: "chat" }, retry: { sleep: async () => {}, random: () => 0.5 } });
   const result = await generateText({ model: handle.model, prompt: "hello", maxRetries: 0, providerOptions: handle.providerOptions });
   assert.equal(result.text, "recovered");
   assert.equal(calls, 2);

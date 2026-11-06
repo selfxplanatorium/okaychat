@@ -161,10 +161,12 @@ test("deep research plans, collects, follows up a gap, and hands cited findings 
   assert.notEqual(chat!.tool_choice, "none", "14 of 20 steps are left for the reply");
   assert.ok(chunks.some((c) => c.type === "text-delta" && c.delta === "Final cited report."));
 
-  // Research is metered once, under its own kind; the reply is metered as chat.
-  assert.deepEqual(usageKinds(), ["chat:1", "research:1"]);
-  const research = db.prepare("SELECT input_tokens AS input FROM usage WHERE kind = 'research'").get() as { input: number };
-  assert.equal(research.input, 10 * (fake.log.length - 1));
+  // Every model invocation is metered under its own kind; the reply is metered as chat.
+  const researchRequests = fake.log.length - fake.of("chat").length;
+  assert.deepEqual(usageKinds(), ["chat:1", `research:${researchRequests}`]);
+  const research = db.prepare("SELECT COUNT(*) AS requests, SUM(input_tokens) AS input FROM usage WHERE kind = 'research'").get() as { requests: number; input: number };
+  assert.equal(research.requests, researchRequests, "one ledger row per non-chat invocation");
+  assert.equal(research.input, 10 * researchRequests);
 });
 
 test("the client assembles research progress and the report into one replayable assistant message", async (t) => {
@@ -305,14 +307,19 @@ test("a continuation of a researched reply does not research again and keeps its
   assert.notEqual(chat!.tool_choice, "none");
 });
 
-test("chats without research keep their tool block; temporary research leaves no usage", async (t) => {
+test("chats without research keep their tool block; temporary research is metered without retaining its chat", async (t) => {
   const fake = transport(t, {});
   await run("plain-chat", { deepResearch: false });
   assert.ok(!toolNames(fake.of("chat")[0]!).includes("deep_research"));
   assert.ok(toolNames(fake.of("chat")[0]!).includes("web_search"));
   await run("tmp_research");
   assert.equal(fake.of("chat").length, 2);
-  assert.deepEqual(usageKinds(), ["chat:1"], "only the stored chat's plain reply is metered");
+  const temporaryResearch = fake.log.length - fake.of("chat").length;
+  assert.deepEqual(usageKinds(), ["chat:2", `research:${temporaryResearch}`], "each invocation is metered, including temporary research");
+  const temporary = db.prepare("SELECT COUNT(*) AS n FROM usage WHERE thread_id IS NULL").get() as { n: number };
+  assert.equal(temporary.n, temporaryResearch + 1, "temporary research and its reply retain no thread identifier");
+  const stored = db.prepare("SELECT COUNT(*) AS n FROM usage WHERE thread_id = 'plain-chat'").get() as { n: number };
+  assert.equal(stored.n, 1, "the stored chat keeps its thread linkage");
 });
 
 test("unavailable deep research is refused with the reason before anything runs", async (t) => {

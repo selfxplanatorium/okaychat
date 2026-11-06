@@ -1,4 +1,4 @@
-import { generateText, type LanguageModel } from "ai";
+import { generateText, wrapLanguageModel, type LanguageModel } from "ai";
 import {
   EVAL_CASE_TIMEOUT_MS,
   EVAL_JUDGE_BUDGET_MICROS,
@@ -14,12 +14,15 @@ import {
 import { FINISH_REASONS } from "../../shared/generation.js";
 import { resolveModel } from "../catalog/providers.js";
 import { AppError } from "../errors.js";
+import { withCreditRoot, finiteCredits } from "../credits/admission.js";
+import { creditModelMiddleware } from "../credits/model.js";
+import type { CreditPermit } from "../credits/store.js";
 import { createModel, type ModelHandle } from "../llm.js";
 import { featureAllowed } from "../permissions/guard.js";
 import { resolvePrompt } from "../prompt-policy.js";
 import { wrapUntrusted } from "../prompt-injection.js";
 import { describeProviderError } from "../provider-errors.js";
-import { costOf, normalizeUsage, recordUsage } from "../usage.js";
+import { costOf, normalizeUsage, type UsageKind } from "../usage.js";
 import { judgeCase } from "./judge.js";
 import {
   bumpJudgeCounters,
@@ -115,10 +118,23 @@ const abortableDelay = (ms: number, signal: AbortSignal) =>
     signal.addEventListener("abort", finish, { once: true });
   });
 
-async function handleFor(userId: string, target: EvalTarget | { modelRef: string; effort: EvalTarget["effort"] }) {
-  const { model, conn } = await resolveModel(userId, target.modelRef);
-  const handle = createModel(model, conn, { userId, ...(target.effort ? { effort: target.effort } : {}) });
-  return { model, handle: modelFactory ? { ...handle, model: modelFactory(model.ref) } : handle };
+type Resolved = Awaited<ReturnType<typeof resolveModel>> & { effort: EvalTarget["effort"] };
+
+async function resolveFor(userId: string, target: EvalTarget | { modelRef: string; effort: EvalTarget["effort"] }): Promise<Resolved> {
+  return { ...(await resolveModel(userId, target.modelRef)), effort: target.effort };
+}
+
+/**
+ * One metered handle per case attempt or judge call: each one is its own credit root, so a finite
+ * account's next case is admitted against the balance the previous one left.
+ */
+function handleFor(userId: string, resolved: Resolved, permit: CreditPermit, usage: { kind: UsageKind; evaluationRunId: string; evaluationCaseId: string }): ModelHandle {
+  const { model, conn, effort } = resolved;
+  const handle = createModel(model, conn, { userId, creditPermit: permit, usageContext: usage, ...(effort ? { effort } : {}) });
+  if (!modelFactory) return handle;
+  // The test model replaces the provider adapter only; metering stays in front of it.
+  const { kind, ...context } = usage;
+  return { ...handle, model: wrapLanguageModel({ model: modelFactory(model.ref) as Parameters<typeof wrapLanguageModel>[0]["model"], middleware: creditModelMiddleware({ permit, userId, model, kind, context }) }) };
 }
 
 function failBeforeStart(runId: string, error: unknown): void {
@@ -138,9 +154,9 @@ async function startRun(runId: string): Promise<void> {
   const target = runTarget(row);
   const controller = new AbortController();
   active.set(runId, { controller, phase: "generation" });
-  let setup: Awaited<ReturnType<typeof handleFor>>;
+  let setup: Resolved;
   try {
-    setup = await handleFor(userId, target);
+    setup = await resolveFor(userId, target);
   } catch (error) {
     failBeforeStart(runId, error);
     return;
@@ -157,15 +173,17 @@ async function startRun(runId: string): Promise<void> {
   const stop: StopState = { reason: null, error: null };
   try {
     const cases = pendingResults(runId);
-    await pool(cases, clampConcurrency(row.concurrency), async (result) => {
+    // A finite allowance admits one operation at a time, so its cases run one after another. The
+    // requested concurrency stays in the run snapshot.
+    const concurrency = finiteCredits(userId) ? 1 : clampConcurrency(row.concurrency);
+    await pool(cases, concurrency, async (result) => {
       await runCase({
         runId,
         userId,
         row,
         result,
         target,
-        model: setup.model,
-        handle: setup.handle,
+        resolved: setup,
         signal: controller.signal,
         stop,
       });
@@ -203,8 +221,7 @@ interface CaseJob {
   row: RunRow;
   result: ResultRow;
   target: EvalTarget;
-  model: Awaited<ReturnType<typeof handleFor>>["model"];
-  handle: ModelHandle;
+  resolved: Resolved;
   signal: AbortSignal;
   stop: StopState;
 }
@@ -231,25 +248,33 @@ async function runCase(job: CaseJob): Promise<void> {
   }
   markResultRunning(runId, caseId);
   const startedAt = Date.now();
+  const model = job.resolved.model;
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt > 0) markResultRunning(runId, caseId);
     const timeout = AbortSignal.timeout(EVAL_CASE_TIMEOUT_MS);
     const signal = AbortSignal.any([job.signal, timeout]);
+    let admitted = false;
     try {
-      const resultText = await generateText({
-        model: job.handle.model,
-        providerOptions: job.handle.providerOptions,
-        maxOutputTokens: target.sampling.maxOutputTokens ?? (job.model.maxOutput || undefined),
-        maxRetries: 0,
-        abortSignal: signal,
-        // The cache-marked system parts stay in the message list, exactly as a chat turn sends them.
-        allowSystemInMessages: true,
-        messages: caseMessages(userId, target, snapshot, job.handle),
-        ...(target.sampling.temperature !== undefined ? { temperature: target.sampling.temperature } : {}),
-        ...(target.sampling.topP !== undefined ? { topP: target.sampling.topP } : {}),
+      // Every attempt is a new SDK invocation and so a new credit root; usage is recorded per
+      // provider request by the metering middleware.
+      const resultText = await withCreditRoot(userId, "evaluation", async (permit) => {
+        admitted = true;
+        const handle = handleFor(userId, job.resolved, permit, { kind: "evaluation", evaluationRunId: runId, evaluationCaseId: caseId });
+        return generateText({
+          model: handle.model,
+          providerOptions: handle.providerOptions,
+          maxOutputTokens: target.sampling.maxOutputTokens ?? (model.maxOutput || undefined),
+          maxRetries: 0,
+          abortSignal: signal,
+          // The cache-marked system parts stay in the message list, exactly as a chat turn sends them.
+          allowSystemInMessages: true,
+          messages: caseMessages(userId, target, snapshot, handle),
+          ...(target.sampling.temperature !== undefined ? { temperature: target.sampling.temperature } : {}),
+          ...(target.sampling.topP !== undefined ? { topP: target.sampling.topP } : {}),
+        });
       });
       const usage = normalizeUsage(resultText.totalUsage);
-      const cost = costOf(job.model.cost, usage);
+      const cost = costOf(model.cost, usage);
       const cut = truncateUtf8(resultText.text, EVAL_MAX_OUTPUT_BYTES);
       settleResultSuccess(runId, caseId, {
         output: cut.text,
@@ -260,19 +285,18 @@ async function runCase(job: CaseJob): Promise<void> {
         cost,
         latencyMs: Date.now() - startedAt,
       });
-      recordUsage({
-        userId,
-        providerId: job.model.providerId,
-        modelId: job.model.id,
-        kind: "evaluation",
-        usage,
-        cost,
-      });
       return;
     } catch (error) {
+      if (!admitted && error instanceof AppError && error.code.startsWith("token_credit_")) {
+        // The allowance refused this case before any provider call: stop the run, skip the rest.
+        stop.reason = "error";
+        stop.error = error;
+        settleResultFailure(runId, caseId, { state: "skipped", errorCode: error.code, errorMessage: null, latencyMs: null });
+        return;
+      }
       const mapped = timeout.aborted && !job.signal.aborted
         ? new AppError({ code: "timeout", message: "The case took longer than two minutes.", cause: error })
-        : describeProviderError(error, { log: false, model: job.model.ref, provider: job.model.providerId });
+        : describeProviderError(error, { log: false, model: model.ref, provider: model.providerId });
       if (mapped.code === "aborted" && job.signal.aborted) {
         settleResultFailure(runId, caseId, { state: "skipped", errorCode: "aborted", errorMessage: null, latencyMs: Date.now() - startedAt });
         return;
@@ -292,7 +316,7 @@ async function runCase(job: CaseJob): Promise<void> {
         errorMessage: bounded(mapped.message),
         latencyMs: Date.now() - startedAt,
       });
-      if (mapped.code === "forbidden") {
+      if (mapped.code === "forbidden" || mapped.code.startsWith("token_credit_")) {
         stop.reason = "error";
         stop.error = mapped;
       }
@@ -350,9 +374,9 @@ async function startJudge(runId: string): Promise<void> {
   }
   const controller = new AbortController();
   active.set(runId, { controller, phase: "judge" });
-  let setup: Awaited<ReturnType<typeof handleFor>>;
+  let setup: Resolved;
   try {
-    setup = await handleFor(userId, config);
+    setup = await resolveFor(userId, config);
   } catch {
     setRunJudgeState(runId, "failed");
     active.delete(runId);
@@ -380,7 +404,7 @@ async function judgeAll(
   runId: string,
   userId: string,
   config: NonNullable<ReturnType<typeof runJudgeConfig>>,
-  setup: Awaited<ReturnType<typeof handleFor>>,
+  setup: Resolved,
   controller: AbortController,
 ): Promise<void> {
   let spent = judgeScoreCost(runId);
@@ -404,27 +428,28 @@ async function judgeAll(
       cancelled = current?.judge_state === "cancelled";
       break;
     }
-    const verdict = await judgeCase({
-      userId,
-      model: setup.model,
-      handle: setup.handle,
-      config,
-      case: caseSnapshot(target),
-      output: target.output,
-      signal: controller.signal,
-    });
-    if (!verdict.ok) {
-      if (verdict.usage) {
-        recordUsage({
-          userId,
-          providerId: setup.model.providerId,
-          modelId: setup.model.id,
-          kind: "evaluation_judge",
-          usage: verdict.usage,
-          cost: verdict.cost ?? 0,
-        });
-        spent += verdict.cost ?? 0;
+    let verdict: Awaited<ReturnType<typeof judgeCase>>;
+    try {
+      // One credit root per judge call. A paid but unusable verdict is still metered per request.
+      verdict = await withCreditRoot(userId, "evaluation_judge", (permit) => judgeCase({
+        userId,
+        model: setup.model,
+        handle: handleFor(userId, setup, permit, { kind: "evaluation_judge", evaluationRunId: runId, evaluationCaseId: target.case_id }),
+        config,
+        case: caseSnapshot(target),
+        output: target.output,
+        signal: controller.signal,
+      }));
+    } catch (error) {
+      // Only admission throws here (judgeCase maps its own failures): the allowance stops the pass.
+      if (error instanceof AppError && error.code.startsWith("token_credit_")) {
+        denied = true;
+        break;
       }
+      throw error;
+    }
+    if (!verdict.ok) {
+      if (verdict.usage) spent += verdict.cost ?? 0;
       if (verdict.error.code === "aborted" && controller.signal.aborted) {
         cancelled = true;
         break;
@@ -441,14 +466,6 @@ async function judgeAll(
       usage: verdict.usage,
       cost: verdict.cost,
       scale: config.scale,
-    });
-    recordUsage({
-      userId,
-      providerId: setup.model.providerId,
-      modelId: setup.model.id,
-      kind: "evaluation_judge",
-      usage: verdict.usage,
-      cost: verdict.cost,
     });
     spent += verdict.cost;
     done += 1;

@@ -1,3 +1,4 @@
+import { finiteCredits, withUnmeteredRoot } from '../credits/admission.js';
 import { existsSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
@@ -115,8 +116,13 @@ export class VideoWorker {
         const referenceJpeg=await d.reference(row);
         const request=requestOf(jobRow(row.id)!);
         const key=credentials();
-        update(['queued'],{state:'submitting',stage:'submitting',submitted_at:d.now(),deadline_at:d.now()+VIDEO_LIMITS.deadlineMs,may_have_charged:1});
-        const receipt=await provider.submit(key,{model:row.model_id,prompt:request.prompt,parameters:parametersOf(row),referenceJpeg},controller.signal);
+        // A queued job of an account that became finite is refused before submission. The submission
+        // holds an unmetered root, so the allowance cannot be set while the POST may be charging.
+        if(finiteCredits(row.user_id)) throw new VideoError('credentials_changed',403);
+        const receipt=await withUnmeteredRoot(row.user_id,'video',async()=>{
+          update(['queued'],{state:'submitting',stage:'submitting',submitted_at:d.now(),deadline_at:d.now()+VIDEO_LIMITS.deadlineMs,may_have_charged:1});
+          return provider.submit(key,{model:row.model_id,prompt:request.prompt,parameters:parametersOf(row),referenceJpeg},controller.signal);
+        });
         // The provider id and polling state become durable in one write before any further request.
         if(jobRow(row.id)?.state==='cancel_requested') {
           update(['cancel_requested'],{provider_id_enc:encrypt(receipt.id)});await this.cancellation(row);return;

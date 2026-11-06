@@ -1,3 +1,4 @@
+import { withCreditRoot, creditSignal } from "./credits/admission.js";
 import { generateText } from "ai";
 import { Hono } from "hono";
 import type { Context, MiddlewareHandler } from "hono";
@@ -28,7 +29,6 @@ import { getSettings } from "./settings.js";
 import { threadBusy } from "./thread-runs.js";
 import { attachmentName, getThread, isTemporaryThread } from "./threads.js";
 import { assertThreadContentReadable, restrictedThreadSignal } from "./knowledge/thread-policy.js";
-import { costOf, normalizeUsage, recordUsage } from "./usage.js";
 
 // Per-message translations are derived text: a standalone model call whose answer is stored beside the
 // message. They never enter `messages`, `turn_context`, FTS, prompts, shares, exports, or archives, and
@@ -220,31 +220,30 @@ export async function translateMessage(
   const ref = [settings.utilityModel, input.modelRef, message.thread.modelRef].find((candidate): candidate is string => !!candidate && !candidate.startsWith("n8n/"));
   if (!ref) throw conflict(NO_MODEL);
   const { model, conn } = await resolveModel(userId, ref);
-  const handle = createModel(model, conn, { userId });
-  const system = resolvePrompt("translation", { userId, modelRef: model.ref }, { language: englishLanguageName(canonical) });
   const { source, truncated: sourceTruncated } = cutSource(message.source);
-  // Restricted chats hold a live dependency lease for the provider call; a revoke aborts it before any
-  // translated text can be stored.
-  const lease = restrictedThreadSignal(userId, threadId, signal);
-  let result: Awaited<ReturnType<typeof generateText>>;
-  try {
-    result = await generateText({
-      model: handle.model,
-      providerOptions: handle.providerOptions,
-      maxRetries: 0,
-      maxOutputTokens: 6000,
-      abortSignal: lease.signal,
-      system,
-      messages: [{ role: "user", content: wrapUntrusted(source, { kind: "message_translation", name: "chat message" }).text }],
-    });
-  } finally {
-    lease.release();
-  }
+  // Each generated translation is its own credit root; the provider request is metered as it settles,
+  // so a later quota refusal never hides a paid request.
+  const result = await withCreditRoot(userId, "translation", async (creditPermit) => {
+    const handle = createModel(model, conn, { userId, creditPermit, usageContext: { kind: "translation", threadId } });
+    const system = resolvePrompt("translation", { userId, modelRef: model.ref }, { language: englishLanguageName(canonical) });
+    // Restricted chats hold a live dependency lease for the provider call; a revoke aborts it before any
+    // translated text can be stored.
+    const lease = restrictedThreadSignal(userId, threadId, creditSignal(creditPermit, signal));
+    try {
+      return await generateText({
+        model: handle.model,
+        providerOptions: handle.providerOptions,
+        maxRetries: 0,
+        maxOutputTokens: 6000,
+        abortSignal: lease.signal,
+        system,
+        messages: [{ role: "user", content: wrapUntrusted(source, { kind: "message_translation", name: "chat message" }).text }],
+      });
+    } finally {
+      lease.release();
+    }
+  });
   assertThreadContentReadable(userId, threadId);
-
-  // Recorded before storage: a quota refusal must not hide a request the provider was already paid for.
-  const usage = normalizeUsage(result.totalUsage);
-  recordUsage({ userId, threadId, providerId: model.providerId, modelId: model.id, kind: "translation", usage, cost: costOf(model.cost, usage) });
 
   // The message may have been edited while the model answered; storing this would label old text as new.
   if (inspect(userId, threadId, messageId).sourceHash !== message.sourceHash) throw conflict(SOURCE_CHANGED);

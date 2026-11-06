@@ -64,6 +64,7 @@ export function recordUsage(entry: {
   kind: UsageKind;
   usage: TokenUsage;
   cost: number;
+  creditRequestId?: string;
   /** A channel reply records the room and the run, so a settled ledger row is unique per run. */
   channelId?: string;
   channelRunId?: string;
@@ -89,8 +90,8 @@ export function recordUsage(entry: {
   }
   db.prepare(
     `INSERT INTO usage (user_id, thread_id, provider_id, model_id, kind, input_tokens, output_tokens, reasoning_tokens,
-       cache_read_tokens, cache_write_tokens, cost, created_at, channel_id, channel_run_id, api_key_id, api_request_id, video_job_id, cost_state)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       cache_read_tokens, cache_write_tokens, cost, created_at, channel_id, channel_run_id, api_key_id, api_request_id, video_job_id, cost_state, credit_request_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     entry.userId,
     entry.threadId ?? null,
@@ -110,6 +111,7 @@ export function recordUsage(entry: {
     entry.apiRequestId ?? null,
     entry.videoJobId ?? null,
     entry.costState ?? "estimated",
+    entry.creditRequestId ?? null,
   );
 }
 

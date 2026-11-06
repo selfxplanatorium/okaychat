@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, beforeEach, test, type TestContext } from "node:test";
+import { after, afterEach, beforeEach, test, type TestContext } from "node:test";
 import { Hono } from "hono";
 import type { ModelInfo } from "../shared/types.js";
 import type { FeatureKey } from "../shared/permissions.js";
@@ -19,6 +19,7 @@ process.env.OKAYCHAT_SECRET = "feature-gates-test-secret-only-not-for-production
 writeFileSync(path.join(dataDir, "models-dev.json"), JSON.stringify({ data: {}, fetchedAt: Date.now() }));
 
 const { db } = await import("./db.js");
+const { admitCreditRoot, closeCreditRoot } = await import("./credits/store.js");
 const { requireUser } = await import("./auth.js");
 const { sha256 } = await import("./crypto.js");
 const { handleAppError } = await import("./errors.js");
@@ -57,6 +58,18 @@ for (const id of USERS) {
 }
 ensureThread("gated", "thr_gated");
 ensureThread("owner", "thr_share");
+
+// The model boundary and subagent tools require a live server-owned permit. Test accounts are
+// unlimited, so a normal root is admitted on demand and released after each test.
+const permits: Array<ReturnType<typeof admitCreditRoot>> = [];
+const creditPermit = (userId = "gated") => {
+  const permit = admitCreditRoot(userId, "chat");
+  permits.push(permit);
+  return permit;
+};
+afterEach(() => {
+  for (const permit of permits.splice(0)) closeCreditRoot(permit);
+});
 
 after(() => {
   db.close();
@@ -136,7 +149,7 @@ test("code, images, and delegation stop before their network boundaries", async 
   await denial(generateImage({ userId: "gated", threadId: "thr_gated", service, prompt: "cat", references: [] }), "image generation");
 
   const model = { ref: "mock/model", name: "Mock", providerId: "mock", id: "model" } as unknown as ModelInfo;
-  const delegate = subagentTools({ userId: "gated", threadId: "thr_gated", allowed: [model], subTools: {} }).delegate_task!;
+  const delegate = subagentTools({ userId: "gated", threadId: "thr_gated", creditPermit: creditPermit(), allowed: [model], subTools: {} }).delegate_task!;
   await assert.rejects(async () => {
     const parts = delegate.execute!({ task: "do it" }, { toolCallId: "d", messages: [] }) as unknown as AsyncGenerator<unknown>;
     for await (const _part of parts) {

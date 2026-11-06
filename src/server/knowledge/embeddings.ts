@@ -1,3 +1,5 @@
+import { finiteCredits, withUnmeteredRoot } from "../credits/admission.js";
+import { CreditError } from "../credits/store.js";
 import type { KnowledgeEmbeddingOption, KnowledgeEmbeddingProvider, KnowledgeEmbeddingSetting } from "../../shared/knowledge.js";
 import { ollamaEmbed } from "../catalog/ollama.js";
 import { getConnection, listProviders, resolvePinnedConnection, type Connection } from "../catalog/providers.js";
@@ -327,11 +329,14 @@ export function createEmbedder(
         if (!connectionAllowed()) throw new EmbeddingError("The embedding connection is no longer allowed. Reindex the collection.");
         // Knowledge may be revoked while a job is running: each batch re-checks and charges one operation.
         assertFeature(userId, "knowledge");
+        // Embedding adapters report no token totals, so a finite allowance refuses every remote batch,
+        // ingestion and query alike, instead of silently switching to a different search.
+        if (finiteCredits(userId)) throw new CreditError("token_credit_unmetered", "Choose keyword-only knowledge to use it with a token allowance.", { service: "embedding" });
         const lease = reserveOperation({ userId }, "knowledge.embed");
         const batch = texts.slice(i, i + EMBED_BATCH).map((text) => (text.length > MAX_INPUT_CHARS ? text.slice(0, MAX_INPUT_CHARS) : text));
         let rows: number[][];
         try {
-          rows =
+          rows = await withUnmeteredRoot(userId, "embedding", async () =>
             setting.provider === "ollama"
               ? await withRetry(
                   async () => {
@@ -347,7 +352,7 @@ export function createEmbedder(
                 )
               : setting.provider === "google"
                 ? await googleEmbed(conn, model, batch, { ...requestOpts, signal })
-                : await openaiEmbed(conn, model, batch, { ...requestOpts, signal });
+                : await openaiEmbed(conn, model, batch, { ...requestOpts, signal }));
         } finally {
           lease.release();
         }

@@ -1,3 +1,5 @@
+import { admitCreditRoot, type CreditPermit } from "../credits/store.js";
+import { creditSignal, endCreditRoot } from "../credits/admission.js";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import {
@@ -381,13 +383,16 @@ export const inferenceRoutes = new Hono<ApiEnv>()
       }
       const { systemBlocks, conversation } = buildMessages(principal.userId, model, body, ceiling, resolved.policy);
       pruneApiTelemetry(principal.userId, admittedAt);
-      const admission = admitApiCall(principal.userId, principal.keyId, model.ref);
+      const creditPermit = admitCreditRoot(principal.userId, "api");
+      let admission: ReturnType<typeof admitApiCall>;
+      try { admission = admitApiCall(principal.userId, principal.keyId, model.ref); } catch (error) { await endCreditRoot(creditPermit); throw error; }
       let released = false;
       const release = () => {
         if (released) return;
         released = true;
         clearTimeout(timer);
         admission.release();
+        void endCreditRoot(creditPermit).catch(() => { /* Open settlement keeps the credit root held for recovery. */ });
       };
       // Nothing after this point may throw before the receipt exists without releasing the slot.
       try {
@@ -410,6 +415,7 @@ export const inferenceRoutes = new Hono<ApiEnv>()
         try {
           handle = createModel(model, conn, {
             userId: principal.userId,
+            creditPermit, usageContext: { kind: "api", apiKeyId: principal.keyId, apiRequestId: requestId },
             effort,
             guard: recheck,
             responseBounds: { maxBytes: API_LIMITS.providerBytes, maxRecordBytes: API_LIMITS.providerRecordBytes },
@@ -436,7 +442,7 @@ export const inferenceRoutes = new Hono<ApiEnv>()
           ...(body.temperature !== undefined ? { temperature: body.temperature } : {}),
           stream: body.stream === true,
           includeUsage: body.stream_options?.include_usage === true,
-          signal,
+          signal: creditSignal(creditPermit, signal),
           recheck,
           heartbeat: admission.heartbeat,
           onDone: release,

@@ -62,6 +62,7 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       for (const column of ["edited_at", "original_enc"]) db.exec("ALTER TABLE messages DROP COLUMN " + column);
       for (const column of ["thread_mode", "thread_attached", "project_id"]) db.exec("ALTER TABLE schedules DROP COLUMN " + column);
       db.prepare("INSERT INTO server_settings (key, value) VALUES ('prompt:anonymous', ?)").run("Keep this temporary chat out of history.");
+      db.exec("DROP TABLE IF EXISTS token_credit_requests; DROP TABLE IF EXISTS token_credit_roots; DROP TABLE IF EXISTS token_credit_audit; DROP TABLE IF EXISTS token_credit_accounts; DROP INDEX IF EXISTS usage_credit_request; ALTER TABLE usage DROP COLUMN credit_request_id");
       db.exec("DROP TABLE IF EXISTS conversation_import_items; DROP TABLE IF EXISTS conversation_import_jobs; DROP TABLE IF EXISTS conversation_source_ids");
       db.exec("DROP TABLE IF EXISTS video_threads; DROP TABLE IF EXISTS videos; DROP TABLE IF EXISTS video_jobs; DROP INDEX IF EXISTS usage_video_job; ALTER TABLE usage DROP COLUMN video_job_id; ALTER TABLE usage DROP COLUMN cost_state"); if (db.prepare("PRAGMA table_info(knowledge_sources)").all().some((c) => c.name === "extraction")) db.exec("ALTER TABLE knowledge_sources DROP COLUMN extraction");
       db.exec('PRAGMA user_version = 14');
@@ -175,6 +176,7 @@ test('n8n migration preserves selected audiences and rolls back schema and versi
     db.exec('DROP TABLE IF EXISTS outgoing_webhook_deliveries; DROP TABLE IF EXISTS outgoing_webhook_test_preparations; DROP TABLE IF EXISTS outgoing_webhook_rate_windows; DROP TABLE IF EXISTS outgoing_webhook_endpoints');
     db.exec('ALTER TABLE schedules DROP COLUMN webhook_invocation_id');
     db.exec('ALTER TABLE schedules DROP COLUMN webhook_started_at');
+      db.exec("DROP TABLE IF EXISTS token_credit_requests; DROP TABLE IF EXISTS token_credit_roots; DROP TABLE IF EXISTS token_credit_audit; DROP TABLE IF EXISTS token_credit_accounts; DROP INDEX IF EXISTS usage_credit_request; ALTER TABLE usage DROP COLUMN credit_request_id");
       db.exec("DROP TABLE IF EXISTS conversation_import_items; DROP TABLE IF EXISTS conversation_import_jobs; DROP TABLE IF EXISTS conversation_source_ids");
       db.exec("DROP TABLE IF EXISTS video_threads; DROP TABLE IF EXISTS videos; DROP TABLE IF EXISTS video_jobs; DROP INDEX IF EXISTS usage_video_job; ALTER TABLE usage DROP COLUMN video_job_id; ALTER TABLE usage DROP COLUMN cost_state"); if (db.prepare("PRAGMA table_info(knowledge_sources)").all().some((c) => c.name === "extraction")) db.exec("ALTER TABLE knowledge_sources DROP COLUMN extraction");
     db.exec('PRAGMA user_version = 38');
@@ -345,6 +347,7 @@ test("channels v2 migration rolls back cleanly and keeps the event high-water", 
       db.exec("DROP TABLE IF EXISTS outgoing_webhook_deliveries; DROP TABLE IF EXISTS outgoing_webhook_test_preparations; DROP TABLE IF EXISTS outgoing_webhook_rate_windows; DROP TABLE IF EXISTS outgoing_webhook_endpoints");
       db.exec("ALTER TABLE schedules DROP COLUMN webhook_invocation_id");
       db.exec("ALTER TABLE schedules DROP COLUMN webhook_started_at");
+      db.exec("DROP TABLE IF EXISTS token_credit_requests; DROP TABLE IF EXISTS token_credit_roots; DROP TABLE IF EXISTS token_credit_audit; DROP TABLE IF EXISTS token_credit_accounts; DROP INDEX IF EXISTS usage_credit_request; ALTER TABLE usage DROP COLUMN credit_request_id");
       db.exec("DROP TABLE IF EXISTS conversation_import_items; DROP TABLE IF EXISTS conversation_import_jobs; DROP TABLE IF EXISTS conversation_source_ids");
       db.exec("DROP TABLE IF EXISTS video_threads; DROP TABLE IF EXISTS videos; DROP TABLE IF EXISTS video_jobs; DROP INDEX IF EXISTS usage_video_job; ALTER TABLE usage DROP COLUMN video_job_id; ALTER TABLE usage DROP COLUMN cost_state"); if (db.prepare("PRAGMA table_info(knowledge_sources)").all().some((c) => c.name === "extraction")) db.exec("ALTER TABLE knowledge_sources DROP COLUMN extraction");
       db.exec("PRAGMA user_version = 48");
@@ -485,6 +488,7 @@ test("shared knowledge migration rolls back cleanly, keeps private rows private,
       db.exec("DROP TABLE IF EXISTS outgoing_webhook_deliveries; DROP TABLE IF EXISTS outgoing_webhook_test_preparations; DROP TABLE IF EXISTS outgoing_webhook_rate_windows; DROP TABLE IF EXISTS outgoing_webhook_endpoints");
       db.exec("ALTER TABLE schedules DROP COLUMN webhook_invocation_id");
       db.exec("ALTER TABLE schedules DROP COLUMN webhook_started_at");
+      db.exec("DROP TABLE IF EXISTS token_credit_requests; DROP TABLE IF EXISTS token_credit_roots; DROP TABLE IF EXISTS token_credit_audit; DROP TABLE IF EXISTS token_credit_accounts; DROP INDEX IF EXISTS usage_credit_request; ALTER TABLE usage DROP COLUMN credit_request_id");
       db.exec("DROP TABLE IF EXISTS conversation_import_items; DROP TABLE IF EXISTS conversation_import_jobs; DROP TABLE IF EXISTS conversation_source_ids");
       db.exec("DROP TABLE IF EXISTS video_threads; DROP TABLE IF EXISTS videos; DROP TABLE IF EXISTS video_jobs; DROP INDEX IF EXISTS usage_video_job; ALTER TABLE usage DROP COLUMN video_job_id; ALTER TABLE usage DROP COLUMN cost_state"); if (db.prepare("PRAGMA table_info(knowledge_sources)").all().some((c) => c.name === "extraction")) db.exec("ALTER TABLE knowledge_sources DROP COLUMN extraction");
       db.exec("PRAGMA user_version = 50");

@@ -5,7 +5,8 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { Me } from "../shared/types.js";
 import { hashPassword, newId, randomToken, sha256, verifyPassword } from "./crypto.js";
-import { db } from "./db.js";
+import { db, tx } from "./db.js";
+import { ensureCreditAccount } from "./credits/store.js";
 import { env } from "./env.js";
 
 const COOKIE = "okaychat_session";
@@ -169,14 +170,18 @@ export const authRoutes = new Hono<AppEnv>()
     const exists = db.prepare("SELECT 1 FROM users WHERE lower(email) = ?").get(body.data.email);
     if (exists) return c.json({ error: "That email is already registered." }, 409);
     const id = newId("usr");
-    db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(
-      id,
-      body.data.email,
-      body.data.name ?? body.data.email.split("@")[0]!,
-      passwordHash,
-      first ? "admin" : "user",
-      Date.now(),
-    );
+    const createdAt = Date.now();
+    tx(() => {
+      db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(
+        id,
+        body.data.email,
+        body.data.name ?? body.data.email.split("@")[0]!,
+        passwordHash,
+        first ? "admin" : "user",
+        createdAt,
+      );
+      ensureCreditAccount(id, createdAt);
+    });
     createSession(c, id);
     return c.json({ ok: true });
   })

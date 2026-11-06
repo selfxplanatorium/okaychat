@@ -1,3 +1,4 @@
+import { creditBalances, ensureCreditAccount, getCreditBalance } from "./credits/store.js";
 import { removeUserImports } from "./conversation-import/jobs.js";
 import { deletingUserVideos, removeUserVideoFiles } from "./video/maintenance.js";
 import { deleteChatGPTUser } from "./chatgpt-oauth-store.js";
@@ -83,21 +84,28 @@ export const adminRoutes = new Hono<AppEnv>()
            (SELECT COALESCE(SUM(cost), 0) FROM usage g WHERE g.user_id = u.id AND g.created_at > ?) AS cost30d
          FROM users u ORDER BY u.created_at`,
       )
-      .all(Date.now() - 30 * 86_400_000) as unknown as AdminUser[];
-    return c.json(rows);
+      .all(Date.now() - 30 * 86_400_000) as unknown as Array<Omit<AdminUser, "tokenCredits">>;
+    const credits = creditBalances();
+    return c.json(rows.map((row): AdminUser => ({ ...row, tokenCredits: credits.get(row.id) ?? getCreditBalance(row.id) })));
   })
   .post("/admin/users", async (c) => {
     const body = userInput.safeParse(await c.req.json());
     if (!body.success) return c.json({ error: body.error.issues[0]?.message }, 400);
     if (db.prepare("SELECT 1 FROM users WHERE lower(email) = ?").get(body.data.email)) return c.json({ error: "That email is already registered." }, 409);
-    db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(
-      newId("usr"),
-      body.data.email,
-      body.data.name,
-      await hashPassword(body.data.password),
-      body.data.role,
-      Date.now(),
-    );
+    const passwordHash = await hashPassword(body.data.password);
+    const id = newId("usr");
+    const createdAt = Date.now();
+    tx(() => {
+      db.prepare("INSERT INTO users (id, email, name, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(
+        id,
+        body.data.email,
+        body.data.name,
+        passwordHash,
+        body.data.role,
+        createdAt,
+      );
+      ensureCreditAccount(id, createdAt);
+    });
     return c.json({ ok: true });
   })
   .patch("/admin/users/:id", async (c) => {
