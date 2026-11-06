@@ -82,7 +82,7 @@ async function execute(id: string, job: Job, targets: readonly [ArenaTarget, Are
     const handles = targets.map(t => createModel(t.model, t.conn, { userId: job.userId, creditPermit: permit, usageContext: { kind: "arena", arenaBattleId: id, arenaSide: t === targets[0] ? "A" : "B" }, effort: t.model.reasoning ? resolveReasoningEffort(t.model, null, "none") : "none", guard: () => {
       if (getBattle(job.userId, id).state !== "running") throw arenaUnavailable("arena_not_ready");
       guardTarget(job.userId, t, mode);
-    }, responseBounds: { maxBytes: 8 * 1024 * 1024, maxRecordBytes: 256 * 1024 } }));
+    }, retry: { policy: { maxAttempts: 1 } }, responseBounds: { maxBytes: 8 * 1024 * 1024, maxRecordBytes: 256 * 1024 } }));
     await Promise.allSettled(handles.map(async (handle, index) => {
       const side: ArenaSide = index === 0 ? "A" : "B", target = targets[index]!;
       const paneAbort = new AbortController();

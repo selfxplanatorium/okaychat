@@ -38,7 +38,7 @@ function panes(id: string): [PaneRow, PaneRow] {
 function vote(id: string): VoteRow | undefined { return db.prepare("SELECT choice,created_at FROM arena_votes WHERE battle_id=?").get(id) as unknown as VoteRow | undefined; }
 function content(id: string): ContentRow | undefined { return db.prepare("SELECT * FROM arena_contents WHERE battle_id=?").get(id) as unknown as ContentRow | undefined; }
 function ready(row: BattleRow, pair: readonly PaneRow[], now: number): boolean {
-  return row.state === "ready" && row.content_expires_at > now && !!content(row.id) && pair.every(p => p.state === "done" && p.usage_json !== null && !!p.receipt_id && !!db.prepare(
+  return row.state === "ready" && row.content_expires_at > now && !!content(row.id) && pair.every(p => p.state === "done" && p.finish_reason === "stop" && p.usage_json !== null && !!p.receipt_id && !!db.prepare(
     "SELECT 1 FROM token_credit_requests WHERE id=? AND user_id=? AND state='reported' AND json_extract(context_json,'$.arenaBattleId')=? AND json_extract(context_json,'$.arenaSide')=?"
   ).get(p.receipt_id, row.user_id, row.id, p.side));
 }
@@ -153,7 +153,7 @@ export function finishPane(userId: string, id: string, side: ArenaSide, result: 
     const receipt = result.receiptId ? db.prepare(`SELECT r.usage_json,u.cost FROM token_credit_requests r
       JOIN usage u ON u.credit_request_id=r.id WHERE r.id=? AND r.user_id=? AND r.state='reported'
       AND json_extract(r.context_json,'$.arenaBattleId')=? AND json_extract(r.context_json,'$.arenaSide')=?`).get(result.receiptId, userId, id, side) as { usage_json: string; cost: number } | undefined : undefined;
-    const done = !!result.text.trim() && ["stop", "length"].includes(result.finish) && !!receipt;
+    const done = !!result.text.trim() && result.finish === "stop" && !!receipt;
     const snapshot = pane.launch_snapshot_enc ? JSON.parse(decrypt(pane.launch_snapshot_enc)) as LaunchSnapshot : null;
     db.prepare(`UPDATE arena_panes SET state=?,finish_reason=?,error_code=?,receipt_id=?,usage_json=?,cost=?,cost_state=? WHERE battle_id=? AND side=?`).run(
       done ? "done" : "failed", result.finish, done ? null : "arena_failed", result.receiptId ?? null,

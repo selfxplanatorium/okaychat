@@ -39,8 +39,11 @@ Existing comparison and evaluations keep their own storage and execution paths.
 `arena/worker.ts` admits two hard turn slots and two policy turn leases atomically, then one
 `arena` credit root before saving content. Both `createModel` handles use that permit and live
 account/exact-model/connection/entitlement guards. Their final-text streams run concurrently with
-no SDK retries, no tools/history/memory, a 120-second deadline and a 32 KiB output bound per pane.
-Only reported matching receipt snapshots allow voting. The root and both leases survive until both
+no SDK or HTTP transport retries (including unlimited accounts), no tools/history/memory, a 120-second deadline and a 32 KiB output bound per pane.
+Only nonempty answers ending in a normal `stop`, with reported matching receipt snapshots, allow voting.
+A `length` finish retains partial text and billing but fails the pair and cannot receive a new vote.
+The vote-time check also refuses truncated panes saved as ready by older builds.
+The root and both leases survive until both
 drains settle. Failures and missing telemetry make the pair unvoteable; Stop aborts both.
 
 `arena/routes.ts` provides private no-store owner APIs for options, idempotent creation/mutation

@@ -32,6 +32,13 @@ function settled(id: string, side: "A" | "B") {
 }
 function ready() { const { battle } = launch(); settled(battle.id, "A"); settled(battle.id, "B"); store.finishBattle("a", battle.id); return battle.id; }
 
+test("previously ready truncated panes cannot be voted on after an upgrade", () => {
+  const id = ready();
+  db.prepare("UPDATE arena_panes SET finish_reason='length' WHERE battle_id=? AND side='A'").run(id);
+  assert.equal(store.getBattle("a", id).canVote, false);
+  assert.throws(() => store.castVote("a", id, "tie", true));
+});
+
 test("blind projection has no private metadata and two immutable sides", () => {
   const { battle } = launch();
   assert.equal(battle.visibility, "blind");

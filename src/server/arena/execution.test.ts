@@ -21,7 +21,7 @@ const { writePolicy } = await import("../permissions/store.js");
 const { usageSummary, goWindows, hiddenArenaRequests } = await import("../usage.js");
 const { setModelAccessPolicies } = await import("../entitlements.js");
 let caseScope = 0;
-let calls = 0, active = 0, maxActive = 0, failure = false, missingUsage = false, delay = 100;
+let calls = 0, active = 0, maxActive = 0, failure = false, missingUsage = false, truncated = false, transientFailure = false, delay = 100;
 const provider = createServer(async (req, res) => {
   if (req.url === "/v1/models") return res.setHeader("content-type", "application/json").end(JSON.stringify({ data: [{ id: "fixture-one" }, { id: "fixture-two" }] }));
   if (req.url !== "/v1/chat/completions") return res.writeHead(404).end();
@@ -32,6 +32,7 @@ const provider = createServer(async (req, res) => {
   const tracked = body.includes(`[arena-case-${caseScope}]`);
   if (tracked) { calls++; active++; maxActive = Math.max(active, maxActive); }
   res.on("close", () => { if (tracked) active--; });
+  if (transientFailure) return res.writeHead(503).end("PRIVATE-transient-failure");
   if (failure && input.model === "fixture-two") return res.writeHead(422).end("PRIVATE-provider-failure");
   res.writeHead(200, { "content-type": "text/event-stream" });
   const send = (delta: object, finish_reason: string | null = null, usage?: object) => res.write(`data: ${JSON.stringify({ id: "PRIVATE-receipt", model: input.model, object: "chat.completion.chunk", created: 1, choices: [{ index: 0, delta, finish_reason }], ...(usage ? { usage } : {}) })}\n\n`);
@@ -39,7 +40,7 @@ const provider = createServer(async (req, res) => {
   await new Promise(resolve => setTimeout(resolve, delay));
   if (res.destroyed) return;
   send({ content: "A useful final answer." });
-  send({}, "stop", missingUsage ? undefined : { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 }); res.end("data: [DONE]\n\n");
+  send({}, truncated ? "length" : "stop", missingUsage ? undefined : { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 }); res.end("data: [DONE]\n\n");
 });
 await new Promise<void>(resolve => provider.listen(0, "127.0.0.1", resolve));
 const port = (provider.address() as { port: number }).port;
@@ -66,7 +67,7 @@ beforeEach(() => {
   caseScope++;
   setArenaTestDeadlines();
   process.env.OKAYCHAT_ARENA_PUBLIC_MODELS = publicConfig;
-  resetArenaRouteLimits(); calls = 0; maxActive = 0; failure = false; missingUsage = false; delay = 100;
+  resetArenaRouteLimits(); calls = 0; maxActive = 0; failure = false; missingUsage = false; truncated = false; transientFailure = false; delay = 100;
   db.exec("DELETE FROM arena_battles; DELETE FROM usage; DELETE FROM token_credit_requests; DELETE FROM token_credit_roots; DELETE FROM permission_policies; DELETE FROM permission_leases; DELETE FROM provider_model_grants; DELETE FROM provider_model_policies; DELETE FROM provider_connections; UPDATE token_credit_accounts SET credit_tokens=10000,consumed_tokens=0,unknown_requests=0; UPDATE arena_rating_meta SET revision=revision+1");
 });
 test("two concurrent calls share one finite root, remain blind through usage, and reveal after one vote", async () => {
@@ -202,6 +203,26 @@ test("deadline and missing attachment abort both calls, release leases and never
   }
   setArenaTestDeadlines();
 });
+
+test("a provider length finish preserves partial text and billing but never permits a vote", async () => {
+  truncated = true;
+  const { response, data } = await start(); assert.equal(response.status, 201);
+  const text = await drain(data.battle.id);
+  assert.match(text, /A useful final answer/);
+  const view = await (await request(`/battles/${data.battle.id}`)).json() as { battle: { state: string; canVote: boolean } };
+  assert.equal(view.battle.state, "failed"); assert.equal(view.battle.canVote, false);
+  assert.equal(getCreditBalance("alice").consumedTokens, 60);
+  assert.equal((await request(`/battles/${data.battle.id}/vote`, "POST", { choice: "A" })).status, 409);
+});
+test("unlimited accounts make exactly one transport attempt per pane on transient errors", async () => {
+  db.exec("UPDATE token_credit_accounts SET credit_tokens=NULL");
+  transientFailure = true;
+  const { response, data } = await start(); assert.equal(response.status, 201);
+  const text = await drain(data.battle.id);
+  assert.equal(calls, 2); assert.doesNotMatch(text, /PRIVATE/);
+  assert.equal((await request(`/battles/${data.battle.id}/vote`, "POST", { choice: "tie" })).status, 409);
+});
+
 test("leaderboard filters do not renumber, mine isolates voters, 30-day replay resets and deletion invalidates", async () => {
   delay = 1;
   for (let i = 0; i < 20; i++) {

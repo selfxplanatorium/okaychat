@@ -226,7 +226,10 @@ export function ArenaLeaderboard({
             <SegmentedControl
               value={scope}
               onValueChange={(value) => {
-                if (value === "mine" || value === "global") onScopeChange?.(value);
+                if (value !== "mine" && value !== "global") return;
+                // A new scope is a new first page; keeping the offset can hide every row.
+                setOffset(0);
+                onScopeChange?.(value);
               }}
               label={t("arena.leaderboardScope")}
               items={[
@@ -242,7 +245,10 @@ export function ArenaLeaderboard({
           <SegmentedControl
             value={window}
             onValueChange={(value) => {
-              if (value === "all" || value === "30d") onWindowChange(value);
+              if (value !== "all" && value !== "30d") return;
+              // A smaller window can have fewer pages; never keep a page two offset.
+              setOffset(0);
+              onWindowChange(value);
             }}
             label={t("arena.leaderboardWindow")}
             items={[
