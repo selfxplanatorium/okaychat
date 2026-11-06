@@ -1,3 +1,4 @@
+import { bumpRatingRevision } from "./arena/store.js";
 import { creditBalances, ensureCreditAccount, getCreditBalance } from "./credits/store.js";
 import { removeUserImports } from "./conversation-import/jobs.js";
 import { deletingUserVideos, removeUserVideoFiles } from "./video/maintenance.js";
@@ -158,7 +159,10 @@ export const adminRoutes = new Hono<AppEnv>()
     abortUserEndpointSends(id);
     deletingUserVideos(id);
     removeUserImports(id);
-    db.prepare("DELETE FROM users WHERE id = ?").run(id);
+    tx(() => {
+      bumpRatingRevision();
+      db.prepare("DELETE FROM users WHERE id = ?").run(id);
+    });
     await removeUserVideoFiles(id);
     abortRevokedAgentRuns();
     requestChannelRevocation();

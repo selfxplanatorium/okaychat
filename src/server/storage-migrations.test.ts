@@ -65,6 +65,7 @@ test("integrated migrations are repeatable and backfill legacy generated image s
       db.exec("DROP TABLE IF EXISTS token_credit_requests; DROP TABLE IF EXISTS token_credit_roots; DROP TABLE IF EXISTS token_credit_audit; DROP TABLE IF EXISTS token_credit_accounts; DROP INDEX IF EXISTS usage_credit_request; ALTER TABLE usage DROP COLUMN credit_request_id");
       db.exec("DROP TABLE IF EXISTS conversation_import_items; DROP TABLE IF EXISTS conversation_import_jobs; DROP TABLE IF EXISTS conversation_source_ids");
       db.exec("DROP TABLE IF EXISTS video_threads; DROP TABLE IF EXISTS videos; DROP TABLE IF EXISTS video_jobs; DROP INDEX IF EXISTS usage_video_job; ALTER TABLE usage DROP COLUMN video_job_id; ALTER TABLE usage DROP COLUMN cost_state"); if (db.prepare("PRAGMA table_info(knowledge_sources)").all().some((c) => c.name === "extraction")) db.exec("ALTER TABLE knowledge_sources DROP COLUMN extraction");
+      db.exec("DROP INDEX usage_arena; ALTER TABLE usage DROP COLUMN arena_side; ALTER TABLE usage DROP COLUMN arena_battle_id; DROP TABLE arena_votes; DROP TABLE arena_contents; DROP TABLE arena_panes; DROP TABLE arena_battles; DROP TABLE arena_models; DROP TABLE arena_rating_meta;");
       db.exec('PRAGMA user_version = 14');
       db.close();`);
     mkdirSync(path.join(directory, "images", "legacy"), { recursive: true });
@@ -179,6 +180,7 @@ test('n8n migration preserves selected audiences and rolls back schema and versi
       db.exec("DROP TABLE IF EXISTS token_credit_requests; DROP TABLE IF EXISTS token_credit_roots; DROP TABLE IF EXISTS token_credit_audit; DROP TABLE IF EXISTS token_credit_accounts; DROP INDEX IF EXISTS usage_credit_request; ALTER TABLE usage DROP COLUMN credit_request_id");
       db.exec("DROP TABLE IF EXISTS conversation_import_items; DROP TABLE IF EXISTS conversation_import_jobs; DROP TABLE IF EXISTS conversation_source_ids");
       db.exec("DROP TABLE IF EXISTS video_threads; DROP TABLE IF EXISTS videos; DROP TABLE IF EXISTS video_jobs; DROP INDEX IF EXISTS usage_video_job; ALTER TABLE usage DROP COLUMN video_job_id; ALTER TABLE usage DROP COLUMN cost_state"); if (db.prepare("PRAGMA table_info(knowledge_sources)").all().some((c) => c.name === "extraction")) db.exec("ALTER TABLE knowledge_sources DROP COLUMN extraction");
+    db.exec("DROP INDEX usage_arena; ALTER TABLE usage DROP COLUMN arena_side; ALTER TABLE usage DROP COLUMN arena_battle_id; DROP TABLE arena_votes; DROP TABLE arena_contents; DROP TABLE arena_panes; DROP TABLE arena_battles; DROP TABLE arena_models; DROP TABLE arena_rating_meta;");
     db.exec('PRAGMA user_version = 38');
     console.log(version); db.close();`;
   try {
@@ -350,6 +352,7 @@ test("channels v2 migration rolls back cleanly and keeps the event high-water", 
       db.exec("DROP TABLE IF EXISTS token_credit_requests; DROP TABLE IF EXISTS token_credit_roots; DROP TABLE IF EXISTS token_credit_audit; DROP TABLE IF EXISTS token_credit_accounts; DROP INDEX IF EXISTS usage_credit_request; ALTER TABLE usage DROP COLUMN credit_request_id");
       db.exec("DROP TABLE IF EXISTS conversation_import_items; DROP TABLE IF EXISTS conversation_import_jobs; DROP TABLE IF EXISTS conversation_source_ids");
       db.exec("DROP TABLE IF EXISTS video_threads; DROP TABLE IF EXISTS videos; DROP TABLE IF EXISTS video_jobs; DROP INDEX IF EXISTS usage_video_job; ALTER TABLE usage DROP COLUMN video_job_id; ALTER TABLE usage DROP COLUMN cost_state"); if (db.prepare("PRAGMA table_info(knowledge_sources)").all().some((c) => c.name === "extraction")) db.exec("ALTER TABLE knowledge_sources DROP COLUMN extraction");
+      db.exec("DROP INDEX usage_arena; ALTER TABLE usage DROP COLUMN arena_side; ALTER TABLE usage DROP COLUMN arena_battle_id; DROP TABLE arena_votes; DROP TABLE arena_contents; DROP TABLE arena_panes; DROP TABLE arena_battles; DROP TABLE arena_models; DROP TABLE arena_rating_meta;");
       db.exec("PRAGMA user_version = 48");
       console.log(JSON.stringify({ high, tail })); db.close();`));
     for (let i = 0; i < 2; i++) {
@@ -491,6 +494,7 @@ test("shared knowledge migration rolls back cleanly, keeps private rows private,
       db.exec("DROP TABLE IF EXISTS token_credit_requests; DROP TABLE IF EXISTS token_credit_roots; DROP TABLE IF EXISTS token_credit_audit; DROP TABLE IF EXISTS token_credit_accounts; DROP INDEX IF EXISTS usage_credit_request; ALTER TABLE usage DROP COLUMN credit_request_id");
       db.exec("DROP TABLE IF EXISTS conversation_import_items; DROP TABLE IF EXISTS conversation_import_jobs; DROP TABLE IF EXISTS conversation_source_ids");
       db.exec("DROP TABLE IF EXISTS video_threads; DROP TABLE IF EXISTS videos; DROP TABLE IF EXISTS video_jobs; DROP INDEX IF EXISTS usage_video_job; ALTER TABLE usage DROP COLUMN video_job_id; ALTER TABLE usage DROP COLUMN cost_state"); if (db.prepare("PRAGMA table_info(knowledge_sources)").all().some((c) => c.name === "extraction")) db.exec("ALTER TABLE knowledge_sources DROP COLUMN extraction");
+      db.exec("DROP INDEX usage_arena; ALTER TABLE usage DROP COLUMN arena_side; ALTER TABLE usage DROP COLUMN arena_battle_id; DROP TABLE arena_votes; DROP TABLE arena_contents; DROP TABLE arena_panes; DROP TABLE arena_battles; DROP TABLE arena_models; DROP TABLE arena_rating_meta;");
       db.exec("PRAGMA user_version = 50");
       console.log(JSON.stringify({ tail })); db.close();`, {}));
     assert.ok(before.tail >= 51);

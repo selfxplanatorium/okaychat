@@ -1,3 +1,4 @@
+import { interruptBattles } from "./arena/store.js";
 import { recoverImports, startImports, stopImports } from "./conversation-import/jobs.js";
 import { videoWorker, recoverVideoJobs } from "./video/worker.js";
 import { startVideoMaintenance, stopVideoMaintenance } from "./video/maintenance.js";
@@ -113,6 +114,7 @@ void warmCatalog().catch(() => {});
 // Credit receipts settle first: an open dispatched request becomes unknown, an undispatched one
 // not_dispatched, and every open root closes, before any API, evaluation, or channel recovery runs.
 recoverCreditOperations();
+interruptBattles();
 // Room archive recovery runs before the listener accepts a request; the interval starts with the server.
 recoverRoomArchiveJobs();
 recoverImports();
