@@ -1,3 +1,4 @@
+import { assertMeteredService } from '../credits/admission.js';
 import { createUIMessageStream, generateId, type UIMessage } from 'ai';
 import type { AssistantMetadata } from '../../shared/types.js';
 import { randomToken, sha256 } from '../crypto.js';
@@ -38,6 +39,8 @@ export function agentBody(messages: UIMessage[], config: NonNullable<ReturnType<
 export function agentTurnStream(opts: TurnOptions, agentId: string, requestAgent: typeof agentRequest = agentRequest) {
   const modelRef = `n8n/${agentId}`;
   assertModelAllowed(opts.userId, modelRef);
+  // An outside agent's remote work has no token price; turnStream already holds an unmetered root.
+  assertMeteredService(opts.userId, "agent");
   const agent = resolveAgent(opts.userId, agentId);
   if (!agent) throw new AppError({ code: 'not_found' });
   if (!agent.enabled) throw new AppError({ code: 'validation' });

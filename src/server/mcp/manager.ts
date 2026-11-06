@@ -1,3 +1,4 @@
+import { assertMeteredService, withUnmeteredRoot } from "../credits/admission.js";
 import { createHash } from "node:crypto";
 import {
   createMCPClient,
@@ -945,9 +946,12 @@ async function withClient<T>(
   replayable = true,
 ): Promise<T> {
   // One tool, resource, or prompt invocation is one charged operation, before the transport is touched.
+  // A remote server can start paid work with no token price, so a finite allowance refuses it here,
+  // at the executor, including approvals replayed from an earlier turn.
+  assertMeteredService(server.userId, "mcp");
   const lease = reserveOperation({ userId: server.userId }, "mcp.call");
   try {
-    return await withClientWork(server, run, abortSignal, replayable);
+    return await withUnmeteredRoot(server.userId, "mcp", () => withClientWork(server, run, abortSignal, replayable));
   } finally {
     lease.release();
   }

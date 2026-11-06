@@ -1,3 +1,4 @@
+import { assertMeteredService, withUnmeteredRoot } from "../credits/admission.js";
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
@@ -259,12 +260,14 @@ export function referencePaths(userId: string, ids: string[]): string[] {
 export async function generateImage(opts: { userId: string; threadId: string; service: ImageService; prompt: string; references: string[]; signal?: AbortSignal }): Promise<GeneratedImage> {
   // Image generation is a policy decision, not just a credential one: own keys and Codex do not bypass it.
   assertFeature(opts.userId, "images");
+  // Images have no token price, so a finite allowance refuses them before the CLI or API is reached.
+  assertMeteredService(opts.userId, "image");
   const lease = reserveOperation({ userId: opts.userId }, "image.generate");
   try {
     const references = referencePaths(opts.userId, opts.references);
-    const buf = opts.service.def.credential === "codex"
-      ? await generateWithCodex(opts.userId, opts.prompt, references, opts.signal)
-      : await generateWithApi(opts.service, opts.prompt, references, opts.signal);
+    const buf = await withUnmeteredRoot(opts.userId, "image", () => opts.service.def.credential === "codex"
+      ? generateWithCodex(opts.userId, opts.prompt, references, opts.signal)
+      : generateWithApi(opts.service, opts.prompt, references, opts.signal));
     const stored = await storeImage(opts.userId, opts.threadId, buf, opts.prompt);
     if (!stored) throw new Error(`${opts.service.def.name} did not return a PNG, JPEG, WebP, GIF, or AVIF image.`);
     return { ...stored, service: opts.service.def.name, model: opts.service.model };

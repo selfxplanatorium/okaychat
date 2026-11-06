@@ -1,3 +1,4 @@
+import { AppError } from "../errors.js";
 import type {
   KnowledgeRetrievalMode,
   KnowledgeSearchCollectionOutcome,
@@ -234,9 +235,11 @@ async function vectorRanking(
         const [vector] = await embedder.embed([query], signal);
         if (!vector) degraded.add(collection.id);
         queryVectors.set(key, vector ?? null);
-      } catch {
+      } catch (error) {
         // A provider outage or a revocation degrades this query to lexical; the label tells the truth.
         if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
+        // A token allowance is not an outage: the user must choose keyword-only knowledge instead.
+        if (error instanceof AppError && error.code === "token_credit_unmetered") throw error;
         queryVectors.set(key, null);
       }
     }

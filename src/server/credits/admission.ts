@@ -32,6 +32,11 @@ export function finiteCredits(userId: string): boolean { return getCreditBalance
 export function assertMeteredService(userId: string, service: string): void {
   if (finiteCredits(userId)) throw new CreditError("token_credit_unmetered", "This service cannot be used with a token allowance. Contact your administrator.", { service });
 }
+/** A root for unpriced remote work that outlives one call (a Realtime session). Close it with endCreditRoot. */
+export function admitUnmeteredRoot(userId: string, service: string): CreditPermit {
+  assertMeteredService(userId, service);
+  return admitCreditRoot(userId, "unmetered");
+}
 export async function withUnmeteredRoot<T>(userId: string, service: string, fn: () => Promise<T>): Promise<T> {
   assertMeteredService(userId, service);
   return withCreditRoot(userId, "unmetered", async () => fn());

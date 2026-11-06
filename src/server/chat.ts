@@ -1,5 +1,5 @@
 import { admitCreditRoot, assertCreditPermit, type CreditPermit } from "./credits/store.js";
-import { assertMeteredService, creditOwnedStream, creditSignal, endCreditRoot, withCreditRoot } from "./credits/admission.js";
+import { assertMeteredService, creditOwnedStream, creditSignal, endCreditRoot, finiteCredits, withCreditRoot } from "./credits/admission.js";
 import { db } from "./db.js";
 import { videoTools } from "./tools/video.js";
 import { videoModeEligible, videoVoiceActive, type VideoTurnContext } from "./video/eligibility.js";
@@ -417,7 +417,9 @@ async function creditTurnStream(opts: TurnOptions & { creditPermit: CreditPermit
       const sidecars = continuation || !sidecarIds.length
         ? Promise.resolve(new Map<FixedServiceId, ServiceStatus | undefined>())
         : turnServiceStates(sidecarIds);
-      const mcp = !restrictedChat && model.toolCall && !temporary && allowed("mcp")
+      // Unpriced remote services are not offered to a finite allowance; their executors refuse them too.
+      const finite = finiteCredits(userId);
+      const mcp = !restrictedChat && model.toolCall && !temporary && allowed("mcp") && !finite
         ? await toolsForUser(user.id, {
             threadId,
             images: canViewImages ? toolImages : undefined,
@@ -530,9 +532,9 @@ async function creditTurnStream(opts: TurnOptions & { creditPermit: CreditPermit
       const sandboxTurn = new SandboxTurn();
       let videoRunId: string | null = null;
       const videoContext: VideoTurnContext = {userId:user.id,threadId,assistantMessageId,getRunId:()=>videoRunId,modelRef,toolCallModel:model.toolCall,toolPolicy,interactive:opts.interactive===true,unattended:opts.unattended===true,turnOrigin:opts.turnOrigin,temporary,restrictedChat,comparison:opts.turnOrigin==="comparison"};
-      const videoServices = videoModeEligible(videoContext) && allowed("videos") && !videoVoiceActive(user.id)
+      const videoServices = !finite && videoModeEligible(videoContext) && allowed("videos") && !videoVoiceActive(user.id)
         ? videoServiceStatuses(user.id,settings.videoServices??{}).filter(s=>s.enabled) : [];
-      const imageServices = !restrictedChat && model.toolCall && !temporary && allowed("images") && allows("images") ? enabledImageServices(user.id, settings) : [];
+      const imageServices = !finite && !restrictedChat && model.toolCall && !temporary && allowed("images") && allows("images") ? enabledImageServices(user.id, settings) : [];
       // The final assembly is explicit: a restricted chat gets the knowledge pair and nothing else, so a
       // future family cannot leak in by forgetting its own guard.
       const offeredTools: ToolSet = guardTools(actor, restrictedChat ? {
