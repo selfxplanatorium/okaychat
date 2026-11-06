@@ -26,7 +26,9 @@ export function creditModelMiddleware(options: {
   };
   const finish = (id: string, raw?: LanguageModelV4Usage) => {
     const usage = rawCreditUsage(raw);
-    if (usage) settleCreditRequest(id, { state: "reported", usage, cost: costOf(options.model.cost, usage) });
+    // The price is a display estimate from external catalog data; a malformed one must not block the debit.
+    const cost = usage ? costOf(options.model.cost, usage) : 0;
+    if (usage) settleCreditRequest(id, { state: "reported", usage, cost: Number.isFinite(cost) && cost >= 0 ? cost : 0 });
     else settleCreditRequest(id, { state: "unknown", errorCode: "missing_usage" });
   };
   // Only explicit HTTP rejection evidence is safe to call free. A protocol/error frame after

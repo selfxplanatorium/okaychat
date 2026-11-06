@@ -39,6 +39,20 @@ test("generate reports once and records canonical usage", async () => {
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM usage").get()?.n, 1);
   closeCreditRoot(permit);
 });
+test("a malformed catalog price still debits and closes the root", async () => {
+  // models.dev data is external: a tier without a price makes costOf() NaN. The debit must not depend on it.
+  const priced = { ...info, cost: { input: 1, output: 1, tiers: [{ above: 5, input: undefined as unknown as number, output: 1 }] } } as ModelInfo;
+  const permit = admitCreditRoot("meter", "chat");
+  const model: LanguageModelV4 = {
+    specificationVersion: "v4", provider: "test", modelId: "test", supportedUrls: {},
+    doGenerate: async () => ({ content: [], finishReason: { unified: "stop", raw: "stop" }, usage: raw(10, 2), warnings: [] }),
+    doStream: async () => { throw new Error("unused"); },
+  };
+  await wrapLanguageModel({ model, middleware: creditModelMiddleware({ permit, userId: "meter", model: priced, kind: "chat" }) }).doGenerate({ prompt: [] });
+  assert.equal(getCreditBalance("meter").consumedTokens, 12);
+  assert.equal(db.prepare("SELECT cost FROM usage").get()?.cost, 0);
+  closeCreditRoot(permit);
+});
 test("finish is persisted before being forwarded and later cancel cannot replace it", async () => {
   const permit = admitCreditRoot("meter", "chat");
   let cancelled = false;
