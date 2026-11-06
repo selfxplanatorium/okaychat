@@ -179,6 +179,7 @@ export function ModelEntitlementsDialog({
             ) : (
               <>
                 <p className="text-muted-foreground text-xs">{t("entitlements.selectedHint")}</p>
+                {provider?.modelSource?.mode === "manual" && <p className="text-muted-foreground text-xs">{t("entitlements.configuredModels")}</p>}
                 <div className="relative">
                   <SearchIcon className="text-muted-foreground absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2" />
                   <Input

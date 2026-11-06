@@ -1,5 +1,6 @@
 import { sttEngineDef, ttsEngineDef, type SpeechOption, type SpeechOptionList } from "../../shared/speech.js";
 import { sha256 } from "../crypto.js";
+import { connectionDigest } from "../catalog/provider-config.js";
 import { azureRegion, credentialFor, upstream, type ResolvedCredential } from "./engines.js";
 import { speechWorkerConfigured, workerVoices } from "./worker.js";
 
@@ -105,7 +106,8 @@ export async function speechOptions(userId: string, kind: "stt" | "tts", engine:
   const builtIn = (what === "models" ? def.models : "voices" in def ? (def.voices as string[]) : []).map((id) => ({ id }));
   const cred = credentialFor(userId, def.credential);
   if (!cred) return { options: builtIn, live: false, error: `Connect ${def.name} to load its list.` };
-  const key = sha256(`${kind}:${engine}:${what}:${cred.apiKey ?? ""}:${cred.baseURL ?? ""}`);
+  // The connection digest covers any transport configuration as well as the key and address.
+  const key = sha256(`${kind}:${engine}:${what}:${cred.apiKey ?? ""}:${cred.baseURL ?? ""}:${cred.conn ? connectionDigest(cred.conn) : ""}`);
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.list;
   let list: SpeechOptionList;

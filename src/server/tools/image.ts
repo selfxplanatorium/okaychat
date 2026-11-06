@@ -19,7 +19,7 @@ import { env, USER_AGENT } from "../env.js";
 import { assertStorage } from "../quota.js";
 import { promptText } from "../prompts.js";
 import { listImageModels } from "./image-models.js";
-import { publicFetch } from "../public-fetch.js";
+import { providerFetch } from "../provider-transport.js";
 import { getSettings } from "../settings.js";
 import { tx } from "../db.js";
 import { getMedia, mediaPath, removeVariants } from "../media/store.js";
@@ -201,8 +201,12 @@ export function enabledImageServices(userId: string, settings: UserSettings): Im
 
 // Image-only providers load when an image is first generated with them; OpenAI and Google are loaded for chat anyway.
 async function imageModel(service: ImageService): Promise<ImageModel> {
-  const { apiKey, baseURL, guarded } = service.conn!;
-  const settings = { apiKey, baseURL, headers: { "User-Agent": USER_AGENT }, fetch: guarded ? publicFetch : undefined };
+  const conn = service.conn!;
+  const { baseURL } = conn;
+  // The whole connection goes to the transport factory: a v1 custom connection's auth, headers, and query
+  // are applied there, and the SDK's own key header is replaced. No current selector passes one.
+  const apiKey = conn.transport ? "connection-transport" : conn.apiKey;
+  const settings = { apiKey, baseURL, headers: { "User-Agent": USER_AGENT }, fetch: providerFetch(conn) };
   const model = service.model!;
   switch (service.def.id) {
     case "openai":

@@ -8,6 +8,9 @@ import type { ImageServiceSettings } from "./image-services.js";
 import type { TurnUnavailable } from "./services.js";
 import type { SpeechSettings } from "./speech.js";
 import type { Spec } from "generative-frame/spec";
+import type { CustomModelSource, CustomTransportInput, CustomTransportSummary } from "./provider-transport.js";
+
+export type { CustomAuth, CustomModelSource, CustomTransportInput, CustomTransportSummary, SecretRowInput, SecretRowSummary } from "./provider-transport.js";
 
 // Types shared by server and web. Keep free of runtime imports.
 
@@ -78,6 +81,10 @@ export interface ProviderInfo {
   modelCount: number;
   /** Admin listing only: who may use the server-wide connection. */
   audience?: ShareAudience;
+  /** Custom connections, owner or admin view only: names and presence, never values. */
+  transport?: CustomTransportSummary;
+  /** Custom connections, owner or admin view only. */
+  modelSource?: CustomModelSource;
 }
 
 /** Who may use something an admin shares: every user, or only the listed users and members of the listed groups. */
@@ -121,6 +128,10 @@ export interface ProviderConnectionInput {
   baseURL?: string;
   name?: string;
   enabled?: boolean;
+  /** Custom connections only. Omitted keeps the saved configuration. */
+  transport?: CustomTransportInput;
+  /** Custom connections only. Omitted keeps the saved source. */
+  modelSource?: CustomModelSource;
 }
 
 /** A model installed on an Ollama daemon, from `/api/tags`, `/api/show`, and `/api/ps`. */

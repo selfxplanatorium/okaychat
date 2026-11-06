@@ -16,7 +16,8 @@ import { z } from "zod";
 import type { McpServerConfig, UserSettings } from "../shared/types.js";
 import { requireUser, type AppEnv } from "./auth.js";
 import { newId } from "./crypto.js";
-import { deleteConnection, getOwnConnection, listModels, listProviders, privateUrlError, saveConnection } from "./catalog/providers.js";
+import { commitConnectionSave, deleteConnection, listModels, listProviders, prepareConnectionSave, privateUrlError } from "./catalog/providers.js";
+import { changesDestination, ConnectionInputError, parseProviderInput } from "./catalog/provider-config.js";
 import { OLLAMA, OLLAMA_DEFAULT_URL } from "./catalog/ollama.js";
 import { ollamaManagementRoutes } from "./catalog/ollama-routes.js";
 import { adminRoutes, audienceInput } from "./admin.js";
@@ -92,13 +93,6 @@ import { appendMessage, branchThread, deleteThread, ensureThread, getThread, isT
 import { normalizeTag } from "../shared/tags.js";
 import { hiddenArenaRequests, goWindows, threadUsage, usageSummary } from "./usage.js";
 
-const providerInput = z.object({
-  apiKey: z.string().optional(),
-  baseURL: z.string().url().or(z.literal("")).optional(),
-  name: z.string().max(60).optional(),
-  enabled: z.boolean().optional(),
-});
-
 const mcpInput = z.object({
   name: z.string().trim().min(1).max(40).regex(/^[\w .-]+$/, "Letters, numbers, spaces, dot, dash"),
   transport: z.enum(["http", "sse", "stdio"]),
@@ -159,16 +153,26 @@ const api = new Hono<AppEnv>()
   // Providers and models
   .get("/providers", async (c) => c.json(await listProviders(c.get("user").id)))
   .put("/providers/:id", async (c) => {
-    const body = providerInput.safeParse(await c.req.json());
-    if (!body.success) return c.json({ error: body.error.issues[0]?.message }, 400);
     const id = c.req.param("id");
     const userId = c.get("user").id;
-    // An omitted or empty Ollama address still means loopback, so validate that effective URL.
-    const stored = id === OLLAMA ? getOwnConnection(userId, OLLAMA)?.baseURL : undefined;
-    const effective = id === OLLAMA && !body.data.baseURL ? (stored ?? OLLAMA_DEFAULT_URL) : body.data.baseURL;
-    const blocked = await privateUrlError(userId, effective);
-    if (blocked) return c.json({ error: blocked }, 400);
-    saveConnection(userId, id, body.data);
+    try {
+      const input = parseProviderInput(id, await c.req.json().catch(() => null));
+      const prepared = prepareConnectionSave(userId, id, input);
+      // The effective candidate is checked, not only a supplied URL: an omitted or empty Ollama address
+      // still means loopback, and a retained custom address carries new credentials. A pure custom switch
+      // or rename needs no destination check, so such a row can always be turned off.
+      const effective = id.startsWith("custom-")
+        ? changesDestination(input) ? prepared.baseURL : undefined
+        : id === OLLAMA ? (prepared.baseURL ?? OLLAMA_DEFAULT_URL) : input.baseURL;
+      if (effective) {
+        const blocked = await privateUrlError(userId, effective);
+        if (blocked) return c.json({ error: blocked, field: "baseURL", reason: "invalid_url" }, 400);
+      }
+      commitConnectionSave(prepared);
+    } catch (error) {
+      if (error instanceof ConnectionInputError) return c.json(error.body(), error.status);
+      throw error;
+    }
     return c.json({ ok: true });
   })
   .delete("/providers/:id", (c) => {

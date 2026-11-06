@@ -35,6 +35,7 @@ const RTL_CHECKED_FILES = [
   "components/settings/AdminWebhooks.tsx",
   "components/settings/TokenCreditBalanceCard.tsx",
   "components/settings/TokenCreditAdminDialog.tsx",
+  "components/settings/CustomProviderFields.tsx",
 ];
 
 const FORBIDDEN = [

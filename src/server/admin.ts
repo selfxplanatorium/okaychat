@@ -18,6 +18,7 @@ import { z } from "zod";
 import type { AdminUser, ModelAccessPolicy } from "../shared/types.js";
 import { requireAdmin, signupAllowed, type AppEnv } from "./auth.js";
 import { deleteConnection, getSharedConnection, listProviders, listSharedModels, saveConnection } from "./catalog/providers.js";
+import { ConnectionInputError, parseProviderInput } from "./catalog/provider-config.js";
 import { ollamaManagementRoutes } from "./catalog/ollama-routes.js";
 import { hashPassword, newId } from "./crypto.js";
 import { disconnect as disconnectCodex } from "./codex.js";
@@ -52,13 +53,6 @@ const userPatch = z.object({
   password: z.string().min(8).max(200).optional(),
   // Bytes. null removes the override, so the user falls back to the server default.
   storageLimit: z.number().int().min(1024 * 1024).max(1024 ** 4).nullable().optional(),
-});
-
-const providerInput = z.object({
-  apiKey: z.string().optional(),
-  baseURL: z.string().url().or(z.literal("")).optional(),
-  name: z.string().max(60).optional(),
-  enabled: z.boolean().optional(),
 });
 
 const ids = z.array(z.string().max(100)).max(10_000);
@@ -196,9 +190,14 @@ export const adminRoutes = new Hono<AppEnv>()
   .route("/admin/providers/ollama", ollamaManagementRoutes("admin"))
   .get("/admin/providers", async (c) => c.json(await listProviders(null)))
   .put("/admin/providers/:id", async (c) => {
-    const body = providerInput.safeParse(await c.req.json());
-    if (!body.success) return c.json({ error: body.error.issues[0]?.message }, 400);
-    saveConnection(null, c.req.param("id"), body.data);
+    const id = c.req.param("id");
+    try {
+      // Admins may point a shared connection at a private host, so there is no destination check here.
+      saveConnection(null, id, parseProviderInput(id, await c.req.json().catch(() => null)));
+    } catch (error) {
+      if (error instanceof ConnectionInputError) return c.json(error.body(), error.status);
+      throw error;
+    }
     return c.json({ ok: true });
   })
   .put("/admin/providers/:id/access", async (c) => {

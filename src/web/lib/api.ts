@@ -16,6 +16,9 @@ export class ApiError extends Error {
   readonly requestId?: string;
   /** An authored reason for an unusable agent answer; never remote text. */
   readonly agentReason?: AgentReason;
+  /** A settings field path and stable reason from a 400, e.g. `transport.headers.1.name` + `reserved_header`. */
+  field?: string;
+  reason?: string;
 
   constructor(message: string, readonly status: number, wire?: Partial<ErrorWire>) {
     super(message);
@@ -85,7 +88,14 @@ export function apiErrorFromBody(body: unknown, status: number, fallback = httpF
     const shown = presentError(wire, "settings");
     return new ApiError(shown.detail ?? t(shown.messageKey), status, wire);
   }
-  return new ApiError(legacyMessage(body, status) || fallback, status);
+  const error = new ApiError(legacyMessage(body, status) || fallback, status);
+  // Only shape-checked identifiers are kept; the form maps them to its own translated text.
+  if (status >= 400 && status < 500 && typeof body === "object" && body !== null) {
+    const { field, reason } = body as { field?: unknown; reason?: unknown };
+    if (typeof field === "string" && /^[A-Za-z0-9.]{1,80}$/.test(field)) error.field = field;
+    if (typeof reason === "string" && /^[a-z_]{1,40}$/.test(reason)) error.reason = reason;
+  }
+  return error;
 }
 
 const aborted = (error: unknown) => (error as { name?: string })?.name === "AbortError";

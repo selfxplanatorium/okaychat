@@ -317,6 +317,13 @@ row references a channel, room message, or room attachment.
   works) but have no pin: ingestion refuses until the owner runs an explicit `POST /collections/:id/reindex`
   (optionally with a new embedding setting). `PATCH` cannot change the embedding while sources exist.
   A vector dimension mismatch fails that source instead of mixing spaces.
+  For a custom connection with default query parameters, `endpointHash` also covers a keyed digest of the
+  query names and values, so changing `api-version` stops retrieval until an explicit reindex; a connection
+  without configured query keeps its old hash. Active ingest and query operations additionally compare a
+  server-only transport fingerprint (key, auth mode, headers, query): any change, including key rotation,
+  aborts the running batch, but only an endpoint or query change requires a reindex. A fixed deployment
+  base URL (`…/openai/deployments/<id>`) requires the collection model to equal that deployment id. See
+  [providers](providers.md).
 - **Storage payer.** The owner pays originals, extracted text, chunks, vectors, ingestion operations, and
   provider billing. A reader pays only their own chat context (bounded retrieved blocks/tool results),
   messages, and generation. Retrieval itself writes nothing for a non-owner. Audience/dependency/audit
