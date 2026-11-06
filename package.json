@@ -56,7 +56,7 @@
     "fflate": "^0.8.3",
     "generative-frame": "^0.0.6",
     "highlight.js": "^11.12.0",
-    "hono": "^4.13.13",
+    "hono": "^4.13.16",
     "imapflow": "^2.10.0",
     "katex": "^0.18.10",
     "linkedom": "^0.18.13",
