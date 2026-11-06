@@ -1,3 +1,5 @@
+import { withCreditRoot, creditSignal } from "./credits/admission.js";
+import type { CreditPermit } from "./credits/store.js";
 import { envelopeTranscript } from "./conversation-import/provenance.js";
 import { envelopeAgentHistory } from "./n8n/provenance.js";
 import { convertToModelMessages, generateText, isToolUIPart, type ModelMessage, type ToolSet, type UIMessage } from "ai";
@@ -6,7 +8,6 @@ import type { Connection } from "./catalog/providers.js";
 import { createModel } from "./llm.js";
 import { resolvePrompt } from "./prompt-policy.js";
 import { wrapUntrusted } from "./prompt-injection.js";
-import { costOf, normalizeUsage, recordUsage } from "./usage.js";
 import { adaptPdfParts } from "./pdf-parts.js";
 import { resolveImageRefs } from "./media/refs.js";
 
@@ -194,6 +195,7 @@ export function summaryMessages(summary: string): ModelMessage[] {
 }
 
 export async function compact(opts: {
+  creditPermit?: CreditPermit;
   userId: string;
   threadId: string;
   messages: UIMessage[];
@@ -203,10 +205,11 @@ export async function compact(opts: {
   /** Stop and schedule timeouts end the summary request; nothing is returned for a cancelled one. */
   signal?: AbortSignal;
 }): Promise<CompactionState> {
+  if (!opts.creditPermit) return withCreditRoot(opts.userId, "compaction", creditPermit => compact({ ...opts, creditPermit, signal: creditSignal(creditPermit, opts.signal) }));
   const applied = applyCompaction(opts.messages, opts.previous);
   const boundary = opts.messages.at(-1);
   if (!boundary) throw new Error("Nothing to compact");
-  const handle = createModel(opts.model, opts.conn, { userId: opts.userId });
+  const handle = createModel(opts.model, opts.conn, { userId: opts.userId, creditPermit: opts.creditPermit, usageContext: { kind: "compaction", threadId: opts.threadId } });
   const history = [...(applied.summary ? summaryMessages(applied.summary) : []), ...(await historyMessages(applied, async (tail) => adaptPdfParts(await resolveImageRefs(opts.userId, tail), opts.model)))];
   const result = await generateText({
     model: handle.model,
@@ -216,16 +219,6 @@ export async function compact(opts: {
     messages: [...history, { role: "user", content: resolvePrompt("compaction", { userId: opts.userId, modelRef: opts.model.ref }) }],
     maxOutputTokens: Math.min(8_000, opts.model.maxOutput),
     abortSignal: opts.signal,
-  });
-  const usage = normalizeUsage(result.totalUsage);
-  recordUsage({
-    userId: opts.userId,
-    threadId: opts.threadId,
-    providerId: opts.model.providerId,
-    modelId: opts.model.id,
-    kind: "compaction",
-    usage,
-    cost: costOf(opts.model.cost, usage),
   });
   // The tokens were spent, so usage is recorded; a cancelled turn still must not save the summary.
   opts.signal?.throwIfAborted();

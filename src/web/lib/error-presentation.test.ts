@@ -11,7 +11,7 @@ const wire = (code: ErrorWire["code"], extra: Partial<ErrorWire> = {}): ErrorWir
 });
 
 test("every taxonomy code has a message and hint decision, including unknown", () => {
-  assert.equal(ERROR_CODES.length, 45);
+  assert.equal(ERROR_CODES.length, 49);
   assert.ok(ERROR_CODES.includes("video_submission_unknown"));
   for (const code of ERROR_CODES) {
     const chat = presentError(wire(code), "chat");
@@ -56,6 +56,25 @@ test("chat failures offer retry only when retrying can help", () => {
   const context = presentError(wire("context_length", { retryable: false }), "chat");
   assert.equal(context.actions.settings, "compaction");
   assert.equal(settingsForError("storage_quota"), "account");
+});
+
+test("credit failures point to Usage and skip a retry that cannot help", () => {
+  const exhausted = presentError(wire("token_credit_exhausted", { retryable: false }), "chat");
+  assert.equal(exhausted.actions.retry, false);
+  assert.equal(exhausted.actions.settings, "usage");
+  assert.equal(exhausted.messageKey, "errors.tokenCreditExhaustedMessage");
+
+  const unknown = presentError(wire("token_credit_usage_unknown", { retryable: false }), "chat");
+  assert.equal(unknown.actions.retry, false);
+  assert.equal(unknown.actions.settings, "usage");
+
+  const busy = presentError(wire("token_credit_busy"), "chat");
+  assert.equal(busy.actions.retry, true, "a manual retry is allowed after the active operation");
+  assert.equal(busy.hintKey, "errors.tokenCreditBusyHint");
+
+  const unmetered = presentError(wire("token_credit_unmetered", { retryable: false }), "chat");
+  assert.equal(unmetered.actions.retry, false);
+  assert.equal(unmetered.actions.copyDetails, true);
 });
 
 test("tool cards stay a plain message and hint with no actions", () => {

@@ -6,6 +6,7 @@ import { t, type PlainMessageKey } from "@/i18n";
 import { formatCost, formatNumber, formatPercent, formatTokens } from "@/i18n/format";
 import { useData } from "@/state/data";
 import { SettingsPage, SettingsSection } from "./SettingsUI";
+import { TokenCreditBalanceCard } from "./TokenCreditBalanceCard";
 
 type Range = "1" | "7" | "30" | "90";
 
@@ -65,6 +66,7 @@ export function UsageSettings() {
 
   return (
     <SettingsPage title={t("usage.title")} description={t("usage.description")}>
+      <TokenCreditBalanceCard showUsageLink={false} />
       <div className="flex justify-end">
         <Select
           className="w-40"

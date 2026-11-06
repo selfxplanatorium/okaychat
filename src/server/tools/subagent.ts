@@ -1,3 +1,4 @@
+import type { CreditPermit } from "../credits/store.js";
 import { stepCountIs, streamText, tool, type ToolSet } from "ai";
 import { z } from "zod";
 import type { InjectionReport, ModelInfo, TokenUsage } from "../../shared/types.js";
@@ -6,7 +7,7 @@ import { createModel } from "../llm.js";
 import { assertFeature, type Actor } from "../permissions/guard.js";
 import { promptText } from "../prompts.js";
 import { scanForInjection, wrapUntrusted } from "../prompt-injection.js";
-import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "../usage.js";
+import { addUsage, costOf, normalizeUsage, ZERO_USAGE } from "../usage.js";
 import type { SearchBudget } from "./search-budget.js";
 
 // A sub-agent runs one self-contained task on a model the user allows, in its own context, with the
@@ -31,7 +32,7 @@ export interface SubagentProgress {
  * @param allowed Models the main model may pick, first is the default.
  * @param subTools Tools the sub-agent may use. Must not need approval: nobody is there to answer.
  */
-export function subagentTools(opts: { userId: string; threadId: string; allowed: ModelInfo[]; subTools: ToolSet; maxSteps?: number; searchBudget?: SearchBudget; signal?: AbortSignal; parentFeatures?: Actor["parentFeatures"] }): ToolSet {
+export function subagentTools(opts: { creditPermit: CreditPermit; userId: string; threadId: string; allowed: ModelInfo[]; subTools: ToolSet; maxSteps?: number; searchBudget?: SearchBudget; signal?: AbortSignal; parentFeatures?: Actor["parentFeatures"] }): ToolSet {
   const refs = opts.allowed.map((m) => m.ref) as [string, ...string[]];
   const list = opts.allowed.map((m) => `\`${m.ref}\` (${m.name}${m.context ? `, ${Math.round(m.context / 1000)}k context` : ""})`).join(", ");
   return {
@@ -47,7 +48,7 @@ export function subagentTools(opts: { userId: string; threadId: string; allowed:
         // the chat layer) still apply to the child.
         assertFeature({ userId: opts.userId, modelRef: ref ?? refs[0], ...(opts.parentFeatures ? { parentFeatures: opts.parentFeatures } : {}) }, "delegation");
         const { model, conn } = await resolveModel(opts.userId, ref ?? refs[0]);
-        const handle = createModel(model, conn, { userId: opts.userId });
+        const handle = createModel(model, conn, { userId: opts.userId, creditPermit: opts.creditPermit, usageContext: { kind: "subagent", threadId: opts.threadId } });
         let usage = ZERO_USAGE;
         let cost = 0;
         const progress: SubagentProgress = { model: model.ref, status: "running", text: "", steps: 0, tools: [] };
@@ -86,7 +87,6 @@ export function subagentTools(opts: { userId: string; threadId: string; allowed:
           }
         }
         const finalText = (await result.text).trim();
-        recordUsage({ userId: opts.userId, threadId: opts.threadId, providerId: model.providerId, modelId: model.id, kind: "subagent", usage, cost });
         const report = finalText || progress.text.trim();
         const injection = scanForInjection(report);
         yield { ...progress, status: "done", text: report, usage, cost, ...(injection.flagged ? { injection } : {}) };

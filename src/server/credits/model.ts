@@ -1,4 +1,5 @@
-import type { LanguageModelV4Usage } from "@ai-sdk/provider";
+import { creditSignal, holdCreditWork } from "./admission.js";
+import type { LanguageModelV4Usage, LanguageModelV4StreamPart } from "@ai-sdk/provider";
 import type { LanguageModelMiddleware } from "ai";
 import type { ModelInfo, TokenUsage } from "../../shared/types.js";
 import { costOf, type UsageKind } from "../usage.js";
@@ -37,63 +38,65 @@ export function creditModelMiddleware(options: {
   return {
     wrapGenerate: async ({ doGenerate, params }) => {
       const id = begin();
-      if (params.abortSignal?.aborted) {
-        settleCreditRequest(id, { state: "not_dispatched", errorCode: "aborted" });
-        params.abortSignal.throwIfAborted();
-      }
-      try { markCreditDispatched(id); } catch (error) {
-        settleCreditRequest(id, { state: "not_dispatched", errorCode: "admission_denied" });
-        throw error;
-      }
-      let result;
-      try { result = await doGenerate(); } catch (error) { fail(id, error); throw error; }
-      // Persistence errors propagate with the request still open and the root still held.
-      finish(id, result.usage);
-      return result;
+      const release = holdCreditWork(options.permit);
+      params.abortSignal = creditSignal(options.permit, params.abortSignal);
+      try {
+        if (params.abortSignal.aborted) {
+          settleCreditRequest(id, { state: "not_dispatched", errorCode: "aborted" });
+          params.abortSignal.throwIfAborted();
+        }
+        try { markCreditDispatched(id); } catch (error) {
+          settleCreditRequest(id, { state: "not_dispatched", errorCode: "admission_denied" }); throw error;
+        }
+        let result;
+        try { result = await doGenerate(); } catch (error) { fail(id, error); throw error; }
+        finish(id, result.usage);
+        return result;
+      } finally { release(); }
     },
     wrapStream: async ({ doStream, params }) => {
       const id = begin();
-      if (params.abortSignal?.aborted) {
-        settleCreditRequest(id, { state: "not_dispatched", errorCode: "aborted" });
-        params.abortSignal.throwIfAborted();
-      }
+      const release = holdCreditWork(options.permit);
       const abort = new AbortController();
-      params.abortSignal = params.abortSignal ? AbortSignal.any([params.abortSignal, abort.signal]) : abort.signal;
+      const signal = AbortSignal.any([creditSignal(options.permit, params.abortSignal), abort.signal]);
+      params.abortSignal = signal;
+      if (signal.aborted) {
+        try { settleCreditRequest(id, { state: "not_dispatched", errorCode: "aborted" }); signal.throwIfAborted(); } finally { release(); }
+      }
       try { markCreditDispatched(id); } catch (error) {
-        settleCreditRequest(id, { state: "not_dispatched", errorCode: "admission_denied" });
-        throw error;
+        try { settleCreditRequest(id, { state: "not_dispatched", errorCode: "admission_denied" }); } finally { release(); } throw error;
       }
       let result;
-      try { result = await doStream(); } catch (error) { fail(id, error); throw error; }
+      try { result = await doStream(); } catch (error) { try { fail(id, error); } finally { release(); } throw error; }
       const reader = result.stream.getReader();
-      let ended = false;
+      let output: ReadableStreamDefaultController<LanguageModelV4StreamPart>;
+      let cleanup: Promise<void> | undefined;
       let persistenceFailed = false;
-      const unknown = () => {
-        if (!persistenceFailed) settleCreditRequest(id, { state: "unknown", errorCode: "stream_incomplete" });
-      };
+      const end = (cancel: boolean, reason?: unknown) => cleanup ??= (async () => {
+        signal.removeEventListener("abort", onAbort);
+        if (cancel) abort.abort(reason);
+        try { if (cancel) await reader.cancel(reason); }
+        finally {
+          try { if (!persistenceFailed) settleCreditRequest(id, { state: "unknown", errorCode: "stream_incomplete" }); }
+          finally { release(); }
+        }
+      })();
+      const onAbort = () => { void end(true, signal.reason).then(() => output.error(signal.reason), error => output.error(error)); };
       return {
         ...result,
         stream: new ReadableStream({
+          start(controller) { output = controller; signal.addEventListener("abort", onAbort, { once: true }); if (signal.aborted) onAbort(); },
           async pull(controller) {
             try {
               const { value, done } = await reader.read();
-              if (done) { unknown(); ended = true; controller.close(); return; }
-              // Capture before forwarding, including a finish received before subsequent failure.
+              if (done) { await end(false); controller.close(); return; }
               if (value.type === "finish") {
                 try { finish(id, value.usage); } catch (error) { persistenceFailed = true; throw error; }
               }
               controller.enqueue(value);
-            } catch (error) {
-              abort.abort(error);
-              try { await reader.cancel(error); } finally { unknown(); ended = true; }
-              controller.error(error);
-            }
+            } catch (error) { try { await end(true, error); } finally { controller.error(error); } }
           },
-          async cancel(reason) {
-            if (ended) return;
-            abort.abort(reason);
-            try { await reader.cancel(reason); } finally { unknown(); ended = true; }
-          },
+          async cancel(reason) { await end(true, reason); },
         }, { highWaterMark: 0 }),
       };
     },

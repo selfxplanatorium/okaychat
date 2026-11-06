@@ -1,4 +1,4 @@
-import { HardDriveIcon, KeyRoundIcon, Loader2Icon, PencilIcon, PlusIcon, ShieldCheckIcon, TrashIcon } from "lucide-react";
+import { GaugeIcon, HardDriveIcon, KeyRoundIcon, Loader2Icon, PencilIcon, PlusIcon, ShieldCheckIcon, TrashIcon } from "lucide-react";
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { Link, useSearch } from "wouter";
 import type { AdminPrompt, AdminUser, ProviderInfo, StorageInfo, UserGroup } from "@shared/types";
@@ -22,6 +22,7 @@ import { AdminWebhooks } from "./AdminWebhooks";
 import { AgentManagement } from "@/components/agents/AgentManagement";
 import { AdminChannels } from "@/components/channels/AdminChannels";
 import { SettingsPage, SettingsRow, SettingsSection } from "./SettingsUI";
+import { TokenCreditAdminDialog } from "./TokenCreditAdminDialog";
 
 function NewUserForm({ onDone }: { onDone: () => void }) {
   const [email, setEmail] = useState("");
@@ -165,6 +166,7 @@ function Users({ defaultLimit }: { defaultLimit: number | null }) {
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [edit, setEdit] = useState<UserEdit | null>(null);
+  const [creditUser, setCreditUser] = useState<AdminUser | null>(null);
   const refresh = useCallback(() => {
     invalidateDirectory();
     return api<AdminUser[]>("/admin/users").then(setUsers);
@@ -226,6 +228,9 @@ function Users({ defaultLimit }: { defaultLimit: number | null }) {
               { value: "admin", label: t("admin.roleAdmin") },
             ]}
           />
+          <Button size="icon-sm" variant="ghost" aria-label={t("credits.allowanceOf", { name: u.name })} onClick={() => setCreditUser(u)}>
+            <GaugeIcon />
+          </Button>
           <Button size="icon-sm" variant="ghost" aria-label={t("admin.storageLimitOf", { name: u.name })} onClick={() => setEdit({ kind: "limit", user: u })}>
             <HardDriveIcon />
           </Button>
@@ -252,6 +257,7 @@ function Users({ defaultLimit }: { defaultLimit: number | null }) {
         </div>
       ))}
       <UserEditDialog edit={edit} onClose={() => setEdit(null)} onSaved={() => void refresh()} />
+      <TokenCreditAdminDialog user={creditUser} onClose={() => setCreditUser(null)} />
     </SettingsSection>
   );
 }

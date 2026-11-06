@@ -1,3 +1,5 @@
+import { admitCreditRoot, assertCreditPermit, type CreditPermit } from "./credits/store.js";
+import { assertMeteredService, creditOwnedStream, creditSignal, endCreditRoot, withCreditRoot } from "./credits/admission.js";
 import { db } from "./db.js";
 import { videoTools } from "./tools/video.js";
 import { videoModeEligible, videoVoiceActive, type VideoTurnContext } from "./video/eligibility.js";
@@ -73,7 +75,7 @@ import { branchMessages, currentBranch, ensureThread, getThread, isTemporaryThre
 import { markBusy, threadBusy } from "./thread-runs.js";
 import { isCompareThread, persistCompareReply, persistCompareUserMessage } from "./compare.js";
 import { withStoredEdits } from "./message-edits.js";
-import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "./usage.js";
+import { addUsage, costOf, normalizeUsage, ZERO_USAGE } from "./usage.js";
 import { assistantAllowsDelegation, assistantAllowsFamily, assistantAllowsResearch, filterAssistantTools } from "./assistant-policy.js";
 import { resolveAssistantForTurn } from "./assistant-presets.js";
 import { assertContinuation, isContinueConflict, type ContinuationRequest } from "./continuation.js";
@@ -198,6 +200,8 @@ function assistantSection(userId: string, modelRef: string, snapshot: { name: st
 }
 
 export interface TurnOptions {
+  /** Internal only: a root the caller already admitted. Never taken from a request. */
+  creditPermit?: CreditPermit;
   userId: string;
   threadId: string;
   modelRef: string;
@@ -237,8 +241,29 @@ export interface TurnOptions {
   onRunId?: (id: string) => void;
 }
 
-/** One assistant turn as a UI message stream. Used by /api/chat and by scheduled runs. */
+/**
+ * One assistant turn as a UI message stream. Used by /api/chat and by scheduled runs. The turn owns one
+ * credit root from admission (before compaction, research, or any dispatch) until its stream ends; a
+ * caller that admitted earlier (schedules) passes its permit and closes it itself.
+ */
 export async function turnStream(opts: TurnOptions) {
+  // Model and agent denials come first, so a refused allowance never reveals a forbidden target.
+  const target = await resolveChatTarget(opts.userId, opts.modelRef);
+  if (target.kind === "agent") assertMeteredService(opts.userId, "agent");
+  else assertModelAllowed(opts.userId, opts.modelRef);
+  const origin = target.kind === "agent" ? "unmetered" : isTemporaryThread(opts.threadId) ? "temporary" : opts.turnOrigin === "schedule" ? "schedule" : "chat";
+  const permit = opts.creditPermit ?? admitCreditRoot(opts.userId, origin);
+  assertCreditPermit(permit, opts.userId);
+  try {
+    const stream = await creditTurnStream({ ...opts, creditPermit: permit, signal: creditSignal(permit, opts.signal) });
+    return opts.creditPermit ? stream : creditOwnedStream(stream, permit, opts.signal);
+  } catch (error) {
+    if (!opts.creditPermit) await endCreditRoot(permit);
+    throw error;
+  }
+}
+
+async function creditTurnStream(opts: TurnOptions & { creditPermit: CreditPermit }) {
   const { userId, threadId, modelRef } = opts;
   const temporary = isTemporaryThread(threadId);
   // An edited reply is sent as stored, also from a tab that still shows the text from before the edit.
@@ -360,7 +385,7 @@ export async function turnStream(opts: TurnOptions) {
         // again and rewrite the history, losing the prompt cache every time.
         if ((!trimmed || trimmed.trim!.tokensAfter > limit * TRIM_HEADROOM) && compactable.length >= 2) {
           writer.write({ type: "data-compaction", data: { status: "running" }, transient: true });
-          compaction = await compact({ userId: user.id, threadId, messages: compactable, previous: compaction, model, conn, signal });
+          compaction = await compact({ creditPermit: opts.creditPermit, userId: user.id, threadId, messages: compactable, previous: compaction, model, conn, signal });
           setCompaction(user.id, threadId, compaction);
           writer.write({ type: "data-compaction", data: { status: "done", boundaryMessageId: compaction.boundaryMessageId, tokensBefore: compaction.tokensBefore }, transient: true });
         }
@@ -497,7 +522,7 @@ export async function turnStream(opts: TurnOptions) {
       }
       const unavailableMetadata = unavailable.length ? { unavailable } : {};
       const subagents = subagentModels.length
-        ? subagentTools({ userId: user.id, threadId, allowed: subagentModels, subTools: readOnlyTools, maxSteps: settings.maxSteps, searchBudget, signal: signal })
+        ? subagentTools({ creditPermit: opts.creditPermit, userId: user.id, threadId, allowed: subagentModels, subTools: readOnlyTools, maxSteps: settings.maxSteps, searchBudget, signal: signal })
         : {};
       // view_artifact stores its PNG here; prepareStep attaches it once as a user image message.
       const shots = new Map<string, VisualShot>();
@@ -540,6 +565,7 @@ export async function turnStream(opts: TurnOptions) {
       const { messages: live, summary } = applied;
       const handle = createModel(model, conn, {
         userId,
+        creditPermit: opts.creditPermit, usageContext: { kind: "chat", ...(!temporary ? { threadId } : {}) },
         effort,
         // Transient so the notice never becomes part of the stored reply or its prompt prefix.
         onRetry: (notice) => writer.write({ type: "data-retry", data: notice, transient: true }),
@@ -622,6 +648,7 @@ export async function turnStream(opts: TurnOptions) {
         let output;
         try {
           output = await runResearch({
+            creditPermit: opts.creditPermit,
             userId: user.id,
             threadId,
             record: !temporary,
@@ -667,12 +694,6 @@ export async function turnStream(opts: TurnOptions) {
       let total: TokenUsage = ZERO_USAGE;
       let cost = 0;
       let lastStep: LanguageModelUsage | undefined;
-      let usageSaved = false;
-      const saveUsage = () => {
-        if (usageSaved || temporary) return;
-        usageSaved = true;
-        recordUsage({ userId: user.id, threadId, providerId: model.providerId, modelId: model.id, kind: "chat", usage: total, cost });
-      };
 
       // Visible answer text for an opted-in webhook. For a resumed reply, seed from the already-stored
       // text parts (the request carries them) and append each following step; reasoning/tool parts never
@@ -854,7 +875,6 @@ export async function turnStream(opts: TurnOptions) {
           // A completed reply is evidence this account's provider works again; the registry's coarse
           // provider status clears without contacting the vendor.
           noteProviderOutcome(user.id, "ok");
-          saveUsage();
           const reason = normalizeFinishReason(event.finishReason);
           // `tool-calls` here means the turn stopped for a client tool or approval: the logical reply is
           // still waiting, not finished. Everything else is terminal.
@@ -862,7 +882,6 @@ export async function turnStream(opts: TurnOptions) {
         },
         // The SDK skips onEnd for a stopped stream; steps that already finished were still billed.
         onAbort: () => {
-          if (total.input || total.output) saveUsage();
           // An abort always wins over an earlier length step: it is never a Continue target.
           finishReceipt("aborted", null);
         },
@@ -1147,21 +1166,22 @@ export const chatRoutes = new Hono<AppEnv>()
     if (!restrictedTitle && ref && !body.modelRef?.startsWith("n8n/") && !getThread(user.id, threadId)?.modelRef?.startsWith("n8n/")) {
       try {
         const { model, conn } = await resolveModel(user.id, ref);
-        const handle = createModel(model, conn, { userId: user.id });
-        const result = await generateText({
-          model: handle.model,
-          providerOptions: handle.providerOptions,
-          maxRetries: 0,
-          maxOutputTokens: 400,
-          prompt: resolvePrompt("title", { userId: user.id, modelRef: model.ref }, {
-            message: db.prepare("SELECT 1 FROM messages m JOIN threads t ON t.id=m.thread_id WHERE t.id=? AND t.user_id=? AND m.imported=1 LIMIT 1").get(threadId,user.id)
-              ? wrapUntrusted(text.slice(0,4000),{kind:"past_chat",name:"imported conversation"}).text
-              : text.slice(0,4000),
-          }),
+        // An optional root of its own: a finite account that is busy or spent keeps the fallback title.
+        const titleResult = await withCreditRoot(user.id, "title", async (creditPermit) => {
+          const handle = createModel(model, conn, { userId: user.id, creditPermit, usageContext: { kind: "title", threadId } });
+          return generateText({
+            model: handle.model,
+            providerOptions: handle.providerOptions,
+            maxRetries: 0,
+            maxOutputTokens: 400,
+            prompt: resolvePrompt("title", { userId: user.id, modelRef: model.ref }, {
+              message: db.prepare("SELECT 1 FROM messages m JOIN threads t ON t.id=m.thread_id WHERE t.id=? AND t.user_id=? AND m.imported=1 LIMIT 1").get(threadId,user.id)
+                ? wrapUntrusted(text.slice(0,4000),{kind:"past_chat",name:"imported conversation"}).text
+                : text.slice(0,4000),
+            }),
+          });
         });
-        const usage = normalizeUsage(result.totalUsage);
-        recordUsage({ userId: user.id, threadId, providerId: model.providerId, modelId: model.id, kind: "title", usage, cost: costOf(model.cost, usage) });
-        title = result.text.trim().replace(/^["'#\s]+|["'.\s]+$/g, "").slice(0, 80) || fallback;
+        title = titleResult.text.trim().replace(/^["'#\s]+|["'.\s]+$/g, "").slice(0, 80) || fallback;
       } catch {
         // A failed title is cosmetic. Keep the fallback.
       }

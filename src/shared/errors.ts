@@ -7,6 +7,7 @@ import { isAgentReason, type AgentReason } from "./n8n-agents.js";
  * text, request bodies, prompts, and stacks stay in the server log behind `ref`.
  */
 export const ERROR_CODES = [
+  "token_credit_exhausted", "token_credit_usage_unknown", "token_credit_busy", "token_credit_unmetered",
   "video_invalid_reference",
   "video_reference_aspect_mismatch",
   "video_unsupported_parameters",

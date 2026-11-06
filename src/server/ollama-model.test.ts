@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { after, beforeEach, test } from "node:test";
+import { after, afterEach, beforeEach, test } from "node:test";
 import type { LanguageModelV4StreamPart } from "@ai-sdk/provider";
 import { stepCountIs, streamText, tool } from "ai";
 import { z } from "zod";
@@ -133,8 +133,18 @@ writeFileSync(path.join(dataDir, "models-dev.json"), JSON.stringify({ data: {}, 
 const { createOllamaModel } = await import("./ollama-model.js");
 const { createModel } = await import("./llm.js");
 const { db } = await import("./db.js");
+const { admitCreditRoot, closeCreditRoot } = await import("./credits/store.js");
 db.exec("INSERT INTO users (id,email,name,password_hash,role,created_at) VALUES ('alice','alice@test.invalid','Alice','unused','user',1)");
 const { forgetOllamaModels } = await import("./catalog/ollama.js");
+
+// createModel() needs a live server-owned permit. Alice is unlimited, so the fixture admits one
+// normal root per test and releases it afterwards.
+const permits: Array<ReturnType<typeof admitCreditRoot>> = [];
+const creditPermit = () => {
+  const permit = admitCreditRoot("alice", "chat");
+  permits.push(permit);
+  return permit;
+};
 
 after(() => {
   server.closeAllConnections();
@@ -145,6 +155,9 @@ beforeEach(() => {
   calls.length = 0;
   flakyCalls = 0;
   forgetOllamaModels();
+});
+afterEach(() => {
+  for (const permit of permits.splice(0)) closeCreditRoot(permit);
 });
 
 const modelInfo = (id: string) => ({
@@ -178,7 +191,7 @@ function errorOf(parts: LanguageModelV4StreamPart[]): Error {
 }
 
 test("streamText receives native text and thinking with correct usage, finish, and no cache fields", async () => {
-  const handle = createModel(modelInfo("thinker"), connection, { userId: "alice" });
+  const handle = createModel(modelInfo("thinker"), connection, { userId: "alice", creditPermit: creditPermit(), usageContext: { kind: "chat" } });
   assert.equal(handle.model.specificationVersion, "v4");
   const result = streamText({
     model: handle.model,
@@ -316,7 +329,7 @@ test("abort closes the stream without a spurious error", { timeout: 5_000 }, asy
 });
 
 test("native chat retries a transient daemon response before the stream opens", async () => {
-  const handle = createModel(modelInfo("flaky"), connection, { userId: "alice", retry: { sleep: async () => {}, random: () => 0.5 } });
+  const handle = createModel(modelInfo("flaky"), connection, { userId: "alice", creditPermit: creditPermit(), usageContext: { kind: "chat" }, retry: { sleep: async () => {}, random: () => 0.5 } });
   const result = streamText({ model: handle.model, messages: [{ role: "user", content: "Hi" }], maxRetries: 0 });
   assert.equal(await result.text, "Hello world");
   assert.equal(flakyCalls, 2, "the daemon was asked twice");
@@ -325,7 +338,7 @@ test("native chat retries a transient daemon response before the stream opens", 
 });
 
 test("native generation retries a transient daemon response too", async () => {
-  const handle = createModel({ ...modelInfo("flaky"), id: "flaky" }, connection, { userId: "alice", retry: { sleep: async () => {}, random: () => 0.5 } });
+  const handle = createModel({ ...modelInfo("flaky"), id: "flaky" }, connection, { userId: "alice", creditPermit: creditPermit(), usageContext: { kind: "chat" }, retry: { sleep: async () => {}, random: () => 0.5 } });
   const result = await handle.model.doGenerate({ prompt: [{ role: "user", content: [{ type: "text", text: "Hi" }] }] });
   assert.equal(result.content.some((part) => part.type === "text" && part.text === "Plain answer"), true);
   assert.equal(flakyCalls, 2);
@@ -336,7 +349,7 @@ test("factory effort reaches native think and num_ctx through chat streaming and
   const prompt = [{ role: "user" as const, content: [{ type: "text" as const, text: "Hi" }] }];
   for (const effort of ["none", "high"] as const) {
     calls.length = 0;
-    const handle = createModel(info, connection, { userId: "alice", effort });
+    const handle = createModel(info, connection, { userId: "alice", creditPermit: creditPermit(), usageContext: { kind: "chat" }, effort });
     const streamed = streamText({ model: handle.model, messages: [{ role: "user", content: "Hi" }] });
     assert.equal(await streamed.text, "Hello world");
     assert.equal(calls[0]!.body.think, effort === "high");
@@ -344,7 +357,7 @@ test("factory effort reaches native think and num_ctx through chat streaming and
   }
   for (const effort of ["none", "high"] as const) {
     calls.length = 0;
-    const handle = createModel(info, connection, { userId: "alice", effort });
+    const handle = createModel(info, connection, { userId: "alice", creditPermit: creditPermit(), usageContext: { kind: "chat" }, effort });
     await handle.model.doGenerate({ prompt });
     assert.equal(calls[0]!.body.think, effort === "high");
     assert.equal((calls[0]!.body.options as Record<string, unknown>).num_ctx, 131072);
@@ -362,7 +375,7 @@ test("direct top-level reasoning still wins over the factory default", async () 
 
 test("non-thinking models never receive reasoning config", async () => {
   const info = { ...modelInfo("plain"), reasoning: false };
-  const handle = createModel(info, connection, { userId: "alice", effort: "high" });
+  const handle = createModel(info, connection, { userId: "alice", creditPermit: creditPermit(), usageContext: { kind: "chat" }, effort: "high" });
   const result = streamText({ model: handle.model, messages: [{ role: "user", content: "Hi" }] });
   await result.text;
   assert.equal("think" in calls[0]!.body, false);
@@ -370,7 +383,7 @@ test("non-thinking models never receive reasoning config", async () => {
 
 test("named thinking levels are sent as native strings, never invalid booleans", async () => {
   const info = { ...modelInfo("gptoss"), reasoningEfforts: ["low", "medium", "high"], thinkingLevels: ["low", "medium", "high"] };
-  const handle = createModel(info, connection, { userId: "alice", effort: "medium" });
+  const handle = createModel(info, connection, { userId: "alice", creditPermit: creditPermit(), usageContext: { kind: "chat" }, effort: "medium" });
   await handle.model.doGenerate({ prompt: [{ role: "user", content: [{ type: "text", text: "Hi" }] }] });
   assert.equal(calls[0]!.body.think, "medium");
 

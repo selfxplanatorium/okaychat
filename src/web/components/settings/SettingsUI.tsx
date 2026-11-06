@@ -16,7 +16,9 @@ export function SettingsPage({ title, description, children }: { title: string; 
       </header>}
       {Children.map(children, (child) =>
         isValidElement(child) ? (
-          <div className="stagger animate-rise-in" style={{ "--i": ++group } as CSSProperties}>
+          // A settings section that renders nothing (for example an absent token allowance) must
+          // not leave an empty flex row behind.
+          <div className="stagger animate-rise-in empty:hidden" style={{ "--i": ++group } as CSSProperties}>
             {child}
           </div>
         ) : null,

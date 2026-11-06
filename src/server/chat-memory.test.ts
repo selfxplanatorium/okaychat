@@ -186,6 +186,18 @@ function storedCounts() {
   ));
 }
 
+/**
+ * Temporary model calls are now metered (one usage row per provider invocation) without storing any
+ * content. Everything else must stay untouched, and the new row must not name the temporary chat.
+ */
+function assertOnlyTemporaryUsageGrew(before: Record<string, number>, added = 1) {
+  const after = storedCounts();
+  assert.equal(after.usage, before.usage + added, "temporary model calls are metered");
+  assert.deepEqual({ ...after, usage: before.usage }, before);
+  const latest = db.prepare("SELECT thread_id AS thread FROM usage ORDER BY rowid DESC LIMIT 1").get() as { thread: string | null } | undefined;
+  assert.equal(latest?.thread, null, "temporary usage retains no thread identifier");
+}
+
 test("temporary turns do not save data or include account personalization by default", async (t) => {
   const requests = provider(t, false);
   updateSettings("alice", { systemPrompt: "ACCOUNT_PRIVATE_INSTRUCTIONS", artifacts: true, generativeUI: true, subagents: true });
@@ -193,7 +205,7 @@ test("temporary turns do not save data or include account personalization by def
   const before = storedCounts();
   await run("tmp_default", [{ id: "temporary-user", role: "user", parts: [{ type: "text", text: "Give me an example" }] }]);
   assert.ok(system(requests[0]!).includes("This is a temporary chat."));
-  assert.deepEqual(storedCounts(), before);
+  assertOnlyTemporaryUsageGrew(before);
   assert.ok(!JSON.stringify(requests[0]!.messages).includes(FACT));
   assert.ok(!system(requests[0]!).includes("ACCOUNT_PRIVATE_INSTRUCTIONS"));
   assert.deepEqual(names(requests[0]!), [], "temporary mode excludes memory mutations, artifacts, images, delegates, and browser tools");
@@ -213,7 +225,7 @@ test("temporary personalization reads only global memory and instructions withou
   assert.ok(!sent.includes("PROJECT_PRIVATE_FACT"));
   assert.ok(!sent.includes("PROJECT_PRIVATE_INSTRUCTIONS"));
   assert.deepEqual(names(requests[0]!), ["memory_search"]);
-  assert.deepEqual(storedCounts(), before);
+  assertOnlyTemporaryUsageGrew(before);
 });
 
 test("temporary API streams bypass replay storage and reject history and compaction writes", async (t) => {
@@ -232,7 +244,7 @@ test("temporary API streams bypass replay storage and reject history and compact
   assert.deepEqual(await (await request("POST", "title")).json(), { title: "Temporary chat" });
   assert.equal((await request("POST", "compact")).status, 400);
   assert.equal((await request("DELETE", "compact")).status, 400);
-  assert.deepEqual(storedCounts(), before);
+  assertOnlyTemporaryUsageGrew(before);
 });
 
 test("temporary PDF extraction returns text without storing original uploads", async () => {

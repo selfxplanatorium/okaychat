@@ -1,3 +1,4 @@
+import type { CreditPermit } from "./credits/store.js";
 import { envelopeAgentHistory } from "./n8n/provenance.js";
 import { generateText, stepCountIs, streamText, tool, type ToolSet, type UIMessage } from "ai";
 import { z } from "zod";
@@ -10,7 +11,7 @@ import { promptText } from "./prompts.js";
 import { scanForInjection, wrapUntrusted } from "./prompt-injection.js";
 import { SearchShare, type SearchBudget, type StepBudget } from "./tools/search-budget.js";
 import { webTools } from "./tools/web.js";
-import { addUsage, costOf, normalizeUsage, recordUsage, ZERO_USAGE } from "./usage.js";
+import { addUsage, costOf, normalizeUsage, ZERO_USAGE } from "./usage.js";
 
 // Deep research: a bounded plan → collect → review loop that runs before the chat model answers. The chat
 // model then writes the cited report as its normal reply, from the findings this returns as a tool result.
@@ -70,9 +71,10 @@ interface Stage {
 }
 
 export interface ResearchOptions {
+  creditPermit: CreditPermit;
   userId: string;
   threadId: string;
-  /** False for temporary chats, which leave no usage records. */
+  /** False for temporary chats, whose usage records keep no thread id. */
   record: boolean;
   /** Plans and reviews: the chat's model and reasoning effort. */
   lead: Stage & { effort?: ReasoningEffort };
@@ -196,15 +198,10 @@ export async function runResearch(o: ResearchOptions): Promise<ResearchProgress>
     cost: 0,
   };
   const notes = new Map<ResearchQuestion, string>();
-  // Usage per model, written once at the end, also when research stops or fails part way.
-  const metered = new Map<string, { model: ModelInfo; usage: TokenUsage; cost: number }>();
+  // Display totals for the card. The ledger is written per provider request by the credit middleware.
   const meter = (model: ModelInfo, raw: Parameters<typeof normalizeUsage>[0]) => {
     const usage = normalizeUsage(raw);
     const cost = costOf(model.cost, usage);
-    const entry = metered.get(model.ref) ?? { model, usage: ZERO_USAGE, cost: 0 };
-    entry.usage = addUsage(entry.usage, usage);
-    entry.cost += cost;
-    metered.set(model.ref, entry);
     progress.usage = addUsage(progress.usage, usage);
     progress.cost += cost;
   };
@@ -218,7 +215,7 @@ export async function runResearch(o: ResearchOptions): Promise<ResearchProgress>
     o.onProgress(structuredClone(progress));
   };
 
-  const lead = createModel(o.lead.model, o.lead.conn, { userId: o.userId, effort: o.lead.effort });
+  const lead = createModel(o.lead.model, o.lead.conn, { userId: o.userId, creditPermit: o.creditPermit, usageContext: { kind: "research", ...(o.record ? { threadId: o.threadId } : {}) }, effort: o.lead.effort });
   /** One tool-free model call on the lead model. Its system prompt is constant, so it stays cached. */
   const stage = async (key: PromptKey, values: Record<string, number>, content: string) => {
     const result = await generateText({
@@ -234,7 +231,7 @@ export async function runResearch(o: ResearchOptions): Promise<ResearchProgress>
     return result.text;
   };
 
-  const worker = createModel(o.worker.model, o.worker.conn, { userId: o.userId });
+  const worker = createModel(o.worker.model, o.worker.conn, { userId: o.userId, creditPermit: o.creditPermit, usageContext: { kind: "research", ...(o.record ? { threadId: o.threadId } : {}) } });
   const investigate = async (question: ResearchQuestion, pending: number) => {
     // Shares are fixed when a worker starts, so earlier workers cannot starve later ones.
     const stepShare = Math.max(1, Math.min(WORKER_STEPS, Math.floor(o.stepBudget.remaining / pending)));
@@ -324,88 +321,80 @@ export async function runResearch(o: ResearchOptions): Promise<ResearchProgress>
       .map((question) => `### ${question.question}\n${notes.get(question) ?? (question.error ? `No notes: ${question.error}` : "No notes: not researched.")}`)
       .join("\n\n");
 
-  try {
+  emit(true);
+  const fit = (cap: number) => Math.max(1, Math.min(cap, o.searchBudget.remaining, o.stepBudget.remaining));
+  const planned = parseJson(
+    await stage(
+      "researchPlan",
+      { maxQuestions: fit(MAX_QUESTIONS) },
+      `<conversation>\n${o.context || "(none)"}\n</conversation>\n\n<request>\n${o.request}\n</request>`,
+    ),
+    planSchema,
+  );
+  progress.objective = planned?.objective.trim().slice(0, 1000) || o.request.slice(0, 1000);
+  let batch = clean(planned?.questions ?? [], fit(MAX_QUESTIONS));
+  if (!batch.length) batch = [progress.objective.slice(0, 500)];
+
+  for (let round = 1; ; round++) {
+    progress.round = round;
+    progress.phase = "researching";
+    const questions = batch.map((question): ResearchQuestion => ({ question, round, status: "queued", searches: 0, reads: 0 }));
+    progress.questions.push(...questions);
     emit(true);
-    const fit = (cap: number) => Math.max(1, Math.min(cap, o.searchBudget.remaining, o.stepBudget.remaining));
-    const planned = parseJson(
-      await stage(
-        "researchPlan",
-        { maxQuestions: fit(MAX_QUESTIONS) },
-        `<conversation>\n${o.context || "(none)"}\n</conversation>\n\n<request>\n${o.request}\n</request>`,
-      ),
-      planSchema,
-    );
-    progress.objective = planned?.objective.trim().slice(0, 1000) || o.request.slice(0, 1000);
-    let batch = clean(planned?.questions ?? [], fit(MAX_QUESTIONS));
-    if (!batch.length) batch = [progress.objective.slice(0, 500)];
-
-    for (let round = 1; ; round++) {
-      progress.round = round;
-      progress.phase = "researching";
-      const questions = batch.map((question): ResearchQuestion => ({ question, round, status: "queued", searches: 0, reads: 0 }));
-      progress.questions.push(...questions);
-      emit(true);
-      await collect(questions);
-      if (!notes.size) {
-        const failure = progress.questions.find((question) => question.error)?.error;
-        throw new AppError({
-          code: "tool_failed",
-          message: failure ? "Deep research could not collect evidence." : "Deep research could not collect evidence within the search and step limits.",
-          details: { failure },
-        });
-      }
-
-      progress.phase = "reviewing";
-      emit(true);
-      let review: z.infer<typeof reviewSchema> | null = null;
-      try {
-        review = parseJson(
-          await stage(
-            "researchReview",
-            { maxQuestions: MAX_FOLLOW_UPS },
-            `<objective>\n${progress.objective}\n</objective>\n\n<notes>\n${notesText()}\n</notes>`,
-          ),
-          reviewSchema,
-        );
-      } catch (error) {
-        // The notes are already paid for. A failed review only loses the follow-up round.
-        if (isAbort(error, o.signal)) throw error;
-      }
-      // A failed or malformed review must not erase previously identified uncertainties.
-      if (!review) {
-        progress.gaps = clean([...progress.gaps, "The evidence review did not complete; coverage and conflicts remain unverified."], 4);
-        break;
-      }
-      progress.conflicts = clean(review.conflicts, 8);
-      progress.gaps = clean(review.gaps, MAX_FOLLOW_UPS);
-      if (round >= MAX_ROUNDS || !progress.gaps.length) break;
-      if (o.searchBudget.remaining === 0 || o.stepBudget.remaining === 0) {
-        progress.limited = o.searchBudget.remaining === 0 ? "searches" : "steps";
-        break;
-      }
-      batch = progress.gaps.slice(0, fit(MAX_FOLLOW_UPS));
+    await collect(questions);
+    if (!notes.size) {
+      const failure = progress.questions.find((question) => question.error)?.error;
+      throw new AppError({
+        code: "tool_failed",
+        message: failure ? "Deep research could not collect evidence." : "Deep research could not collect evidence within the search and step limits.",
+        details: { failure },
+      });
     }
 
-    progress.phase = "done";
-    progress.findings = [
-      `Objective: ${progress.objective}`,
-      `## Findings\n${notesText()}`,
-      progress.conflicts.length ? `## Conflicts and weak evidence\n${progress.conflicts.map((item) => `- ${item}`).join("\n")}` : "",
-      progress.gaps.length ? `## Open questions\n${progress.gaps.map((item) => `- ${item}`).join("\n")}` : "",
-      progress.limited ? `Research stopped early: the ${progress.limited === "searches" ? "web search" : "agent step"} limit for this reply was reached.` : "",
-      progress.sources.length ? `## Pages read\n${progress.sources.map((source) => `- [${source.title.replace(/[[\]]/g, "")}](${source.url})`).join("\n")}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n\n");
-    const injection = scanForInjection(progress.findings);
-    if (injection.flagged) progress.injection = injection;
+    progress.phase = "reviewing";
     emit(true);
-    return progress;
-  } finally {
-    if (o.record) {
-      for (const { model, usage, cost } of metered.values()) {
-        recordUsage({ userId: o.userId, threadId: o.threadId, providerId: model.providerId, modelId: model.id, kind: "research", usage, cost });
-      }
+    let review: z.infer<typeof reviewSchema> | null = null;
+    try {
+      review = parseJson(
+        await stage(
+          "researchReview",
+          { maxQuestions: MAX_FOLLOW_UPS },
+          `<objective>\n${progress.objective}\n</objective>\n\n<notes>\n${notesText()}\n</notes>`,
+        ),
+        reviewSchema,
+      );
+    } catch (error) {
+      // The notes are already paid for. A failed review only loses the follow-up round.
+      if (isAbort(error, o.signal)) throw error;
     }
+    // A failed or malformed review must not erase previously identified uncertainties.
+    if (!review) {
+      progress.gaps = clean([...progress.gaps, "The evidence review did not complete; coverage and conflicts remain unverified."], 4);
+      break;
+    }
+    progress.conflicts = clean(review.conflicts, 8);
+    progress.gaps = clean(review.gaps, MAX_FOLLOW_UPS);
+    if (round >= MAX_ROUNDS || !progress.gaps.length) break;
+    if (o.searchBudget.remaining === 0 || o.stepBudget.remaining === 0) {
+      progress.limited = o.searchBudget.remaining === 0 ? "searches" : "steps";
+      break;
+    }
+    batch = progress.gaps.slice(0, fit(MAX_FOLLOW_UPS));
   }
+
+  progress.phase = "done";
+  progress.findings = [
+    `Objective: ${progress.objective}`,
+    `## Findings\n${notesText()}`,
+    progress.conflicts.length ? `## Conflicts and weak evidence\n${progress.conflicts.map((item) => `- ${item}`).join("\n")}` : "",
+    progress.gaps.length ? `## Open questions\n${progress.gaps.map((item) => `- ${item}`).join("\n")}` : "",
+    progress.limited ? `Research stopped early: the ${progress.limited === "searches" ? "web search" : "agent step"} limit for this reply was reached.` : "",
+    progress.sources.length ? `## Pages read\n${progress.sources.map((source) => `- [${source.title.replace(/[[\]]/g, "")}](${source.url})`).join("\n")}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const injection = scanForInjection(progress.findings);
+  if (injection.flagged) progress.injection = injection;
+  emit(true);
+  return progress;
 }

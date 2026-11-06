@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, beforeEach, test } from "node:test";
+import { after, afterEach, beforeEach, test } from "node:test";
 import { Hono } from "hono";
 
 const dataDir = mkdtempSync(path.join(os.tmpdir(), "okaychat-api-access-"));
@@ -17,6 +17,7 @@ const { apiKeyRoutes, inferenceRoutes, resetManagementLimits } = await import(".
 const keys = await import("./keys.js");
 const limits = await import("./limits.js");
 const store = await import("./store.js");
+const { admitCreditRoot, beginCreditRequest, closeCreditRoot, markCreditDispatched, settleCreditRequest } = await import("../credits/store.js");
 const protocol = await import("./protocol.js");
 const schema = await import("./schema.js");
 const { resetApiAuthGate } = await import("./auth.js");
@@ -52,6 +53,25 @@ beforeEach(() => {
   limits.setApiLimitClock(null);
   keys.setApiKeyEntropy(null);
 });
+
+// The canonical API ledger row is written when its credit request settles, not by the API receipt.
+// These fixtures admit a real root and settle real credit requests for the ledger assertions.
+const permits: Array<ReturnType<typeof admitCreditRoot>> = [];
+afterEach(() => {
+  for (const permit of permits.splice(0)) closeCreditRoot(permit);
+});
+function creditApiRequest(permit: ReturnType<typeof admitCreditRoot>, entry: {
+  requestId: string; keyId: string; providerId: string; modelId: string; usage: { input: number; output: number; reasoning: number; cacheRead: number; cacheWrite: number }; cost: number;
+}) {
+  const id = beginCreditRequest(permit, {
+    providerId: entry.providerId,
+    modelId: entry.modelId,
+    kind: "api",
+    context: { apiKeyId: entry.keyId, apiRequestId: entry.requestId },
+  });
+  markCreditDispatched(id);
+  settleCreditRequest(id, { state: "reported", usage: entry.usage, cost: entry.cost });
+}
 
 const manage = (url: string, method = "GET", body?: unknown, user = "alice", headers: Record<string, string> = {}) =>
   management.request(`http://app${url}`, {
@@ -290,11 +310,14 @@ test("concurrency slots cap per key, per account, and release exactly once", () 
   again.release();
 });
 
-test("settlement dedupes the receipt and the ledger row, and unknown usage stays unknown", () => {
+test("settlement dedupes the receipt and the credit ledger row, and unknown usage stays unknown", () => {
   const now = 1_800_000_000_000;
+  const permit = admitCreditRoot("alice", "api");
+  permits.push(permit);
   store.openApiRequest({ id: "apr_one", userId: "alice", keyId: "key-a", modelRef: "openai/gpt-a", stream: false, now });
   store.markApiDispatched("apr_one", "alice", now + 1);
   const usage = { input: 10, output: 4, reasoning: 2, cacheRead: 3, cacheWrite: 0 };
+  creditApiRequest(permit, { requestId: "apr_one", keyId: "key-a", providerId: "openai", modelId: "gpt-a", usage, cost: 0.5 });
   assert.equal(
     store.settleApiRequest({
       id: "apr_one",
@@ -342,14 +365,19 @@ test("settlement dedupes the receipt and the ledger row, and unknown usage stays
 test("usage aggregates UTC days, models, and keys, and preserves totals past the group cap", () => {
   const now = Date.now() + 1_000;
   const day = new Date(Date.now()).toISOString().slice(0, 10);
+  const permit = admitCreditRoot("alice", "api");
+  permits.push(permit);
   for (let index = 0; index < 3; index++) {
-    store.openApiRequest({ id: `apr_u${index}`, userId: "alice", keyId: index === 2 ? "key-b" : "key-a", modelRef: index === 0 ? "openai/gpt-a" : "openai/gpt-b", stream: false, now: now - 1_000 });
+    const keyId = index === 2 ? "key-b" : "key-a";
+    const modelId = index === 0 ? "gpt-a" : "gpt-b";
+    store.openApiRequest({ id: `apr_u${index}`, userId: "alice", keyId, modelRef: index === 0 ? "openai/gpt-a" : "openai/gpt-b", stream: false, now: now - 1_000 });
+    creditApiRequest(permit, { requestId: `apr_u${index}`, keyId, providerId: "openai", modelId, usage: { input: 10, output: 5, reasoning: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0.1 });
     store.settleApiRequest({
       id: `apr_u${index}`,
       userId: "alice",
-      keyId: index === 2 ? "key-b" : "key-a",
+      keyId,
       providerId: "openai",
-      modelId: index === 0 ? "gpt-a" : "gpt-b",
+      modelId,
       settlement: { state: "succeeded", httpStatus: 200, errorCode: null, finishReason: "stop", usage: { input: 10, output: 5, reasoning: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0.1, now: now - 500 },
     });
   }

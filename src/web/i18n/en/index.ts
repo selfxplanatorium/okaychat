@@ -16,6 +16,7 @@ import calendar from "./calendar";
 import chatArchives from "./chatArchives";
 import composer from "./composer";
 import compare from "./compare";
+import credits from "./credits";
 import customTools from "./customTools";
 import entitlements from "./entitlements";
 import errors from "./errors";
@@ -76,6 +77,7 @@ export const en = {
   customTools,
   composer,
   compare,
+  credits,
   entitlements,
   errors,
   email,

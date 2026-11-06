@@ -1,3 +1,5 @@
+import { admitCreditRoot, type CreditPermit } from "./credits/store.js";
+import { endCreditRoot, assertMeteredService } from "./credits/admission.js";
 import { agentMetadata } from "./n8n/provenance.js";
 import { deleteSession } from "./n8n/store.js";
 import { generateId, readUIMessageStream, type UIMessage } from "ai";
@@ -130,8 +132,18 @@ export async function runSchedule(row: Row, reserved?: () => void): Promise<void
     recordSkipped(row, "This schedule's model is not allowed for this account.");
     return reserved?.();
   }
+  // Admission comes before any thread or prompt is written, so a refused occurrence leaves no history.
+  let creditPermit: CreditPermit;
+  try {
+    const agent = row.model_ref.startsWith("n8n/");
+    if (agent) assertMeteredService(row.user_id, "agent");
+    creditPermit = admitCreditRoot(row.user_id, agent ? "unmetered" : "schedule");
+  } catch (error) {
+    recordSkipped(row, error instanceof Error ? error.message : "Token allowance unavailable.");
+    return reserved?.();
+  }
   const release = reserved ?? reserveTurn(row.user_id);
-  if (!release) return;
+  if (!release) { await endCreditRoot(creditPermit); return; }
   running.add(row.id);
   const startedAt = Date.now();
   // A server-generated invocation id is the source identity for an outgoing schedule event. It is
@@ -167,6 +179,7 @@ export async function runSchedule(row: Row, reserved?: () => void): Promise<void
     appendMessage(row.user_id, threadId, { id: userMessage.id, parent_id: history.at(-1)?.id ?? null, format: "ai-sdk/v6", content: withoutId(userMessage) });
 
     const stream = await turnStream({
+      creditPermit,
       userId: row.user_id,
       threadId,
       modelRef: row.model_ref,
@@ -287,6 +300,7 @@ export async function runSchedule(row: Row, reserved?: () => void): Promise<void
       // A notice must never fail a run.
     }
   } finally {
+    await endCreditRoot(creditPermit);
     releaseThread?.();
     running.delete(row.id);
     release();

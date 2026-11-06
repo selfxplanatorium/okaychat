@@ -1,13 +1,16 @@
+import { AppError } from "../errors.js";
 import { randomUUID } from "node:crypto";
 import { CREDIT_ORIGINS, MAX_TOKEN_CREDIT, type CreditOrigin, type CreditSnapshot, type TokenCreditAuditEntry, type TokenCreditBalance } from "../../shared/token-credits.js";
 import type { TokenUsage } from "../../shared/types.js";
 import { db, tx } from "../db.js";
 import { recordUsage, type UsageKind } from "../usage.js";
 
-// Not part of the wire taxonomy until all dispatch paths have been converted.
-export class CreditError extends Error {
-  constructor(readonly code: "token_credit_exhausted" | "token_credit_usage_unknown" | "token_credit_busy" | "token_credit_unmetered" | "conflict" | "validation" | "forbidden" | "not_found", message: string = code) { super(message); }
+export class CreditError extends AppError {
+  constructor(code: "token_credit_exhausted" | "token_credit_usage_unknown" | "token_credit_busy" | "token_credit_unmetered" | "conflict" | "validation" | "forbidden" | "not_found", message?: string, details?: Record<string, unknown>) {
+    super({ code, ...(message ? { message } : {}), ...(details ? { details } : {}), ...(code.startsWith("token_credit_") && code !== "token_credit_busy" ? { recovery: "contact_admin" as const } : {}) });
+  }
 }
+
 interface Account {
   user_id: string; credit_tokens: number | null; consumed_tokens: number; unknown_requests: number;
   period: number; period_started_at: number; version: number;

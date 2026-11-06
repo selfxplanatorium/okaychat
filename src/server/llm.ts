@@ -1,3 +1,7 @@
+import { creditModelMiddleware } from "./credits/model.js";
+import { assertCreditPermit, type CreditContext, type CreditPermit } from "./credits/store.js";
+import { finiteCredits } from "./credits/admission.js";
+import type { UsageKind } from "./usage.js";
 import { reserveOperation } from "./permissions/limits.js";
 import { modelPolicy } from "./permissions/model.js";
 import { assertModelAllowed } from "./permissions/guard.js";
@@ -59,6 +63,8 @@ function affinityHeaders(providerId: string, affinity: string): Record<string, s
 export const cacheAffinity = (userId: string) => `okc-${sha256(`cache:${userId}`).slice(0, 32)}`;
 
 export interface CreateModelOptions {
+  creditPermit: CreditPermit;
+  usageContext: CreditContext & { kind: UsageKind };
   userId: string;
   effort?: ReasoningEffort;
   /** Chat turns stream a visible "Retrying in Ns…" notice; background calls simply wait. */
@@ -89,8 +95,9 @@ export function createModel(info: ModelInfo, conn: Connection, opts: CreateModel
     opts.guard?.();
   };
   check();
+  assertCreditPermit(opts.creditPermit, opts.userId);
   const handle = createRawModel(info, conn, opts);
-  return { ...handle, model: wrapLanguageModel({ model: handle.model as Parameters<typeof wrapLanguageModel>[0]["model"], middleware: modelPolicy(opts.userId, info, check) }) };
+  return { ...handle, model: wrapLanguageModel({ model: handle.model as Parameters<typeof wrapLanguageModel>[0]["model"], middleware: [modelPolicy(opts.userId, info, check), creditModelMiddleware({ permit: opts.creditPermit, userId: opts.userId, model: info, kind: opts.usageContext.kind, context: Object.fromEntries(Object.entries(opts.usageContext).filter(([key]) => key !== "kind")) })] }) };
 }
 
 function createRawModel(info: ModelInfo, conn: Connection, opts: CreateModelOptions): ModelHandle {
@@ -121,7 +128,7 @@ function createRawModel(info: ModelInfo, conn: Connection, opts: CreateModelOpti
   // All provider retries happen here, before a response body is consumed. Every caller disables the
   // SDK's own retry (maxRetries: 0), so delays never compound. See docs/implementation/errors.md.
   const fetch = withResponseBounds(
-    createRetryingFetch({ ...(opts.retry ?? {}), onRetry: opts.onRetry, beforeAttempt, fetchImpl: conn.guarded ? publicFetch : undefined }),
+    createRetryingFetch({ ...(opts.retry ?? {}), ...(finiteCredits(opts.userId) ? { policy: { maxAttempts: 1 } } : {}), onRetry: opts.onRetry, beforeAttempt, fetchImpl: conn.guarded ? publicFetch : undefined }),
     opts.responseBounds ?? { maxBytes: Infinity, maxRecordBytes: Infinity },
   );
   // OpenAI-style caches are partitioned by prompt_cache_key: a per-chat key made every new chat start cold.
@@ -133,7 +140,7 @@ function createRawModel(info: ModelInfo, conn: Connection, opts: CreateModelOpti
     case "openai-responses": {
       const chatgpt = info.providerId === CHATGPT;
       const provider = createOpenAI(chatgpt
-        ? { apiKey: "chatgpt-login", baseURL, headers, fetch: createRetryingFetch({ ...(opts.retry ?? {}), onRetry: opts.onRetry, beforeAttempt, fetchImpl: chatgptFetch(opts.userId) }) }
+        ? { apiKey: "chatgpt-login", baseURL, headers, fetch: createRetryingFetch({ ...(opts.retry ?? {}), ...(finiteCredits(opts.userId) ? { policy: { maxAttempts: 1 } } : {}), onRetry: opts.onRetry, beforeAttempt, fetchImpl: chatgptFetch(opts.userId) }) }
         : { apiKey, baseURL, headers, fetch });
       const openai: Record<string, JSONValue> = { ...(chatgpt ? {} : { promptCacheKey: cacheKey }), store: false };
       if (effort) {

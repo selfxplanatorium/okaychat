@@ -118,6 +118,10 @@ export function describeApiFailure(error: unknown, options: { modelRef?: string;
   if (error instanceof AppError) {
     const app = error;
     switch (app.code) {
+      case "token_credit_exhausted":
+      case "token_credit_usage_unknown":
+      case "token_credit_unmetered": return apiFailure(403, "permission_error", app.code, app.message);
+      case "token_credit_busy": return apiFailure(409, "rate_limit_error", app.code, app.message);
       case "provider_auth": return apiFailure(502, "server_error", "upstream_auth", "The model provider rejected the server's credentials.");
       case "provider_quota": return apiFailure(502, "server_error", "upstream_quota", "The model provider account is out of quota.");
       case "model_not_found": return apiFailure(502, "server_error", "upstream_model_not_found", "The provider does not offer that model.");

@@ -14,7 +14,6 @@ import {
 import type { TokenUsage } from "../../shared/types.js";
 import { db, tx } from "../db.js";
 import { costOf } from "../usage.js";
-import { recordUsage } from "../usage.js";
 import { statusOf } from "./keys.js";
 
 // External API receipts, telemetry aggregation, and transactional ledger settlement
@@ -207,22 +206,6 @@ export function settleApiRequest(input: {
         input.userId,
       );
     if (Number(changed.changes) === 0) return false;
-    if (settlement.usage) {
-      // The unique api_request_id index makes a repeated insert impossible even outside this guard.
-      const existing = db.prepare("SELECT 1 FROM usage WHERE api_request_id = ?").get(input.id);
-      if (!existing) {
-        recordUsage({
-          userId: input.userId,
-          providerId: input.providerId,
-          modelId: input.modelId,
-          kind: "api",
-          usage: settlement.usage,
-          cost: settlement.cost ?? 0,
-          apiKeyId: input.keyId,
-          apiRequestId: input.id,
-        });
-      }
-    }
     return true;
   });
 }
