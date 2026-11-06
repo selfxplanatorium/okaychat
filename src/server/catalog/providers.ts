@@ -252,6 +252,7 @@ export function prepareConnectionSave(scope: ConnectionScope, providerId: string
       baseURL: existing.baseURL,
       enabled: existing.enabled,
       config: decodeConfig(providerId, snapshot!.config_json),
+      configJson: snapshot!.config_json,
     }, input);
     return { scope, providerId, snapshot, apiKey: candidate.apiKey, baseURL: candidate.baseURL, configJson: candidate.configJson, enabled: candidate.enabled };
   }

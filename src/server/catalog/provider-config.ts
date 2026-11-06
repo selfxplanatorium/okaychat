@@ -247,6 +247,8 @@ export interface StoredConnection {
   baseURL?: string;
   enabled: boolean;
   config: DecodedConfig;
+  /** The exact stored JSON, so a toggle can preserve a configuration this build cannot decode. */
+  configJson: string;
 }
 
 export interface ConnectionCandidate {
@@ -337,6 +339,11 @@ function normalizedModelSource(source: CustomModelSource): CustomModelSource {
  * field error. Nothing is persisted here and nothing is read from another scope.
  */
 export function buildCustomCandidate(providerId: string, existing: StoredConnection | undefined, input: ProviderConnectionInput): ConnectionCandidate {
+  // An enabled-only save must always be possible, even on a row this build cannot decode: it flips the
+  // switch and keeps the stored configuration and key byte for byte instead of forcing a re-entry.
+  if (existing && isOnlyToggle(input)) {
+    return { apiKey: existing.apiKey, baseURL: existing.baseURL, enabled: input.enabled ?? existing.enabled, configJson: existing.configJson };
+  }
   const previous = existing?.config.transport;
   if (previous && !previous.ok && input.transport === undefined && input.modelSource === undefined && !isOnlyToggle(input)) {
     // A corrupt stored configuration cannot be partially patched: the owner must supply it again.
