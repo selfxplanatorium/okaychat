@@ -25,14 +25,14 @@ beforeEach(() => db.exec("DELETE FROM user_settings"));
 const appearance: UserAppearance = {
   theme: "test-theme", mode: "dark", halves: { light: "ocean" },
   customThemes: [{ id: "test-theme", label: "Test", appearance: "dark", colors: { canvas: "#112233" }, variants: { light: { canvas: "#eeeeee" } } }],
-  glassOpacity: 80, appearanceContrast: 100, panelAnimationDurationMs: 0, motionOff: [], squareCorners: false, sidebarStyle: "floating", chatWidth: "comfortable",
+  glassOpacity: 80, appearanceContrast: 100, panelAnimationDurationMs: 0, motionOff: [], squareCorners: false, sidebarStyle: "floating", chatWidth: "comfortable", messageLayout: "timeline",
   fontFamilySans: "", fontFamilyComposer: "", fontFamilyCode: "", fontSizePrompt: 14, fontSizeCode: 13,
   fontSmoothing: true, wordWrap: true, typographyAdvanced: false,
   ...GLASS_DEFAULTS,
 };
 // A snapshot saved before the Glass fields existed.
 const { glassPreset: _p, glassBend: _b, glassDispersion: _d, glassFrost: _f, glassRimShine: _r, glassTint: _t, glassPerformance: _perf,
-  glassSidebar: _s, glassComposer: _c, glassOverlays: _o, glassCards: _cards, glassToolbars: _tb, glassControls: _ctl, ...legacy } = appearance;
+  glassSidebar: _s, glassComposer: _c, glassOverlays: _o, glassCards: _cards, glassToolbars: _tb, glassControls: _ctl, messageLayout: _layout, ...legacy } = appearance;
 const request = (method: string, body?: unknown, user = "alice") => app.request("http://app/appearance", {
   method, headers: { cookie: `okaychat_session=${user}`, "Content-Type": "application/json" },
   ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -92,7 +92,9 @@ test("each account has its own appearance", async () => {
 
 test("snapshots saved before Glass read with its defaults without being rewritten", async () => {
   updateSettings("alice", { appearance: legacy as UserAppearance });
-  assert.deepEqual(await (await request("GET")).json(), appearance);
+  const read = await (await request("GET")).json();
+  assert.deepEqual(read, appearance);
+  assert.equal(read.messageLayout, "timeline");
   assert.deepEqual(getSettings("alice").appearance, legacy);
   // A partial patch still merges into the old snapshot and leaves every other field intact.
   await request("PATCH", { glassBend: 0.3, glassPreset: "custom" });
@@ -120,4 +122,25 @@ test("invalid glass values are rejected, not clamped", async () => {
   for (const patch of [{ glassBend: 0.6 }, { glassBend: 0 }, { glassFrost: 24 }, { glassTint: 12 }, { glassRimShine: 0.4 }, { glassFrost: 7.5 }]) {
     assert.equal((await request("PATCH", patch)).status, 200, JSON.stringify(patch));
   }
+});
+
+test("the message layout persists through a one-key patch and survives other patches", async () => {
+  await request("PUT", appearance);
+  assert.equal((await request("PATCH", { messageLayout: "bubbles" })).status, 200);
+  assert.deepEqual(getSettings("alice").appearance, { ...appearance, messageLayout: "bubbles" });
+  await request("PATCH", { chatWidth: "wide" });
+  assert.deepEqual(await (await request("GET")).json(), { ...appearance, messageLayout: "bubbles", chatWidth: "wide" });
+});
+
+test("an invalid message layout is rejected and leaves the row unchanged", async () => {
+  await request("PUT", appearance);
+  assert.equal((await request("PATCH", { messageLayout: "bubble" })).status, 400);
+  assert.deepEqual(getSettings("alice").appearance, appearance);
+});
+
+test("a corrupt stored snapshot still reads a total appearance with a valid layout", async () => {
+  updateSettings("alice", { appearance: { ...appearance, glassOpacity: 5, messageLayout: "chat" } as unknown as UserAppearance });
+  assert.equal((await (await request("GET")).json()).messageLayout, "timeline");
+  updateSettings("alice", { appearance: { ...appearance, glassOpacity: 5, messageLayout: "bubbles" } as unknown as UserAppearance });
+  assert.equal((await (await request("GET")).json()).messageLayout, "bubbles");
 });

@@ -95,6 +95,7 @@ import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useLongPaste } from "@/components/chat/long-paste";
 import { parseAttachmentText, splitUserMessage, typedText } from "@/runtime/message-attachments";
 import { mcpAppOf } from "@/components/chat/McpApp";
+import { assistantBubbleShape, messageRunAt } from "@/components/chat/message-layout";
 import { ReplyFiles } from "@/components/chat/reply-files";
 import { TurnServiceNote } from "@/components/chat/ServiceNotice";
 import { ContinueGeneration } from "@/components/chat/ContinueGeneration";
@@ -1435,6 +1436,11 @@ const AssistantMessage: FC = () => {
     const last = s.message.parts.at(-1);
     return last === undefined || (last.type !== "text" && last.type !== "reasoning");
   });
+  // Layout-independent flags: theme/messages.css reads them only under data-message-layout="bubbles".
+  const run = useAuiState((s) => messageRunAt(s.thread.messages, s.message.index));
+  const statusType = useAuiState((s) => s.message.status?.type);
+  const shape = useMemo(() => assistantBubbleShape(parts, statusType), [parts, statusType]);
+  const wide = shape.wide || editing;
 
   const ACTION_BAR_PT = "pt-1.5";
   // Keep the action bar inside the contained root's paint box, then cancel its reserved space in flow.
@@ -1447,6 +1453,10 @@ const AssistantMessage: FC = () => {
       {...focus}
       data-slot="aui_assistant-message-root"
       data-role="assistant"
+      data-message-run={run}
+      data-bubble-wide={wide ? "1" : undefined}
+      data-bubble-empty={shape.empty ? "1" : undefined}
+      data-bubble-waiting={waitingForFirstToken ? "1" : undefined}
       className={cn(
         "relative -mb-7.5 pb-7.5 [contain-intrinsic-size:auto_200px] [content-visibility:auto] rounded-xl outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring/60",
         entering && "chat-message-in-soft",
@@ -1736,18 +1746,18 @@ const UserMessage: FC = () => {
   const focus = useMessageFocus();
   const remoteId = useAuiState((s) => s.threadListItem.remoteId);
   const messageId = useAuiState((s) => s.message.id);
+  const run = useAuiState((s) => messageRunAt(s.thread.messages, s.message.index));
   return (
     <MessagePrimitive.Root
       {...focus}
       data-slot="aui_user-message-root"
+      data-message-run={run}
       className={cn(
-        // Inset the measured anchor without changing message spacing. The
-        // reserve stops short turns below the mobile header's 5rem fade.
-        // Negative margin preserves the spacing between messages. The reserve
-        // overlaps the previous assistant footer, so only children take the pointer.
+        // The anchor reserve (top padding cancelled by a negative margin) lives in theme/messages.css.
+        // It overlaps the previous assistant footer, so only children take the pointer.
         // The root carries a tall top reserve, so focus is drawn on the bubble instead.
         "outline-none focus-visible:[&_.aui-user-message-content]:outline-2 focus-visible:[&_.aui-user-message-content]:outline-offset-2 focus-visible:[&_.aui-user-message-content]:outline-ring/60",
-        "pointer-events-none [&>*]:pointer-events-auto -mt-24 grid auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 pt-24 md:-mt-[3em] md:pt-[3em] [contain-intrinsic-size:auto_200px] [content-visibility:auto] [&:where(>*)]:col-start-2",
+        "pointer-events-none [&>*]:pointer-events-auto grid auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 [contain-intrinsic-size:auto_200px] [content-visibility:auto] [&:where(>*)]:col-start-2",
         // Sent messages come up from the composer they left.
         entering && "chat-message-in",
       )}

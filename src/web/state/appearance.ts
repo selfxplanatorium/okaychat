@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import { GLASS_DEFAULTS, GLASS_KEYS, type AppearanceSettings, type DeviceAppearance, type MotionGroup, type UserAppearance } from "@shared/appearance";
+import { useEffect, useLayoutEffect } from "react";
+import { DEFAULT_MESSAGE_LAYOUT, GLASS_DEFAULTS, GLASS_KEYS, isMessageLayout, type AppearanceSettings, type DeviceAppearance, type MotionGroup, type UserAppearance } from "@shared/appearance";
 import { effectiveGlass } from "@/components/glass/glass-policy";
 import { publishGlassEffective, readGlassEnvironment, watchGlassEnvironment } from "@/components/glass/glass-environment";
 import { applyGlassAppearance, invalidateGlass, sanitizeGlass } from "@/theme/glass";
@@ -23,6 +23,7 @@ import {
 import {
   applyChatWidth,
   applyGlassOpacity,
+  applyMessageLayout,
   DEFAULT_APPEARANCE_CONTRAST,
   DEFAULT_CHAT_WIDTH,
   DEFAULT_CODE_FONT_SIZE,
@@ -45,6 +46,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   squareCorners: false,
   sidebarStyle: "floating",
   chatWidth: DEFAULT_CHAT_WIDTH,
+  messageLayout: DEFAULT_MESSAGE_LAYOUT,
   fontFamilySans: "",
   fontFamilyComposer: "",
   fontFamilyCode: "",
@@ -111,10 +113,15 @@ export const useAppearance = create<AppearanceState>()(
     {
       name: "okaychat:appearance",
       partialize: (s) => Object.fromEntries(Object.keys(DEFAULT_APPEARANCE).map((k) => [k, s[k as keyof AppearanceSettings]])),
-      // Nothing validates the device's own store: repair Glass values before they reach CSS.
+      // Nothing validates the device's own store: repair Glass values and the layout before they reach CSS.
       merge: (persisted, current) => {
         const stored = (persisted ?? {}) as Partial<AppearanceState>;
-        return { ...current, ...stored, ...sanitizeGlass(stored) };
+        return {
+          ...current,
+          ...stored,
+          ...sanitizeGlass(stored),
+          messageLayout: isMessageLayout(stored.messageLayout) ? stored.messageLayout : DEFAULT_MESSAGE_LAYOUT,
+        };
       },
     },
   ),
@@ -187,6 +194,7 @@ function applySettings(s: AppearanceSettings) {
   publishGlassEffective(glass.tier, glass.reason);
   applyAppearanceContrast(root, s.appearanceContrast);
   applyChatWidth(root, s.chatWidth);
+  applyMessageLayout(root, s.messageLayout);
   applyAppearanceFontVariables(root, {
     sans: s.fontFamilySans,
     code: s.fontFamilyCode,
@@ -208,6 +216,9 @@ function applySettings(s: AppearanceSettings) {
 
 /** Mount once at the app root. Keeps the DOM in sync with the store and the OS color scheme. */
 export function useApplyAppearance() {
+  // The store hydrates synchronously, but the effect below runs after paint; set the layout first so a
+  // reload with bubbles selected never paints a timeline frame.
+  useLayoutEffect(() => applyMessageLayout(document.documentElement, useAppearance.getState().messageLayout), []);
   useEffect(() => {
     applyTheme();
     applySettings(useAppearance.getState());

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { appearanceSchema, GLASS_DEFAULTS, GLASS_PRESET_VALUES, GLASS_RANGES, parseAppearancePatch } from "./appearance";
+import { appearanceSchema, GLASS_DEFAULTS, GLASS_PRESET_VALUES, GLASS_RANGES, isMessageLayout, parseAppearancePatch } from "./appearance";
 
 test("Glass schema defaults, accepted enums and inclusive numeric boundaries",()=>{
   for(const [key,range] of Object.entries(GLASS_RANGES) as [keyof typeof GLASS_RANGES,typeof GLASS_RANGES[keyof typeof GLASS_RANGES]][]) {
@@ -37,4 +37,26 @@ test('all Glass keys reject wrong types and nonfinite numbers without filling PA
   for (const key of ['glassPerformance', 'glassPreset']) {
     for (const value of [null, 1, true, 'unknown']) assert.deepEqual(parseAppearancePatch({ [key]: value }), { success: false });
   }
+});
+
+test("message layout defaults to timeline, accepts only its two values, and patches only when sent", () => {
+  assert.equal(appearanceSchema.shape.messageLayout.parse(undefined), "timeline");
+  for (const value of ["timeline", "bubbles"]) assert.equal(appearanceSchema.shape.messageLayout.safeParse(value).success, true);
+  for (const value of ["bubble", "chat", null, 1]) assert.equal(appearanceSchema.shape.messageLayout.safeParse(value).success, false, String(value));
+  assert.deepEqual(parseAppearancePatch({ messageLayout: "bubbles" }), { success: true, data: { messageLayout: "bubbles" } });
+  assert.deepEqual(parseAppearancePatch({ messageLayout: "timeline", chatWidth: "wide" }), { success: true, data: { messageLayout: "timeline", chatWidth: "wide" } });
+  assert.deepEqual(parseAppearancePatch({ messageLayout: "bubble" }), { success: false });
+  assert.equal(isMessageLayout("bubbles"), true);
+  assert.equal(isMessageLayout("bubble"), false);
+  assert.equal(isMessageLayout(undefined), false);
+});
+
+test("a snapshot written before the message layout existed parses as timeline", () => {
+  const legacy = {
+    theme: "t3code", mode: "system", halves: null, customThemes: [], glassOpacity: 80, appearanceContrast: 100,
+    panelAnimationDurationMs: 180, chatWidth: "comfortable", fontFamilySans: "", fontFamilyComposer: "", fontFamilyCode: "",
+    fontSizePrompt: 15, fontSizeCode: 13, fontSmoothing: true, wordWrap: true, typographyAdvanced: false, ...GLASS_DEFAULTS,
+  };
+  const parsed = appearanceSchema.parse(legacy);
+  assert.equal(parsed.messageLayout, "timeline");
 });

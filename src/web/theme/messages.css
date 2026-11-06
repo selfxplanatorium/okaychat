@@ -1,0 +1,96 @@
+/*
+ * Message layouts. One account preference writes data-message-layout on <html>; every rule that
+ * changes the presentation is scoped to "bubbles", so the timeline is the stylesheet default and
+ * the first paint never waits for the preference. The per-message flags (data-message-run,
+ * data-bubble-*) are rendered in both layouts, so a switch is only a style recalculation.
+ *
+ * Do not add overflow, transform, filter, contain: paint, backdrop-filter or will-change here:
+ * these elements must never become a clipping/containing block for portaled menus.
+ */
+
+/* Anchor reserve: the root's paint box reaches above the bubble so turn-anchor measurement and
+   focus land above it (and short turns stop below the mobile header's 5rem fade), while the negative
+   margin cancels the reserve in flow. Grouping adds --message-run-pull to the same margin, so the
+   anchor maths stays in one place. */
+[data-slot="aui_user-message-root"] {
+  --message-anchor-inset: 6rem;
+  padding-block-start: var(--message-anchor-inset);
+  margin-block-start: calc(-1 * (var(--message-anchor-inset) + var(--message-run-pull, 0px)));
+}
+@media (min-width: 48rem) {
+  [data-slot="aui_user-message-root"] { --message-anchor-inset: 3em; }
+}
+
+html[data-message-layout="bubbles"] {
+  --bubble-assistant-max: 40rem;
+  --bubble-user-max: 34rem;
+}
+
+/* Role blocks breathe less; same-role runs sit almost together. */
+html[data-message-layout="bubbles"] [data-slot="aui_message-group"] { row-gap: 1rem; }
+html[data-message-layout="bubbles"] [data-message-run="middle"],
+html[data-message-layout="bubbles"] [data-message-run="end"] { --message-run-pull: 0.75rem; }
+html[data-message-layout="bubbles"] [data-slot="aui_assistant-message-root"][data-message-run="middle"],
+html[data-message-layout="bubbles"] [data-slot="aui_assistant-message-root"][data-message-run="end"] {
+  margin-block-start: calc(-1 * var(--message-run-pull));
+}
+
+/* Both bubbles meet the lane edges, aligned with the composer below them. */
+html[data-message-layout="bubbles"] [data-slot="aui_user-message-root"] { padding-inline: 0; }
+
+/* The assistant reading surface. Opaque on purpose: Glass never filters reading content. */
+html[data-message-layout="bubbles"] [data-slot="aui_assistant-message-content"] {
+  box-sizing: border-box;
+  width: fit-content;
+  min-width: 0;
+  max-width: min(100%, var(--bubble-assistant-max));
+  margin-inline-end: auto;
+  padding: 0.75rem 1rem;
+  overflow-wrap: anywhere;
+  color: var(--contrast-message-foreground, var(--message-foreground));
+  background-color: var(--message-surface);
+  background-image: none;
+  border-start-start-radius: var(--composer-radius, 1.25rem);
+  border-start-end-radius: var(--composer-radius, 1.25rem);
+  border-end-end-radius: var(--composer-radius, 1.25rem);
+  border-end-start-radius: 0.375rem;
+  box-shadow:
+    var(--depth-highlight),
+    0 0 0 1px var(--depth-line),
+    0 3px 10px -6px color-mix(in srgb, var(--depth-shadow-tint) 14%, transparent);
+}
+
+/* Cards, media, files and failures use the whole reading lane. */
+html[data-message-layout="bubbles"] [data-bubble-wide="1"] > [data-slot="aui_assistant-message-content"] {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* Nothing to read: paint nothing, keep the flow position. */
+html[data-message-layout="bubbles"] [data-bubble-empty="1"] > [data-slot="aui_assistant-message-content"] {
+  width: auto;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+/* First token: the dots are out of flow, so reserve a pill-sized surface. */
+html[data-message-layout="bubbles"] [data-bubble-waiting="1"] > [data-slot="aui_assistant-message-content"] {
+  min-width: 4.5rem;
+  min-height: 2.75rem;
+}
+
+/* The user bubble keeps its existing depth-bubble surface; only its width is capped. Its grid track is
+   sized from the uncapped text, so the capped bubble is pushed to the inline end of that track. */
+html[data-message-layout="bubbles"] .aui-user-message-content {
+  min-width: 0;
+  margin-inline-start: auto;
+  max-width: min(100%, var(--bubble-user-max));
+  overflow-wrap: anywhere;
+}
+
+/* Editing a user message keeps the same width as its bubble instead of the 85% composer. */
+html[data-message-layout="bubbles"] .aui-edit-composer-root {
+  max-width: min(100%, var(--bubble-user-max));
+}
