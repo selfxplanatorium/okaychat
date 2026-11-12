@@ -92,7 +92,6 @@ All four are private account data beside messages or the prompt library. None en
 ## Pass 6: connected workspace (built)
 
 - **n8n webhook agents**: per-account agents with encrypted definitions and auth headers, NDJSON/SSE/JSON response parsing, optional history memory, streaming chat, stop, usage counters, and shared audiences. See `docs/implementation/n8n-agents.md`.
-- **Liquid glass appearance**: a vendored, attributed Glisse 0.5.0 adaptation with explicit backdrop sources, bounded material leases, performance tiers, appearance settings, and Glisse switches across the app. The sliding sidebar selection card was removed in favour of a static selection. See `docs/implementation/appearance.md`.
 - **Granular permissions**: an admin workspace for people, groups, models, features, limits, prompt overrides, effective inspection, and audit; per-model and per-user instructions; server-side enforcement across tools, routes, jobs, and runtimes. See `docs/implementation/granular-permissions.md`.
 - **Assistant presets, continuation, and archives**: named reusable assistants with copied snapshots and restrictive tool/knowledge policies; explicit continuation of length-limited replies with generation receipts; portable native chat archives with bounded import/export. See `docs/implementation/assistant-presets.md`, `continuation.md`, and `chat-archives.md`.
 - **Performance pass**: FTS row addressing and trigger repair, a history time index, scoped model resolution, bounded live-model caches, and a repeatable benchmark. See `docs/implementation/performance.md`.

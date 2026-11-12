@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, beforeEach, test } from "node:test";
 import { Hono } from "hono";
-import { GLASS_DEFAULTS, type UserAppearance } from "../shared/appearance.js";
+import type { UserAppearance } from "../shared/appearance.js";
 
 const dataDir = mkdtempSync(path.join(os.tmpdir(), "okaychat-appearance-test-"));
 process.env.OKAYCHAT_DATA_DIR = dataDir;
@@ -28,11 +28,9 @@ const appearance: UserAppearance = {
   glassOpacity: 80, appearanceContrast: 100, panelAnimationDurationMs: 0, motionOff: [], squareCorners: false, sidebarStyle: "floating", chatWidth: "comfortable", messageLayout: "timeline",
   fontFamilySans: "", fontFamilyComposer: "", fontFamilyCode: "", fontSizePrompt: 14, fontSizeCode: 13,
   fontSmoothing: true, wordWrap: true, typographyAdvanced: false,
-  ...GLASS_DEFAULTS,
 };
-// A snapshot saved before the Glass fields existed.
-const { glassPreset: _p, glassBend: _b, glassDispersion: _d, glassFrost: _f, glassRimShine: _r, glassTint: _t, glassPerformance: _perf,
-  glassSidebar: _s, glassComposer: _c, glassOverlays: _o, glassCards: _cards, glassToolbars: _tb, glassControls: _ctl, messageLayout: _layout, ...legacy } = appearance;
+// A snapshot saved before the message layout existed.
+const { messageLayout: _layout, ...legacy } = appearance;
 const request = (method: string, body?: unknown, user = "alice") => app.request("http://app/appearance", {
   method, headers: { cookie: `okaychat_session=${user}`, "Content-Type": "application/json" },
   ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -90,38 +88,11 @@ test("each account has its own appearance", async () => {
   assert.equal((await (await request("GET", undefined, "bob")).json()).theme, "grove");
 });
 
-test("snapshots saved before Glass read with its defaults without being rewritten", async () => {
+test("snapshots saved before the message layout read with its default without being rewritten", async () => {
   updateSettings("alice", { appearance: legacy as UserAppearance });
   const read = await (await request("GET")).json();
   assert.deepEqual(read, appearance);
-  assert.equal(read.messageLayout, "timeline");
   assert.deepEqual(getSettings("alice").appearance, legacy);
-  // A partial patch still merges into the old snapshot and leaves every other field intact.
-  await request("PATCH", { glassBend: 0.3, glassPreset: "custom" });
-  assert.deepEqual(await (await request("GET")).json(), { ...appearance, glassBend: 0.3, glassPreset: "custom" });
-});
-
-test("glass patches carry only the fields they send", async () => {
-  await request("PUT", { ...appearance, glassSidebar: false, glassPerformance: "css" });
-  await request("PATCH", { glassOpacity: 70 });
-  await request("PATCH", { glassComposer: false });
-  assert.deepEqual(await (await request("GET")).json(), { ...appearance, glassOpacity: 70, glassSidebar: false, glassComposer: false, glassPerformance: "css" });
-});
-
-test("a preset name that disagrees with its values is accepted", async () => {
-  await request("PUT", appearance);
-  assert.equal((await request("PATCH", { glassPreset: "bold", glassBend: 0.05 })).status, 200);
-});
-
-test("invalid glass values are rejected, not clamped", async () => {
-  await request("PUT", appearance);
-  for (const patch of [
-    { glassBend: 0.61 }, { glassBend: -0.01 }, { glassDispersion: "0.1" }, { glassFrost: 25 }, { glassRimShine: 0.5 }, { glassTint: 13 },
-    { glassTint: null }, { glassPreset: "loud" }, { glassPerformance: "max" }, { glassSidebar: "false" }, { glassControls: 1 },
-  ]) assert.equal((await request("PATCH", patch)).status, 400, JSON.stringify(patch));
-  for (const patch of [{ glassBend: 0.6 }, { glassBend: 0 }, { glassFrost: 24 }, { glassTint: 12 }, { glassRimShine: 0.4 }, { glassFrost: 7.5 }]) {
-    assert.equal((await request("PATCH", patch)).status, 200, JSON.stringify(patch));
-  }
 });
 
 test("the message layout persists through a one-key patch and survives other patches", async () => {

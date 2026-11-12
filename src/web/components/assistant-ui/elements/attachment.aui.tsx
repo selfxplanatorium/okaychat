@@ -106,16 +106,16 @@ const AttachmentPreviewDialog: FC<AttachmentPreviewDialogProps> = ({
 
 const AttachmentThumb: FC<{ src: string | undefined }> = ({ src }) => {
   return (
-    <Avatar data-glass-surface="card" className="aui-attachment-tile-avatar h-full w-full rounded-none after:hidden">
+    <Avatar className="aui-attachment-tile-avatar h-full w-full rounded-none after:hidden">
       <AvatarImage
         src={src && imageVariantUrl(src, "thumb")}
         alt=""
         loading="lazy"
         decoding="async"
-        data-glass-surface="card" className="aui-attachment-tile-image rounded-none object-cover"
+        className="aui-attachment-tile-image rounded-none object-cover"
       />
       <AvatarFallback>
-        <FileText data-glass-surface="card" className="aui-attachment-tile-fallback-icon text-muted-foreground/80 size-6 stroke-[1.5]" />
+        <FileText className="aui-attachment-tile-fallback-icon text-muted-foreground/80 size-6 stroke-[1.5]" />
       </AvatarFallback>
     </Avatar>
   );
@@ -239,7 +239,7 @@ const AttachmentUI: FC = () => {
               {isUploading && (
                 <div
                   aria-hidden="true"
-                  data-glass-surface="card" className="aui-attachment-tile-uploading animate-in fade-in-0 absolute inset-0 flex items-center justify-center  motion-reduce:animate-none"
+                  className="aui-attachment-tile-uploading bg-background/60 animate-in fade-in-0 absolute inset-0 flex items-center justify-center backdrop-blur-[2px] motion-reduce:animate-none"
                 >
                   <Loader2Icon className="text-muted-foreground size-4 animate-spin" />
                 </div>
@@ -247,7 +247,7 @@ const AttachmentUI: FC = () => {
               {isError && (
                 <div
                   aria-hidden="true"
-                  data-glass-surface="card" className="aui-attachment-tile-error animate-in fade-in-0 absolute inset-0 flex items-center justify-center  motion-reduce:animate-none"
+                  className="aui-attachment-tile-error bg-background/70 animate-in fade-in-0 absolute inset-0 flex items-center justify-center backdrop-blur-[2px] motion-reduce:animate-none"
                 >
                   <AlertCircleIcon className="text-destructive size-4" />
                 </div>
@@ -273,7 +273,7 @@ const AttachmentRemove: FC<{ name: string }> = ({ name }) => {
       render={
         <TooltipIconButton
           tooltip={t("thread.removeName", { name })}
-          data-glass-surface="card" className="aui-attachment-tile-remove absolute end-1 top-1 size-5 rounded-full bg-black/50! text-white after:absolute after:-inset-1.5 hover:bg-black/70! hover:text-white! active:scale-[0.96] motion-reduce:transition-none"
+          className="aui-attachment-tile-remove absolute end-1 top-1 size-5 rounded-full bg-black/50! text-white after:absolute after:-inset-1.5 hover:bg-black/70! hover:text-white! active:scale-[0.96] motion-reduce:transition-none"
           side="top"
         />
       }

@@ -1,4 +1,3 @@
-import { useGlassSurface } from "@/components/glass/GlassSurface";
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { useEffect, useRef } from "react";
 import { t } from "@/i18n";
@@ -33,7 +32,6 @@ import { SidebarResizeHandle } from "./sidebar-width";
  * between them slides the contents while the surface itself stays still (shell.css).
  */
 export function Sidebar({ open, onToggle, settings, section }: { open: boolean; onToggle: () => void; settings: boolean; section?: string }) {
-  const glassRef = useGlassSurface({ source: "sidebar-content", family: "sidebar", priority: 60 });
   const aui = useAui();
   const searchOpen = useKeyboardDialog((s) => s.open === "search");
   const toggleDialog = useKeyboardDialog((s) => s.toggle);
@@ -73,7 +71,7 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
         )}
       >
         {/* Floating or docked comes from html[data-sidebar]; shell.css morphs between the two. */}
-        <div ref={glassRef} className="shell-sidebar-inner sidebar-surface relative h-full shrink-0 overflow-hidden max-md:w-full">
+        <div className="shell-sidebar-inner sidebar-surface relative h-full shrink-0 overflow-hidden max-md:w-full">
           <div ref={panelRef} data-layer="chat" data-active={!settings} inert={settings} className="sidebar-layer absolute inset-0 flex flex-col">
             <div className="flex h-12 shrink-0 items-center justify-between px-3">
               <Link href="/" onClick={(event) => { event.preventDefault(); showChat(navigate); }}>

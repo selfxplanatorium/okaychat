@@ -4,7 +4,6 @@ export default {
   cmdAppSearch: "Search chats",
   cmdAppToggleSidebar: "Show or hide the sidebar",
   cmdAppColorScheme: "Switch color scheme (light, system, dark)",
-  cmdAppearanceResetGlass: "Reset the glass material to its defaults",
   cmdAppLogout: "Log out",
   cmdAppReload: "Reload the app",
   cmdErrorCopyDetails: "Copy error details",

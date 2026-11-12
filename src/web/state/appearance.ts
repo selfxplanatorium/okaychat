@@ -1,8 +1,5 @@
 import { useEffect, useLayoutEffect } from "react";
-import { DEFAULT_MESSAGE_LAYOUT, GLASS_DEFAULTS, GLASS_KEYS, isMessageLayout, type AppearanceSettings, type DeviceAppearance, type MotionGroup, type UserAppearance } from "@shared/appearance";
-import { effectiveGlass } from "@/components/glass/glass-policy";
-import { publishGlassEffective, readGlassEnvironment, watchGlassEnvironment } from "@/components/glass/glass-environment";
-import { applyGlassAppearance, invalidateGlass, sanitizeGlass } from "@/theme/glass";
+import { DEFAULT_MESSAGE_LAYOUT, isMessageLayout, type AppearanceSettings, type DeviceAppearance, type MotionGroup, type UserAppearance } from "@shared/appearance";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { applyAppearanceContrast } from "@/theme/contrast";
@@ -56,7 +53,6 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   fontSmoothing: true,
   wordWrap: true,
   typographyAdvanced: false,
-  ...GLASS_DEFAULTS,
 };
 
 interface AppearanceState extends AppearanceSettings {
@@ -125,13 +121,12 @@ export const useAppearance = create<AppearanceState>()(
     {
       name: "okaychat:appearance",
       partialize: (s) => Object.fromEntries(Object.keys(DEFAULT_APPEARANCE).map((k) => [k, s[k as keyof AppearanceSettings]])),
-      // Nothing validates the device's own store: repair Glass values and the layout before they reach CSS.
+      // Nothing validates the device's own store: repair the layout before it reaches CSS.
       merge: (persisted, current) => {
         const stored = (persisted ?? {}) as Partial<AppearanceState>;
         return {
           ...current,
           ...stored,
-          ...sanitizeGlass(stored),
           messageLayout: isMessageLayout(stored.messageLayout) ? stored.messageLayout : DEFAULT_MESSAGE_LAYOUT,
         };
       },
@@ -162,9 +157,7 @@ export function restoreAppearance(value: UserAppearance) {
   const { customThemes: _themes, ...rest } = value;
   // Snapshots stored before the size became per-device still carry it.
   const settings = Object.fromEntries(Object.entries(rest).filter(([key]) => !DEVICE_KEYS.has(key)));
-  // A response written before Glass existed must not keep the previous account's Glass values.
-  const glass = sanitizeGlass({ ...GLASS_DEFAULTS, ...Object.fromEntries(GLASS_KEYS.filter((key) => key in rest).map((key) => [key, rest[key]])) });
-  useAppearance.setState({ ...settings, ...glass });
+  useAppearance.setState(settings);
 }
 
 /** False when the OS asks for reduced motion or the user switched the group off in Appearance. */
@@ -188,7 +181,6 @@ function applyTheme() {
   const root = document.documentElement;
   root.classList.toggle("dark", appearance === "dark");
   applyThemePalette(themeId, appearance);
-  invalidateGlass("theme");
   root.dataset.themeSelected = themeId ? "true" : "false";
   // Replace the boot script's load-time splash colors with the live tokens.
   root.style.backgroundColor = "var(--app-chrome-background)";
@@ -200,9 +192,6 @@ function applyTheme() {
 function applySettings(s: AppearanceSettings) {
   const root = document.documentElement;
   applyGlassOpacity(root, s.glassOpacity);
-  const glass = effectiveGlass(s, readGlassEnvironment(s.motionOff));
-  applyGlassAppearance(root, s, glass.tier, glass.reason);
-  publishGlassEffective(glass.tier, glass.reason);
   applyAppearanceContrast(root, s.appearanceContrast);
   applyChatWidth(root, s.chatWidth);
   applyMessageLayout(root, s.messageLayout);
@@ -236,16 +225,13 @@ export function useApplyAppearance() {
     const unsubStore = useAppearance.subscribe((s, prev) => {
       if (s.theme !== prev.theme || s.mode !== prev.mode || s.halves !== prev.halves || s.revision !== prev.revision) applyTheme();
       applySettings(s);
-      if (GLASS_KEYS.some((key) => s[key] !== prev[key]) || s.glassOpacity !== prev.glassOpacity || s.squareCorners !== prev.squareCorners) invalidateGlass("tokens");
     });
-    const unwatchGlass = watchGlassEnvironment(() => applySettings(useAppearance.getState()));
     const query = systemDarkQuery();
     const onSystem = () => applyTheme();
     query.addEventListener("change", onSystem);
     const unsubThemes = subscribeToCustomThemes(() => useAppearance.getState().bump());
     return () => {
       unsubStore();
-      unwatchGlass();
       unsubThemes();
       query.removeEventListener("change", onSystem);
     };

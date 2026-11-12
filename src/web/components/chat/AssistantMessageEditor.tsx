@@ -240,7 +240,7 @@ export function EditableReplyTexts() {
   const { drafts, setDraft, saving } = useReplyEditor();
   const tooLong = drafts.reduce((sum, text) => sum + text.length, 0) > MAX_EDITED_TEXT;
   return (
-    <div data-glass-surface="composer" className="depth-composer mt-2 flex flex-col gap-2 rounded-(--composer-radius) border p-2">
+    <div className="depth-composer mt-2 flex flex-col gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-2">
       {drafts.map((text, index) => {
         const label = drafts.length > 1 ? t("thread.editReplySection", { index: index + 1, total: drafts.length }) : t("thread.editReplyLabel");
         return (

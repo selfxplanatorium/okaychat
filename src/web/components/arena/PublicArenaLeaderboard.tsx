@@ -20,7 +20,7 @@ export function PublicArenaLeaderboard() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <header data-glass-surface="toolbar" className="border-border sticky top-0 z-10 border-b">
+      <header className="bg-background/80 border-border sticky top-0 z-10 border-b backdrop-blur">
         <div className="mx-auto flex h-12 w-full max-w-5xl items-center justify-between gap-3 px-4">
           <a href="/" className="transition-opacity duration-(--motion-fast) ease-out-quart hover:opacity-80">
             <Brand />

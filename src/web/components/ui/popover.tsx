@@ -1,5 +1,3 @@
-import { useCallback } from "react";
-import { useGlassSurface } from "@/components/glass/GlassSurface";
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
 import { cn } from "@/lib/utils";
 import { useSmoothHeight } from "./smooth-height";
@@ -18,17 +16,11 @@ function PopoverContent({
   ...props
 }: PopoverPrimitive.Popup.Props & Pick<PopoverPrimitive.Positioner.Props, "side" | "align" | "sideOffset" | "anchor">) {
   const smoothHeight = useSmoothHeight();
-  const glassRef = useGlassSurface({ source: "active-content", family: "overlay", priority: 100 });
-  const materialRef = useCallback((node: HTMLElement | null) => {
-    glassRef(node);
-    const cleanup = smoothHeight(node);
-    return () => { glassRef(null); cleanup?.(); };
-  }, [glassRef, smoothHeight]);
   return (
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Positioner data-slot="popover-positioner" side={side} align={align} sideOffset={sideOffset} anchor={anchor} className="isolate z-50">
         <PopoverPrimitive.Popup
-          ref={materialRef}
+          ref={smoothHeight}
           className={cn(
             "dropdown-glass text-popover-foreground origin-(--transform-origin) rounded-xl border p-1.5 depth-float outline-none",
             "translate-x-0 translate-y-0 scale-100 transition-[opacity,scale,translate] duration-[var(--motion-base)] ease-out-expo",

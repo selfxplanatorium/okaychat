@@ -48,10 +48,3 @@ Highlighted select items use `text-primary-foreground` for both the main label a
 Sidebar navigation shortcuts, including New chat, use the same quiet hover/selected row surface (`bg-sidebar-row-hover`), without accent elevation. Accent controls remain reserved for actions within the page.
 
 The chat list uses an alpha gradient mask at its top edge beneath the project switcher. Scrolling increases the fade from 0 to 24 px, revealing the actual sidebar surface in every theme and glass setting; returning to the top removes it. The scroll handler updates a CSS variable directly to avoid React renders while scrolling.
-
-Glass material is owned by `theme/glass.css`, using semantic palette tokens and
-family opacity minimums. Depth utilities continue to own shadows and geometry;
-do not layer independent upstream shadows or raw backdrop blur on these hosts.
-`data-glass-surface` identifies sidebar/composer/overlay/card/toolbar/control
-material, while `data-glass-renderer` describes leased refraction versus fallback.
-Opaque reading content and state-color alpha fills are intentionally separate.

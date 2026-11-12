@@ -6,7 +6,6 @@
  *   @import "tailwindcss";
  *   @import "./theme/theme.css";
  *   @import "./theme/depth.css";
- *   @import "./theme/glass.css";
  *   @import "./motion/motion.css";
  *
  * Data flow: palette.ts writes --app-theme-* on <html> and sets
@@ -208,12 +207,7 @@
   --message-surface: #2a2926;
 }
 
-/*
- * Appearance variables. settings.ts, contrast.ts, and glass.ts overwrite these
- * inline. `--glass-blur`, `--glass-opacity`, and `--glass-saturation` are
- * compatibility tokens kept for older rules; the Glass material itself derives
- * its frost and fill in glass.css and never restores blur in solid mode.
- */
+/* Appearance variables. settings.ts and contrast.ts overwrite these inline. */
 :root {
   --appearance-contrast-base: 100%;
   --appearance-contrast-boost: 0%;
@@ -547,14 +541,62 @@ html[data-theme-id]:not([data-theme-id=""]) {
   }
 }
 
-/*
- * Glass compatibility classes: `surface-glass`, `dialog-glass`, and
- * `dropdown-glass` now live in `theme/glass.css`, where they consume the same
- * material tokens as every `data-glass-surface` host. They are plain classes
- * there, not Tailwind utilities, so one definition covers the legacy callers
- * until each one is classified. `dialog-backdrop` had no callers and is gone:
- * dialogs dim through the theme-derived scrim instead.
- */
+/* Glass surfaces: translucent background driven by --glass-opacity and --glass-blur. */
+@utility surface-glass {
+  background: color-mix(in srgb, var(--background) var(--glass-opacity), transparent);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+
+  @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    background: var(--background) !important;
+  }
+}
+
+@utility dialog-glass {
+  background: color-mix(in srgb, var(--background) var(--glass-opacity), transparent);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  border-color: color-mix(in srgb, var(--contrast-foreground) 10%, transparent);
+  box-shadow:
+    var(--depth-highlight),
+    0 24px 64px -24px rgb(0 0 0 / 50%);
+
+  @variant dark {
+    border-color: color-mix(in srgb, var(--color-white) 8%, transparent);
+    box-shadow:
+      inset 0 1px rgb(255 255 255 / 4%),
+      0 24px 72px -20px rgb(0 0 0 / 90%);
+  }
+
+  @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    background: var(--popover) !important;
+  }
+}
+
+@utility dialog-backdrop {
+  background: color-mix(in srgb, var(--background) 60%, transparent);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+
+  @variant dark {
+    background: color-mix(in srgb, var(--background) 64%, transparent);
+  }
+}
+
+@utility dropdown-glass {
+  background: color-mix(
+    in srgb,
+    var(--popover) 18%,
+    color-mix(in srgb, var(--popover) var(--glass-opacity), transparent)
+  );
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  border: 1px solid color-mix(in srgb, var(--contrast-foreground) 10%, transparent);
+
+  @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    background: var(--popover) !important;
+  }
+}
 
 /* Theme editor inspector. Ported from T3Code apps/web/src/index.css. */
 /* Theme-token dependency probes are restored synchronously, before paint. Keep

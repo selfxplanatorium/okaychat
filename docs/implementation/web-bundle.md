@@ -117,13 +117,6 @@ The chat smoke test can use a local OpenAI-compatible fixture provider to avoid
 spending provider credit. The production flow was tested with that fixture;
 this does not re-verify every external provider or MCP server.
 
-The Glisse source fork uses synchronous control/material CSS and a dynamic
-`vendor/glisse/material-engine` import from the account-scoped registry. Do not
-export the engine from a statically imported barrel or preload it with settings.
-Importing the npm bundle would inject another stylesheet and is forbidden.
-Verify engine isolation and compressed sizes after material/control changes;
-production sizes alone do not establish frame-time or raster-memory budgets.
-
 ## Team channels
 
 `/channels` and `/channels/:channelId` are one `preloadable()` route chunk before the chat fallback. The

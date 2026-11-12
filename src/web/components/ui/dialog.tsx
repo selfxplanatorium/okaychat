@@ -1,4 +1,3 @@
-import { useGlassSurface } from "@/components/glass/GlassSurface";
 "use client";
 
 import * as React from "react";
@@ -49,9 +48,9 @@ function DialogOverlay({
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 isolate z-50 bg-foreground/20",
-        "transition-opacity duration-[var(--motion-base)] ease-out-quart",
-        "data-[starting-style]:opacity-0",
+        "fixed inset-0 isolate z-50 bg-black/10 supports-backdrop-filter:backdrop-blur-xs",
+        "transition-[opacity,backdrop-filter] duration-[var(--motion-base)] ease-out-quart",
+        "data-[starting-style]:opacity-0 data-[starting-style]:[backdrop-filter:blur(0px)]",
         "data-[ending-style]:opacity-0 data-[ending-style]:duration-[var(--motion-fast)] data-[ending-style]:ease-in-quart",
         className,
       )}
@@ -68,12 +67,10 @@ function DialogContent({
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean;
 }) {
-  const glassRef = useGlassSurface({ source: "active-content", family: "overlay", priority: 100 });
   return (
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Popup
-        ref={glassRef}
         data-slot="dialog-content"
         className={cn(
           // Glass surface (follows the Glass opacity setting) and spacing from T3Code's dialog.
@@ -126,7 +123,6 @@ function DialogFooter({
 }: React.ComponentProps<"div"> & {
   showCloseButton?: boolean;
 }) {
-  const glassRef = useGlassSurface({ source: "active-content", family: "overlay", priority: 100 });
   return (
     <div
       data-slot="dialog-footer"

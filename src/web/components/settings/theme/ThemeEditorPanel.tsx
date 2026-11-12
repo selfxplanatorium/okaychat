@@ -26,7 +26,6 @@ import { t, type PlainMessageKey } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { motionAllowed } from "@/state/appearance";
@@ -898,24 +897,44 @@ export function ThemeEditorPanel({
     </label>
   );
 
+  const renderAppearanceButton = (appearance: ThemeAppearance) => {
+    const lockReason = appearanceLockReason(appearance);
+    const isActive = activeAppearance === appearance;
+    // A locked mode stays hoverable so the tooltip can say why it is off;
+    // a real disabled attribute would swallow the pointer events.
+    const button = (
+      <button
+        aria-disabled={lockReason !== null}
+        aria-pressed={isActive}
+        className={cn(
+          "h-7 flex-1 rounded-md px-3 text-sm font-medium outline-none transition-colors duration-(--motion-fast) focus-visible:ring-2 focus-visible:ring-ring",
+          isActive ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+          lockReason !== null && "cursor-not-allowed opacity-50",
+        )}
+        onClick={() => {
+          if (lockReason === null) setActiveAppearance(appearance);
+        }}
+        type="button"
+      >
+        {appearance === "light" ? t("appearance.light") : t("appearance.dark")}
+      </button>
+    );
+    if (lockReason === null) return button;
+    return (
+      <Tooltip>
+        <TooltipTrigger render={button} />
+        <TooltipContent data-theme-editor-panel="">{lockReason}</TooltipContent>
+      </Tooltip>
+    );
+  };
+
   const renderAppearanceButtons = () => (
     <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-center gap-3">
       <span className="text-sm font-medium">{t("appearance.themeAppearance")}</span>
-      <SegmentedControl
-        aria-label={t("appearance.themeAppearanceGroup")}
-        className="w-fit"
-        items={(["light", "dark"] as const).map((appearance) => ({
-          value: appearance,
-          label: appearance === "light" ? t("appearance.light") : t("appearance.dark"),
-          // A locked mode stays reachable so its tooltip can say why it is off.
-          disabled: appearanceLockReason(appearance) !== null,
-          reason: appearanceLockReason(appearance) ?? undefined,
-        }))}
-        onValueChange={(next) => {
-          if (next === "light" || next === "dark") setActiveAppearance(next);
-        }}
-        value={activeAppearance}
-      />
+      <div aria-label={t("appearance.themeAppearanceGroup")} className="bg-muted flex w-fit gap-0.5 rounded-lg p-0.5" role="group">
+        {renderAppearanceButton("light")}
+        {renderAppearanceButton("dark")}
+      </div>
     </div>
   );
 

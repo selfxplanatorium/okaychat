@@ -1,8 +1,5 @@
 import { CodeBlock } from "@/components/ui/code-block";
 import { ImportedQuarantineRecord, ImportedMissingAttachment } from "@/components/chat/ImportedQuarantineRecord";
-import { useGlassBackdrop } from "@/components/glass/GlassBackdrop";
-import { useGlassSurface } from "@/components/glass/GlassSurface";
-import { useCallback } from "react";
 "use client";
 
 import {
@@ -453,7 +450,6 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
   // content keeps an equal spacer and the composer skips the scrollbar.
   const rootRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const messagesBackdrop = useGlassBackdrop("chat-messages", viewportRef);
   const footerRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const root = rootRef.current;
@@ -564,7 +560,6 @@ const ThreadRoot: FC<{ isEmpty: boolean; autoFocus: boolean }> = ({
           <MessageBaselineContext.Provider value={baseline}>
             <div
               key={`messages-${seen.generation}`}
-              ref={messagesBackdrop}
               data-slot="aui_message-group"
               className={cn(
                 "mb-14 flex flex-col gap-y-6 empty:hidden",
@@ -1083,12 +1078,6 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
   const unavailable = useUnavailableTargetRef(useCurrentThreadId());
   // The composer sits on the bottom edge, so it grows upward with the typed line held in place.
   const smoothHeight = useSmoothHeight({ pin: "bottom" });
-  const glassRef = useGlassSurface({ source: "chat-messages", family: "composer", priority: 70 });
-  const materialRef = useCallback((node: HTMLDivElement | null) => {
-    glassRef(node);
-    const cleanup = smoothHeight(node);
-    return () => { glassRef(null); cleanup?.(); };
-  }, [glassRef, smoothHeight]);
   const longPaste = useLongPaste(!agent);
   // Switching to a text-only agent must not leave an earlier attachment in the submission.
   useEffect(() => {
@@ -1096,9 +1085,9 @@ const Composer: FC<{ autoFocus: boolean }> = ({ autoFocus }) => {
   }, [agent, aui]);
   const shell = (
     <div
-      ref={materialRef}
+      ref={smoothHeight}
       data-slot="aui_composer-shell"
-      className="depth-composer data-[dragging=true]:border-ring flex w-full cursor-text flex-col gap-2 rounded-(--composer-radius) border p-(--composer-padding) transition-[border-color,box-shadow] duration-(--motion-base) ease-out-quart data-[dragging=true]:border-dashed data-[dragging=true]:bg-[color-mix(in_oklab,var(--color-accent)_50%,var(--color-background))]"
+      className="depth-composer data-[dragging=true]:border-ring flex w-full cursor-text flex-col gap-2 rounded-(--composer-radius) border bg-(--composer-bg) p-(--composer-padding) [backdrop-filter:blur(var(--glass-blur))_saturate(var(--glass-saturation))] transition-[border-color,box-shadow] duration-(--motion-base) ease-out-quart data-[dragging=true]:border-dashed data-[dragging=true]:bg-[color-mix(in_oklab,var(--color-accent)_50%,var(--color-background))]"
     >
       {!agent && <ComposerAttachments />}
       {longPaste.notice}
@@ -1888,7 +1877,7 @@ const EditComposer: FC = () => {
       data-slot="aui_edit-composer-wrapper"
       className="chat-edit-in flex flex-col px-2 [contain-intrinsic-size:auto_200px] [content-visibility:auto]"
     >
-      <ComposerPrimitive.Root data-glass-surface="composer" className="aui-edit-composer-root depth-composer ms-auto flex w-full max-w-[85%] cursor-text flex-col rounded-(--composer-radius) border  transition-[border-color,box-shadow] duration-(--motion-base) ease-out-quart">
+      <ComposerPrimitive.Root className="aui-edit-composer-root depth-composer ms-auto flex w-full max-w-[85%] cursor-text flex-col rounded-(--composer-radius) border bg-(--composer-bg) transition-[border-color,box-shadow] duration-(--motion-base) ease-out-quart">
         <EditComposerRestore />
         <div className="px-2.5 pt-2.5 has-[>.aui-composer-attachments:empty]:hidden">
           <ComposerAttachments />

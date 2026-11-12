@@ -136,7 +136,7 @@ export function FloatingSelectionBar({
       <div
         role="toolbar"
         aria-label={t("ui.selectionActions")}
-        data-glass-surface="toolbar" className="dropdown-glass depth-float animate-rise-in pointer-events-auto flex max-w-full flex-col gap-1.5 rounded-2xl border p-1.5"
+        className="dropdown-glass depth-float animate-rise-in pointer-events-auto flex max-w-full flex-col gap-1.5 rounded-2xl border p-1.5"
       >
         {error && <p role="alert" className="text-destructive px-2 pt-1 text-xs">{error}</p>}
         <div className="flex flex-wrap items-center gap-1">

@@ -43,37 +43,3 @@ become a clipping block.
 chat, checks both layouts at 1440, 720, 390, dark and reduced-motion, switches live from a second tab,
 reloads and checks the first frame, opens the action menu, and fails on any console error, failed API
 request or horizontal overflow.
-
-## Glass material
-
-Glass preferences are flat account appearance fields, with defaults and numeric
-ranges in `src/shared/appearance.ts`. Existing snapshots normalize on read without
-a database write; PATCH preserves only sent keys. The existing opacity is retained.
-Named presets set bend, dispersion, frost, rim and accent tint atomically; reset
-also resets opacity while preserving typography, themes and motion. The numeric
-tuple determines the displayed preset when devices concurrently change fields.
-Sync remains the existing debounced outbox and refresh-on-focus mechanism.
-
-`theme/glass.ts` writes semantic material tokens after the legacy opacity writer.
-`glass-policy.ts` derives a device-local effective tier: reduced transparency,
-reduced motion, forced colors and full opacity select solid; disabled interface
-motion and low-end hardware cap enhancement at CSS. Requested performance and
-family settings sync; effective tiers, hardware and load failures do not.
-
-The authenticated, account-keyed `GlassRuntime` owns shared observers and bounded
-leases. Sources are explicit existing siblings: shell background, messages only
-(clipped to their viewport), and settings body (excluding the sticky header).
-The composer is never inside the filtered messages source. Menus, popovers,
-selects and dialogs retain Base UI semantics and ref-composed smooth height.
-Theme application and editor preview notify the registry explicitly.
-
-The MIT Glisse 0.5.0 adaptation is vendored under `vendor/glisse`, with provenance
-in UPSTREAM.md. The engine is dynamically imported only for an eligible lease;
-CSS material and stable semantic controls mount independently. No sampled content
-is serialized, cloned or sent over the network. Map/rim storage shares a bounded
-24-entry, 12 MiB reference-counted cache. Reading surfaces remain opaque.
-
-Automated tests cover policy, schema/API migration, presets and cache bounds.
-Native paint, focus, pointer gestures, contrast across imported themes, browser
-coverage and CPU/GPU/heap release budgets require manual browser measurements;
-pure rect/cache tests are not evidence for those properties.

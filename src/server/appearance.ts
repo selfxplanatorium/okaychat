@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { appearanceSchema, DEFAULT_MESSAGE_LAYOUT, GLASS_DEFAULTS, isMessageLayout, parseAppearancePatch, type UserAppearance } from "../shared/appearance.js";
+import { appearanceSchema, DEFAULT_MESSAGE_LAYOUT, isMessageLayout, parseAppearancePatch, type UserAppearance } from "../shared/appearance.js";
 import type { AppEnv } from "./auth.js";
 import { getSettings, updateSettings } from "./settings.js";
 
@@ -12,7 +12,6 @@ const stored = (userId: string): UserAppearance | undefined => {
   const { fontSizeInterface: _device, ...synced } = appearance;
   const parsed = appearanceSchema.safeParse(synced);
   return parsed.success ? parsed.data : {
-    ...GLASS_DEFAULTS,
     ...synced,
     // The fallback must stay a total UserAppearance; a corrupt stored layout falls back to timeline.
     messageLayout: isMessageLayout(synced.messageLayout) ? synced.messageLayout : DEFAULT_MESSAGE_LAYOUT,

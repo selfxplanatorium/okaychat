@@ -315,7 +315,7 @@ function ArtifactPanelBody({
       <div className="shell-artifact-inner flex h-full w-full shrink-0 flex-col border-l md:w-(--artifact-width)">
         <ResizeHandle width={width} onResize={resize} />
         <EdgeSwipeClose onClose={onClose} />
-        <header data-glass-surface="toolbar" className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium">{current?.title ?? id}</p>
             {current && (

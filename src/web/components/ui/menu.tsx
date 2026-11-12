@@ -1,5 +1,3 @@
-import { useCallback } from "react";
-import { useGlassSurface } from "@/components/glass/GlassSurface";
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "./scroll-area";
@@ -29,17 +27,11 @@ function MenuContent({
 }: MenuPrimitive.Popup.Props &
   Pick<MenuPrimitive.Positioner.Props, "side" | "align" | "sideOffset" | "alignOffset" | "anchor">) {
   const smoothHeight = useSmoothHeight();
-  const glassRef = useGlassSurface({ source: "active-content", family: "overlay", priority: 100 });
-  const materialRef = useCallback((node: HTMLElement | null) => {
-    glassRef(node);
-    const cleanup = smoothHeight(node);
-    return () => { glassRef(null); cleanup?.(); };
-  }, [glassRef, smoothHeight]);
   return (
     <MenuPrimitive.Portal>
       <MenuPrimitive.Positioner side={side} align={align} sideOffset={sideOffset} alignOffset={alignOffset} anchor={anchor} className="isolate z-50">
         <MenuPrimitive.Popup
-          ref={materialRef}
+          ref={smoothHeight}
           className={cn(
             "dropdown-glass text-popover-foreground flex max-h-(--available-height) min-w-40 origin-(--transform-origin) flex-col overflow-hidden rounded-xl border depth-float outline-none",
             "translate-x-0 translate-y-0 scale-100 transition-[opacity,scale,translate] duration-[var(--motion-base)] ease-out-expo",
