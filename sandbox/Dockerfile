@@ -4,7 +4,7 @@
 # Everything a run can use comes from this image: the root filesystem is read-only and runs have no network.
 
 # ---- inner.bpf: the seccomp filter bubblewrap applies to every run, generated with libseccomp ----
-FROM python:3.12-slim-bookworm@sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70 AS seccomp
+FROM python:3.15-slim-bookworm@sha256:96599df822d0e1c6bb700014a05c7f3c8cabc6e0f7ff3c4f9f69cee033b4b5d9 AS seccomp
 RUN apt-get update \
  && apt-get install -y --no-install-recommends gcc libc6-dev libseccomp-dev \
  && rm -rf /var/lib/apt/lists/*
@@ -12,7 +12,7 @@ COPY seccomp/inner.c /src/inner.c
 RUN gcc -O2 -Wall -Werror -o /src/inner /src/inner.c -lseccomp && /src/inner /src/inner.bpf
 
 # ---- runtime ----
-FROM python:3.12-slim-bookworm@sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70
+FROM python:3.15-slim-bookworm@sha256:96599df822d0e1c6bb700014a05c7f3c8cabc6e0f7ff3c4f9f69cee033b4b5d9
 
 # Debian packages only, no third-party downloads. Groups: isolation, shell basics, media, PDF, Office (LibreOffice
 # without its GUI or Java), OCR, images and diagrams, archives, metadata, fonts.
