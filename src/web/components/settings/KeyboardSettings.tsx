@@ -153,7 +153,7 @@ export function KeyboardSettings() {
                             type="button"
                             aria-label={t("keyboard.removeShortcut", { combo: formatCombo(combo), command: commandLabel(command) })}
                             onClick={() => setKeys({ [command.id]: keys.filter((k) => k !== combo) })}
-                            className="text-muted-foreground hover:text-foreground rounded p-0.5"
+                            className="text-muted-foreground hover:text-foreground rounded p-0.5 pointer-coarse:p-2.5"
                           >
                             <XIcon className="size-3" />
                           </button>

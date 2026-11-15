@@ -87,11 +87,14 @@ export function CalendarToolbar({
               aria-label={t("calendar.search")}
               placeholder={t("calendar.search")}
               data-command="calendar.search"
-              className="h-8 w-48 ps-7 text-xs"
+              className="h-8 w-48 max-w-full ps-7 text-xs"
             />
           </div>
-          <span className="text-muted-foreground text-xs">{t("calendar.viewZone")}</span>
-          <TimeZonePicker value={zone} onChange={onZone} />
+          {/* One unit, so the label never wraps away from its picker on a phone. */}
+          <span className="flex items-center gap-2 whitespace-nowrap">
+            <span className="text-muted-foreground text-xs">{t("calendar.viewZone")}</span>
+            <TimeZonePicker value={zone} onChange={onZone} />
+          </span>
         </div>
       </div>
     </header>

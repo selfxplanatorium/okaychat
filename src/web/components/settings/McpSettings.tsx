@@ -277,6 +277,8 @@ function ServerRow({ server, index }: { server: ServerView; index: number }) {
   );
 }
 
+const MANY_TOOLS = 40;
+
 export function McpSettings({ embedded = false }: { embedded?: boolean }) {
   const servers = useData((s) => s.mcp);
   const refresh = useData((s) => s.refreshMcp);
@@ -293,6 +295,8 @@ export function McpSettings({ embedded = false }: { embedded?: boolean }) {
   }, [refresh]);
 
   const installed = new Set(servers.map((s) => s.name.toLowerCase()));
+  // Tool definitions ride on every request. Past this many the cost is worth pointing out.
+  const toolsOn = servers.filter((s) => s.enabled).reduce((sum, s) => sum + s.tools.filter((tool) => tool.enabled).length, 0);
 
   return (
     <SettingsPage
@@ -310,6 +314,11 @@ export function McpSettings({ embedded = false }: { embedded?: boolean }) {
         }
       >
         {adding && <ServerForm onDone={() => setAdding(false)} />}
+        {toolsOn > MANY_TOOLS && (
+          <p role="note" className="border-warning/40 bg-warning/10 text-warning mx-4 mt-3 rounded-lg border px-3 py-2 text-xs">
+            {t("mcp.manyTools", { tools: formatNumber(toolsOn) })}
+          </p>
+        )}
         {servers.map((s, index) => (
           <ServerRow key={s.id} server={s} index={index} />
         ))}

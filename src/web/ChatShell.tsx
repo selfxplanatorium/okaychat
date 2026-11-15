@@ -1,4 +1,4 @@
-import { PanelLeftIcon, SquarePenIcon } from "lucide-react";
+import { PanelLeftIcon, SquarePenIcon, XIcon } from "lucide-react";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Route, Switch, useLocation } from "wouter";
 import { useAui, useAuiState } from "@assistant-ui/react";
@@ -95,6 +95,11 @@ function ChatUrlSync() {
   // The chat a URL asked for, while the runtime switches to it from `from`. Until it arrives, or the user opens a
   // third chat, the open chat must not rewrite the URL. A ref, so a repeated effect run sees it at once.
   const pending = useRef<{ id: string; from: string | undefined } | undefined>(undefined);
+  // A link to a chat that no longer exists opens a new chat; this says why, until dismissed or the next chat.
+  const [missing, setMissing] = useState(false);
+  useEffect(() => {
+    if (stored) setMissing(false);
+  }, [stored]);
   const written = useRef<string | undefined>(undefined);
   const last = useRef<{ location?: string; stored?: string }>({});
 
@@ -124,6 +129,7 @@ function ChatUrlSync() {
         await Promise.resolve(aui.threads.switchToNewThread()).catch(() => {});
         if (pending.current !== next) return;
         pending.current = undefined;
+        setMissing(true);
         navigate("/", { replace: true });
       });
       return;
@@ -141,7 +147,15 @@ function ChatUrlSync() {
     document.title = title ? t("shell.tabTitle", { title }) : t("shell.appName");
   }, [title]);
   useEffect(() => () => void (document.title = t("shell.appName")), []);
-  return null;
+  if (!missing) return null;
+  return (
+    <div role="status" className="bg-popover text-popover-foreground absolute inset-x-0 top-14 z-20 mx-auto flex w-fit max-w-[calc(100%-2rem)] items-center gap-2 rounded-xl border px-3 py-2 text-sm shadow-md">
+      <span>{t("shell.chatUnavailable")}</span>
+      <button type="button" aria-label={t("common.close")} onClick={() => setMissing(false)} className="text-muted-foreground hover:text-foreground rounded p-1 pointer-coarse:p-2.5">
+        <XIcon className="size-3.5" />
+      </button>
+    </div>
+  );
 }
 
 /** Tab titles for the pages outside a chat, by top-level route. A chat names its own tab in ChatUrlSync. */

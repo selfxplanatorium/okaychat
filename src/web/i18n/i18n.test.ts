@@ -172,7 +172,7 @@ test("every chunk on disk is valid for its registry row, including optional entr
     assert.deepEqual(problems, [], row.tag);
   }
   // Legacy rows keep the activity and keyboard text they already translated.
-  for (const row of nonSource.filter((r) => r.coverage === "legacy")) {
+  for (const row of nonSource.filter((r) => (r.coverage as string) === "legacy")) {
     const keys = requiredKeys(row.coverage);
     for (const key of LEGACY_SUPPLEMENT) assert.ok(keys.includes(key), `${row.tag}: ${key}`);
   }

@@ -112,11 +112,13 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
                 { id: "compare", label: "sidebar.compare", href: "/compare", icon: GitCompareArrowsIcon },
                 { id: "evaluations", label: "sidebar.evaluations", href: "/evaluations", icon: FlaskConicalIcon },
               ] as const).filter((item) => visibleItems.includes(item.id)).map((item) => (
-                <div key={item.id} className="flex items-center gap-0.5">
+                // The trailing control overlays the row's end, so the selected highlight spans the full width
+                // like the rows without one.
+                <div key={item.id} className="relative flex items-center">
                   <Link
                     href={item.href}
                     aria-current={(item.id === "channels" ? location === "/channels" || location.startsWith("/channels/") : item.id === "notes" ? location.startsWith("/notes") : item.id === "calendar" ? location.startsWith("/calendar") : location === item.href) ? "page" : undefined}
-                    className={cn(rowClass, "min-w-0 flex-1")}
+                    className={cn(rowClass, "min-w-0 flex-1", ("create" in item || item.id === "knowledge") && "pe-10 pointer-coarse:pe-12")}
                     // Start the Library's first page while the pointer heads for the click, so it opens with data.
                     {...(item.id === "library" ? { onPointerEnter: prefetchLibrary, onFocus: prefetchLibrary, onPointerDown: prefetchLibrary } : {})}
                   >
@@ -130,6 +132,7 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
                       </span>
                     )}
                   </Link>
+                  <div className="absolute inset-y-0 end-0 flex items-center">
                   {item.id === "knowledge" && <KnowledgeControl reveal={() => { if (!open) onToggle(); }} />}
                   {"create" in item && (
                     // Sibling, never inside the Link: the row keeps opening its page while this opens the form.
@@ -144,6 +147,7 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
                       <PlusIcon className="size-4" />
                     </button>
                   )}
+                  </div>
                 </div>
               ))}
             </nav>

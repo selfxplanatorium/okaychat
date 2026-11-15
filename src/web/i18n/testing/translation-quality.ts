@@ -7,6 +7,38 @@ import { SOURCE } from "./catalog-rules.js";
  * later cannot ride on an old decision.
  */
 const REVIEWED_IDENTICAL: Record<string, Record<string, readonly string[]>> = {
+  de: {
+    "agents.protocolChatTrigger": ["Chat Trigger"],
+    "apiAccess.paramModel": ["provider/model"],
+    "apiAccess.paramMessages": ["system, user, assistant"],
+    "apiAccess.paramReasoning": ["none, minimal, low, medium, high, xhigh, max"],
+    "email.stageThunderbird": ["Thunderbird XML"],
+    "knowledge.urlPlaceholder": ["https://example.com/guide"],
+    "mcp.transportHttp": ["Streamable HTTP"],
+    "providers.chatgptRunCommand": ["node chatgpt-connect.mjs {file}"],
+    "providers.ollamaAddressPlaceholder": ["http://127.0.0.1:11434"],
+    "voice.callEngineRealtime": ["OpenAI Realtime"],
+    "assistants.familyWidgets": ["Generative UI"],
+    "general.generativeUi": ["Generative UI"],
+    "skills.namePlaceholder": ["skill-name (kebab-case)"],
+    "skills.sourceNamePlaceholder": ["Name (optional)"],
+    "skills.branchPlaceholder": ["Branch (optional)"],
+    "voice.browserVoiceOnline": ["{name} ({lang}) · online"],
+  },
+  es: {
+    "agents.protocolChatTrigger": ["Chat Trigger"],
+    "apiAccess.paramModel": ["provider/model"],
+    "apiAccess.paramMessages": ["system, user, assistant"],
+    "apiAccess.paramReasoning": ["none, minimal, low, medium, high, xhigh, max"],
+    "email.stageThunderbird": ["Thunderbird XML"],
+    "knowledge.urlPlaceholder": ["https://example.com/guide"],
+    "mcp.transportHttp": ["Streamable HTTP"],
+    "providers.chatgptRunCommand": ["node chatgpt-connect.mjs {file}"],
+    "providers.ollamaAddressPlaceholder": ["http://127.0.0.1:11434"],
+    "voice.callEngineRealtime": ["OpenAI Realtime"],
+    "arena.leaderboardProvisionalBadge": ["Provisional {count}/20"],
+    "projects.fileTokens": ["~{tokens} tokens"],
+  },
   fr: {
     "agents.protocolChatTrigger": ["Chat Trigger"],
     "apiAccess.paramModel": ["provider/model"],

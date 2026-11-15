@@ -105,7 +105,7 @@ export function SelectModeToggle({ selecting, onChange, disabled }: { selecting:
       onClick={() => onChange(!selecting)}
       className="pointer-coarse:h-10 pointer-coarse:px-4"
     >
-      {selecting ? <XIcon /> : <ListChecksIcon />} {selecting ? "Done" : "Select"}
+      {selecting ? <XIcon /> : <ListChecksIcon />} {selecting ? t("common.done") : t("common.select")}
     </Button>
   );
 }

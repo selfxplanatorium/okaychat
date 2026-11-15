@@ -28,6 +28,7 @@ export default {
   save: "Save",
   saving: "Saving…",
   select: "Select",
+  done: "Done",
   selectAll: "Select all",
   settings: "Settings",
   stop: "Stop",

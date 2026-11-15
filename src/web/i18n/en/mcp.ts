@@ -2,6 +2,7 @@ export default {
   title: "MCP servers",
   description: "Connect Model Context Protocol servers to give models tools. Connections open on first use, time out per call, reconnect once on failure, and close when idle.",
   yourServers: "Your servers",
+  manyTools: "{tools} tools are on. Every message sends all of their definitions to the model, which adds input tokens and cost to each reply. Expand a server and turn off the tools you do not use.",
   addServer: "Add server",
   add: "Add",
   noServers: "No servers yet.",

@@ -26,8 +26,8 @@ export const LEGACY_SUPPLEMENT = [
   "keyboard.cmdMessageTranslate", "keyboard.cmdMessageTranslateChoose",
 ] as const;
 
-/** Only these rows may keep partial feature coverage; every later row is a full `wave` locale. */
-export const LEGACY_TAGS = ["de", "es"] as const;
+/** Only these rows may keep partial feature coverage. German and Spanish were completed, so none remain. */
+export const LEGACY_TAGS: readonly string[] = [];
 
 const namespaceKeys = (namespaces: readonly string[]) =>
   namespaces.flatMap((ns) => Object.keys(SOURCE[ns] ?? {}).map((key) => `${ns}.${key}`));

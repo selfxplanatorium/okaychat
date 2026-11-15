@@ -16,6 +16,7 @@ export default {
   appName: "okaychat",
   tabTitle: "{title} · okaychat",
   openSidebar: "Open sidebar",
+  chatUnavailable: "That chat is no longer available. It may have been deleted.",
   loadFailed: "Could not load your chats and settings.",
   pluginsTitle: "Plugins",
   pluginsIntro: "Manage the tools and skills available to your chats.",

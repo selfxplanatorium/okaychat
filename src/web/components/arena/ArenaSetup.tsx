@@ -79,8 +79,9 @@ export function ArenaSetup({
     onSubmit();
   };
 
+  // Same 5xl column as the page header, so the form starts under the title; its rows keep a readable width.
   return (
-    <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-col gap-5 overflow-y-auto px-4 py-6">
+    <div className="mx-auto flex min-h-0 w-full max-w-[calc(64rem+2rem)] flex-col gap-5 overflow-y-auto px-4 py-6 [&>*]:max-w-3xl">
       <div>
         <h2 className="text-lg font-semibold tracking-tight">{t("arena.setupTitle")}</h2>
         <p className="text-muted-foreground mt-1 text-sm">{t("arena.setupIntro")}</p>
