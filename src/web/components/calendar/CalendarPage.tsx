@@ -146,6 +146,8 @@ export function CalendarPage() {
 
   const missing = !!selectedId && selectedStatus === "error";
 
+  const showEmptyGrid = !loading && !error && !q;
+
   return (
     <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <CalendarToolbar
@@ -178,7 +180,8 @@ export function CalendarPage() {
             <Button size="sm" variant="outline" onClick={() => useCalendar.getState().setSearch("")}>{t("calendar.clearFilters")}</Button>
           </div>
         )}
-        {!loading && !events.length && !q && (
+        {/* Month and week keep their grid when empty: it shows the dates and its day cells create events. */}
+        {showEmptyGrid && !events.length && view === "agenda" && (
           <div className="flex flex-col items-center gap-1 p-8 text-center">
             <p className="text-sm font-medium">{t("calendar.empty")}</p>
             <p className="text-muted-foreground text-sm">{t("calendar.emptyBody")}</p>
@@ -195,7 +198,7 @@ export function CalendarPage() {
             loadingMore={loadingMore}
           />
         )}
-        {view === "month" && events.length > 0 && (
+        {view === "month" && (events.length > 0 || showEmptyGrid) && (
           <MonthView
             dates={bounds.dates}
             events={events}
@@ -207,7 +210,7 @@ export function CalendarPage() {
             onNewOnDay={openCreate}
           />
         )}
-        {view === "week" && events.length > 0 && <WeekView dates={bounds.dates} events={events} zone={zone} onOpen={openEvent} />}
+        {view === "week" && (events.length > 0 || showEmptyGrid) && <WeekView dates={bounds.dates} events={events} zone={zone} today={todayInZone(zone)} onOpen={openEvent} />}
         {nextCursor && !dense && <Button variant="ghost" size="sm" className="m-3" onClick={() => void useCalendar.getState().loadMore()}>{t("calendar.loadingMore")}</Button>}
         {dense && view !== "agenda" && (
           <div role="status" className="border-warning/40 bg-warning/5 m-3 rounded-lg border p-3 text-sm">

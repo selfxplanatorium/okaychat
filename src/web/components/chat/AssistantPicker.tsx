@@ -36,6 +36,7 @@ export function AssistantPickerButton({ compact = false }: { compact?: boolean }
       data-command="composer.assistant"
       aria-haspopup="dialog"
       aria-label={t("assistants.selectedLabel", { name })}
+      title={name}
       onClick={() => openAssistantPicker()}
       onContextMenu={(event) => {
         event.preventDefault();
@@ -44,7 +45,8 @@ export function AssistantPickerButton({ compact = false }: { compact?: boolean }
       className="hover:bg-muted text-muted-foreground hover:text-foreground aria-expanded:bg-muted flex h-7 min-w-0 shrink items-center gap-1 rounded-lg px-2 text-xs font-medium transition-colors duration-(--motion-fast) ease-out-quart pointer-coarse:h-9 max-sm:hidden pointer-coarse:hidden"
     >
       <AssistantIcon name={label?.icon ?? "sparkles"} className="size-3.5 shrink-0" />
-      {!compact && <span className="max-w-32 truncate">{name}</span>}
+      {/* The default has no name worth the width; the model picker beside it needs the room. */}
+      {!compact && label && <span className="max-w-32 truncate">{name}</span>}
     </button>
   );
 }

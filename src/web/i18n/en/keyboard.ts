@@ -227,6 +227,8 @@ export default {
   settingsProjects: "Settings: Projects",
   settingsSchedules: "Settings: Scheduled",
   settingsUsage: "Settings: Usage",
+  settingsWebhooks: "Settings: Webhooks",
+  settingsVoice: "Settings: Voice",
   settingsAppearance: "Settings: Appearance",
   settingsKeyboard: "Settings: Keyboard",
   settingsAdmin: "Settings: Admin",

@@ -105,10 +105,10 @@ function ProviderRow({ provider, index, expanded, onToggle, onModels }: { provid
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" onClick={onToggle} className="flex min-w-24 flex-1 items-center gap-2 text-left">
           <span className="truncate text-sm font-medium">{provider.name}</span>
-          {provider.id === "opencode-go" && <span className="bg-primary/10 text-primary rounded px-1.5 py-0.5 text-[10px] font-medium">{t("providers.recommended")}</span>}
+          {provider.id === "opencode-go" && <span className="bg-primary/10 text-primary shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium max-sm:hidden">{t("providers.recommended")}</span>}
           {provider.connected && <CheckCircle2Icon className="text-success animate-pop-in size-3.5 shrink-0" aria-label={t("providers.connected")} />}
           {provider.shared && <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[10px] font-medium">{t("providers.serverKey")}</span>}
-          <span className="text-muted-foreground ml-auto text-xs tabular-nums">{provider.modelCount ? t("providers.modelCount", { count: provider.modelCount }) : ""}</span>
+          <span className="text-muted-foreground ml-auto shrink-0 text-xs whitespace-nowrap tabular-nums">{provider.modelCount ? t("providers.modelCount", { count: provider.modelCount }) : ""}</span>
         </button>
         {provider.connected && !provider.shared && (
           <>

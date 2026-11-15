@@ -24,12 +24,12 @@ export interface CommandDef {
   palette?: boolean;
 }
 
-const SETTINGS_SECTIONS = ["general", "account", "memory", "email", "providers", "apiAccess", "mcp", "agents", "projects", "schedules", "usage", "appearance", "keyboard", "admin"] as const;
+export const SETTINGS_SECTIONS = ["general", "account", "memory", "email", "providers", "apiAccess", "mcp", "agents", "projects", "schedules", "webhooks", "usage", "voice", "appearance", "keyboard", "admin"] as const;
 
 const SETTINGS_LABELS = {
   general: "keyboard.settingsGeneral", account: "keyboard.settingsAccount", memory: "keyboard.settingsMemory", email: "keyboard.settingsEmail", providers: "keyboard.settingsProviders",
   apiAccess: "keyboard.settingsApiAccess",
-  mcp: "keyboard.settingsMcp", agents: "settings.sectionAgents", projects: "keyboard.settingsProjects", schedules: "keyboard.settingsSchedules", usage: "keyboard.settingsUsage",
+  mcp: "keyboard.settingsMcp", agents: "settings.sectionAgents", projects: "keyboard.settingsProjects", schedules: "keyboard.settingsSchedules", usage: "keyboard.settingsUsage", webhooks: "keyboard.settingsWebhooks", voice: "keyboard.settingsVoice",
   appearance: "keyboard.settingsAppearance", keyboard: "keyboard.settingsKeyboard", admin: "keyboard.settingsAdmin",
 } as const satisfies Record<(typeof SETTINGS_SECTIONS)[number], PlainMessageKey>;
 

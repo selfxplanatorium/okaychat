@@ -237,8 +237,9 @@ export function ChannelComposer({
           </Button>
         </div>
         <div className="text-muted-foreground flex items-center justify-between gap-2 text-[0.7rem]">
-          <span className="truncate">{showAi ? (room.ai ? `${t("channels.aiBinding")}: ${room.ai.label}` : t("channels.aiNone")) : t("channels.storageOwner")}</span>
-          <span>{showAi ? t("channels.storageOwner") : ""}</span>
+          {/* The status keeps its width (it was squeezed to "O…" on phones) and names what is off. */}
+          <span className={showAi ? "max-w-[50%] shrink-0 truncate" : "truncate"}>{showAi ? `${t("channels.aiBinding")}: ${room.ai ? room.ai.label : t("channels.aiNone")}` : t("channels.storageOwner")}</span>
+          <span className="min-w-0 text-end">{showAi ? t("channels.storageOwner") : ""}</span>
         </div>
       </div>
     </div>

@@ -73,7 +73,7 @@ export function AuthScreen({ needsSetup, signupOpen, onDone }: { needsSetup: boo
           />
           <Input
             type="password"
-            placeholder={t("auth.password")}
+            placeholder={mode === "login" ? t("auth.currentPassword") : t("auth.password")}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete={mode === "login" ? "current-password" : "new-password"}
@@ -83,7 +83,7 @@ export function AuthScreen({ needsSetup, signupOpen, onDone }: { needsSetup: boo
             style={{ "--i": 4 } as CSSProperties}
           />
           {error && (
-            <p key={errorSeq} className="text-error animate-fade-in text-sm">
+            <p key={errorSeq} role="alert" className="text-error animate-fade-in text-sm">
               {error}
             </p>
           )}

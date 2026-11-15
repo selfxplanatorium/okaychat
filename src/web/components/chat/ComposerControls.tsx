@@ -204,14 +204,15 @@ export function PromptsButton() {
       type="button"
       data-command="composer.prompts"
       aria-label={t("composer.prompts")}
+      title={t("composer.prompts")}
       onClick={() => {
         void loadMcp();
         openPromptPicker();
       }}
       className={cn(triggerClass, "max-sm:hidden pointer-coarse:hidden")}
     >
+      {/* Icon only: with its label the toolbar left the model picker room for two letters. */}
       <SquareSlashIcon className="size-3.5" />
-      {t("composer.prompts")}
     </button>
   );
 }

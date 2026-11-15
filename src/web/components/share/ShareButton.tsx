@@ -117,11 +117,8 @@ export function SharePanel({ threadId, title = t("share.shareThisChat") }: { thr
   return (
     <div className="flex flex-col gap-3">
       {title !== null && <p className="text-sm font-medium">{title}</p>}
-      <div className="text-muted-foreground flex flex-col gap-1 text-xs">
-        <p>{t("share.shareNotice")}</p>
-        <p>{t("share.liveModeHint")}</p>
-        <p>{t("share.frozenModeHint")}</p>
-      </div>
+      {/* The live/frozen hints belong to the mode choice in the link form, which shows the one that applies. */}
+      <p className="text-muted-foreground text-xs">{t("share.shareNotice")}</p>
       {sharingDisabled && (
         <p role="status" className="bg-muted rounded-lg p-2 text-xs">
           {t("share.sharingDisabled")}

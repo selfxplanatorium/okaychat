@@ -254,6 +254,7 @@ const de: Translation = {
     name: "Name",
     email: "E-Mail",
     password: "Passwort (mindestens 8 Zeichen)",
+    currentPassword: "Passwort",
     noAccount: "Kein Konto? Erstelle eins",
     haveAccount: "Du hast ein Konto? Melde dich an",
   },

@@ -13,11 +13,14 @@ export function WeekView({
   dates,
   events,
   zone,
+  today,
   onOpen,
 }: {
   dates: string[];
   events: CalendarEventSummary[];
   zone: string;
+  /** Today's date in the display zone, marked in the header like the month grid marks its cell. */
+  today?: string;
   onOpen: (id: string) => void;
 }) {
   const segments = dates.map((date) => {
@@ -45,7 +48,7 @@ export function WeekView({
             const offsetChanged = start !== null && end !== null && zoneOffsetMinutes(zone, start) !== zoneOffsetMinutes(zone, end);
             return (
               <div key={date} className="text-center">
-                <div className="text-xs font-medium">{dayTitle(date)}</div>
+                <div aria-current={date === today ? "date" : undefined} className={date === today ? "text-primary text-xs font-semibold" : "text-xs font-medium"}>{dayTitle(date)}</div>
                 {offsetChanged && start !== null && <div className="text-muted-foreground text-[0.65rem]">{offsetLabel(zoneOffsetMinutes(zone, start))}</div>}
               </div>
             );

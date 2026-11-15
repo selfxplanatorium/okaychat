@@ -256,6 +256,7 @@ const es: Translation = {
     name: "Nombre",
     email: "Correo electrónico",
     password: "Contraseña (8 caracteres o más)",
+    currentPassword: "Contraseña",
     noAccount: "¿No tienes cuenta? Crea una",
     haveAccount: "¿Tienes cuenta? Inicia sesión",
   },

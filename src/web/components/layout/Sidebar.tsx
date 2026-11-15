@@ -100,7 +100,7 @@ export function Sidebar({ open, onToggle, settings, section }: { open: boolean; 
                 showChat(navigate);
               }}><SquarePenIcon className="size-4 shrink-0" /> {t("common.newChat")}</button>}
               {([
-                { id: "scheduled", label: "sidebar.scheduled", href: "/scheduled", icon: SwordsIcon, CalendarClockIcon, create: { command: "nav.createSchedule", label: "ux.newScheduleQuick", href: "/scheduled?new=1" } },
+                { id: "scheduled", label: "sidebar.scheduled", href: "/scheduled", icon: CalendarClockIcon, create: { command: "nav.createSchedule", label: "ux.newScheduleQuick", href: "/scheduled?new=1" } },
                 { id: "notes", label: "sidebar.notes", href: "/notes", icon: NotebookPenIcon, create: { command: "notes.create", label: "notes.new", href: "/notes?new=1" } },
                 { id: "calendar", label: "sidebar.calendar", href: "/calendar", icon: CalendarDaysIcon, create: { command: "calendar.create", label: "calendar.new", href: "/calendar?new=1" } },
                 { id: "library", label: "sidebar.library", href: "/library", icon: LibraryIcon },

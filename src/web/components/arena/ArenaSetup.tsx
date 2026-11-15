@@ -11,6 +11,9 @@ import { useData } from "@/state/data";
 import type { ArenaModelOption, ArenaOptions } from "@/lib/arena-api";
 import { cn } from "@/lib/utils";
 
+// A whole sentence: it must wrap on a phone instead of running past the screen edge.
+const EXAMPLE_CHIP = "h-auto max-w-full py-1 text-start whitespace-normal";
+
 export function ArenaSetup({
   options,
   prompt,
@@ -113,13 +116,13 @@ export function ArenaSetup({
       <div className="flex flex-col gap-1.5">
         <span className="text-muted-foreground text-xs">{t("arena.examplesLabel")}</span>
         <div className="flex flex-wrap gap-1.5">
-          <Button type="button" size="sm" variant="outline" onClick={() => onPromptChange(t("arena.exampleCompare"))}>
+          <Button type="button" size="sm" variant="outline" className={EXAMPLE_CHIP} onClick={() => onPromptChange(t("arena.exampleCompare"))}>
             {t("arena.exampleCompare")}
           </Button>
-          <Button type="button" size="sm" variant="outline" onClick={() => onPromptChange(t("arena.exampleDecide"))}>
+          <Button type="button" size="sm" variant="outline" className={EXAMPLE_CHIP} onClick={() => onPromptChange(t("arena.exampleDecide"))}>
             {t("arena.exampleDecide")}
           </Button>
-          <Button type="button" size="sm" variant="outline" onClick={() => onPromptChange(t("arena.exampleExplain"))}>
+          <Button type="button" size="sm" variant="outline" className={EXAMPLE_CHIP} onClick={() => onPromptChange(t("arena.exampleExplain"))}>
             {t("arena.exampleExplain")}
           </Button>
         </div>

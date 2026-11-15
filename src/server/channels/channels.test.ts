@@ -325,6 +325,9 @@ test("SSE sends ready, heartbeat, revoked and releases its account slot", { time
       text += decoder.decode(part.value);
     }
   };
+  // The heartbeat timer is unref'ed, so the idle test process would exit before it fires and the runner
+  // would cancel this test and every one after it.
+  const keepAlive = setInterval(() => {}, 1_000);
   try {
     await until("event: reset");
     assert.match(text, /event: ready/);
@@ -335,6 +338,7 @@ test("SSE sends ready, heartbeat, revoked and releases its account slot", { time
     while (!(await reader.read()).done) { /* drain */ }
     assert.equal(streamCounts().process, baseline);
   } finally {
+    clearInterval(keepAlive);
     await reader.cancel();
     db.prepare("UPDATE sessions SET expires_at = ? WHERE user_id = 'alice'").run(Date.now() + 3600000);
   }

@@ -12,7 +12,7 @@ import { useChatPrivacyStore } from "@/state/chat-privacy";
 import { showChat, useData } from "@/state/data";
 import { useThreadSelection } from "@/state/thread-selection";
 import { t } from "@/i18n";
-import { COMMAND_GROUPS, COMMANDS, commandLabel, groupLabel } from "./commands";
+import { COMMAND_GROUPS, COMMANDS, SETTINGS_SECTIONS, commandLabel, groupLabel } from "./commands";
 import { Kbd } from "./Kbd";
 import { commandAvailable, commandTarget, dialogReturnFocus, press, runCommand, useBindings, useCommand, useKeyboardDialog, useKeyboardDispatcher } from "./registry";
 
@@ -50,6 +50,14 @@ function focusComposer() {
   input.setSelectionRange(input.value.length, input.value.length);
   return true;
 }
+
+const SETTINGS_NAV_COMMANDS = new Set<string>([
+  ...SETTINGS_SECTIONS.map((id) => `settings.${id}`),
+  "settings.compaction",
+  "settings.webTools",
+  "settings.webSearchLimit",
+  "settings.permissions",
+]);
 
 /** Shell-level commands, the key listeners, and the command list. Mounted once inside the runtime. */
 export function KeyboardShortcuts() {
@@ -94,7 +102,10 @@ export function KeyboardShortcuts() {
   useCommand("app.openAgents", () => navigate(settingsHref("agents")));
   useCommand("nav.createProject", () => navigate("/projects?new=1"));
   useCommand("nav.createSchedule", () => navigate("/scheduled?new=1"));
-  for (const command of COMMANDS.filter((c) => c.group === "Settings")) {
+  // Only the commands that open a settings page. The group also holds page actions (`email.save`,
+  // `settings.ollamaTest`, ...) that click their own `data-command` control; a handler here would make
+  // them look available everywhere and navigate to a section that does not exist.
+  for (const command of COMMANDS.filter((c) => SETTINGS_NAV_COMMANDS.has(c.id))) {
     const section = command.id.slice("settings.".length);
     useCommand(command.id, () => {
       if (section === "admin" && useData.getState().me?.role !== "admin") return false;

@@ -151,6 +151,8 @@ const knowledge = {
   citationUnavailable: "This passage is unavailable.",
   readOnlyHelp: "Ask the collection owner to add, retry or remove a source.",
   adminTitle: "Shared knowledge storage",
+  adminDescription: "Collections that accounts on this server share with others. Deleting one makes the chats that depend on it unavailable.",
+  adminEmpty: "No shared collections.",
   adminCleanup: "Delete shared collection",
   adminReason: "Reason for deletion",
   adminCleanupConfirm: "Delete this shared collection and its indexed sources? Dependent chats will become unavailable.",

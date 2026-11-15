@@ -72,11 +72,12 @@ export function ChannelList({
     tab === "archived" ? mode === "joined" && archivedOnly : mode === tab && !(tab === "joined" && archivedOnly);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-1 px-2 pt-2">
+      {/* Wraps: both labels do not fit side by side in the 240px desktop column. */}
+      <div className="flex flex-wrap items-center gap-1 px-2 pt-2">
         <Button type="button" size="sm" className="flex-1" onClick={onCreate}>
           <PlusIcon aria-hidden /> {t("channels.create")}
         </Button>
-        <Button type="button" size="sm" variant="outline" onClick={onNewDm} aria-label={t("channels.newDm")}>
+        <Button type="button" size="sm" variant="outline" className="flex-1" onClick={onNewDm} aria-label={t("channels.newDm")}>
           <UsersIcon aria-hidden /> {t("channels.newDm")}
         </Button>
       </div>
@@ -85,7 +86,7 @@ export function ChannelList({
           <UploadIcon aria-hidden /> {t("roomArchives.importRoom")}
         </Button>
       </div>
-      <div role="tablist" aria-label={t("channels.title")} className="grid grid-cols-2 gap-0.5 px-2 pt-2">
+      <div role="tablist" aria-label={t("channels.title")} className="flex flex-wrap gap-0.5 px-2 pt-2">
         {tabs.map(([tab, label, Icon]) => (
           <button
             key={tab}

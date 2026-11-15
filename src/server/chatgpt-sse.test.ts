@@ -98,14 +98,21 @@ test("aborts and deadlines stop an endless utility stream", async () => {
         controller.enqueue(encoder.encode(": keep-alive\n\n"));
       },
     });
-  const abort = new AbortController();
-  setTimeout(() => abort.abort(), 5);
-  await assert.rejects(collectCompletedResponse(new Response(endless()), { signal: abort.signal }), (error) => (error as Error).name === "AbortError");
+  // AbortSignal.timeout() uses an unref'ed timer. Without a referenced one the idle test process exits
+  // before the deadline fires and the runner cancels this test and every one after it.
+  const keepAlive = setInterval(() => {}, 1_000);
+  try {
+    const abort = new AbortController();
+    setTimeout(() => abort.abort(), 5);
+    await assert.rejects(collectCompletedResponse(new Response(endless()), { signal: abort.signal }), (error) => (error as Error).name === "AbortError");
 
-  await assert.rejects(
-    collectCompletedResponse(new Response(endless()), { timeoutMs: 5 }),
-    (error) => error instanceof AppError && error.code === "timeout",
-  );
+    await assert.rejects(
+      collectCompletedResponse(new Response(endless()), { timeoutMs: 5 }),
+      (error) => error instanceof AppError && error.code === "timeout",
+    );
+  } finally {
+    clearInterval(keepAlive);
+  }
 });
 
 test("stream guard forwards a completed stream unchanged", async () => {

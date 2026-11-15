@@ -42,7 +42,7 @@ export function NotesPage({ noteId }: { noteId?: string }) {
   const me = useData((state) => state.me);
   const projects = useData((state) => state.projects);
   const search = useSearch();
-  const [location, navigate] = useLocation();
+  const [, navigate] = useLocation();
   const items = useNotes((state) => state.items);
   const filters = useNotes((state) => state.filters);
   const listStatus = useNotes((state) => state.listStatus);
@@ -171,8 +171,11 @@ export function NotesPage({ noteId }: { noteId?: string }) {
         <Button variant="outline" size="sm" className="mt-3" onClick={() => navigate(`/notes${filtersQuery(filters)}`)}>{t("notes.back")}</Button>
       </div>
     </div>
+  ) : noteId ? (
+    <div role="status" className="grid flex-1 place-items-center p-8 text-sm text-muted-foreground">{t("notes.loading")}</div>
   ) : (
-    <div className="grid flex-1 place-items-center p-8 text-sm text-muted-foreground">{t("notes.loading")}</div>
+    // No note is open. With an empty list the list already carries this hint.
+    <div className="grid flex-1 place-items-center p-8 text-center text-sm text-muted-foreground">{items.length > 0 && t("notes.emptyBody")}</div>
   );
 
   return (
@@ -197,6 +200,7 @@ export function NotesPage({ noteId }: { noteId?: string }) {
               items={items}
               selectedId={noteId ?? null}
               loading={listStatus === "loading"}
+              filtered={filtersQuery(filters) !== ""}
               error={listError}
               nextCursor={nextCursor}
               onSelect={openNote}
@@ -210,9 +214,6 @@ export function NotesPage({ noteId }: { noteId?: string }) {
         </aside>
         <div className={`${noteId ? "flex" : "hidden md:flex"} min-w-0 flex-1 flex-col`}>{editor}</div>
       </div>
-      {location === "/notes" && !items.length && listStatus === "ready" && (
-        <p className="text-muted-foreground sr-only">{t("notes.noResults")}</p>
-      )}
     </main>
   );
 }

@@ -59,8 +59,11 @@ interface RawRow {
   hasAudio: number | null;
 }
 
-const VIDEO_THREAD = `(SELECT t.id FROM video_threads r JOIN threads t ON t.id=r.thread_id AND t.user_id=v.user_id
-  WHERE r.video_id=v.id ORDER BY (t.id=v.origin_thread_id) DESC,t.updated_at DESC,t.id DESC LIMIT 1)`;
+// The origin preference is a column of an inner select: SQLite before 3.47 (Node 22) cannot resolve an
+// outer column inside the ORDER BY of a correlated subquery and fails with "no such column".
+const VIDEO_THREAD = `(SELECT id FROM (SELECT vt.id AS id,(vt.id=v.origin_thread_id) AS origin,vt.updated_at AS updated_at
+    FROM video_threads r JOIN threads vt ON vt.id=r.thread_id AND vt.user_id=v.user_id WHERE r.video_id=v.id)
+  ORDER BY origin DESC,updated_at DESC,id DESC LIMIT 1)`;
 const SOURCES = `
   SELECT 'video:' || v.id AS key,v.label AS name,'video' AS kind,v.mime,v.size,v.created_at,
     'generated' AS source,t.id AS threadId,t.title AS threadTitle,t.project_id AS projectId,NULL AS artifactKind,

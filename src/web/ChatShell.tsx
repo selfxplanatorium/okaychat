@@ -3,7 +3,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Route, Switch, useLocation } from "wouter";
 import { useAui, useAuiState } from "@assistant-ui/react";
 import { AppLoading } from "@/components/AppLoading";
-import { t } from "@/i18n";
+import { t, type PlainMessageKey } from "@/i18n";
 import { ArtifactPanel } from "@/components/artifacts/ArtifactPanel";
 import { ChatView } from "@/components/chat/ChatView";
 import { Sidebar } from "@/components/layout/Sidebar";
@@ -144,6 +144,22 @@ function ChatUrlSync() {
   return null;
 }
 
+/** Tab titles for the pages outside a chat, by top-level route. A chat names its own tab in ChatUrlSync. */
+const PAGE_TITLES: Record<string, PlainMessageKey> = {
+  settings: "common.settings",
+  channels: "sidebar.channels",
+  notes: "sidebar.notes",
+  calendar: "sidebar.calendar",
+  "/scheduled": "sidebar.scheduled",
+  "/library": "sidebar.library",
+  "/knowledge": "sidebar.knowledge",
+  "/plugins": "sidebar.plugins",
+  "/projects": "sidebar.projects",
+  "/compare": "sidebar.compare",
+  "/evaluations": "sidebar.evaluations",
+  "/arena": "sidebar.arena",
+};
+
 export function Shell({ userId }: { userId: string }) {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -160,6 +176,10 @@ export function Shell({ userId }: { userId: string }) {
   const inCalendar = location === "/calendar" || location.startsWith("/calendar?");
   const inNavigation = inChannels || inNotes || inCalendar || ["/scheduled", "/library", "/knowledge", "/plugins", "/projects", "/compare", "/evaluations", "/arena"].includes(location);
   const route = inSettings ? "settings" : inChannels ? "channels" : inNotes ? "notes" : inCalendar ? "calendar" : inNavigation ? location : "chat";
+  useEffect(() => {
+    const key = PAGE_TITLES[route];
+    if (key) document.title = t("shell.tabTitle", { title: t(key) });
+  }, [route]);
   // The settings layer stays mounted in the sidebar, so it keeps its last section while the chat is shown.
   const lastSection = useRef<string | undefined>(undefined);
   if (inSettings) lastSection.current = location.split("/")[2] || undefined;
@@ -228,6 +248,14 @@ export function Shell({ userId }: { userId: string }) {
   if (!loaded) return <AppLoading />;
   if (!connected && !hasAgent && !onboardingSkipped && !inSettings) return <Onboarding />;
 
+  // Every page outside the chat needs this bar: with the sidebar closed (always on phones) it is the only
+  // visible way back to navigation.
+  const openSidebarBar = (
+    <div className={`flex h-12 shrink-0 items-center px-3 ${sidebarOpen ? "md:hidden" : ""}`}>
+      <button type="button" aria-label={t("shell.openSidebar")} onClick={() => setSidebarOpen(true)} className="text-muted-foreground hover:bg-accent rounded-lg p-2 pointer-coarse:p-3"><PanelLeftIcon className="size-4" /></button>
+    </div>
+  );
+
   return (
     <RuntimeProvider>
       <KeyboardShortcuts />
@@ -271,53 +299,72 @@ export function Shell({ userId }: { userId: string }) {
               </Route>
               <Route path="/channels/:channelId/thread/:rootId">
                 {(p) => (
+                  <>
+                  {openSidebarBar}
                   <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
                     <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">{t("common.loading")}</p>}>
                       <ChannelsPage channelId={p.channelId} threadRootId={p.rootId} />
                     </Suspense>
                   </main>
+                  </>
                 )}
               </Route>
               <Route path="/channels/:channelId">
                 {(p) => (
+                  <>
+                  {openSidebarBar}
                   <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
                     <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">{t("common.loading")}</p>}>
                       <ChannelsPage channelId={p.channelId} />
                     </Suspense>
                   </main>
+                  </>
                 )}
               </Route>
               <Route path="/channels">
                 {() => (
+                  <>
+                  {openSidebarBar}
                   <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
                     <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">{t("common.loading")}</p>}>
                       <ChannelsPage />
                     </Suspense>
                   </main>
+                  </>
                 )}
               </Route>
               <Route path="/notes/:id">
                 {(p) => (
+                  <>
+                  {openSidebarBar}
                   <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">{t("common.loading")}</p>}>
                     <NotesPage noteId={p.id} />
                   </Suspense>
+                  </>
                 )}
               </Route>
               <Route path="/notes">
                 {() => (
+                  <>
+                  {openSidebarBar}
                   <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">{t("common.loading")}</p>}>
                     <NotesPage />
                   </Suspense>
+                  </>
                 )}
               </Route>
               <Route path="/calendar">
                 {() => (
+                  <>
+                  {openSidebarBar}
                   <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">{t("common.loading")}</p>}>
                     <CalendarPage />
                   </Suspense>
+                  </>
                 )}
               </Route>
               <Route path="/arena">
+                {openSidebarBar}
                 <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
                   <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">{t("common.loading")}</p>}>
                     <NavigationPage page="arena" />
@@ -325,6 +372,7 @@ export function Shell({ userId }: { userId: string }) {
                 </main>
               </Route>
               <Route path="/compare">
+                {openSidebarBar}
                 <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
                   <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">{t("common.loading")}</p>}>
                     <NavigationPage page="compare" />
@@ -332,6 +380,7 @@ export function Shell({ userId }: { userId: string }) {
                 </main>
               </Route>
               <Route path="/evaluations">
+                {openSidebarBar}
                 <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
                   <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">{t("common.loading")}</p>}>
                     <NavigationPage page="evaluations" />
@@ -340,9 +389,7 @@ export function Shell({ userId }: { userId: string }) {
               </Route>
               {["scheduled", "library", "knowledge", "plugins", "projects"].map((page) => (
                 <Route key={page} path={`/${page}`}>
-                  <div className={`flex h-12 shrink-0 items-center px-3 ${sidebarOpen ? "md:hidden" : ""}`}>
-                    <button type="button" aria-label={t("shell.openSidebar")} onClick={() => setSidebarOpen(true)} className="text-muted-foreground hover:bg-accent rounded-lg p-2 pointer-coarse:p-3"><PanelLeftIcon className="size-4" /></button>
-                  </div>
+                  {openSidebarBar}
                   <main className="min-h-0 flex-1 overflow-y-auto">
                     <Suspense fallback={<p role="status" className="text-muted-foreground p-8 text-sm">{t("common.loading")}</p>}><NavigationPage page={page} /></Suspense>
                   </main>

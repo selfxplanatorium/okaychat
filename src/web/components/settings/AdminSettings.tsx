@@ -208,12 +208,14 @@ function Users({ defaultLimit }: { defaultLimit: number | null }) {
       )}
       {error && <p className="text-error settings-error px-4 pt-2 text-xs">{error}</p>}
       {users.map((u, index) => (
-        <div key={u.id} className="stagger animate-rise-in flex items-center gap-3 px-4 py-3" style={{ "--i": index } as CSSProperties}>
-          <div className="min-w-0 flex-1">
+        <div key={u.id} className="stagger animate-rise-in flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3" style={{ "--i": index } as CSSProperties}>
+          {/* Phones: the text takes its own line and the controls sit below it. */}
+          <div className="min-w-0 flex-1 basis-full sm:basis-0">
             <p className="truncate text-sm font-medium">
               {u.name} {u.id === me?.id && <span className="text-muted-foreground font-normal">{t("admin.you")}</span>}
             </p>
-            <p className="text-muted-foreground truncate text-xs">
+            {/* Wraps instead of truncating: the 30-day cost is the last item and was the first to be cut. */}
+            <p className="text-muted-foreground text-xs break-words">
               {t("admin.userStats", { email: u.email, chats: u.threads, used: formatBytes(u.storageUsed), limit: limitLabel(u), cost: formatCost(u.cost30d) })}
             </p>
             <p className="text-muted-foreground truncate text-xs tabular-nums">
@@ -529,11 +531,11 @@ function SharedKnowledgeAdmin() {
   useEffect(() => { void load(); }, [load]);
 
   return (
-    <SettingsSection title={t("knowledge.adminTitle")} description={t("knowledge.adminCleanupConfirm")}>
+    <SettingsSection title={t("knowledge.adminTitle")} description={t("knowledge.adminDescription")}>
       <div className="flex flex-col gap-2 px-4 py-3">
         {error && <p role="alert" className="text-destructive text-xs">{error}</p>}
         {!rows && !error && <p role="status" className="text-muted-foreground text-xs">{t("common.loading")}</p>}
-        {rows?.length === 0 && <p className="text-muted-foreground text-xs">{t("knowledge.sharedEmpty")}</p>}
+        {rows?.length === 0 && <p className="text-muted-foreground text-xs">{t("knowledge.adminEmpty")}</p>}
         {rows && rows.length > 0 && (
           <ul className="flex flex-col gap-1.5">
             {rows.map((row) => (

@@ -1,5 +1,5 @@
 import { CircleAlertIcon, RefreshCwIcon, SettingsIcon } from "lucide-react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import type { ServiceId } from "@shared/services";
 import { t, type PlainMessageKey } from "@/i18n";
 import { settingsHref } from "@/lib/settings-link";
@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 // service is up or unknown, and "checking" is never shown as "down".
 export function ServiceAvailability({ id, className, describeId, messageKey }: { id: ServiceId; className?: string; describeId?: string; messageKey?: PlainMessageKey }) {
   const services = useServices();
+  const [location] = useLocation();
   const state = availabilityOf(services, id);
   const check = () => void services.refresh(true);
   useCommand("services.checkAgain", check, state === "down" || state === "degraded" || state === "unconfigured" || state === "failed");
@@ -77,7 +78,8 @@ export function ServiceAvailability({ id, className, describeId, messageKey }: {
           <RefreshCwIcon aria-hidden className="size-3.5" />
           {t("services.checkAgain")}
         </button>
-        {fix && (
+        {/* No link to the settings page the notice is already on. */}
+        {fix && settingsHref(fix).split("?")[0] !== location && (
           <Link
             href={settingsHref(fix)}
             className="focus-visible:ring-ring/50 inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-warning/40 px-2 py-1 font-medium outline-none focus-visible:ring-2 pointer-coarse:min-h-11"

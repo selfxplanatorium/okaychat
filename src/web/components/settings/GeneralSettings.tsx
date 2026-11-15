@@ -196,12 +196,7 @@ export function GeneralSettings() {
         <SettingsRow
           id="setting-language"
           label={t("general.languageLabel")}
-          description={
-            <>
-              <span className="block">{t("general.languageDescription")}</span>
-              <span className="mt-1 block">{t("general.languageNote")}</span>
-            </>
-          }
+          description={t("general.languageNote")}
           control={
             <Select
               aria-label={t("general.languageLabel")}

@@ -584,10 +584,6 @@ export function SavedPromptsDialog() {
             ) : filtered.length === 0 ? (
               <div className="flex flex-col items-start gap-3 py-4">
                 <p className="text-muted-foreground text-sm">{query.trim() ? t("savedPrompts.noMatches") : t("savedPrompts.empty")}</p>
-                <Button type="button" size="sm" onClick={() => startCreate("manage")} disabled={prompts.length >= MAX_SAVED_PROMPTS}>
-                  <PlusIcon />
-                  {t("savedPrompts.create")}
-                </Button>
                 {prompts.length >= MAX_SAVED_PROMPTS && <p className="text-muted-foreground text-xs">{t("savedPrompts.limitReached", { count: MAX_SAVED_PROMPTS })}</p>}
               </div>
             ) : (
@@ -664,12 +660,6 @@ export function SavedPromptsDialog() {
                 ) : filtered.length === 0 ? (
                   <div className="flex flex-col items-start gap-2 px-1 pb-2">
                     <p className="text-muted-foreground text-sm">{query.trim() ? t("savedPrompts.noMatches") : t("savedPrompts.empty")}</p>
-                    {!query.trim() && (
-                      <Button type="button" size="sm" variant="outline" onClick={() => startCreate("picker")} disabled={prompts.length >= MAX_SAVED_PROMPTS}>
-                        <PlusIcon />
-                        {t("savedPrompts.create")}
-                      </Button>
-                    )}
                     {prompts.length >= MAX_SAVED_PROMPTS && <p className="text-muted-foreground text-xs">{t("savedPrompts.limitReached", { count: MAX_SAVED_PROMPTS })}</p>}
                   </div>
                 ) : (

@@ -7,6 +7,7 @@ export default {
   name: "Name",
   email: "Email",
   password: "Password (8+ characters)",
+  currentPassword: "Password",
   noAccount: "No account? Create one",
   haveAccount: "Have an account? Sign in",
 } as const;

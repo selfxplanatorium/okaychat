@@ -9,6 +9,7 @@ export function NoteList({
   items,
   selectedId,
   loading,
+  filtered,
   error,
   nextCursor,
   onSelect,
@@ -20,6 +21,8 @@ export function NoteList({
   items: NoteSummary[];
   selectedId: string | null;
   loading: boolean;
+  /** A search or filter is active, so an empty list means no match rather than no notes. */
+  filtered: boolean;
   error: string | null;
   nextCursor: string | null;
   onSelect: (id: string) => void;
@@ -40,8 +43,14 @@ export function NoteList({
   if (!items.length) {
     return (
       <div className="flex flex-col gap-1 p-6 text-center">
-        <p className="text-sm font-medium">{t("notes.empty")}</p>
-        <p className="text-muted-foreground text-sm">{t("notes.emptyBody")}</p>
+        {filtered ? (
+          <p className="text-muted-foreground text-sm">{t("notes.noResults")}</p>
+        ) : (
+          <>
+            <p className="text-sm font-medium">{t("notes.empty")}</p>
+            <p className="text-muted-foreground text-sm">{t("notes.emptyBody")}</p>
+          </>
+        )}
       </div>
     );
   }
@@ -61,7 +70,7 @@ export function NoteList({
                   {note.pinned && <PinIcon aria-label={t("notes.pinned")} className="text-muted-foreground size-3 shrink-0" />}
                   <span className="truncate text-sm font-medium">{note.title || t("notes.untitled")}</span>
                 </span>
-                <span className="text-muted-foreground mt-0.5 line-clamp-2 block text-xs">{note.excerpt || t("notes.emptyBody")}</span>
+                <span className="text-muted-foreground mt-0.5 line-clamp-2 block text-xs">{note.excerpt}</span>
                 <span className="text-muted-foreground mt-1 block text-[0.7rem]">{formatRelativeTime(note.updatedAt)}</span>
               </button>
               <div className="flex shrink-0 items-center gap-0.5 pe-1 pt-1 opacity-100 md:opacity-0 md:group-focus-within:opacity-100 md:group-hover:opacity-100">
